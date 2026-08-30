@@ -1087,23 +1087,23 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     switch normalized {
     case "", "und", "zxx", "null", "unknown": return ""
     case "english", "eng": return "en"
-    case "japanese", "jpn": return "ja"
-    case "korean", "kor": return "ko"
-    case "chinese", "chi", "zho": return "zh"
-    case "zh-hans", "zh-sg": return "zh-cn"
-    case "zh-hant", "zh-hk", "zh-mo": return "zh-tw"
+    case "japanese", "jp", "jpn": return "ja"
+    case "korean", "kr", "kor": return "ko"
+    case "chinese", "ch", "chi", "zho": return "zh"
+    case "zh-hans", "zh-sg", "chs", "chn", "cn", "sc", "gb": return "zh-cn"
+    case "zh-hant", "zh-hk", "zh-mo", "cht", "tc", "big5": return "zh-tw"
     default: return normalized
     }
   }
 
   private func subtitleLanguageTokens(_ language: String) -> [String] {
     switch language {
-    case "zh-cn": return ["zhcn", "zhhans", "chs", "简体", "簡體", "简中"]
-    case "zh-tw": return ["zhtw", "zhhant", "cht", "繁体", "繁體", "繁中"]
+    case "zh-cn": return ["zhcn", "zhhans", "chs", "chn", "chi", "zho", "cn", "sc", "简体", "簡體", "简中"]
+    case "zh-tw": return ["zhtw", "zhhant", "cht", "chi", "zho", "tc", "big5", "繁体", "繁體", "繁中"]
     case "zh": return ["chinese", "中文", "国语", "國語"]
-    case "en": return ["english", " eng ", "英语", "英語", "英文"]
-    case "ja": return ["japanese", " jpn ", "日语", "日語", "日本語"]
-    case "ko": return ["korean", " kor ", "韩语", "韓語", "한국어"]
+    case "en": return ["english", " eng ", "英语", "英語", "英文", "英字"]
+    case "ja": return ["japanese", " jp ", " jpn ", "日语", "日語", "日文", "日字", "日本語"]
+    case "ko": return ["korean", " kr ", " kor ", "韩语", "韓語", "한국어"]
     default: return [language.replacingOccurrences(of: "-", with: "")]
     }
   }

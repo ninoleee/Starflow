@@ -52,7 +52,11 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       try {
         final defaultSubtitle = settings.playbackDefaultSubtitle;
         if (defaultSubtitle == PlaybackDefaultSubtitle.dual) {
-          final restored = await _applyDefaultMpvDualSubtitleTracks(player);
+          final restored = await _applyDefaultMpvDualSubtitleTracks(
+            player,
+            primaryLanguage: settings.playbackDualSubtitlePrimaryLanguage,
+            secondaryLanguage: settings.playbackDualSubtitleSecondaryLanguage,
+          );
           if (restored) {
             return;
           }
@@ -95,20 +99,24 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     }
   }
 
-  Future<bool> _applyDefaultMpvDualSubtitleTracks(Player player) async {
+  Future<bool> _applyDefaultMpvDualSubtitleTracks(
+    Player player, {
+    required PlaybackSubtitleLanguage primaryLanguage,
+    required PlaybackSubtitleLanguage secondaryLanguage,
+  }) async {
     final tracks = await _awaitAvailableSubtitleTracks(player);
     final candidates =
         tracks.where(_canUseMpvDualSubtitleTrack).toList(growable: false);
     final primary = _selectMpvSubtitleTrackForLanguages(
       candidates,
-      const ['zh-cn', 'zh-tw', 'zh'],
+      primaryLanguage.preferredLanguages,
     );
     if (primary == null) {
       return false;
     }
     final secondary = _selectMpvSubtitleTrackForLanguages(
       candidates.where((track) => track.id != primary.id).toList(),
-      const ['en'],
+      secondaryLanguage.preferredLanguages,
     );
     if (secondary == null) {
       return false;

@@ -52,6 +52,8 @@ void main() {
       'playbackDefaultSpeed': 1.5,
       'playbackSubtitlePreference': 'off',
       'playbackDefaultSubtitle': 'traditionalChinese',
+      'playbackDualSubtitlePrimaryLanguage': 'traditionalChinese',
+      'playbackDualSubtitleSecondaryLanguage': 'japanese',
       'playbackSubtitleScale': 'large',
       'playbackPrimarySubtitlePosition': 75,
       'playbackSecondarySubtitlePosition': 90,
@@ -81,6 +83,10 @@ void main() {
         playbackDefaultSpeed: 1.5,
         playbackSubtitlePreference: PlaybackSubtitlePreference.off,
         playbackDefaultSubtitle: PlaybackDefaultSubtitle.traditionalChinese,
+        playbackDualSubtitlePrimaryLanguage:
+            PlaybackSubtitleLanguage.traditionalChinese,
+        playbackDualSubtitleSecondaryLanguage:
+            PlaybackSubtitleLanguage.japanese,
         playbackSubtitleScale: 36.0,
         playbackPrimarySubtitlePosition: 75.0,
         playbackSecondarySubtitlePosition: 90.0,

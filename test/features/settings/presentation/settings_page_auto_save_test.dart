@@ -111,7 +111,7 @@ void main() {
     expect(repository.settings.doubanAccount.userId, 'updated-user');
   });
 
-  testWidgets('default subtitle exposes seven options and saves immediately',
+  testWidgets('default subtitle and dual languages save immediately',
       (tester) async {
     final initial = SeedData.defaultSettings.copyWith(
       playbackDefaultSubtitle: PlaybackDefaultSubtitle.systemLanguage,
@@ -138,7 +138,6 @@ void main() {
       '繁体中文',
       '英语',
       '日语',
-      '韩语',
       '系统语言',
     ]) {
       expect(find.text(label), findsOneWidget);
@@ -150,6 +149,19 @@ void main() {
     expect(
       repository.settings.playbackDefaultSubtitle,
       PlaybackDefaultSubtitle.dual,
+    );
+    expect(find.text('双字幕主字幕语言'), findsOneWidget);
+    expect(find.text('双字幕副字幕语言'), findsOneWidget);
+
+    await tester.tap(find.text('双字幕主字幕语言'));
+    await tester.pumpAndSettle();
+    expect(find.text('韩语'), findsNothing);
+    await tester.tap(find.text('日语'));
+    await tester.pumpAndSettle();
+
+    expect(
+      repository.settings.playbackDualSubtitlePrimaryLanguage,
+      PlaybackSubtitleLanguage.japanese,
     );
   });
 }

@@ -24,6 +24,8 @@ class UnsupportedNativePlaybackLauncher implements NativePlaybackLauncher {
     required bool backgroundPlaybackEnabled,
     required PlaybackSubtitlePreference subtitlePreference,
     required PlaybackDefaultSubtitle defaultSubtitle,
+    required PlaybackSubtitleLanguage dualSubtitlePrimaryLanguage,
+    required PlaybackSubtitleLanguage dualSubtitleSecondaryLanguage,
     PlaybackEpisodeQueue? episodeQueue,
     String mediaMimeType = '',
     NativePlaybackEpisodeResolver? episodeResolver,

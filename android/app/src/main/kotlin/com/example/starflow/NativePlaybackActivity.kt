@@ -1329,6 +1329,20 @@ class NativePlaybackActivity : Activity() {
         )
     }
 
+    private fun dualSubtitlePrimaryLanguage(): NativeSubtitleLanguage {
+        return NativeSubtitleLanguage.fromRaw(
+            raw = intent.getStringExtra(EXTRA_DUAL_SUBTITLE_PRIMARY_LANGUAGE).orEmpty(),
+            fallback = NativeSubtitleLanguage.SIMPLIFIED_CHINESE,
+        )
+    }
+
+    private fun dualSubtitleSecondaryLanguage(): NativeSubtitleLanguage {
+        return NativeSubtitleLanguage.fromRaw(
+            raw = intent.getStringExtra(EXTRA_DUAL_SUBTITLE_SECONDARY_LANGUAGE).orEmpty(),
+            fallback = NativeSubtitleLanguage.ENGLISH,
+        )
+    }
+
     private fun applyAutomaticSubtitleSelection(tracks: Tracks) {
         if (automaticSubtitleSelectionApplied) {
             return
@@ -1503,7 +1517,9 @@ class NativePlaybackActivity : Activity() {
         val candidates = choices.filter(NativeTrackChoice::canUseInDualSubtitleMode)
         val primary = NativeSubtitleTrackSelectionPolicy.selectLanguage(
             candidates = candidates.map(NativeTrackChoice::subtitleCandidate),
-            preferredLanguages = listOf("zh-cn", "zh-tw", "zh"),
+            preferredLanguages = dualSubtitlePrimaryLanguage().resolveLanguages(
+                Locale.getDefault().toLanguageTag(),
+            ),
         ) ?: return null
         val primaryKey = primary.formatKey ?: return null
         val secondaryCandidates = candidates.filter { choice ->
@@ -1512,7 +1528,9 @@ class NativePlaybackActivity : Activity() {
         }
         val secondary = NativeSubtitleTrackSelectionPolicy.selectLanguage(
             candidates = secondaryCandidates.map(NativeTrackChoice::subtitleCandidate),
-            preferredLanguages = listOf("en"),
+            preferredLanguages = dualSubtitleSecondaryLanguage().resolveLanguages(
+                Locale.getDefault().toLanguageTag(),
+            ),
         ) ?: return null
         return NativeSubtitleRestoreResult.Dual(primary, secondary)
     }
@@ -4346,6 +4364,8 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_RESOLVER_SESSION_ID = "resolverSessionId"
         const val EXTRA_SUBTITLE_PREFERENCE = "subtitlePreference"
         const val EXTRA_DEFAULT_SUBTITLE = "defaultSubtitle"
+        const val EXTRA_DUAL_SUBTITLE_PRIMARY_LANGUAGE = "dualSubtitlePrimaryLanguage"
+        const val EXTRA_DUAL_SUBTITLE_SECONDARY_LANGUAGE = "dualSubtitleSecondaryLanguage"
         const val EXTRA_PLAYBACK_TARGET_JSON = "playbackTargetJson"
         const val EXTRA_PLAYBACK_ITEM_KEY = "playbackItemKey"
         const val EXTRA_SERIES_KEY = "seriesKey"
@@ -4488,7 +4508,6 @@ private enum class NativeDefaultSubtitle(
     TRADITIONAL_CHINESE(listOf("zh-tw")),
     ENGLISH(listOf("en")),
     JAPANESE(listOf("ja")),
-    KOREAN(listOf("ko")),
     SYSTEM_LANGUAGE(emptyList());
 
     companion object {
@@ -4498,8 +4517,34 @@ private enum class NativeDefaultSubtitle(
             "traditionalChinese" -> TRADITIONAL_CHINESE
             "english" -> ENGLISH
             "japanese" -> JAPANESE
-            "korean" -> KOREAN
             else -> SYSTEM_LANGUAGE
+        }
+    }
+}
+
+private enum class NativeSubtitleLanguage(
+    val preferredLanguages: List<String>,
+) {
+    SIMPLIFIED_CHINESE(listOf("zh-cn")),
+    TRADITIONAL_CHINESE(listOf("zh-tw")),
+    ENGLISH(listOf("en")),
+    JAPANESE(listOf("ja")),
+    SYSTEM_LANGUAGE(emptyList());
+
+    fun resolveLanguages(systemLanguage: String): List<String> =
+        preferredLanguages.ifEmpty { listOf(systemLanguage) }
+
+    companion object {
+        fun fromRaw(
+            raw: String,
+            fallback: NativeSubtitleLanguage,
+        ): NativeSubtitleLanguage = when (raw.trim()) {
+            "simplifiedChinese" -> SIMPLIFIED_CHINESE
+            "traditionalChinese" -> TRADITIONAL_CHINESE
+            "english" -> ENGLISH
+            "japanese" -> JAPANESE
+            "systemLanguage" -> SYSTEM_LANGUAGE
+            else -> fallback
         }
     }
 }

@@ -48,11 +48,6 @@ const List<SubtitlePreferredLanguageOption>
     label: '日语',
     subtitle: 'ja',
   ),
-  SubtitlePreferredLanguageOption(
-    value: 'ko',
-    label: '韩语',
-    subtitle: 'ko',
-  ),
 ];
 
 String canonicalizeSubtitlePreferredLanguage(
@@ -426,8 +421,8 @@ String _canonicalSubtitlePreferenceKey(
 
   return switch (normalized) {
     'eng' || 'english' || '英语' || '英文' => 'en',
-    'jpn' || 'japanese' || '日语' || '日文' || '日本語' => 'ja',
-    'kor' || 'korean' || '韩语' || '韓語' || '韩文' || '韓文' => 'ko',
+    'jp' || 'jpn' || 'japanese' || '日语' || '日文' || '日字' || '日本語' => 'ja',
+    'kr' || 'kor' || 'korean' || '韩语' || '韓語' || '韩文' || '韓文' => 'ko',
     'fre' || 'fra' || 'french' || '法语' || '法文' => 'fr',
     'ger' || 'deu' || 'german' || '德语' || '德文' => 'de',
     'spa' || 'spanish' || '西班牙语' => 'es',
@@ -495,6 +490,8 @@ List<String> _subtitleMatchTokensForPreferenceKey(String key) {
         'zh-hans',
         'chs',
         'chn',
+        'chi',
+        'zho',
         'cn',
         'sc',
         'gb',
@@ -515,6 +512,8 @@ List<String> _subtitleMatchTokensForPreferenceKey(String key) {
         'zh-hk',
         'zh-mo',
         'cht',
+        'chi',
+        'zho',
         'tc',
         'big5',
         '繁中',
@@ -543,9 +542,9 @@ List<String> _subtitleMatchTokensForPreferenceKey(String key) {
         '双语',
         '雙語',
       ],
-    'en' => const <String>['eng', 'english', '英语', '英文'],
-    'ja' => const <String>['jpn', 'japanese', '日本語', '日语', '日文'],
-    'ko' => const <String>['kor', 'korean', '韩语', '韓語', '韩文', '韓文'],
+    'en' => const <String>['eng', 'english', '英语', '英語', '英文', '英字'],
+    'ja' => const <String>['jp', 'jpn', 'japanese', '日本語', '日语', '日文', '日字'],
+    'ko' => const <String>['kr', 'kor', 'korean', '韩语', '韓語', '韩文', '韓文'],
     'fr' => const <String>['fre', 'fra', 'french', '法语', '法文'],
     'de' => const <String>['ger', 'deu', 'german', '德语', '德文'],
     'es' => const <String>['spa', 'spanish', '西班牙语'],

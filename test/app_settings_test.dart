@@ -337,6 +337,14 @@ void main() {
       defaults.playbackDefaultSubtitle,
       PlaybackDefaultSubtitle.systemLanguage,
     );
+    expect(
+      defaults.playbackDualSubtitlePrimaryLanguage,
+      PlaybackSubtitleLanguage.simplifiedChinese,
+    );
+    expect(
+      defaults.playbackDualSubtitleSecondaryLanguage,
+      PlaybackSubtitleLanguage.english,
+    );
     expect(defaults.playbackSubtitleScale, 32.0);
     expect(
       defaults.playbackPrimarySubtitlePosition,
@@ -669,6 +677,36 @@ void main() {
         const {'playbackDefaultSubtitle': 'removed-option'},
       ).playbackDefaultSubtitle,
       PlaybackDefaultSubtitle.systemLanguage,
+    );
+    expect(
+      AppSettings.fromJson(
+        const {'playbackDefaultSubtitle': 'korean'},
+      ).playbackDefaultSubtitle,
+      PlaybackDefaultSubtitle.systemLanguage,
+    );
+    final dualLanguages = AppSettings.fromJson(const {
+      'playbackDualSubtitlePrimaryLanguage': 'traditionalChinese',
+      'playbackDualSubtitleSecondaryLanguage': 'japanese',
+    });
+    expect(
+      dualLanguages.playbackDualSubtitlePrimaryLanguage,
+      PlaybackSubtitleLanguage.traditionalChinese,
+    );
+    expect(
+      dualLanguages.playbackDualSubtitleSecondaryLanguage,
+      PlaybackSubtitleLanguage.japanese,
+    );
+    final removedKorean = AppSettings.fromJson(const {
+      'playbackDualSubtitlePrimaryLanguage': 'korean',
+      'playbackDualSubtitleSecondaryLanguage': 'ko',
+    });
+    expect(
+      removedKorean.playbackDualSubtitlePrimaryLanguage,
+      PlaybackSubtitleLanguage.simplifiedChinese,
+    );
+    expect(
+      removedKorean.playbackDualSubtitleSecondaryLanguage,
+      PlaybackSubtitleLanguage.english,
     );
   });
 

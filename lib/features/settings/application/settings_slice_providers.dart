@@ -81,6 +81,10 @@ final settingsPlaybackSliceProvider = Provider<SettingsPlaybackSlice>(
           playbackDefaultSpeed: settings.playbackDefaultSpeed,
           playbackSubtitlePreference: settings.playbackSubtitlePreference,
           playbackDefaultSubtitle: settings.playbackDefaultSubtitle,
+          playbackDualSubtitlePrimaryLanguage:
+              settings.playbackDualSubtitlePrimaryLanguage,
+          playbackDualSubtitleSecondaryLanguage:
+              settings.playbackDualSubtitleSecondaryLanguage,
           playbackSubtitleScale: settings.playbackSubtitleScale,
           playbackPrimarySubtitlePosition:
               settings.playbackPrimarySubtitlePosition,
@@ -227,6 +231,10 @@ class SettingsPlaybackSlice {
     required this.playbackDefaultSpeed,
     required this.playbackSubtitlePreference,
     this.playbackDefaultSubtitle = PlaybackDefaultSubtitle.systemLanguage,
+    this.playbackDualSubtitlePrimaryLanguage =
+        PlaybackSubtitleLanguage.simplifiedChinese,
+    this.playbackDualSubtitleSecondaryLanguage =
+        PlaybackSubtitleLanguage.english,
     required this.playbackSubtitleScale,
     this.playbackPrimarySubtitlePosition =
         kPlaybackPrimarySubtitlePositionDefault,
@@ -259,6 +267,8 @@ class SettingsPlaybackSlice {
   final double playbackDefaultSpeed;
   final PlaybackSubtitlePreference playbackSubtitlePreference;
   final PlaybackDefaultSubtitle playbackDefaultSubtitle;
+  final PlaybackSubtitleLanguage playbackDualSubtitlePrimaryLanguage;
+  final PlaybackSubtitleLanguage playbackDualSubtitleSecondaryLanguage;
   final double playbackSubtitleScale;
   final double playbackPrimarySubtitlePosition;
   final double playbackSecondarySubtitlePosition;
@@ -295,6 +305,10 @@ class SettingsPlaybackSlice {
             other.playbackDefaultSpeed == playbackDefaultSpeed &&
             other.playbackSubtitlePreference == playbackSubtitlePreference &&
             other.playbackDefaultSubtitle == playbackDefaultSubtitle &&
+            other.playbackDualSubtitlePrimaryLanguage ==
+                playbackDualSubtitlePrimaryLanguage &&
+            other.playbackDualSubtitleSecondaryLanguage ==
+                playbackDualSubtitleSecondaryLanguage &&
             other.playbackSubtitleScale == playbackSubtitleScale &&
             other.playbackPrimarySubtitlePosition ==
                 playbackPrimarySubtitlePosition &&
@@ -339,6 +353,8 @@ class SettingsPlaybackSlice {
           playbackDefaultSpeed,
           playbackSubtitlePreference,
           playbackDefaultSubtitle,
+          playbackDualSubtitlePrimaryLanguage,
+          playbackDualSubtitleSecondaryLanguage,
           playbackSubtitleScale,
           playbackPrimarySubtitlePosition,
           playbackSecondarySubtitlePosition,

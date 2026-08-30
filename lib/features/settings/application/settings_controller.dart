@@ -230,6 +230,8 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> savePlaybackSubtitlePreferences({
     required PlaybackSubtitlePreference subtitlePreference,
     required PlaybackDefaultSubtitle defaultSubtitle,
+    required PlaybackSubtitleLanguage dualSubtitlePrimaryLanguage,
+    required PlaybackSubtitleLanguage dualSubtitleSecondaryLanguage,
     required double subtitleScale,
     double? primarySubtitlePosition,
     double? secondarySubtitlePosition,
@@ -249,6 +251,8 @@ class SettingsController extends AsyncNotifier<AppSettings> {
       current.copyWith(
         playbackSubtitlePreference: subtitlePreference,
         playbackDefaultSubtitle: defaultSubtitle,
+        playbackDualSubtitlePrimaryLanguage: dualSubtitlePrimaryLanguage,
+        playbackDualSubtitleSecondaryLanguage: dualSubtitleSecondaryLanguage,
         playbackSubtitleScale: subtitleScale,
         playbackPrimarySubtitlePosition: primarySubtitlePosition,
         playbackSecondarySubtitlePosition: secondarySubtitlePosition,
@@ -263,7 +267,20 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         subdlApiKey: subdlApiKey.trim(),
         subtitlePreferredLanguages: subtitlePreferredLanguages
             .map((item) => item.trim().toLowerCase())
-            .where((item) => item.isNotEmpty)
+            .where(
+              (item) =>
+                  item.isNotEmpty &&
+                  !const <String>{
+                    'ko',
+                    'kr',
+                    'kor',
+                    'korean',
+                    '韩语',
+                    '韓語',
+                    '韩文',
+                    '韓文',
+                  }.contains(item),
+            )
             .toSet()
             .toList(growable: false),
         subtitleSearchMaxValidatedCandidates:

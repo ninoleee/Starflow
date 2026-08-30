@@ -105,11 +105,11 @@ object NativeSubtitleSessionPreferencePolicy {
         return when (normalized) {
             "und", "zxx", "null", "unknown" -> ""
             "english", "eng" -> "en"
-            "japanese", "jpn" -> "ja"
-            "korean", "kor" -> "ko"
-            "chinese", "chi", "zho" -> "zh"
-            "zh-hans", "zh-sg" -> "zh-cn"
-            "zh-hant", "zh-hk", "zh-mo" -> "zh-tw"
+            "japanese", "jp", "jpn" -> "ja"
+            "korean", "kr", "kor" -> "ko"
+            "chinese", "ch", "chi", "zho" -> "zh"
+            "zh-hans", "zh-sg", "chs", "chn", "cn", "sc", "gb" -> "zh-cn"
+            "zh-hant", "zh-hk", "zh-mo", "cht", "tc", "big5" -> "zh-tw"
             else -> normalized
         }
     }

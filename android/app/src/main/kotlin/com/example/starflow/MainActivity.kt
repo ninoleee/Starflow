@@ -155,6 +155,10 @@ class MainActivity : FlutterActivity() {
                         call.argument<String>("subtitlePreference")?.trim().orEmpty()
                     val defaultSubtitle =
                         call.argument<String>("defaultSubtitle")?.trim().orEmpty()
+                    val dualSubtitlePrimaryLanguage =
+                        call.argument<String>("dualSubtitlePrimaryLanguage")?.trim().orEmpty()
+                    val dualSubtitleSecondaryLanguage =
+                        call.argument<String>("dualSubtitleSecondaryLanguage")?.trim().orEmpty()
                     val mediaMimeType =
                         call.argument<String>("mediaMimeType")?.trim().orEmpty()
                     val resolverSessionId =
@@ -223,6 +227,14 @@ class MainActivity : FlutterActivity() {
                             putExtra(
                                 NativePlaybackActivity.EXTRA_DEFAULT_SUBTITLE,
                                 defaultSubtitle,
+                            )
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_DUAL_SUBTITLE_PRIMARY_LANGUAGE,
+                                dualSubtitlePrimaryLanguage,
+                            )
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_DUAL_SUBTITLE_SECONDARY_LANGUAGE,
+                                dualSubtitleSecondaryLanguage,
                             )
                             putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_TARGET_JSON, playbackTargetJson)
                             putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_ITEM_KEY, playbackItemKey)

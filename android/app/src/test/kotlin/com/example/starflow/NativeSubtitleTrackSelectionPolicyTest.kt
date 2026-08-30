@@ -62,4 +62,31 @@ class NativeSubtitleTrackSelectionPolicyTest {
             ),
         )
     }
+
+    @Test
+    fun `recognizes common subtitle language aliases`() {
+        val candidates = listOf(
+            NativeSubtitleTrackCandidate("simplified", language = "chs"),
+            NativeSubtitleTrackCandidate("traditional", label = "繁中"),
+            NativeSubtitleTrackCandidate("english", language = "eng"),
+            NativeSubtitleTrackCandidate("japanese", language = "jp"),
+        )
+
+        assertEquals(
+            "simplified",
+            NativeSubtitleTrackSelectionPolicy.selectLanguage(candidates, listOf("zh-cn")),
+        )
+        assertEquals(
+            "traditional",
+            NativeSubtitleTrackSelectionPolicy.selectLanguage(candidates, listOf("zh-tw")),
+        )
+        assertEquals(
+            "english",
+            NativeSubtitleTrackSelectionPolicy.selectLanguage(candidates, listOf("en")),
+        )
+        assertEquals(
+            "japanese",
+            NativeSubtitleTrackSelectionPolicy.selectLanguage(candidates, listOf("ja")),
+        )
+    }
 }

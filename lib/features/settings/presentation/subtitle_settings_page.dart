@@ -26,6 +26,8 @@ class SubtitleSettingsPage extends ConsumerStatefulWidget {
 class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
   late PlaybackSubtitlePreference _draftSubtitlePreference;
   late PlaybackDefaultSubtitle _draftDefaultSubtitle;
+  late PlaybackSubtitleLanguage _draftDualSubtitlePrimaryLanguage;
+  late PlaybackSubtitleLanguage _draftDualSubtitleSecondaryLanguage;
   late double _draftSubtitleScale;
   late double _draftPrimarySubtitlePosition;
   late double _draftSecondarySubtitlePosition;
@@ -48,6 +50,10 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     final slice = ref.read(settingsPlaybackSliceProvider);
     _draftSubtitlePreference = slice.playbackSubtitlePreference;
     _draftDefaultSubtitle = slice.playbackDefaultSubtitle;
+    _draftDualSubtitlePrimaryLanguage =
+        slice.playbackDualSubtitlePrimaryLanguage;
+    _draftDualSubtitleSecondaryLanguage =
+        slice.playbackDualSubtitleSecondaryLanguage;
     _draftSubtitleScale = slice.playbackSubtitleScale;
     _draftPrimarySubtitlePosition = slice.playbackPrimarySubtitlePosition;
     _draftSecondarySubtitlePosition = slice.playbackSecondarySubtitlePosition;
@@ -118,6 +124,9 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
   String _draftFingerprint() => jsonEncode({
         'subtitlePreference': _draftSubtitlePreference.name,
         'defaultSubtitle': _draftDefaultSubtitle.name,
+        'dualSubtitlePrimaryLanguage': _draftDualSubtitlePrimaryLanguage.name,
+        'dualSubtitleSecondaryLanguage':
+            _draftDualSubtitleSecondaryLanguage.name,
         'subtitleScale': _draftSubtitleScale,
         'primarySubtitlePosition': _draftPrimarySubtitlePosition,
         'secondarySubtitlePosition': _draftSecondarySubtitlePosition,
@@ -151,6 +160,8 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     final controller = ref.read(settingsControllerProvider.notifier);
     final subtitlePreference = _draftSubtitlePreference;
     final defaultSubtitle = _draftDefaultSubtitle;
+    final dualSubtitlePrimaryLanguage = _draftDualSubtitlePrimaryLanguage;
+    final dualSubtitleSecondaryLanguage = _draftDualSubtitleSecondaryLanguage;
     final subtitleScale = _draftSubtitleScale;
     final primarySubtitlePosition = _draftPrimarySubtitlePosition;
     final secondarySubtitlePosition = _draftSecondarySubtitlePosition;
@@ -168,6 +179,8 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     Future<void> save() => controller.savePlaybackSubtitlePreferences(
           subtitlePreference: subtitlePreference,
           defaultSubtitle: defaultSubtitle,
+          dualSubtitlePrimaryLanguage: dualSubtitlePrimaryLanguage,
+          dualSubtitleSecondaryLanguage: dualSubtitleSecondaryLanguage,
           subtitleScale: subtitleScale,
           primarySubtitlePosition: primarySubtitlePosition,
           secondarySubtitlePosition: secondarySubtitlePosition,
@@ -249,6 +262,26 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
+          if (_draftDefaultSubtitle == PlaybackDefaultSubtitle.dual) ...[
+            const SizedBox(height: 12),
+            SettingsSelectionTile(
+              title: '双字幕主字幕语言',
+              subtitle: '匹配第一条字幕；不可用时整组回退系统语言。',
+              value: _draftDualSubtitlePrimaryLanguage.label,
+              onPressed: () => _openDualSubtitleLanguagePicker(
+                primary: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SettingsSelectionTile(
+              title: '双字幕副字幕语言',
+              subtitle: '匹配第二条不同字幕轨；不可用时整组回退系统语言。',
+              value: _draftDualSubtitleSecondaryLanguage.label,
+              onPressed: () => _openDualSubtitleLanguagePicker(
+                primary: false,
+              ),
+            ),
+          ],
           const SizedBox(height: 18),
           SettingsStepperTile(
             title: '主字幕大小',
@@ -517,7 +550,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
         .toSet();
     final selected = await showSettingsCheckboxSelectionDialog<String>(
       context: context,
-      title: '选择优先语言',
+      title: '选择在线字幕优先语言',
       initialSelection: initialSelection,
       allLabel: '未限制',
       allSubtitle: '清空单独选择后，按字幕结果和系统语言自动处理。',
@@ -558,6 +591,30 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
     }
     setState(() {
       _draftDefaultSubtitle = selection;
+    });
+    _flushAutoSave();
+  }
+
+  Future<void> _openDualSubtitleLanguagePicker({required bool primary}) async {
+    final current = primary
+        ? _draftDualSubtitlePrimaryLanguage
+        : _draftDualSubtitleSecondaryLanguage;
+    final selection = await showSettingsOptionDialog<PlaybackSubtitleLanguage>(
+      context: context,
+      title: primary ? '选择主字幕语言' : '选择副字幕语言',
+      options: PlaybackSubtitleLanguage.values,
+      currentValue: current,
+      labelBuilder: (option) => option.label,
+    );
+    if (selection == null) {
+      return;
+    }
+    setState(() {
+      if (primary) {
+        _draftDualSubtitlePrimaryLanguage = selection;
+      } else {
+        _draftDualSubtitleSecondaryLanguage = selection;
+      }
     });
     _flushAutoSave();
   }

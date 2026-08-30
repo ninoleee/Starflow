@@ -13,7 +13,7 @@ void main() {
   test('orders common subtitle preferred languages with canonical values', () {
     expect(
       orderCommonSubtitlePreferredLanguages(['english', 'zh-CN', 'ko', 'xx']),
-      ['zh-cn', 'en', 'ko'],
+      ['zh-cn', 'en'],
     );
   });
 
@@ -123,5 +123,57 @@ void main() {
       ),
       'forced',
     );
+  });
+
+  test('recognizes common language codes and title abbreviations', () {
+    for (final text in const [
+      'zh-Hans',
+      'chs',
+      'chn',
+      'cn',
+      'sc',
+      'chi',
+      'zho',
+      '简中'
+    ]) {
+      expect(
+        scorePreferredSubtitleText(
+          text,
+          configuredLanguages: const ['zh-cn'],
+        ),
+        greaterThan(0),
+        reason: text,
+      );
+    }
+    for (final text in const ['zh-Hant', 'cht', 'tc', 'big5', '繁中']) {
+      expect(
+        scorePreferredSubtitleText(
+          text,
+          configuredLanguages: const ['zh-tw'],
+        ),
+        greaterThan(0),
+        reason: text,
+      );
+    }
+    for (final text in const ['eng', 'English', '英字']) {
+      expect(
+        scorePreferredSubtitleText(
+          text,
+          configuredLanguages: const ['en'],
+        ),
+        greaterThan(0),
+        reason: text,
+      );
+    }
+    for (final text in const ['jp', 'jpn', 'Japanese', '日字']) {
+      expect(
+        scorePreferredSubtitleText(
+          text,
+          configuredLanguages: const ['ja'],
+        ),
+        greaterThan(0),
+        reason: text,
+      );
+    }
   });
 }

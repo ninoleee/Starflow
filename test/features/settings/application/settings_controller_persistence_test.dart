@@ -95,6 +95,9 @@ void main() {
         .savePlaybackSubtitlePreferences(
           subtitlePreference: PlaybackSubtitlePreference.off,
           defaultSubtitle: PlaybackDefaultSubtitle.dual,
+          dualSubtitlePrimaryLanguage:
+              PlaybackSubtitleLanguage.traditionalChinese,
+          dualSubtitleSecondaryLanguage: PlaybackSubtitleLanguage.japanese,
           subtitleScale: 40,
           primarySubtitlePosition: 75,
           secondarySubtitlePosition: 90,
@@ -115,6 +118,14 @@ void main() {
     expect(
       repository.settings.playbackDefaultSubtitle,
       PlaybackDefaultSubtitle.dual,
+    );
+    expect(
+      repository.settings.playbackDualSubtitlePrimaryLanguage,
+      PlaybackSubtitleLanguage.traditionalChinese,
+    );
+    expect(
+      repository.settings.playbackDualSubtitleSecondaryLanguage,
+      PlaybackSubtitleLanguage.japanese,
     );
     expect(repository.settings.playbackSubtitleScale, 40);
     expect(repository.settings.playbackPrimarySubtitlePosition, 75);

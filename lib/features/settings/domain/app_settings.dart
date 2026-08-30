@@ -131,8 +131,47 @@ enum PlaybackDefaultSubtitle {
   traditionalChinese,
   english,
   japanese,
-  korean,
   systemLanguage,
+}
+
+enum PlaybackSubtitleLanguage {
+  simplifiedChinese,
+  traditionalChinese,
+  english,
+  japanese,
+  systemLanguage,
+}
+
+extension PlaybackSubtitleLanguageX on PlaybackSubtitleLanguage {
+  String get label => switch (this) {
+        PlaybackSubtitleLanguage.simplifiedChinese => '简体中文',
+        PlaybackSubtitleLanguage.traditionalChinese => '繁体中文',
+        PlaybackSubtitleLanguage.english => '英语',
+        PlaybackSubtitleLanguage.japanese => '日语',
+        PlaybackSubtitleLanguage.systemLanguage => '系统语言',
+      };
+
+  List<String> get preferredLanguages => switch (this) {
+        PlaybackSubtitleLanguage.simplifiedChinese => const ['zh-cn'],
+        PlaybackSubtitleLanguage.traditionalChinese => const ['zh-tw'],
+        PlaybackSubtitleLanguage.english => const ['en'],
+        PlaybackSubtitleLanguage.japanese => const ['ja'],
+        PlaybackSubtitleLanguage.systemLanguage => const [],
+      };
+
+  static PlaybackSubtitleLanguage fromName(
+    String raw, {
+    required PlaybackSubtitleLanguage fallback,
+  }) {
+    return switch (raw.trim()) {
+      'simplifiedChinese' => PlaybackSubtitleLanguage.simplifiedChinese,
+      'traditionalChinese' => PlaybackSubtitleLanguage.traditionalChinese,
+      'english' => PlaybackSubtitleLanguage.english,
+      'japanese' => PlaybackSubtitleLanguage.japanese,
+      'systemLanguage' => PlaybackSubtitleLanguage.systemLanguage,
+      _ => fallback,
+    };
+  }
 }
 
 extension PlaybackDefaultSubtitleX on PlaybackDefaultSubtitle {
@@ -142,12 +181,12 @@ extension PlaybackDefaultSubtitleX on PlaybackDefaultSubtitle {
         PlaybackDefaultSubtitle.traditionalChinese => '繁体中文',
         PlaybackDefaultSubtitle.english => '英语',
         PlaybackDefaultSubtitle.japanese => '日语',
-        PlaybackDefaultSubtitle.korean => '韩语',
         PlaybackDefaultSubtitle.systemLanguage => '系统语言',
       };
 
   String get description => switch (this) {
-        PlaybackDefaultSubtitle.dual => '默认使用中文主字幕和英文副字幕；缺少对应轨道或播放器不支持时回退系统语言。',
+        PlaybackDefaultSubtitle.dual =>
+          '按单独设置的主字幕语言和副字幕语言匹配；缺少对应轨道或播放器不支持时回退系统语言。',
         PlaybackDefaultSubtitle.systemLanguage => '按设备当前系统语言选择字幕。',
         _ => '优先选择$label；片源没有对应轨道时回退系统语言。',
       };
@@ -157,7 +196,6 @@ extension PlaybackDefaultSubtitleX on PlaybackDefaultSubtitle {
         PlaybackDefaultSubtitle.traditionalChinese => const ['zh-tw'],
         PlaybackDefaultSubtitle.english => const ['en'],
         PlaybackDefaultSubtitle.japanese => const ['ja'],
-        PlaybackDefaultSubtitle.korean => const ['ko'],
         PlaybackDefaultSubtitle.dual ||
         PlaybackDefaultSubtitle.systemLanguage =>
           const [],
@@ -170,7 +208,6 @@ extension PlaybackDefaultSubtitleX on PlaybackDefaultSubtitle {
       'traditionalChinese' => PlaybackDefaultSubtitle.traditionalChinese,
       'english' => PlaybackDefaultSubtitle.english,
       'japanese' => PlaybackDefaultSubtitle.japanese,
-      'korean' => PlaybackDefaultSubtitle.korean,
       'systemLanguage' => PlaybackDefaultSubtitle.systemLanguage,
       _ => PlaybackDefaultSubtitle.systemLanguage,
     };
@@ -522,10 +559,20 @@ int clampSubtitleSearchMaxValidatedCandidates(int value) {
 }
 
 List<String> parseSubtitlePreferredLanguages(Object? raw) {
+  const removedKoreanAliases = <String>{
+    'ko',
+    'kr',
+    'kor',
+    'korean',
+    '韩语',
+    '韓語',
+    '韩文',
+    '韓文',
+  };
   return (raw as List<dynamic>? ?? const <dynamic>[])
       .whereType<String>()
       .map((item) => item.trim().toLowerCase())
-      .where((item) => item.isNotEmpty)
+      .where((item) => item.isNotEmpty && !removedKoreanAliases.contains(item))
       .toSet()
       .toList(growable: false);
 }
@@ -1016,6 +1063,10 @@ class AppSettings {
     this.playbackDefaultSpeed = 1.0,
     this.playbackSubtitlePreference = PlaybackSubtitlePreference.auto,
     this.playbackDefaultSubtitle = PlaybackDefaultSubtitle.systemLanguage,
+    this.playbackDualSubtitlePrimaryLanguage =
+        PlaybackSubtitleLanguage.simplifiedChinese,
+    this.playbackDualSubtitleSecondaryLanguage =
+        PlaybackSubtitleLanguage.english,
     this.playbackSubtitleScale = kPlaybackSubtitleScaleDefault,
     this.playbackPrimarySubtitlePosition =
         kPlaybackPrimarySubtitlePositionDefault,
@@ -1090,6 +1141,8 @@ class AppSettings {
   final double playbackDefaultSpeed;
   final PlaybackSubtitlePreference playbackSubtitlePreference;
   final PlaybackDefaultSubtitle playbackDefaultSubtitle;
+  final PlaybackSubtitleLanguage playbackDualSubtitlePrimaryLanguage;
+  final PlaybackSubtitleLanguage playbackDualSubtitleSecondaryLanguage;
   final double playbackSubtitleScale;
   final double playbackPrimarySubtitlePosition;
   final double playbackSecondarySubtitlePosition;
@@ -1159,6 +1212,8 @@ class AppSettings {
     double? playbackDefaultSpeed,
     PlaybackSubtitlePreference? playbackSubtitlePreference,
     PlaybackDefaultSubtitle? playbackDefaultSubtitle,
+    PlaybackSubtitleLanguage? playbackDualSubtitlePrimaryLanguage,
+    PlaybackSubtitleLanguage? playbackDualSubtitleSecondaryLanguage,
     double? playbackSubtitleScale,
     double? playbackPrimarySubtitlePosition,
     double? playbackSecondarySubtitlePosition,
@@ -1279,6 +1334,12 @@ class AppSettings {
           playbackSubtitlePreference ?? this.playbackSubtitlePreference,
       playbackDefaultSubtitle:
           playbackDefaultSubtitle ?? this.playbackDefaultSubtitle,
+      playbackDualSubtitlePrimaryLanguage:
+          playbackDualSubtitlePrimaryLanguage ??
+              this.playbackDualSubtitlePrimaryLanguage,
+      playbackDualSubtitleSecondaryLanguage:
+          playbackDualSubtitleSecondaryLanguage ??
+              this.playbackDualSubtitleSecondaryLanguage,
       playbackSubtitleScale: playbackSubtitleScale == null
           ? this.playbackSubtitleScale
           : clampPlaybackSubtitleScale(playbackSubtitleScale),
@@ -1393,6 +1454,10 @@ class AppSettings {
       'playbackDefaultSpeed': playbackDefaultSpeed,
       'playbackSubtitlePreference': playbackSubtitlePreference.name,
       'playbackDefaultSubtitle': playbackDefaultSubtitle.name,
+      'playbackDualSubtitlePrimaryLanguage':
+          playbackDualSubtitlePrimaryLanguage.name,
+      'playbackDualSubtitleSecondaryLanguage':
+          playbackDualSubtitleSecondaryLanguage.name,
       'playbackSubtitleScale': playbackSubtitleScale,
       'playbackPrimarySubtitlePosition': playbackPrimarySubtitlePosition,
       'playbackSecondarySubtitlePosition': playbackSecondarySubtitlePosition,
@@ -1557,6 +1622,14 @@ class AppSettings {
       ),
       playbackDefaultSubtitle: PlaybackDefaultSubtitleX.fromName(
         json['playbackDefaultSubtitle'] as String? ?? '',
+      ),
+      playbackDualSubtitlePrimaryLanguage: PlaybackSubtitleLanguageX.fromName(
+        json['playbackDualSubtitlePrimaryLanguage'] as String? ?? '',
+        fallback: PlaybackSubtitleLanguage.simplifiedChinese,
+      ),
+      playbackDualSubtitleSecondaryLanguage: PlaybackSubtitleLanguageX.fromName(
+        json['playbackDualSubtitleSecondaryLanguage'] as String? ?? '',
+        fallback: PlaybackSubtitleLanguage.english,
       ),
       playbackSubtitleScale: parsePlaybackSubtitleScale(
         json['playbackSubtitleScale'],

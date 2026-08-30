@@ -94,12 +94,12 @@ object NativeSubtitleTrackSelectionPolicy {
     private fun canonicalLanguage(raw: String): String {
         val normalized = raw.trim().lowercase(Locale.ROOT).replace('_', '-')
         return when (normalized) {
-            "english", "eng" -> "en"
-            "japanese", "jpn" -> "ja"
-            "korean", "kor" -> "ko"
-            "chinese", "chi", "zho" -> "zh"
-            "zh-hans", "zh-sg" -> "zh-cn"
-            "zh-hant", "zh-hk", "zh-mo" -> "zh-tw"
+            "english", "eng", "英语", "英語", "英文", "英字" -> "en"
+            "japanese", "jp", "jpn", "日语", "日語", "日文", "日字", "日本語" -> "ja"
+            "korean", "kr", "kor", "韩语", "韓語", "韩文", "韓文" -> "ko"
+            "chinese", "ch", "chi", "zho", "中文" -> "zh"
+            "zh-hans", "zh-sg", "chs", "chn", "cn", "sc", "gb", "简中", "简体", "簡體" -> "zh-cn"
+            "zh-hant", "zh-hk", "zh-mo", "cht", "tc", "big5", "繁中", "繁体", "繁體" -> "zh-tw"
             else -> normalized
         }
     }
@@ -118,12 +118,12 @@ object NativeSubtitleTrackSelectionPolicy {
     }
 
     private fun subtitleLanguageTokens(language: String): List<String> = when (language) {
-        "zh-cn" -> listOf("zhcn", "zhhans", "chs", "简体", "簡體", "简中")
-        "zh-tw" -> listOf("zhtw", "zhhant", "cht", "繁体", "繁體", "繁中")
+        "zh-cn" -> listOf("zhcn", "zhhans", "chs", "chn", "chi", "zho", "cn", "sc", "简体", "簡體", "简中")
+        "zh-tw" -> listOf("zhtw", "zhhant", "cht", "chi", "zho", "tc", "big5", "繁体", "繁體", "繁中")
         "zh" -> listOf("chinese", "中文", "国语", "國語")
-        "en" -> listOf("english", " eng ", "英语", "英語", "英文")
-        "ja" -> listOf("japanese", " jpn ", "日语", "日語", "日本語")
-        "ko" -> listOf("korean", " kor ", "韩语", "韓語", "한국어")
+        "en" -> listOf("english", " eng ", "英语", "英語", "英文", "英字")
+        "ja" -> listOf("japanese", " jp ", " jpn ", "日语", "日語", "日文", "日字", "日本語")
+        "ko" -> listOf("korean", " kr ", " kor ", "韩语", "韓語", "한국어")
         else -> listOf(language.replace("-", ""))
     }
 
