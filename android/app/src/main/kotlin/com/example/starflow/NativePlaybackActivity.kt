@@ -4315,7 +4315,7 @@ class NativePlaybackActivity : Activity() {
         private val SUBTITLE_SCALE_OPTIONS =
             listOf(20.0, 24.0, 28.0, 32.0, 36.0, 42.0, 48.0, 56.0, 64.0, 78.0)
         private val SUBTITLE_POSITION_OPTIONS =
-            listOf(50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0)
+            NativeSubtitlePositionPolicy.options
         private val SECONDARY_SUBTITLE_SCALE_OPTIONS =
             listOf(50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0)
 
@@ -4365,6 +4365,10 @@ internal object NativePlayerTvFocusPolicy {
         R.id.native_audio_track_button,
         R.id.native_playback_settings,
     )
+}
+
+internal object NativeSubtitlePositionPolicy {
+    val options: List<Double> = (50..95).map(Int::toDouble)
 }
 
 private data class ExternalSubtitleSource(

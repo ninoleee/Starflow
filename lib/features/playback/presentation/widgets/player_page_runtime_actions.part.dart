@@ -71,6 +71,37 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     }
   }
 
+  Future<void> _applyGlobalMpvSubtitlePreference(
+    Player player,
+    PlaybackTarget target,
+  ) async {
+    _subtitleSessionPreference = null;
+    await _persistMpvSeriesSubtitlePreference(target, null);
+    await _setMpvSubtitleProperty(player, 'secondary-sid', 'no');
+    _setMpvDualSubtitleSessionEnabled(false);
+
+    final settings = _providerContainer.read(appSettingsProvider);
+    if (settings.playbackSubtitlePreference == PlaybackSubtitlePreference.off) {
+      await player.setSubtitleTrack(SubtitleTrack.no());
+      return;
+    }
+    final defaultSubtitle = settings.playbackDefaultSubtitle;
+    if (defaultSubtitle == PlaybackDefaultSubtitle.dual) {
+      final applied = await _applyDefaultMpvDualSubtitleTracks(
+        player,
+        primaryLanguage: settings.playbackDualSubtitlePrimaryLanguage,
+        secondaryLanguage: settings.playbackDualSubtitleSecondaryLanguage,
+      );
+      if (applied) {
+        return;
+      }
+    }
+    await _applyAutoPreferredSubtitleTrack(
+      player,
+      configuredLanguages: defaultSubtitle.preferredLanguages,
+    );
+  }
+
   Future<PlaybackSubtitleSessionPreference?> _loadMpvSeriesSubtitlePreference(
     PlaybackTarget target,
   ) async {

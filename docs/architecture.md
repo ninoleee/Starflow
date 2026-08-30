@@ -666,6 +666,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 全局自动字幕先读取 `PlaybackDefaultSubtitle`：`双字幕 / 简体中文 / 繁体中文 / 英语 / 日语 / 系统语言`。双字幕再分别读取 `playbackDualSubtitlePrimaryLanguage / playbackDualSubtitleSecondaryLanguage`，两项都支持简体、繁体、英语、日语和系统语言，默认简体中文 + 英语；两条轨道必须不同。指定语言缺失时回退系统语言，再按 Forced > 片源默认收尾；未知字段也解析成系统语言。明确选择“默认关闭”时跳过自动选轨。MPV 与 Android Media3 支持默认双字幕；iOS AVPlayer 对双字幕按系统语言处理
 - 字幕语言识别统一组合轨道 language 与 label，并规范化 ISO/三字码/发布组常用简写：简体覆盖 `zh-cn / zh-hans / chs / chn / chi / zho / cn / sc / 简中`，繁体覆盖 `zh-tw / zh-hant / cht / tc / big5 / 繁中`，英语覆盖 `en / eng / English / 英字`，日语覆盖 `ja / jp / jpn / Japanese / 日字`。MPV、Android Media3 和 iOS AVPlayer 保持同一语义
 - 播放记忆的 `subtitlePreferences` 按 `seriesKey` 持有剧集专属选择指纹：用户在某部剧中手动选择内封字幕、关闭字幕或双字幕后，只覆盖该剧其他集；不会写入 `AppSettings`，电影和其他剧不读取。切集重建播放器时按规范化语言、标题、编码、默认/强制标记和稳定 ID 降权匹配，匹配不到才回退全局默认。外挂/在线字幕文件不进入剧集指纹，避免把单集时间轴套到另一集
+- MPV 与 Android Media3 字幕菜单都暴露“使用全局默认”；该动作删除当前 `seriesKey` 的 `subtitlePreferences` 并立即重新应用 `AppSettings` 的默认状态、默认字幕及双字幕主/副语言。MPV 的底层 `auto` 轨道不再直接展示，避免与全局默认语义混淆
 - 非 `TV` 的内嵌 `MPV` 当前使用 Starflow 自己的轻量播放叠层，而不是 `media_kit` 默认控制条：
   - 首层只保留返回、播放/暂停、进度、全屏和“更多”；音量、字幕、音轨与其他高级播放项统一收进播放设置弹窗
   - 顶部标题栏、底部控制区和播放设置弹窗都收敛到更官方的 Material 组件组合：`Material + IconButton + Slider + Text + ListTile + TextButton`；手机、桌面和 TV 顶栏都从最左侧返回按钮开始，实时网速紧跟在其右侧
@@ -852,6 +853,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 播放页放播放器内核、解码模式、ExoPlayer 音频输出、打开超时、后台播放、默认倍速
 - 字幕收拢到独立的“字幕”一级页：字幕默认状态、默认字幕、主字幕大小、主/副字幕位置、副字幕大小、在线字幕来源与凭据、在线字幕优先语言、单次最多验证条数
 - 主字幕大小、主字幕位置、副字幕位置和副字幕大小属于全局字段；设置页的步进项每次点击立即入有序保存队列，MPV 播放内修改走 `savePlaybackRuntimePreferences(...)`，Android 原生播放内修改经 Flutter 回调走 `savePlaybackSubtitleStylePreferences(...)`，三条路径最终写同一组 `AppSettings` 字段
+- 主/副字幕位置统一使用 `50%–95%` 范围和 `1%` 步进；Flutter 设置页、MPV 播放内步进器和 Android 原生位置选择器复用同一精度。副字幕大小继续使用 `5%` 步进
 - `playbackSubtitleStyleDefaultsVersion` 只负责一次性把旧版未标记的副字幕 `75%` 默认值迁到 `50%`；新版本中用户明确保存的 `75%` 不再被重写
 - 内置 MPV 的触屏交互、卡顿自动恢复和激进性能调优保留在全局设置的独立“MPV”一级页；播放器内的播放设置一级只提供“更多”入口，二级页复用同一组持久化字段，并额外集中提供后台播放与主/副字幕布局
 - 三个页面都不再维护需要手动提交的页面草稿：选择、开关和步进项修改后立即排入持久化队列，文本输入使用 `250ms` 合并窗口；返回时会先把最后草稿加入有序写入队列，再立即关闭页面，不再显示保存确认框或工具栏提交按钮

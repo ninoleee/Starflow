@@ -1305,6 +1305,12 @@ extension _PlayerPageStateControls on _PlayerPageState {
         return SimpleDialog(
           title: const Text('字幕选择'),
           children: [
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(dialogContext).pop(
+                _MpvSubtitleSelectionMode.globalDefault,
+              ),
+              child: const Text('使用全局默认'),
+            ),
             if (!kIsWeb)
               SimpleDialogOption(
                 onPressed: () => Navigator.of(dialogContext).pop(
@@ -1314,7 +1320,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
                   _mpvDualSubtitleEnabled ? '特殊：双字幕模式  当前' : '特殊：双字幕模式',
                 ),
               ),
-            for (final track in tracks)
+            for (final track in tracks.where((track) => track.id != 'auto'))
               SimpleDialogOption(
                 onPressed: () => Navigator.of(dialogContext).pop(track),
                 child: Text(
@@ -1333,6 +1339,19 @@ extension _PlayerPageStateControls on _PlayerPageState {
 
     if (selection == _MpvSubtitleSelectionMode.dual) {
       await _selectMpvDualSubtitleTracks(player, tracks);
+      return;
+    }
+    if (selection == _MpvSubtitleSelectionMode.globalDefault) {
+      final applied = await _runPlayerCommand(
+        () => _applyGlobalMpvSubtitlePreference(
+          player,
+          _resolvedTarget ?? widget.target,
+        ),
+        failureMessage: '恢复全局字幕设置失败',
+      );
+      if (applied) {
+        _showMessage('已使用全局默认字幕');
+      }
       return;
     }
 
@@ -1585,7 +1604,7 @@ class _EmbeddedMpvFullscreenControlsBridgeState
   Widget build(BuildContext context) => widget.child;
 }
 
-enum _MpvSubtitleSelectionMode { dual }
+enum _MpvSubtitleSelectionMode { globalDefault, dual }
 
 class _MpvPositionedSubtitleText extends StatelessWidget {
   const _MpvPositionedSubtitleText({

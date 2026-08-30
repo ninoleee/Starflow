@@ -661,6 +661,14 @@ void main() {
     expect(copied.playbackSubtitleScale, kPlaybackSubtitleScaleMin);
   });
 
+  test('subtitle positions step and snap by one percent', () {
+    expect(kPlaybackSubtitlePositionStep, 1.0);
+    expect(stepPlaybackSubtitlePosition(80, 1), 81);
+    expect(stepPlaybackSubtitlePosition(81, -1), 80);
+    expect(clampPlaybackSubtitlePosition(80.4), 80);
+    expect(clampPlaybackSubtitlePosition(80.6), 81);
+  });
+
   test('default subtitle falls back to system language for missing values', () {
     expect(
       AppSettings.fromJson(const {}).playbackDefaultSubtitle,
