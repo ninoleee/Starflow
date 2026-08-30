@@ -689,6 +689,8 @@ flutter build apk --release
 .\scripts\build_tv_apk.ps1 -SettingsJsonPath "D:\OneDrive\Desktop\starflow-settings.json"
 ```
 
+`integration_test` 只保留在 `dev_dependencies`；当前 Flutter release 构建会过滤开发插件，TV 预设不再临时改写 `pubspec.yaml`。
+
 构建 Windows 安装器：
 
 ```powershell
