@@ -115,6 +115,8 @@ class _HomePageState extends ConsumerState<HomePage>
   int _scheduledHeroExplicitRefreshRevision = 0;
   bool _contentLoadingDeferralActive = false;
   bool _missingFocusRecoveryScheduled = false;
+  List<String> _observedEnabledModuleIds = const <String>[];
+  bool _didObserveEnabledModuleIds = false;
 
   bool get _showHeroPagerButtons {
     if (kIsWeb) {
@@ -191,15 +193,15 @@ class _HomePageState extends ConsumerState<HomePage>
     _missingFocusRecoveryScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _missingFocusRecoveryScheduled = false;
-      if (!mounted || !isPageVisible) {
+      if (!mounted || !_isHomeRouteVisible) {
         return;
       }
       final primaryFocus = FocusManager.instance.primaryFocus;
-      final hasActionableFocus = primaryFocus != null &&
-          primaryFocus is! FocusScopeNode &&
-          primaryFocus.context != null &&
-          primaryFocus.canRequestFocus;
+      final hasActionableFocus = _hasActionableHomeFocus(primaryFocus);
       if (hasActionableFocus) {
+        return;
+      }
+      if (_requestHeroNextSectionFocus()) {
         return;
       }
       final menuScope = TvMenuButtonScope.maybeOf(context);
@@ -219,6 +221,28 @@ class _HomePageState extends ConsumerState<HomePage>
       );
       menuScope.onMenuButtonPressed();
     });
+  }
+
+  bool get _isHomeRouteVisible {
+    final route = ModalRoute.of(context);
+    return isPageVisible || route == null || route.isCurrent;
+  }
+
+  bool _hasActionableHomeFocus(FocusNode? focus) {
+    final focusContext = focus?.context;
+    if (focus == null ||
+        focus is FocusScopeNode ||
+        focusContext == null ||
+        !focus.canRequestFocus) {
+      return false;
+    }
+    final focusRoute = ModalRoute.of(focusContext);
+    if (focusRoute == null) {
+      // The TV sidebar lives outside the branch route and remains actionable.
+      return true;
+    }
+    final homeRoute = ModalRoute.of(context);
+    return focusRoute == homeRoute && (homeRoute?.isCurrent ?? true);
   }
 
   @override
@@ -244,6 +268,17 @@ class _HomePageState extends ConsumerState<HomePage>
     );
     final heroModule = ref.watch(homeHeroModuleProvider);
     final enabledModules = ref.watch(homeEnabledModulesProvider);
+    final enabledModuleIds =
+        enabledModules.map((module) => module.id).toList(growable: false);
+    if (!listEquals(enabledModuleIds, _observedEnabledModuleIds)) {
+      final shouldRecoverFocus = _didObserveEnabledModuleIds;
+      _didObserveEnabledModuleIds = true;
+      _observedEnabledModuleIds = enabledModuleIds;
+      _heroFocusBelowRequestVersion += 1;
+      if (shouldRecoverFocus) {
+        _scheduleMissingFocusRecovery(reason: 'modules-changed');
+      }
+    }
     final resolvedSectionsState = ref.watch(homeResolvedSectionsProvider);
     final heroDisplayMode = ref.watch(
       appSettingsProvider.select((settings) => settings.homeHeroDisplayMode),
@@ -297,6 +332,7 @@ class _HomePageState extends ConsumerState<HomePage>
       _observedHomeNavigationResetRevision = homeNavigationResetRevision;
       _heroFocusBelowRequestVersion += 1;
       _heroPrefetchCoordinator.reset();
+      _scheduleMissingFocusRecovery(reason: 'navigation-reset');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _jumpToHeroTop();
@@ -417,11 +453,10 @@ class _HomePageState extends ConsumerState<HomePage>
     if (heroListChanged) {
       _scheduleHeroSelectionSync(activeHero);
     }
-    final visibleModules = featuredSection == null
-        ? enabledModules
-        : enabledModules
-            .where((module) => module.id != featuredSection.id)
-            .toList(growable: false);
+    // Hero references a section; it does not consume that module's normal
+    // slot. Keeping both avoids a first module (often Recent Playback)
+    // disappearing whenever automatic Hero selection pins it.
+    final visibleModules = enabledModules;
     final firstFocusableSectionId = _resolveFirstFocusableSectionId(
       enabledModules: visibleModules,
     );

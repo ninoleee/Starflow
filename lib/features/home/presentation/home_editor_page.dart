@@ -15,6 +15,7 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/douban_account_editor_page.dart';
 import 'package:starflow/features/home/application/home_settings_slices.dart';
+import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 
 final homeEditorCollectionsProvider = FutureProvider<List<MediaCollection>>((
   ref,
@@ -276,187 +277,197 @@ class HomeEditorPage extends ConsumerWidget {
         )
         .toList();
 
-    return Scaffold(
-      floatingActionButton: FloatingActionButton.small(
-        onPressed: () => _showAddModuleSheet(context, ref),
-        child: const Icon(Icons.add_rounded),
-      ),
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          AppPageBackground(
-            child: ListView(
-              padding: overlayToolbarPagePadding(context),
-              children: [
-                SectionPanel(
-                  title: '当前模块',
-                  child: heroModule == null && sortableModules.isEmpty
-                      ? const Text('还没有首页模块。')
-                      : Column(
-                          children: [
-                            if (heroModule != null)
-                              _HomeModuleCard(
-                                module: heroModule,
-                                leading: const Icon(
-                                  Icons.vertical_align_top_rounded,
+    return PopScope<void>(
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          ref.read(homeNavigationResetRevisionProvider.notifier).state += 1;
+        }
+      },
+      child: Scaffold(
+        floatingActionButton: FloatingActionButton.small(
+          onPressed: () => _showAddModuleSheet(context, ref),
+          child: const Icon(Icons.add_rounded),
+        ),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            AppPageBackground(
+              child: ListView(
+                padding: overlayToolbarPagePadding(context),
+                children: [
+                  SectionPanel(
+                    title: '当前模块',
+                    child: heroModule == null && sortableModules.isEmpty
+                        ? const Text('还没有首页模块。')
+                        : Column(
+                            children: [
+                              if (heroModule != null)
+                                _HomeModuleCard(
+                                  module: heroModule,
+                                  leading: const Icon(
+                                    Icons.vertical_align_top_rounded,
+                                  ),
+                                  onToggle: () {
+                                    ref
+                                        .read(
+                                            settingsControllerProvider.notifier)
+                                        .toggleHomeModule(
+                                          heroModule.id,
+                                          !heroModule.enabled,
+                                        );
+                                  },
                                 ),
-                                onToggle: () {
-                                  ref
-                                      .read(settingsControllerProvider.notifier)
-                                      .toggleHomeModule(
-                                        heroModule.id,
-                                        !heroModule.enabled,
-                                      );
-                                },
-                              ),
-                            if (sortableModules.isNotEmpty)
-                              ReorderableListView.builder(
-                                shrinkWrap: true,
-                                buildDefaultDragHandles: false,
-                                physics: const NeverScrollableScrollPhysics(),
-                                itemCount: sortableModules.length,
-                                onReorder: (oldIndex, newIndex) {
-                                  ref
-                                      .read(settingsControllerProvider.notifier)
-                                      .reorderHomeModules(oldIndex, newIndex);
-                                },
-                                itemBuilder: (context, index) {
-                                  final module = sortableModules[index];
-                                  final settingsController = ref.read(
-                                    settingsControllerProvider.notifier,
-                                  );
-                                  return _HomeModuleCard(
-                                    key: ValueKey(module.id),
-                                    module: module,
-                                    leading: isTelevision
-                                        ? Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              StarflowIconButton(
-                                                icon:
-                                                    Icons.arrow_upward_rounded,
-                                                tooltip: '上移',
-                                                size: 38,
-                                                focusId:
-                                                    'home-editor:${module.id}:move-up',
-                                                onPressed: index > 0
-                                                    ? () => settingsController
-                                                            .moveHomeModule(
-                                                          index,
-                                                          index - 1,
-                                                        )
-                                                    : null,
+                              if (sortableModules.isNotEmpty)
+                                ReorderableListView.builder(
+                                  shrinkWrap: true,
+                                  buildDefaultDragHandles: false,
+                                  physics: const NeverScrollableScrollPhysics(),
+                                  itemCount: sortableModules.length,
+                                  onReorder: (oldIndex, newIndex) {
+                                    ref
+                                        .read(
+                                            settingsControllerProvider.notifier)
+                                        .reorderHomeModules(oldIndex, newIndex);
+                                  },
+                                  itemBuilder: (context, index) {
+                                    final module = sortableModules[index];
+                                    final settingsController = ref.read(
+                                      settingsControllerProvider.notifier,
+                                    );
+                                    return _HomeModuleCard(
+                                      key: ValueKey(module.id),
+                                      module: module,
+                                      leading: isTelevision
+                                          ? Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                StarflowIconButton(
+                                                  icon: Icons
+                                                      .arrow_upward_rounded,
+                                                  tooltip: '上移',
+                                                  size: 38,
+                                                  focusId:
+                                                      'home-editor:${module.id}:move-up',
+                                                  onPressed: index > 0
+                                                      ? () => settingsController
+                                                              .moveHomeModule(
+                                                            index,
+                                                            index - 1,
+                                                          )
+                                                      : null,
+                                                ),
+                                                const SizedBox(width: 6),
+                                                StarflowIconButton(
+                                                  icon: Icons
+                                                      .arrow_downward_rounded,
+                                                  tooltip: '下移',
+                                                  size: 38,
+                                                  focusId:
+                                                      'home-editor:${module.id}:move-down',
+                                                  onPressed: index <
+                                                          sortableModules
+                                                                  .length -
+                                                              1
+                                                      ? () => settingsController
+                                                              .moveHomeModule(
+                                                            index,
+                                                            index + 1,
+                                                          )
+                                                      : null,
+                                                ),
+                                              ],
+                                            )
+                                          : ReorderableDragStartListener(
+                                              index: index,
+                                              child: const Icon(
+                                                Icons.drag_indicator_rounded,
                                               ),
-                                              const SizedBox(width: 6),
-                                              StarflowIconButton(
-                                                icon: Icons
-                                                    .arrow_downward_rounded,
-                                                tooltip: '下移',
-                                                size: 38,
-                                                focusId:
-                                                    'home-editor:${module.id}:move-down',
-                                                onPressed: index <
-                                                        sortableModules.length -
-                                                            1
-                                                    ? () => settingsController
-                                                            .moveHomeModule(
-                                                          index,
-                                                          index + 1,
-                                                        )
-                                                    : null,
-                                              ),
-                                            ],
-                                          )
-                                        : ReorderableDragStartListener(
-                                            index: index,
-                                            child: const Icon(
-                                              Icons.drag_indicator_rounded,
                                             ),
-                                          ),
-                                    onEdit: () => _showEditModuleDialog(
-                                      context,
-                                      ref,
-                                      module,
-                                    ),
-                                    onRemove: () {
-                                      ref
-                                          .read(settingsControllerProvider
-                                              .notifier)
-                                          .removeHomeModule(module.id);
-                                    },
-                                    onToggle: () {
-                                      ref
-                                          .read(settingsControllerProvider
-                                              .notifier)
-                                          .toggleHomeModule(
-                                            module.id,
-                                            !module.enabled,
-                                          );
-                                    },
-                                  );
-                                },
-                              ),
-                          ],
+                                      onEdit: () => _showEditModuleDialog(
+                                        context,
+                                        ref,
+                                        module,
+                                      ),
+                                      onRemove: () {
+                                        ref
+                                            .read(settingsControllerProvider
+                                                .notifier)
+                                            .removeHomeModule(module.id);
+                                      },
+                                      onToggle: () {
+                                        ref
+                                            .read(settingsControllerProvider
+                                                .notifier)
+                                            .toggleHomeModule(
+                                              module.id,
+                                              !module.enabled,
+                                            );
+                                      },
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
+                  ),
+                  const SizedBox(height: 18),
+                  SectionPanel(
+                    title: '可添加来源',
+                    child: Column(
+                      children: [
+                        _SourceCategoryTile(
+                          title: '内置',
+                          icon: Icons.auto_awesome_rounded,
+                          onTap: () => _showBuiltinModuleSheet(context, ref),
                         ),
-                ),
-                const SizedBox(height: 18),
-                SectionPanel(
-                  title: '可添加来源',
-                  child: Column(
-                    children: [
-                      _SourceCategoryTile(
-                        title: '内置',
-                        icon: Icons.auto_awesome_rounded,
-                        onTap: () => _showBuiltinModuleSheet(context, ref),
-                      ),
-                      const SizedBox(height: 10),
-                      _SourceCategoryTile(
-                        title: '豆瓣',
-                        icon: Icons.movie_filter_rounded,
-                        onTap: () => _showDoubanModuleSheet(context, ref),
-                      ),
-                      if (scopedSources.isNotEmpty) ...[
                         const SizedBox(height: 10),
-                        ...scopedSources.map(
-                          (source) => Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: _SourceCategoryTile(
-                              title: source.name,
-                              icon: source.kind == MediaSourceKind.emby
-                                  ? Icons.video_library_rounded
-                                  : Icons.storage_rounded,
-                              onTap: () => _showMediaSourceModuleSheet(
-                                context,
-                                ref,
-                                source,
+                        _SourceCategoryTile(
+                          title: '豆瓣',
+                          icon: Icons.movie_filter_rounded,
+                          onTap: () => _showDoubanModuleSheet(context, ref),
+                        ),
+                        if (scopedSources.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          ...scopedSources.map(
+                            (source) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _SourceCategoryTile(
+                                title: source.name,
+                                icon: source.kind == MediaSourceKind.emby
+                                    ? Icons.video_library_rounded
+                                    : Icons.storage_rounded,
+                                onTap: () => _showMediaSourceModuleSheet(
+                                  context,
+                                  ref,
+                                  source,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ] else
-                        Padding(
-                          padding: const EdgeInsets.only(top: 10),
-                          child: Text(
-                            '还没有可用的 Emby、WebDAV 或 Quark 来源，先去设置里接入并启用后，这里就会出现。',
-                            style: Theme.of(context).textTheme.bodyMedium,
+                        ] else
+                          Padding(
+                            padding: const EdgeInsets.only(top: 10),
+                            child: Text(
+                              '还没有可用的 Emby、WebDAV 或 Quark 来源，先去设置里接入并启用后，这里就会出现。',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                appPageBottomSpacer(),
-              ],
+                  appPageBottomSpacer(),
+                ],
+              ),
             ),
-          ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: OverlayToolbar(
-              onBack: () => context.pop(),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                onBack: () => context.pop(),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

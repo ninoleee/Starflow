@@ -9,6 +9,7 @@ import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
+import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/home/presentation/home_page.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
@@ -151,6 +152,57 @@ void main() {
     expect(menuRequestCount, 0);
   });
 
+  testWidgets('home restores first content focus after editor route closes',
+      (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(_homeSettings),
+          homeResolvedSectionsProvider.overrideWith(
+            (ref) => const HomeResolvedSectionsState(
+              sections: [_singleHeroSection],
+            ),
+          ),
+          homeSectionProvider.overrideWith((ref, moduleId) async {
+            return moduleId == 'test-module' ? _singleHeroSection : null;
+          }),
+        ],
+        child: const MaterialApp(
+          home: TvMenuButtonScope(
+            onMenuButtonPressed: _noop,
+            child: HomePage(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final homeContext = tester.element(find.byType(HomePage));
+    Navigator.of(homeContext).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => const _FocusedEditorRoute(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'test-home-editor-focus',
+    );
+
+    Navigator.of(tester.element(find.byType(_FocusedEditorRoute))).pop();
+    await tester.pumpAndSettle();
+
+    final restoredFocus = FocusManager.instance.primaryFocus;
+    expect(restoredFocus, isNotNull);
+    expect(restoredFocus?.debugLabel, isNot('test-home-editor-focus'));
+    expect(restoredFocus?.context, isNotNull);
+    expect(
+      ModalRoute.of(restoredFocus!.context!),
+      same(ModalRoute.of(homeContext)),
+    );
+  });
+
   testWidgets('main library grid can opt out of a second autofocus candidate',
       (tester) async {
     await tester.pumpWidget(
@@ -179,6 +231,46 @@ void main() {
         tester.widget<MediaPosterTile>(find.byType(MediaPosterTile)).autofocus,
         isFalse);
   });
+}
+
+void _noop() {}
+
+class _FocusedEditorRoute extends ConsumerStatefulWidget {
+  const _FocusedEditorRoute();
+
+  @override
+  ConsumerState<_FocusedEditorRoute> createState() =>
+      _FocusedEditorRouteState();
+}
+
+class _FocusedEditorRouteState extends ConsumerState<_FocusedEditorRoute> {
+  final FocusNode _focusNode = FocusNode(debugLabel: 'test-home-editor-focus');
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope<void>(
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          ref.read(homeNavigationResetRevisionProvider.notifier).state += 1;
+        }
+      },
+      child: Scaffold(
+        body: Center(
+          child: Focus(
+            autofocus: true,
+            focusNode: _focusNode,
+            child: const SizedBox(width: 20, height: 20),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 final _homeSettings = SeedData.defaultSettings.copyWith(

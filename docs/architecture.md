@@ -180,6 +180,7 @@ lib/
 - 元数据调度器在前台交互结束后按可配置静默期恢复；首页、媒体库和集合页只在进入“内容加载中”状态时申请一次静默期，避免 widget rebuild 持续推迟后台任务
 - 单击导航栏首页会触发统一软恢复边界：页面 revision 终止旧的 Hero/评分预取会话，媒体刷新协调器取消后台 NAS/WebDAV/Emby 刷新，首页与元数据调度器只清除自身的批次/静默等待并继续 drain；活动任务、前台 lease 和并发计数不会被强制归零
 - `TV` 退出确认框使用短生命周期的元数据前台 lease，只在对话框显示期间阻止新的后台预取；取消后以零延迟释放，真正确认退出仍走播放器与系统会话清理，不复用导航软恢复
+- 首页重新 active 或模块 ID 顺序变化时会在下一帧校验焦点所属路由；编辑器等已退出路由遗留的 FocusNode 不视为有效首页焦点，优先请求 Hero 下方首个模块，失败才回侧栏
 - Android / TV 真正确认退出时，Flutter 先清理播放会话、媒体通知、画中画和后台播放，再通过 `starflow/platform` 调用原生 `finishAndRemoveTask()`；桥接不可用时才回退 `SystemNavigator.pop()`，避免任务仍留在启动器中被自动恢复
 - `AppRuntimeRecoveryBoundary` 统一监听应用生命周期和内存压力。后台状态通过引用计数 lease 暂停首页 load/apply 与元数据 prefetch/maintenance 的新准入；恢复前台后等待首帧和固定 `400ms` 静默期再释放。内存压力使用独立 `2s` lease，并 best-effort 取消媒体库后台刷新，因此生命周期与低内存两种暂停可以安全叠加
 - Flutter 的 `PaintingBinding` 会在内存压力时清理内存图片缓存；应用层只记录 `app.memory-pressure` 和降低后台负载，不重复清空 live/persistent 图片、不篡改活动请求计数，也不碰播放会话
@@ -357,6 +358,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 首页装配特点：
 
 - 模块配置持久化在设置里
+- Hero 只引用选中的 `HomeSectionViewModel`，不会从普通模块列表中移除同一 section；自动 Hero 选中首个完成模块时，“最近播放”等首模块仍保留在 Hero 下方
 - 首页设置读取已经开始从整份 `AppSettings` 拆到 `home_settings_slices.dart`
 - 首页卡片最终统一映射到 `MediaDetailTarget`
 - 首页条目当前分成两段装配：

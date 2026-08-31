@@ -481,7 +481,7 @@ void main() {
     expect(heroArtwork.alignment, Alignment.center);
   });
 
-  testWidgets('home page skips spacer for featured source module',
+  testWidgets('home page keeps the featured source module below Hero',
       (WidgetTester tester) async {
     tester.view.physicalSize = const Size(1280, 2400);
     tester.view.devicePixelRatio = 1;
@@ -587,11 +587,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump(const Duration(milliseconds: 600));
 
-    expect(find.text('Module A'), findsNothing);
+    expect(find.text('Module A'), findsOneWidget);
     expect(find.text('Module B'), findsOneWidget);
 
+    final moduleATop = tester.getTopLeft(find.text('Module A')).dy;
     final moduleBTop = tester.getTopLeft(find.text('Module B')).dy;
-    expect(moduleBTop, lessThan(465));
+    expect(moduleATop, lessThan(moduleBTop));
   });
 
   testWidgets(
