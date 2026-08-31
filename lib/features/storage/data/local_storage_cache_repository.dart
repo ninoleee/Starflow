@@ -1132,6 +1132,50 @@ class LocalStorageCacheRepository {
     );
   }
 
+  Future<void> clearLibraryRelationsForSource(String sourceId) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+
+    await _runSerializedDetailMutation(
+      () => _clearDetailCacheForResourceUnlocked(
+        normalizedSourceId: normalizedSourceId,
+        normalizedResourceId: '',
+        normalizedResourcePath: '',
+        treatAsScope: true,
+      ),
+    );
+  }
+
+  Future<Set<String>> loadCachedMediaSourceIds() async {
+    final sourceIds = <String>{};
+    final manifest = await _loadEmbyManifest();
+    sourceIds.addAll(manifest.sources.keys.map((item) => item.trim()));
+    final payload = await _loadDetailPayload();
+    for (final record in payload.records.values) {
+      for (final target in <MediaDetailTarget>[
+        record.target,
+        ...record.libraryMatchChoices,
+      ]) {
+        final sourceKind =
+            target.sourceKind ?? target.playbackTarget?.sourceKind;
+        if (sourceKind != MediaSourceKind.emby &&
+            sourceKind != MediaSourceKind.nas &&
+            sourceKind != MediaSourceKind.quark) {
+          continue;
+        }
+        final sourceId = target.sourceId.trim().isNotEmpty
+            ? target.sourceId.trim()
+            : target.playbackTarget?.sourceId.trim() ?? '';
+        if (sourceId.isNotEmpty) {
+          sourceIds.add(sourceId);
+        }
+      }
+    }
+    return sourceIds;
+  }
+
   Future<void> _clearDetailCacheForSourceUnlocked(
     String normalizedSourceId,
   ) async {
@@ -2358,6 +2402,10 @@ bool _detailTargetMatchesDeletedResource(
   }
 
   final normalizedResourceId = resourceId.trim();
+  final normalizedResourcePath = resourcePath.trim();
+  if (normalizedResourceId.isEmpty && normalizedResourcePath.isEmpty) {
+    return true;
+  }
   if (normalizedResourceId.isNotEmpty) {
     if (target.itemId.trim() == normalizedResourceId) {
       return true;
@@ -2367,7 +2415,6 @@ bool _detailTargetMatchesDeletedResource(
     }
   }
 
-  final normalizedResourcePath = resourcePath.trim();
   if (normalizedResourcePath.isEmpty) {
     return false;
   }

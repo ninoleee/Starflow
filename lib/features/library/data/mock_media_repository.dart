@@ -522,12 +522,26 @@ class AppMediaRepository implements MediaRepository {
       sectionId: sectionId,
     );
 
-    await _webDavNasClient.deleteResource(
-      source,
-      resourcePath: normalizedResourcePath,
-      sectionId: sectionId,
-    );
-    if (quarkDeletePlan != null) {
+    var quarkDeleteCompleted = false;
+    try {
+      await _webDavNasClient.deleteResource(
+        source,
+        resourcePath: normalizedResourcePath,
+        sectionId: sectionId,
+      );
+    } on WebDavDeleteException catch (error, stackTrace) {
+      final canDeleteFromQuarkSource = quarkDeletePlan != null &&
+          const <int>{403, 405}.contains(error.statusCode);
+      if (!canDeleteFromQuarkSource) {
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+      quarkDeleteCompleted =
+          await _deleteMatchedQuarkDirectory(quarkDeletePlan);
+      if (!quarkDeleteCompleted) {
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+    }
+    if (quarkDeletePlan != null && !quarkDeleteCompleted) {
       await _deleteMatchedQuarkDirectory(quarkDeletePlan);
     }
     await _nasMediaIndexer.removeResourceScope(
@@ -2319,7 +2333,7 @@ class AppMediaRepository implements MediaRepository {
     return null;
   }
 
-  Future<void> _deleteMatchedQuarkDirectory(
+  Future<bool> _deleteMatchedQuarkDirectory(
     _MatchedQuarkDirectory directory,
   ) async {
     try {
@@ -2343,6 +2357,7 @@ class AppMediaRepository implements MediaRepository {
           'path': directory.path,
         },
       );
+      return true;
     } catch (error) {
       _logQuarkSyncDelete(
         'delete.error',
@@ -2354,6 +2369,7 @@ class AppMediaRepository implements MediaRepository {
         },
       );
       // WebDAV delete has already succeeded; Quark sync delete is best-effort.
+      return false;
     }
   }
 
@@ -2379,9 +2395,16 @@ class AppMediaRepository implements MediaRepository {
     }
 
     for (final directory in directories) {
+      final sourceIdMatches = directory.sourceId.trim() == source.id.trim();
+      final normalizedDirectorySourceName =
+          directory.sourceName.trim().toLowerCase();
+      final sourceNameMatches = normalizedSourceName.isNotEmpty &&
+          normalizedDirectorySourceName.isNotEmpty &&
+          normalizedDirectorySourceName == normalizedSourceName;
       final alignedScopeSegments = _alignedScopeSegments(
         resourcePath: resourcePath,
         scopeDirectoryId: directory.directoryId,
+        allowRelocatedScope: sourceIdMatches || sourceNameMatches,
       );
       if (alignedScopeSegments == null) {
         continue;
@@ -2391,18 +2414,14 @@ class AppMediaRepository implements MediaRepository {
         depth: alignedScopeSegments.length,
         matchMode: 'path_only',
       );
-      if (directory.sourceId.trim() == source.id.trim()) {
+      if (sourceIdMatches) {
         exactMatch = withGreaterDepth(
           exactMatch,
           candidate.copyWith(matchMode: 'source_id'),
         );
         continue;
       }
-      final normalizedDirectorySourceName =
-          directory.sourceName.trim().toLowerCase();
-      if (normalizedSourceName.isNotEmpty &&
-          normalizedDirectorySourceName.isNotEmpty &&
-          normalizedDirectorySourceName == normalizedSourceName) {
+      if (sourceNameMatches) {
         sourceNameMatch = withGreaterDepth(
           sourceNameMatch,
           candidate.copyWith(matchMode: 'source_name'),
@@ -2614,6 +2633,7 @@ class AppMediaRepository implements MediaRepository {
   List<String>? _alignedScopeSegments({
     required String resourcePath,
     required String scopeDirectoryId,
+    bool allowRelocatedScope = false,
   }) {
     final resourceSegments = _pathSegments(_uriPath(resourcePath));
     final scopeSegments = _pathSegments(_uriPath(scopeDirectoryId));
@@ -2627,6 +2647,29 @@ class AppMediaRepository implements MediaRepository {
       }
       if (_startsWithSegments(resourceSegments, candidate)) {
         return candidate;
+      }
+    }
+    if (!allowRelocatedScope) {
+      return null;
+    }
+
+    for (var suffixLength = scopeSegments.length;
+        suffixLength >= 2;
+        suffixLength--) {
+      final suffix = scopeSegments.sublist(scopeSegments.length - suffixLength);
+      for (var resourceStart = 0;
+          resourceStart + suffix.length <= resourceSegments.length;
+          resourceStart++) {
+        final resourceCandidate = resourceSegments.sublist(
+          resourceStart,
+          resourceStart + suffix.length,
+        );
+        if (_startsWithSegments(resourceCandidate, suffix)) {
+          return resourceSegments.sublist(
+            0,
+            resourceStart + suffix.length,
+          );
+        }
       }
     }
     return null;

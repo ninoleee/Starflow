@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/media_source_identity.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 abstract class AppSettingsRepository {
@@ -34,7 +35,7 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
     try {
       final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
       final settings = AppSettings.fromCurrentJson(decoded);
-      final reconciled = _reconcileSyncDeleteWebDavDirectories(settings);
+      final reconciled = reconcileSettingsMediaSourceReferences(settings);
       if (jsonEncode(settings.toJson()) != jsonEncode(reconciled.toJson())) {
         await save(reconciled);
       }
@@ -59,69 +60,131 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
       }
       final decoded = Map<String, dynamic>.from(jsonDecode(bundledRaw) as Map);
       final settings = AppSettings.fromCurrentJson(decoded);
-      return _reconcileSyncDeleteWebDavDirectories(settings);
+      return reconcileSettingsMediaSourceReferences(settings);
     } catch (_) {
       return SeedData.defaultSettings;
     }
   }
+}
 
-  AppSettings _reconcileSyncDeleteWebDavDirectories(AppSettings settings) {
-    final directories =
-        settings.networkStorage.syncDeleteQuarkWebDavDirectories;
-    if (directories.isEmpty) {
-      return settings;
+AppSettings reconcileSettingsMediaSourceReferences(AppSettings settings) {
+  final normalizedSources = settings.mediaSources
+      .map(
+        (source) => source.kind != MediaSourceKind.nas
+            ? source
+            : source.copyWith(
+                featuredSectionIds: source.featuredSectionIds
+                    .map(
+                      (sectionId) => sectionId == kNoSectionsSelectedSentinel
+                          ? sectionId
+                          : alignMediaSourceLocationToCurrentRoot(
+                              sectionId,
+                              source,
+                            ),
+                    )
+                    .where((sectionId) => sectionId.trim().isNotEmpty)
+                    .toList(growable: false),
+              ),
+      )
+      .toList(growable: false);
+
+  final mediaSourceById = {
+    for (final source in normalizedSources) source.id.trim(): source,
+  };
+  final validSourceIds = mediaSourceById.keys.toSet();
+  final removedHomeModuleIds = <String>{};
+  final homeModules = <HomeModuleConfig>[];
+  for (final module in settings.homeModules) {
+    if (module.type != HomeModuleType.librarySection) {
+      homeModules.add(module);
+      continue;
     }
-
-    final mediaSourceById = {
-      for (final source in settings.mediaSources) source.id.trim(): source,
-    };
-    final mediaSourcesByName = <String, List<MediaSourceConfig>>{};
-    for (final source in settings.mediaSources) {
-      final normalizedName = source.name.trim().toLowerCase();
-      if (normalizedName.isEmpty) {
-        continue;
-      }
-      mediaSourcesByName.putIfAbsent(normalizedName, () => []).add(source);
+    final source = mediaSourceById[module.sourceId.trim()];
+    if (source == null) {
+      removedHomeModuleIds.add(module.id);
+      continue;
     }
-
-    var changed = false;
-    final reconciled = <NetworkStorageWebDavDirectory>[];
-    for (final directory in directories) {
-      final sourceId = directory.sourceId.trim();
-      final currentSource = mediaSourceById[sourceId];
-      if (currentSource != null) {
-        final updated = directory.copyWith(sourceName: currentSource.name);
-        if (updated.sourceName != directory.sourceName) {
-          changed = true;
-        }
-        reconciled.add(updated);
-        continue;
-      }
-
-      final normalizedName = directory.sourceName.trim().toLowerCase();
-      final nameMatches = mediaSourcesByName[normalizedName] ?? const [];
-      if (nameMatches.length == 1) {
-        final matchedSource = nameMatches.single;
-        reconciled.add(
-          directory.copyWith(
-            sourceId: matchedSource.id,
-            sourceName: matchedSource.name,
-          ),
-        );
-        changed = true;
-        continue;
-      }
-
-      reconciled.add(directory);
-    }
-
-    if (!changed) {
-      return settings;
-    }
-    return settings.copyWith(
-      networkStorage: settings.networkStorage.copyWith(
-        syncDeleteQuarkWebDavDirectories: reconciled,
+    final sectionId = alignMediaSourceLocationToCurrentRoot(
+      module.sectionId,
+      source,
+    );
+    homeModules.add(
+      module.copyWith(
+        sourceName: source.name,
+        sectionId: sectionId,
+        sectionName: sectionId.isEmpty ? '全部内容' : module.sectionName,
       ),
     );
   }
+
+  final sourcesByName = <String, List<MediaSourceConfig>>{};
+  for (final source in normalizedSources) {
+    final normalizedName = source.name.trim().toLowerCase();
+    if (normalizedName.isNotEmpty) {
+      sourcesByName.putIfAbsent(normalizedName, () => []).add(source);
+    }
+  }
+  final directories = <NetworkStorageWebDavDirectory>[];
+  for (final directory
+      in settings.networkStorage.syncDeleteQuarkWebDavDirectories) {
+    var source = mediaSourceById[directory.sourceId.trim()];
+    if (source == null) {
+      final nameMatches =
+          sourcesByName[directory.sourceName.trim().toLowerCase()] ?? const [];
+      if (nameMatches.length == 1) {
+        source = nameMatches.single;
+      }
+    }
+    if (source == null) {
+      continue;
+    }
+    final directoryId = alignMediaSourceLocationToCurrentRoot(
+      directory.directoryId,
+      source,
+    );
+    if (directoryId.isEmpty) {
+      continue;
+    }
+    directories.add(
+      directory.copyWith(
+        sourceId: source.id,
+        sourceName: source.name,
+        directoryId: directoryId,
+        directoryLabel: _mediaSourceDirectoryLabel(directoryId),
+      ),
+    );
+  }
+
+  return settings.copyWith(
+    mediaSources: normalizedSources,
+    homeModules: homeModules,
+    homeHeroSourceModuleId:
+        removedHomeModuleIds.contains(settings.homeHeroSourceModuleId)
+            ? ''
+            : settings.homeHeroSourceModuleId,
+    libraryMatchSourceIds: settings.libraryMatchSourceIds
+        .where(validSourceIds.contains)
+        .toList(growable: false),
+    searchSourceIds: settings.searchSourceIds.where((id) {
+      final normalized = id.trim();
+      if (!normalized.startsWith('source:')) {
+        return true;
+      }
+      return validSourceIds.contains(normalized.substring('source:'.length));
+    }).toList(growable: false),
+    networkStorage: settings.networkStorage.copyWith(
+      syncDeleteQuarkWebDavDirectories: directories,
+      refreshMediaSourceIds: settings.networkStorage.refreshMediaSourceIds
+          .where(validSourceIds.contains)
+          .toList(growable: false),
+    ),
+  );
+}
+
+String _mediaSourceDirectoryLabel(String raw) {
+  final uri = Uri.tryParse(raw.trim());
+  if (uri == null || !uri.hasScheme) {
+    return raw.trim();
+  }
+  return '${uri.host}${uri.path.isEmpty ? '/' : uri.path}';
 }

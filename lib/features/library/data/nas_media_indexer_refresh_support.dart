@@ -51,18 +51,23 @@ class _RefreshTaskHandle {
 }
 
 class _RefreshTaskController {
+  _RefreshTaskController({bool Function()? isExternallyCancelled})
+      : _isExternallyCancelled = isExternallyCancelled;
+
   bool _isCancelled = false;
+  final bool Function()? _isExternallyCancelled;
 
-  bool get cancelled => _isCancelled;
+  bool get cancelled =>
+      _isCancelled || (_isExternallyCancelled?.call() ?? false);
 
-  bool Function() get isCancelled => () => _isCancelled;
+  bool Function() get isCancelled => () => cancelled;
 
   void cancel() {
     _isCancelled = true;
   }
 
   void throwIfCancelled() {
-    if (_isCancelled) {
+    if (cancelled) {
       throw const _RefreshCancelledException();
     }
   }

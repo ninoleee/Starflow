@@ -14,6 +14,7 @@ import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/media_source_identity.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
@@ -42,6 +43,16 @@ final nasMediaIndexerProvider = Provider<NasMediaIndexer>((ref) {
     notifyIndexChanged: () {
       ref.read(nasMediaIndexRevisionProvider.notifier).state++;
     },
+    readInvalidationRevision: (sourceId) {
+      final globalRevision = ref.read(
+        nasMediaIndexGlobalInvalidationRevisionProvider,
+      );
+      final sourceRevision = ref.read(
+            nasMediaIndexSourceInvalidationRevisionsProvider,
+          )[sourceId.trim()] ??
+          0;
+      return Object.hash(globalRevision, sourceRevision);
+    },
     backgroundLimiter: ref.read(metadataPrefetchConcurrencyLimiterProvider),
   );
   ref.onDispose(() {
@@ -61,6 +72,7 @@ class NasMediaIndexer {
     required AppSettings Function() readSettings,
     required WebDavScrapeProgressController progressController,
     void Function()? notifyIndexChanged,
+    int Function(String sourceId)? readInvalidationRevision,
     MetadataPrefetchConcurrencyLimiter? backgroundLimiter,
     NasMediaIndexerConcurrencyLimits? concurrencyLimits,
   })  : _store = store,
@@ -72,6 +84,7 @@ class NasMediaIndexer {
         _readSettings = readSettings,
         _progressController = progressController,
         _notifyIndexChanged = notifyIndexChanged,
+        _readInvalidationRevision = readInvalidationRevision,
         _backgroundLimiter = backgroundLimiter,
         _concurrencyLimitsOverride = concurrencyLimits,
         _sourceBudget = _ConcurrencyBudget(
@@ -102,6 +115,7 @@ class NasMediaIndexer {
   final AppSettings Function() _readSettings;
   final WebDavScrapeProgressController _progressController;
   final void Function()? _notifyIndexChanged;
+  final int Function(String sourceId)? _readInvalidationRevision;
   final MetadataPrefetchConcurrencyLimiter? _backgroundLimiter;
   final NasMediaIndexerConcurrencyLimits? _concurrencyLimitsOverride;
   final Map<String, _RefreshTaskHandle> _activeRefreshTasks =
@@ -110,6 +124,10 @@ class NasMediaIndexer {
       <String, _RefreshTaskHandle>{};
   final Map<String, _NasLibraryMatchCache> _libraryMatchCaches =
       <String, _NasLibraryMatchCache>{};
+  final Map<String, int> _libraryMatchCacheInvalidationRevisions =
+      <String, int>{};
+  final Map<String, String> _libraryMatchCacheStateSignatures =
+      <String, String>{};
   bool _isDisposed = false;
   final _ConcurrencyBudget _sourceBudget;
   final _ConcurrencyBudget _collectionBudget;
@@ -196,6 +214,8 @@ class NasMediaIndexer {
 
   Future<void> clearSource(String sourceId) =>
       _NasMediaIndexerRefreshFlowX(this).clearSource(sourceId);
+
+  Future<void> clearAll() => _NasMediaIndexerRefreshFlowX(this).clearAll();
 
   Future<bool> tryAutoRebuildOnEmpty(
     MediaSourceConfig source, {
@@ -383,12 +403,113 @@ class NasMediaIndexer {
 
     final normalizedSectionId = sectionId?.trim() ?? '';
     if (normalizedSectionId.isNotEmpty) {
-      return _store.loadSourceRecords(
+      final exactRecords = await _store.loadSourceRecords(
         source.id,
         sectionId: normalizedSectionId,
       );
+      if (exactRecords.isNotEmpty) {
+        return exactRecords;
+      }
+
+      final sourceRecords = await _loadSourceRecordsCached(source.id);
+      return _recordsForNestedSection(
+        sourceRecords,
+        normalizedSectionId,
+      );
     }
     return _loadSourceRecordsCached(source.id);
+  }
+
+  bool _recordBelongsToNestedSection(
+    NasMediaIndexRecord record,
+    String sectionId,
+  ) {
+    return <String>[
+      record.resourceId,
+      record.resourcePath,
+      record.item.id,
+      record.item.actualAddress,
+    ].any((candidate) => _resourceBelongsToSection(candidate, sectionId));
+  }
+
+  List<NasMediaIndexRecord> _recordsForNestedSection(
+    List<NasMediaIndexRecord> records,
+    String sectionId,
+  ) {
+    final sectionName = _sectionNameForId(sectionId);
+    return records
+        .where(
+          (record) => _recordBelongsToNestedSection(record, sectionId),
+        )
+        .map(
+          (record) => record.copyWith(
+            sectionId: sectionId,
+            sectionName: sectionName.isEmpty ? record.sectionName : sectionName,
+            item: record.item.copyWith(
+              sectionId: sectionId,
+              sectionName:
+                  sectionName.isEmpty ? record.item.sectionName : sectionName,
+            ),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  String _sectionNameForId(String sectionId) {
+    final uri = Uri.tryParse(sectionId.trim());
+    final segments = uri?.pathSegments
+            .where((segment) => segment.trim().isNotEmpty)
+            .toList(growable: false) ??
+        const <String>[];
+    if (segments.isEmpty) {
+      return '';
+    }
+    try {
+      return Uri.decodeComponent(segments.last);
+    } catch (_) {
+      return segments.last;
+    }
+  }
+
+  bool _resourceBelongsToSection(String resource, String sectionId) {
+    final normalizedResource = resource.trim();
+    final normalizedSectionId = sectionId.trim();
+    if (normalizedResource.isEmpty || normalizedSectionId.isEmpty) {
+      return false;
+    }
+
+    final resourceUri = Uri.tryParse(normalizedResource);
+    final sectionUri = Uri.tryParse(normalizedSectionId);
+    if (resourceUri != null &&
+        resourceUri.host.isNotEmpty &&
+        sectionUri != null &&
+        sectionUri.host.isNotEmpty) {
+      if (resourceUri.host.toLowerCase() != sectionUri.host.toLowerCase()) {
+        return false;
+      }
+      if (resourceUri.hasPort &&
+          sectionUri.hasPort &&
+          resourceUri.port != sectionUri.port) {
+        return false;
+      }
+    }
+
+    final resourceSegments = NasMediaPathPolicy.pathSegments(
+      NasMediaPathPolicy.uriPath(normalizedResource),
+    );
+    final sectionSegments = NasMediaPathPolicy.pathSegments(
+      NasMediaPathPolicy.uriPath(normalizedSectionId),
+    );
+    if (sectionSegments.isEmpty ||
+        resourceSegments.length < sectionSegments.length) {
+      return false;
+    }
+    for (var index = 0; index < sectionSegments.length; index++) {
+      if (resourceSegments[index] != sectionSegments[index]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   List<MediaItem> _materializeLibraryItems(List<NasMediaIndexRecord> records) {

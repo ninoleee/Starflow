@@ -743,17 +743,9 @@ class AppMediaQueryService {
         }
         if (sectionId?.trim().isNotEmpty == true) {
           final resolvedSectionId = sectionId!.trim();
-          final resolvedSectionName =
-              await _resolveSectionName(source, sectionId);
-          final scopedCollections = [
-            MediaCollection(
-              id: resolvedSectionId,
-              title: resolvedSectionName,
-              sourceId: source.id,
-              sourceName: source.name,
-              sourceKind: source.kind,
-            ),
-          ];
+          final scopedCollections = hasScopedSections
+              ? await _selectedCollectionsForSource(source)
+              : null;
           return _SourceFetchResult(
             items: await _loadNasLibraryWithAutoRebuild(
               source,

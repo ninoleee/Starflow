@@ -9,6 +9,15 @@ class WebDavNasException implements Exception {
   String toString() => message;
 }
 
+class WebDavDeleteException implements Exception {
+  const WebDavDeleteException(this.statusCode);
+
+  final int statusCode;
+
+  @override
+  String toString() => 'WebDAV 删除失败：HTTP $statusCode';
+}
+
 class _WebDavScanCancelledException implements Exception {
   const _WebDavScanCancelledException();
 }

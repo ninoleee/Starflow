@@ -29,6 +29,62 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  test('nested NAS section query keeps the configured root index scope',
+      () async {
+    const source = MediaSourceConfig(
+      id: 'nas-main',
+      name: 'NAS',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/strm',
+      libraryPath: 'https://nas.example.com/dav/strm/',
+      enabled: true,
+    );
+    final indexer = _FakeNasMediaIndexer(
+      libraryItems: [
+        MediaItem(
+          id: 'movie-1',
+          title: 'Movie',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '',
+          genres: const [],
+          itemType: 'movie',
+          sourceId: source.id,
+          sourceName: source.name,
+          sourceKind: source.kind,
+          streamUrl: 'https://media.example/movie.mkv',
+          addedAt: DateTime.utc(2026, 8, 31),
+        ),
+      ],
+    );
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsProvider.overrideWithValue(
+          SeedData.defaultSettings.copyWith(
+            mediaSources: const [source],
+            searchProviders: const [],
+            homeModules: const [],
+          ),
+        ),
+        nasMediaIndexerProvider.overrideWithValue(indexer),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final items = await container.read(mediaRepositoryProvider).fetchLibrary(
+          sourceId: source.id,
+          sectionId: 'https://nas.example.com/dav/strm/quark/',
+        );
+
+    expect(items, hasLength(1));
+    expect(
+      indexer.lastLoadedSectionId,
+      'https://nas.example.com/dav/strm/quark/',
+    );
+    expect(indexer.lastLoadedScopedCollections, isNull);
+  });
+
   group('AppMediaRepository synced Quark delete', () {
     test(
         'deletes the matched Quark directory after deleting a file inside the selected WebDAV scope',
@@ -259,6 +315,138 @@ void main() {
 
       expect(quarkClient.listParentFids, ['folder-root']);
       expect(quarkClient.deletedFids, ['quark-dir-series']);
+    });
+
+    test(
+        'uses Quark source deletion when a relocated generated WebDAV directory is read only',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'media-source-1775415208787',
+        name: 'nas',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://openlist.example.com/dav/strm',
+        enabled: true,
+      );
+      final webDavClient = _RecordingWebDavNasClient(
+        deleteError: const WebDavDeleteException(403),
+      );
+      final quarkClient = _RecordingQuarkSaveClient(
+        directories: const [
+          QuarkDirectoryEntry(
+            fid: 'quark-dir-court',
+            name: '开庭',
+            path: '/来自：分享/开庭',
+          ),
+        ],
+      );
+      final indexer = _FakeNasMediaIndexer();
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [source],
+              searchProviders: const [],
+              homeModules: const [],
+              networkStorage: const NetworkStorageConfig(
+                quarkCookie: 'foo=bar',
+                quarkSaveFolderId: 'folder-root',
+                quarkSaveFolderPath: '/来自：分享',
+                syncDeleteQuarkEnabled: true,
+                syncDeleteQuarkWebDavDirectories: [
+                  NetworkStorageWebDavDirectory(
+                    sourceId: 'media-source-1775415208787',
+                    sourceName: 'nas',
+                    directoryId:
+                        'https://webdav.example.com/movies/strm/quark/',
+                    directoryLabel: 'webdav.example.com/movies/strm/quark/',
+                  ),
+                ],
+              ),
+            ),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          webDavNasClientProvider.overrideWithValue(webDavClient),
+          quarkSaveClientProvider.overrideWithValue(quarkClient),
+          nasMediaIndexerProvider.overrideWithValue(indexer),
+          localStorageCacheRepositoryProvider.overrideWithValue(
+            _RecordingLocalStorageCacheRepository(),
+          ),
+          playbackMemoryRepositoryProvider.overrideWithValue(
+            _RecordingPlaybackMemoryRepository(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final repository = container.read(mediaRepositoryProvider);
+      const resourcePath =
+          'https://openlist.example.com/dav/strm/quark/%E5%BC%80%E5%BA%AD';
+
+      await repository.deleteResource(
+        sourceId: source.id,
+        resourcePath: resourcePath,
+      );
+
+      expect(webDavClient.deletedResourcePaths, [resourcePath]);
+      expect(quarkClient.listParentFids, ['folder-root']);
+      expect(quarkClient.deletedFids, ['quark-dir-court']);
+      expect(indexer.removedScopes, [resourcePath]);
+    });
+
+    test('keeps unrelated WebDAV permission failures as errors', () async {
+      const source = MediaSourceConfig(
+        id: 'nas-read-only',
+        name: 'Read-only NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/',
+        enabled: true,
+      );
+      final webDavClient = _RecordingWebDavNasClient(
+        deleteError: const WebDavDeleteException(403),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              mediaSources: const [source],
+              searchProviders: const [],
+              homeModules: const [],
+            ),
+          ),
+          embyApiClientProvider.overrideWithValue(
+            EmbyApiClient(
+              MockClient((request) async => http.Response('', 200)),
+            ),
+          ),
+          webDavNasClientProvider.overrideWithValue(webDavClient),
+          quarkSaveClientProvider.overrideWithValue(
+            _RecordingQuarkSaveClient(directories: const []),
+          ),
+          nasMediaIndexerProvider.overrideWithValue(_FakeNasMediaIndexer()),
+          localStorageCacheRepositoryProvider.overrideWithValue(
+            _RecordingLocalStorageCacheRepository(),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await expectLater(
+        () => container.read(mediaRepositoryProvider).deleteResource(
+              sourceId: source.id,
+              resourcePath: 'https://nas.example.com/dav/Movies/Keep',
+            ),
+        throwsA(
+          isA<WebDavDeleteException>().having(
+            (error) => error.statusCode,
+            'statusCode',
+            403,
+          ),
+        ),
+      );
     });
 
     test(
@@ -618,9 +806,10 @@ NasMediaIndexRecord _quarkIndexRecord({
 }
 
 class _RecordingWebDavNasClient extends WebDavNasClient {
-  _RecordingWebDavNasClient()
+  _RecordingWebDavNasClient({this.deleteError})
       : super(MockClient((request) async => http.Response('', 200)));
 
+  final Object? deleteError;
   final List<String> deletedResourcePaths = <String>[];
 
   @override
@@ -630,6 +819,10 @@ class _RecordingWebDavNasClient extends WebDavNasClient {
     String sectionId = '',
   }) async {
     deletedResourcePaths.add(resourcePath);
+    final error = deleteError;
+    if (error != null) {
+      throw error;
+    }
   }
 }
 
@@ -682,6 +875,7 @@ class _FakeNasMediaIndexer extends NasMediaIndexer {
     Map<String, List<NasMediaIndexRecord>> sourceRecordsBySource = const {},
     Map<String, List<NasMediaIndexRecord>> sourceRecordsAfterRefreshBySource =
         const {},
+    this.libraryItems = const <MediaItem>[],
   })  : _recordsByResourceId = recordsByResourceId,
         _scopeRecordsByPath = scopeRecordsByPath,
         _sourceRecordsBySource = {
@@ -716,8 +910,23 @@ class _FakeNasMediaIndexer extends NasMediaIndexer {
   final Map<String, List<NasMediaIndexRecord>> _sourceRecordsBySource;
   final Map<String, List<NasMediaIndexRecord>>
       _sourceRecordsAfterRefreshBySource;
+  final List<MediaItem> libraryItems;
+  String? lastLoadedSectionId;
+  List<MediaCollection>? lastLoadedScopedCollections;
   final List<String> removedScopes = <String>[];
   final List<String> refreshedSources = <String>[];
+
+  @override
+  Future<List<MediaItem>> loadLibrary(
+    MediaSourceConfig source, {
+    String? sectionId,
+    List<MediaCollection>? scopedCollections,
+    int limit = 200,
+  }) async {
+    lastLoadedSectionId = sectionId;
+    lastLoadedScopedCollections = scopedCollections;
+    return libraryItems.take(limit).toList(growable: false);
+  }
 
   @override
   Future<NasMediaIndexRecord?> loadRecord({

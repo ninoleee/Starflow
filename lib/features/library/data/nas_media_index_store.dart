@@ -22,6 +22,10 @@ abstract class NasMediaIndexStore {
 
   Future<NasMediaIndexSourceState?> loadSourceState(String sourceId);
 
+  Future<List<NasMediaIndexSourceState>> loadSourceStates() async => const [];
+
+  Future<Set<String>> loadCachedSourceIds() async => const <String>{};
+
   Future<void> replaceSourceRecords({
     required String sourceId,
     required List<NasMediaIndexRecord> records,
@@ -148,6 +152,40 @@ class SembastNasMediaIndexStore implements NasMediaIndexStore {
       return null;
     }
     return NasMediaIndexSourceState.fromJson(raw);
+  }
+
+  @override
+  Future<List<NasMediaIndexSourceState>> loadSourceStates() async {
+    final database = await _database();
+    final snapshot = await _sourceStore.find(database);
+    return snapshot
+        .map((entry) => NasMediaIndexSourceState.fromJson(entry.value))
+        .toList(growable: false);
+  }
+
+  @override
+  Future<Set<String>> loadCachedSourceIds() async {
+    final database = await _database();
+    final sourceIds = <String>{};
+    for (final entry in await _sourceStore.find(database)) {
+      final sourceId = '${entry.value['sourceId'] ?? entry.key}'.trim();
+      if (sourceId.isNotEmpty) {
+        sourceIds.add(sourceId);
+      }
+    }
+    for (final entry in await _recordStore.find(database)) {
+      final sourceId = '${entry.value['sourceId'] ?? ''}'.trim();
+      if (sourceId.isNotEmpty) {
+        sourceIds.add(sourceId);
+      }
+    }
+    for (final entry in await _directoryCacheStore.find(database)) {
+      final sourceId = '${entry.value['sourceId'] ?? ''}'.trim();
+      if (sourceId.isNotEmpty) {
+        sourceIds.add(sourceId);
+      }
+    }
+    return sourceIds;
   }
 
   @override

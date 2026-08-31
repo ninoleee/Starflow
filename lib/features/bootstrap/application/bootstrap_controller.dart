@@ -3,6 +3,7 @@ import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/bootstrap/application/startup_crash_recovery.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/settings/application/media_source_cache_lifecycle.dart';
 
 class BootstrapState {
   const BootstrapState({
@@ -74,9 +75,12 @@ class BootstrapController extends Notifier<BootstrapState> {
       title: '正在读取配置',
       subtitle: '加载媒体源、搜索服务和首页模块顺序。',
       task: () async {
-        await ref
+        final settings = await ref
             .read(settingsControllerProvider.future)
             .timeout(const Duration(seconds: 3));
+        await ref
+            .read(mediaSourceCacheLifecycleProvider)
+            .reconcileSources(settings.mediaSources);
       },
       stageDelay: const Duration(milliseconds: 40),
     );

@@ -20,6 +20,157 @@ import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 
 void main() {
+  test('NasMediaIndexer reads an indexed root through a nested section',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-nested-section',
+      name: 'WebDAV Nested Section',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/strm/',
+      enabled: true,
+    );
+    final client = _FakeWebDavNasClient(
+      scannedItems: const [
+        _PendingTestItem(
+          id: 'quark-movie',
+          path: '/dav/strm/quark/Quark Movie/movie.mkv',
+          title: 'Quark Movie',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+        ),
+        _PendingTestItem(
+          id: 'quark-old-movie',
+          path: '/dav/strm/quark-old/Archived Movie/movie.mkv',
+          title: 'Archived Movie',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+        ),
+        _PendingTestItem(
+          id: 'other-cloud-movie',
+          path: '/dav/strm/115/Other Cloud Movie/movie.mkv',
+          title: 'Other Cloud Movie',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+        ),
+      ],
+    );
+    final indexer = _buildStructureGroupingTestIndexer(
+      store: store,
+      client: client,
+      source: source,
+    );
+
+    await indexer.refreshSource(source);
+    final library = await indexer.loadLibrary(
+      source,
+      sectionId: 'https://nas.example.com/dav/strm/quark/',
+      limit: 20,
+    );
+
+    expect(library.map((item) => item.title), <String>['Quark Movie']);
+  });
+
+  test('NasMediaIndexer drops materialized records after store clear',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-manual-clear',
+      name: 'WebDAV Manual Clear',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/',
+      enabled: true,
+    );
+    final indexer = _buildStructureGroupingTestIndexer(
+      store: store,
+      client: _FakeWebDavNasClient(
+        scannedItems: const [
+          _PendingTestItem(
+            id: 'clear-movie',
+            path: '/dav/Movies/Clear Movie/movie.mkv',
+            title: 'Clear Movie',
+            itemType: 'movie',
+            seasonNumber: null,
+            episodeNumber: null,
+          ),
+        ],
+      ),
+      source: source,
+    );
+
+    await indexer.refreshSource(source);
+    expect(await indexer.loadSourceRecords(source.id), hasLength(1));
+
+    await store.clearAll();
+
+    expect(await indexer.loadSourceRecords(source.id), isEmpty);
+    expect(await indexer.loadLibrary(source), isEmpty);
+  });
+
+  test('NasMediaIndexer keeps nested section context while opening episodes',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    final source = const MediaSourceConfig(
+      id: 'webdav-nested-series',
+      name: 'WebDAV Nested Series',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/strm/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    final indexer = _buildStructureGroupingTestIndexer(
+      store: store,
+      client: _FakeWebDavNasClient(
+        scannedItems: const [
+          _PendingTestItem(
+            id: 'nested-ep-1',
+            path: '/dav/strm/quark/Nested Show/Season 1/S01E01.mkv',
+            title: 'Nested Show',
+            itemType: 'episode',
+            seasonNumber: 1,
+            episodeNumber: 1,
+          ),
+          _PendingTestItem(
+            id: 'nested-ep-2',
+            path: '/dav/strm/quark/Nested Show/Season 1/S01E02.mkv',
+            title: 'Nested Show',
+            itemType: 'episode',
+            seasonNumber: 1,
+            episodeNumber: 2,
+          ),
+        ],
+      ),
+      source: source,
+    );
+
+    await indexer.refreshSource(source);
+    final sectionId = 'https://nas.example.com/dav/strm/quark/';
+    final library = await indexer.loadLibrary(
+      source,
+      sectionId: sectionId,
+      limit: 20,
+    );
+    final series = library.single;
+    final seasons = await indexer.loadChildren(
+      source,
+      parentId: series.id,
+      sectionId: series.sectionId,
+    );
+    final episodes = await indexer.loadChildren(
+      source,
+      parentId: seasons.single.id,
+      sectionId: seasons.single.sectionId,
+    );
+
+    expect(series.sectionId, sectionId);
+    expect(seasons.single.sectionId, sectionId);
+    expect(episodes, hasLength(2));
+    expect(episodes.every((item) => item.sectionId == sectionId), isTrue);
+  });
+
   test('NasMediaIndexer groups WebDAV episodes into series and seasons',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -5669,6 +5820,16 @@ class _MemoryNasMediaIndexStore implements NasMediaIndexStore {
   @override
   Future<NasMediaIndexSourceState?> loadSourceState(String sourceId) async {
     return _states[sourceId];
+  }
+
+  @override
+  Future<List<NasMediaIndexSourceState>> loadSourceStates() async {
+    return _states.values.toList(growable: false);
+  }
+
+  @override
+  Future<Set<String>> loadCachedSourceIds() async {
+    return <String>{..._states.keys, ..._records.keys};
   }
 
   @override

@@ -56,6 +56,10 @@ class WebDavNasClient {
   final Map<String, _DirectorySubtreeCacheEntry> _directorySubtreeCache =
       <String, _DirectorySubtreeCacheEntry>{};
 
+  void clearMemoryCaches() {
+    _resetScanCaches();
+  }
+
   Future<List<MediaCollection>> fetchCollections(
     MediaSourceConfig source, {
     String? directoryId,
@@ -280,7 +284,12 @@ class WebDavNasClient {
           );
           childDirectoryResults[entryIndex] = childResult;
           late final Future<void> completion;
-          completion = childResult.whenComplete(() {
+          completion = childResult
+              .then<void>(
+            (_) {},
+            onError: (Object _, StackTrace __) {},
+          )
+              .whenComplete(() {
             activeDirectoryTasks.remove(completion);
           });
           activeDirectoryTasks.add(completion);
@@ -293,7 +302,12 @@ class WebDavNasClient {
         final fileResult = resolvePendingItem(entry, directoryEntries);
         fileResultFutures[entryIndex] = fileResult;
         late final Future<void> completion;
-        completion = fileResult.whenComplete(() {
+        completion = fileResult
+            .then<void>(
+          (_) {},
+          onError: (Object _, StackTrace __) {},
+        )
+            .whenComplete(() {
           activeFileTasks.remove(completion);
         });
         activeFileTasks.add(completion);
@@ -614,7 +628,7 @@ class WebDavNasClient {
       headers: _headers(source),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('WebDAV 删除失败：HTTP ${response.statusCode}');
+      throw WebDavDeleteException(response.statusCode);
     }
     _resetScanCaches();
     final cacheStore = _directoryCacheStore;

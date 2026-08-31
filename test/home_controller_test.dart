@@ -10,6 +10,7 @@ import 'package:starflow/features/home/application/home_metadata_auto_refresh.da
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
+import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -192,6 +193,34 @@ void main() {
             .toList(growable: false),
         ['recently-added'],
       );
+    });
+
+    test('NAS root home module loads the whole source with an empty section',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'nas-main',
+        name: 'NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/',
+        enabled: true,
+      );
+      final repository = _FakeMediaRepository(library: const []);
+      final module = HomeModuleConfig.librarySource(source);
+
+      await const HomeFeedRepository().buildSectionSeed(
+        module: module,
+        mediaRepository: repository,
+        discoveryRepository: const _FakeDiscoveryRepository(entries: []),
+        doubanAccount: const DoubanAccountConfig(enabled: false),
+        mediaSources: const [source],
+        recentItems: Future<List<MediaItem>>.value(const []),
+        recentPlaybackEntries:
+            Future<List<PlaybackProgressEntry>>.value(const []),
+        carouselItems: Future<List<DoubanCarouselEntry>>.value(const []),
+      );
+
+      expect(repository.lastFetchLibrarySourceId, source.id);
+      expect(repository.lastFetchLibrarySectionId, isEmpty);
     });
 
     testWidgets('refreshHomeModules bumps home refresh revisions', (
@@ -917,6 +946,8 @@ class _FakeMediaRepository implements MediaRepository {
   final List<MediaItem> recentlyAdded;
   int fetchLibraryCallCount = 0;
   int fetchRecentlyAddedCallCount = 0;
+  String? lastFetchLibrarySourceId;
+  String? lastFetchLibrarySectionId;
 
   @override
   Future<List<MediaItem>> loadLibraryMatchItems({
@@ -969,6 +1000,8 @@ class _FakeMediaRepository implements MediaRepository {
     int limit = 200,
   }) async {
     fetchLibraryCallCount += 1;
+    lastFetchLibrarySourceId = sourceId;
+    lastFetchLibrarySectionId = sectionId;
     return library.take(limit).toList();
   }
 

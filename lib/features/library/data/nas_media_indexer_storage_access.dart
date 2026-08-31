@@ -584,6 +584,10 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
       ..sort((left, right) => right.item.addedAt.compareTo(left.item.addedAt));
     _libraryMatchCaches[normalizedSourceId] =
         _buildLibraryMatchCache(nextRecords);
+    _libraryMatchCacheInvalidationRevisions[normalizedSourceId] =
+        _readInvalidationRevision?.call(normalizedSourceId) ?? 0;
+    _libraryMatchCacheStateSignatures[normalizedSourceId] =
+        _sourceStateSignature(state);
   }
 
   Future<List<NasMediaIndexRecord>> _loadSourceRecordsCached(
@@ -593,25 +597,65 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
     if (normalizedSourceId.isEmpty) {
       return const [];
     }
+    final state = await _store.loadSourceState(normalizedSourceId);
+    if (state == null) {
+      _dropLibraryMatchCache(normalizedSourceId);
+      return const [];
+    }
+    final invalidationRevision =
+        _readInvalidationRevision?.call(normalizedSourceId) ?? 0;
+    final stateSignature = _sourceStateSignature(state);
     final cached = _libraryMatchCaches[normalizedSourceId];
-    if (cached != null) {
+    if (cached != null &&
+        _libraryMatchCacheInvalidationRevisions[normalizedSourceId] ==
+            invalidationRevision &&
+        _libraryMatchCacheStateSignatures[normalizedSourceId] ==
+            stateSignature) {
       return cached.records;
     }
     final records = await _store.loadSourceRecords(normalizedSourceId);
     _libraryMatchCaches[normalizedSourceId] = _buildLibraryMatchCache(records);
+    _libraryMatchCacheInvalidationRevisions[normalizedSourceId] =
+        invalidationRevision;
+    _libraryMatchCacheStateSignatures[normalizedSourceId] = stateSignature;
     return _libraryMatchCaches[normalizedSourceId]?.records ?? records;
   }
 
   Future<_NasLibraryMatchCache> _loadLibraryMatchCache(String sourceId) async {
     final normalizedSourceId = sourceId.trim();
+    final state = await _store.loadSourceState(normalizedSourceId);
+    if (state == null) {
+      _dropLibraryMatchCache(normalizedSourceId);
+      return _buildLibraryMatchCache(const <NasMediaIndexRecord>[]);
+    }
+    final invalidationRevision =
+        _readInvalidationRevision?.call(normalizedSourceId) ?? 0;
+    final stateSignature = _sourceStateSignature(state);
     final cached = _libraryMatchCaches[normalizedSourceId];
-    if (cached != null) {
+    if (cached != null &&
+        _libraryMatchCacheInvalidationRevisions[normalizedSourceId] ==
+            invalidationRevision &&
+        _libraryMatchCacheStateSignatures[normalizedSourceId] ==
+            stateSignature) {
       return cached;
     }
     final records = await _store.loadSourceRecords(normalizedSourceId);
     final nextCache = _buildLibraryMatchCache(records);
     _libraryMatchCaches[normalizedSourceId] = nextCache;
+    _libraryMatchCacheInvalidationRevisions[normalizedSourceId] =
+        invalidationRevision;
+    _libraryMatchCacheStateSignatures[normalizedSourceId] = stateSignature;
     return nextCache;
+  }
+
+  void _dropLibraryMatchCache(String sourceId) {
+    _libraryMatchCaches.remove(sourceId);
+    _libraryMatchCacheInvalidationRevisions.remove(sourceId);
+    _libraryMatchCacheStateSignatures.remove(sourceId);
+  }
+
+  String _sourceStateSignature(NasMediaIndexSourceState state) {
+    return '${state.lastIndexedAt.toIso8601String()}|${state.recordCount}|${state.scopeKey}|${state.sourceIdentity}';
   }
 
   _NasLibraryMatchCache _buildLibraryMatchCache(

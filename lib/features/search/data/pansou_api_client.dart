@@ -95,15 +95,10 @@ class PanSouApiClient {
   }
 
   Future<String> _resolveToken(SearchProviderConfig provider) async {
-    final configuredToken = provider.apiKey.trim();
-    if (configuredToken.isNotEmpty) {
-      return configuredToken;
-    }
-
     final username = provider.username.trim();
     final password = provider.password.trim();
     if (username.isEmpty || password.isEmpty) {
-      return '';
+      return provider.apiKey.trim();
     }
 
     final response = await _client.post(
@@ -124,11 +119,15 @@ class PanSouApiClient {
           _resolveErrorMessage(payload, response.statusCode));
     }
 
-    final token = payload['token'] as String? ?? '';
+    final data = payload['data'];
+    final nestedData = data is Map ? Map<String, dynamic>.from(data) : const {};
+    final token =
+        '${payload['token'] ?? payload['access_token'] ?? payload['accessToken'] ?? nestedData['token'] ?? nestedData['access_token'] ?? nestedData['accessToken'] ?? ''}'
+            .trim();
     if (token.trim().isEmpty) {
       throw const PanSouApiException('PanSou 登录成功，但没有返回 JWT Token');
     }
-    return token.trim();
+    return token;
   }
 
   List<SearchResult> _parseMergedResults(

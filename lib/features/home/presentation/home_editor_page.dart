@@ -256,6 +256,7 @@ class HomeEditorPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final List<HomeModuleConfig> modules = ref.watch(homeModulesProvider);
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final heroModule = _homeEditorHeroModule(modules);
     final sortableModules = _homeEditorSortableModules(modules);
     final List<MediaSourceConfig> mediaSources = ref.watch(
@@ -268,7 +269,11 @@ class HomeEditorPage extends ConsumerWidget {
             .toSet();
     final enabledSources = mediaSources.where((item) => item.enabled).toList();
     final scopedSources = enabledSources
-        .where((item) => visibleSourceIds.contains(item.id))
+        .where(
+          (item) =>
+              item.kind == MediaSourceKind.nas ||
+              visibleSourceIds.contains(item.id),
+        )
         .toList();
 
     return Scaffold(
@@ -317,15 +322,57 @@ class HomeEditorPage extends ConsumerWidget {
                                 },
                                 itemBuilder: (context, index) {
                                   final module = sortableModules[index];
+                                  final settingsController = ref.read(
+                                    settingsControllerProvider.notifier,
+                                  );
                                   return _HomeModuleCard(
                                     key: ValueKey(module.id),
                                     module: module,
-                                    leading: ReorderableDragStartListener(
-                                      index: index,
-                                      child: const Icon(
-                                        Icons.drag_indicator_rounded,
-                                      ),
-                                    ),
+                                    leading: isTelevision
+                                        ? Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              StarflowIconButton(
+                                                icon:
+                                                    Icons.arrow_upward_rounded,
+                                                tooltip: '上移',
+                                                size: 38,
+                                                focusId:
+                                                    'home-editor:${module.id}:move-up',
+                                                onPressed: index > 0
+                                                    ? () => settingsController
+                                                            .moveHomeModule(
+                                                          index,
+                                                          index - 1,
+                                                        )
+                                                    : null,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              StarflowIconButton(
+                                                icon: Icons
+                                                    .arrow_downward_rounded,
+                                                tooltip: '下移',
+                                                size: 38,
+                                                focusId:
+                                                    'home-editor:${module.id}:move-down',
+                                                onPressed: index <
+                                                        sortableModules.length -
+                                                            1
+                                                    ? () => settingsController
+                                                            .moveHomeModule(
+                                                          index,
+                                                          index + 1,
+                                                        )
+                                                    : null,
+                                              ),
+                                            ],
+                                          )
+                                        : ReorderableDragStartListener(
+                                            index: index,
+                                            child: const Icon(
+                                              Icons.drag_indicator_rounded,
+                                            ),
+                                          ),
                                     onEdit: () => _showEditModuleDialog(
                                       context,
                                       ref,
@@ -423,7 +470,11 @@ class HomeEditorPage extends ConsumerWidget {
       }
       final visibleSourceIds = collections.map((item) => item.sourceId).toSet();
       final scopedSources = enabledSources
-          .where((item) => visibleSourceIds.contains(item.id))
+          .where(
+            (item) =>
+                item.kind == MediaSourceKind.nas ||
+                visibleSourceIds.contains(item.id),
+          )
           .toList();
       return showModalBottomSheet<void>(
         context: context,
@@ -590,7 +641,7 @@ class HomeEditorPage extends ConsumerWidget {
     final sourceCollections = collections
         .where((collection) => collection.sourceId == source.id)
         .toList();
-    if (sourceCollections.isEmpty) {
+    if (sourceCollections.isEmpty && source.kind != MediaSourceKind.nas) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${source.name} 还没有可用分区'),
@@ -605,26 +656,37 @@ class HomeEditorPage extends ConsumerWidget {
       builder: (context) {
         return _HomeEditorSecondarySheetBody(
           title: source.name,
-          tiles: sourceCollections
-              .map(
-                (collection) => _AddModuleTile(
-                  title: collection.title,
-                  onTap: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveHomeModule(
-                          HomeModuleConfig.libraryCollection(collection),
-                        );
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('已添加 ${collection.title}'),
-                      ),
-                    );
-                  },
-                ),
-              )
-              .toList(),
+          tiles: [
+            if (source.kind == MediaSourceKind.nas)
+              _AddModuleTile(
+                title: '全部内容',
+                onTap: () {
+                  ref
+                      .read(settingsControllerProvider.notifier)
+                      .saveHomeModule(HomeModuleConfig.librarySource(source));
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('已添加 ${source.name} 全部内容')),
+                  );
+                },
+              ),
+            ...sourceCollections.map(
+              (collection) => _AddModuleTile(
+                title: collection.title,
+                onTap: () {
+                  ref.read(settingsControllerProvider.notifier).saveHomeModule(
+                        HomeModuleConfig.libraryCollection(collection),
+                      );
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('已添加 ${collection.title}'),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         );
       },
     );

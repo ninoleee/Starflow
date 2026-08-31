@@ -1795,6 +1795,16 @@ class _NoopNasMediaIndexStore implements NasMediaIndexStore {
   }
 
   @override
+  Future<List<NasMediaIndexSourceState>> loadSourceStates() async {
+    return const [];
+  }
+
+  @override
+  Future<Set<String>> loadCachedSourceIds() async {
+    return const <String>{};
+  }
+
+  @override
   Future<void> replaceSourceRecords({
     required String sourceId,
     required List<NasMediaIndexRecord> records,

@@ -105,6 +105,43 @@ class NasMediaIndexRecord {
 
   bool get imdbMatched => imdbStatus.isSuccessful;
 
+  NasMediaIndexRecord copyWith({
+    String? sectionId,
+    String? sectionName,
+    MediaItem? item,
+  }) {
+    return NasMediaIndexRecord(
+      id: id,
+      sourceId: sourceId,
+      sectionId: sectionId ?? this.sectionId,
+      sectionName: sectionName ?? this.sectionName,
+      resourceId: resourceId,
+      resourcePath: resourcePath,
+      fingerprint: fingerprint,
+      fileSizeBytes: fileSizeBytes,
+      modifiedAt: modifiedAt,
+      indexedAt: indexedAt,
+      scrapedAt: scrapedAt,
+      recognizedTitle: recognizedTitle,
+      searchQuery: searchQuery,
+      originalFileName: originalFileName,
+      parentTitle: parentTitle,
+      recognizedYear: recognizedYear,
+      recognizedItemType: recognizedItemType,
+      preferSeries: preferSeries,
+      sidecarStatus: sidecarStatus,
+      wmdbStatus: wmdbStatus,
+      tmdbStatus: tmdbStatus,
+      imdbStatus: imdbStatus,
+      item: item ?? this.item,
+      manualMetadataLocked: manualMetadataLocked,
+      recognizedSeasonNumber: recognizedSeasonNumber,
+      recognizedEpisodeNumber: recognizedEpisodeNumber,
+      metadataFailureCount: metadataFailureCount,
+      metadataRetryAfter: metadataRetryAfter,
+    );
+  }
+
   static String buildRecordId({
     required String sourceId,
     required String resourceId,
@@ -194,6 +231,7 @@ class NasMediaIndexSourceState {
     required this.lastIndexedAt,
     required this.recordCount,
     required this.scopeKey,
+    this.sourceIdentity = '',
     this.emptyAutoRebuildAttempted = false,
   });
 
@@ -201,6 +239,7 @@ class NasMediaIndexSourceState {
   final DateTime lastIndexedAt;
   final int recordCount;
   final String scopeKey;
+  final String sourceIdentity;
   final bool emptyAutoRebuildAttempted;
 
   NasMediaIndexSourceState copyWith({
@@ -208,6 +247,7 @@ class NasMediaIndexSourceState {
     DateTime? lastIndexedAt,
     int? recordCount,
     String? scopeKey,
+    String? sourceIdentity,
     bool? emptyAutoRebuildAttempted,
   }) {
     return NasMediaIndexSourceState(
@@ -215,6 +255,7 @@ class NasMediaIndexSourceState {
       lastIndexedAt: lastIndexedAt ?? this.lastIndexedAt,
       recordCount: recordCount ?? this.recordCount,
       scopeKey: scopeKey ?? this.scopeKey,
+      sourceIdentity: sourceIdentity ?? this.sourceIdentity,
       emptyAutoRebuildAttempted:
           emptyAutoRebuildAttempted ?? this.emptyAutoRebuildAttempted,
     );
@@ -226,6 +267,7 @@ class NasMediaIndexSourceState {
       'lastIndexedAt': lastIndexedAt.toIso8601String(),
       'recordCount': recordCount,
       'scopeKey': scopeKey,
+      'sourceIdentity': sourceIdentity,
       'emptyAutoRebuildAttempted': emptyAutoRebuildAttempted,
     };
   }
@@ -238,6 +280,7 @@ class NasMediaIndexSourceState {
               DateTime.now(),
       recordCount: (json['recordCount'] as num?)?.toInt() ?? 0,
       scopeKey: json['scopeKey'] as String? ?? '',
+      sourceIdentity: json['sourceIdentity'] as String? ?? '',
       emptyAutoRebuildAttempted:
           json['emptyAutoRebuildAttempted'] as bool? ?? false,
     );

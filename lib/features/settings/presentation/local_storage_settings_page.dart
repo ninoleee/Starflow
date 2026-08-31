@@ -8,6 +8,7 @@ import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
+import 'package:starflow/features/settings/application/media_source_cache_lifecycle.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -211,7 +212,7 @@ class _LocalStorageSettingsPageState
   Future<void> _clearType(WidgetRef ref, LocalStorageCacheType type) async {
     switch (type) {
       case LocalStorageCacheType.nasMetadataIndex:
-        await ref.read(nasMediaIndexStoreProvider).clearAll();
+        await ref.read(mediaSourceCacheLifecycleProvider).clearAllIndexes();
         break;
       case LocalStorageCacheType.embyLibraryCache:
         await ref

@@ -9,6 +9,7 @@ import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/media_source_identity.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
@@ -17,6 +18,7 @@ import 'package:starflow/features/home/application/home_feed_load_scheduler.dart
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/application/media_source_cache_lifecycle.dart';
 
 final settingsControllerProvider =
     AsyncNotifierProvider<SettingsController, AppSettings>(
@@ -74,25 +76,35 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   Future<void> saveMediaSource(MediaSourceConfig config) async {
     final current = state.value ?? await _repository.load();
-    final exists = current.mediaSources.any((item) => item.id == config.id);
-    final next = current.copyWith(
-      mediaSources: exists
-          ? [
-              for (final source in current.mediaSources)
-                source.id == config.id ? config : source,
-            ]
-          : [...current.mediaSources, config],
+    final previous =
+        current.mediaSources.where((item) => item.id == config.id).firstOrNull;
+    final exists = previous != null;
+    final resourceIdentityChanged = previous != null &&
+        mediaSourceResourceIdentity(previous) !=
+            mediaSourceResourceIdentity(config);
+    final next = _reconcileMediaSourceReferences(
+      current.copyWith(
+        mediaSources: exists
+            ? [
+                for (final source in current.mediaSources)
+                  source.id == config.id ? config : source,
+              ]
+            : [...current.mediaSources, config],
+      ),
+      previous: previous,
+      current: config,
     );
     await _persist(next);
+    if (resourceIdentityChanged) {
+      await ref.read(mediaSourceCacheLifecycleProvider).clearSource(config.id);
+    }
   }
 
   Future<void> removeMediaSource(String id) async {
     final current = state.value ?? await _repository.load();
-    final next = current.copyWith(
-      mediaSources:
-          current.mediaSources.where((item) => item.id != id).toList(),
-    );
+    final next = _removeMediaSourceReferences(current, id);
     await _persist(next);
+    await ref.read(mediaSourceCacheLifecycleProvider).clearSource(id);
   }
 
   Future<MediaSourceConfig> authenticateEmby({
@@ -384,8 +396,31 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> replaceAllSettings(AppSettings settings) async {
-    await _persist(settings);
-    await _applyLoggingSettings(settings);
+    final current = state.value ?? await _repository.load();
+    final reconciledSettings = reconcileSettingsMediaSourceReferences(
+      settings,
+    );
+    final nextSourceById = <String, MediaSourceConfig>{
+      for (final source in reconciledSettings.mediaSources)
+        source.id.trim(): source,
+    };
+    final changedSourceIds = <String>[];
+    for (final previous in current.mediaSources) {
+      final next = nextSourceById[previous.id.trim()];
+      if (next == null ||
+          mediaSourceResourceIdentity(previous) !=
+              mediaSourceResourceIdentity(next)) {
+        changedSourceIds.add(previous.id);
+      }
+    }
+    await _persist(reconciledSettings);
+    for (final sourceId in changedSourceIds) {
+      await ref.read(mediaSourceCacheLifecycleProvider).clearSource(sourceId);
+    }
+    await ref
+        .read(mediaSourceCacheLifecycleProvider)
+        .reconcileSources(reconciledSettings.mediaSources);
+    await _applyLoggingSettings(reconciledSettings);
   }
 
   Future<void> setLocalLoggingEnabled(bool enabled) async {
@@ -634,6 +669,13 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   }
 
   Future<void> reorderHomeModules(int oldIndex, int newIndex) async {
+    if (newIndex > oldIndex) {
+      newIndex -= 1;
+    }
+    await moveHomeModule(oldIndex, newIndex);
+  }
+
+  Future<void> moveHomeModule(int oldIndex, int newIndex) async {
     final current = state.value ?? await _repository.load();
     final heroModule = _resolveHeroModule(current);
     final modules = current.homeModules
@@ -641,9 +683,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         .toList();
     if (oldIndex < 0 || oldIndex >= modules.length) {
       return;
-    }
-    if (newIndex > oldIndex) {
-      newIndex -= 1;
     }
     final moved = modules.removeAt(oldIndex);
     if (newIndex < 0) {
@@ -704,6 +743,100 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     }
     return HomeModuleConfig.hero();
   }
+}
+
+AppSettings _removeMediaSourceReferences(AppSettings settings, String rawId) {
+  final sourceId = rawId.trim();
+  final removedHomeModuleIds = settings.homeModules
+      .where(
+        (module) =>
+            module.type == HomeModuleType.librarySection &&
+            module.sourceId.trim() == sourceId,
+      )
+      .map((module) => module.id)
+      .toSet();
+  return settings.copyWith(
+    mediaSources: settings.mediaSources
+        .where((source) => source.id.trim() != sourceId)
+        .toList(growable: false),
+    homeModules: settings.homeModules
+        .where((module) => !removedHomeModuleIds.contains(module.id))
+        .toList(growable: false),
+    homeHeroSourceModuleId:
+        removedHomeModuleIds.contains(settings.homeHeroSourceModuleId)
+            ? ''
+            : settings.homeHeroSourceModuleId,
+    libraryMatchSourceIds: settings.libraryMatchSourceIds
+        .where((id) => id.trim() != sourceId)
+        .toList(growable: false),
+    searchSourceIds: settings.searchSourceIds
+        .where(
+          (id) =>
+              id.trim() != sourceId &&
+              id.trim() != searchSourceSettingIdForMediaSource(sourceId),
+        )
+        .toList(growable: false),
+    networkStorage: settings.networkStorage.copyWith(
+      syncDeleteQuarkWebDavDirectories: settings
+          .networkStorage.syncDeleteQuarkWebDavDirectories
+          .where((directory) => directory.sourceId.trim() != sourceId)
+          .toList(growable: false),
+      refreshMediaSourceIds: settings.networkStorage.refreshMediaSourceIds
+          .where((id) => id.trim() != sourceId)
+          .toList(growable: false),
+    ),
+  );
+}
+
+AppSettings _reconcileMediaSourceReferences(
+  AppSettings settings, {
+  required MediaSourceConfig? previous,
+  required MediaSourceConfig current,
+}) {
+  if (previous == null ||
+      mediaSourceResourceIdentity(previous) ==
+          mediaSourceResourceIdentity(current)) {
+    return settings;
+  }
+  HomeModuleConfig remapHomeModule(HomeModuleConfig module) {
+    if (module.sourceId.trim() != current.id.trim()) {
+      return module;
+    }
+    final sectionId = remapMediaSourceLocation(
+      module.sectionId,
+      previous: previous,
+      current: current,
+    );
+    return module.copyWith(
+      sourceName: current.name,
+      sectionId: sectionId,
+      sectionName: sectionId.isEmpty ? '全部内容' : module.sectionName,
+    );
+  }
+
+  return settings.copyWith(
+    homeModules:
+        settings.homeModules.map(remapHomeModule).toList(growable: false),
+    networkStorage: settings.networkStorage.copyWith(
+      syncDeleteQuarkWebDavDirectories:
+          settings.networkStorage.syncDeleteQuarkWebDavDirectories
+              .map((directory) {
+                if (directory.sourceId.trim() != current.id.trim()) {
+                  return directory;
+                }
+                return directory.copyWith(
+                  sourceName: current.name,
+                  directoryId: remapMediaSourceLocation(
+                    directory.directoryId,
+                    previous: previous,
+                    current: current,
+                  ),
+                );
+              })
+              .where((directory) => directory.directoryId.trim().isNotEmpty)
+              .toList(growable: false),
+    ),
+  );
 }
 
 bool _isHomeHeroModule(HomeModuleConfig module) {

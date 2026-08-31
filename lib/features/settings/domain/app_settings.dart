@@ -623,7 +623,9 @@ class HomeModuleConfig {
         return '展示最近播放过的内容';
       case HomeModuleType.librarySection:
         final sourcePart = sourceName.trim().isEmpty ? '资源来源' : sourceName;
-        final sectionPart = sectionName.trim().isEmpty ? '分区' : sectionName;
+        final sectionPart = sectionId.trim().isEmpty
+            ? '全部内容'
+            : (sectionName.trim().isEmpty ? '分区' : sectionName);
         return '$sourcePart · $sectionPart';
       case HomeModuleType.doubanInterest:
         return doubanInterestStatus.label;
@@ -637,9 +639,7 @@ class HomeModuleConfig {
   }
 
   bool get isLibrarySection =>
-      type == HomeModuleType.librarySection &&
-      sourceId.trim().isNotEmpty &&
-      sectionId.trim().isNotEmpty;
+      type == HomeModuleType.librarySection && sourceId.trim().isNotEmpty;
 
   HomeModuleConfig copyWith({
     String? id,
@@ -759,6 +759,19 @@ class HomeModuleConfig {
       sourceName: collection.sourceName,
       sectionId: collection.id,
       sectionName: collection.title,
+    );
+  }
+
+  static HomeModuleConfig librarySource(MediaSourceConfig source) {
+    return HomeModuleConfig(
+      id: 'home-module-${DateTime.now().millisecondsSinceEpoch}',
+      type: HomeModuleType.librarySection,
+      title: source.name.trim().isEmpty ? '媒体库' : source.name.trim(),
+      enabled: true,
+      sourceId: source.id,
+      sourceName: source.name,
+      sectionId: '',
+      sectionName: '全部内容',
     );
   }
 

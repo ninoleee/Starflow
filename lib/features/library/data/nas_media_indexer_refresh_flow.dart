@@ -1,9 +1,26 @@
 part of 'nas_media_indexer.dart';
 
 extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
-  Future<void> clearSource(String sourceId) {
-    _libraryMatchCaches.remove(sourceId.trim());
-    return _store.clearSource(sourceId);
+  Future<void> clearSource(String sourceId) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+    await _cancelRefreshTasksForSource(normalizedSourceId);
+    _libraryMatchCaches.remove(normalizedSourceId);
+    _libraryMatchCacheInvalidationRevisions.remove(normalizedSourceId);
+    _libraryMatchCacheStateSignatures.remove(normalizedSourceId);
+    await _store.clearSource(normalizedSourceId);
+    _notifyIndexChangedSafely();
+  }
+
+  Future<void> clearAll() async {
+    await cancelAllRefreshTasks(includeForceFull: true);
+    _libraryMatchCaches.clear();
+    _libraryMatchCacheInvalidationRevisions.clear();
+    _libraryMatchCacheStateSignatures.clear();
+    await _store.clearAll();
+    _notifyIndexChangedSafely();
   }
 
   bool _supportsIndexedExternalSource(MediaSourceConfig source) {
@@ -122,6 +139,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         lastIndexedAt: now,
         recordCount: existingRecords.length,
         scopeKey: scopeKey,
+        sourceIdentity: mediaSourceResourceIdentity(source),
         emptyAutoRebuildAttempted: true,
       ),
     );
@@ -184,6 +202,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         lastIndexedAt: now,
         recordCount: nextRecords.length,
         scopeKey: existingState?.scopeKey ?? '',
+        sourceIdentity: existingState?.sourceIdentity ?? '',
         emptyAutoRebuildAttempted: nextRecords.isNotEmpty
             ? false
             : (existingState?.emptyAutoRebuildAttempted ?? false),
@@ -402,6 +421,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         lastIndexedAt: now,
         recordCount: nextRecords.length,
         scopeKey: existingState?.scopeKey ?? '',
+        sourceIdentity: existingState?.sourceIdentity ?? '',
         emptyAutoRebuildAttempted: nextRecords.isNotEmpty
             ? false
             : (existingState?.emptyAutoRebuildAttempted ?? false),
@@ -452,10 +472,25 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     if (hierarchyCache.records.isEmpty) {
       return const [];
     }
-    final groupsBySeriesItemId = normalizedSectionId.isEmpty
-        ? hierarchyCache.seriesGroupsByItemId
-        : hierarchyCache.seriesGroupsBySectionId[normalizedSectionId] ??
-            const <String, _SeriesRecordGroup>{};
+    Map<String, _SeriesRecordGroup> groupsBySeriesItemId;
+    if (normalizedSectionId.isEmpty) {
+      groupsBySeriesItemId = hierarchyCache.seriesGroupsByItemId;
+    } else {
+      groupsBySeriesItemId =
+          hierarchyCache.seriesGroupsBySectionId[normalizedSectionId] ??
+              const <String, _SeriesRecordGroup>{};
+      if (groupsBySeriesItemId.isEmpty) {
+        final scopedRecords = await _loadScopedRecords(
+          source,
+          sectionId: normalizedSectionId,
+          scopedCollections: scopedCollections,
+        );
+        groupsBySeriesItemId = <String, _SeriesRecordGroup>{
+          for (final group in _groupSeriesRecords(scopedRecords))
+            group.seriesItemId: group,
+        };
+      }
+    }
 
     if (normalizedParentId.startsWith(NasMediaIndexer._seriesGroupPrefix)) {
       final group = groupsBySeriesItemId[normalizedParentId];
@@ -632,9 +667,17 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     }
     final normalizedSectionId = sectionId.trim();
     if (normalizedSectionId.isNotEmpty) {
-      return _store.loadSourceRecords(
+      final exactRecords = await _store.loadSourceRecords(
         source.id,
         sectionId: normalizedSectionId,
+      );
+      if (exactRecords.isNotEmpty) {
+        return exactRecords;
+      }
+      final sourceRecords = await _loadSourceRecordsCached(source.id);
+      return _recordsForNestedSection(
+        sourceRecords,
+        normalizedSectionId,
       );
     }
     return _loadSourceRecordsCached(source.id);
@@ -723,7 +766,13 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       });
     }
 
-    final controller = _RefreshTaskController();
+    final initialInvalidationRevision =
+        _readInvalidationRevision?.call(normalizedSourceId) ?? 0;
+    final controller = _RefreshTaskController(
+      isExternallyCancelled: () =>
+          (_readInvalidationRevision?.call(normalizedSourceId) ?? 0) !=
+          initialInvalidationRevision,
+    );
     _updateIndexerConcurrencyLimits();
     final future = _sourceBudget.withPermit(() {
       return _withGlobalBackgroundPermit(() async {
@@ -946,6 +995,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         lastIndexedAt: now,
         recordCount: nextRecords.length,
         scopeKey: existingState?.scopeKey ?? '',
+        sourceIdentity: existingState?.sourceIdentity ?? '',
         emptyAutoRebuildAttempted: nextRecords.isNotEmpty
             ? false
             : (existingState?.emptyAutoRebuildAttempted ?? false),
@@ -1284,6 +1334,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         lastIndexedAt: now,
         recordCount: nextRecords.length,
         scopeKey: _buildScopeKey(source, scopedCollections),
+        sourceIdentity: mediaSourceResourceIdentity(source),
         emptyAutoRebuildAttempted: nextRecords.isNotEmpty
             ? false
             : (existingState?.emptyAutoRebuildAttempted ?? false),
@@ -1629,6 +1680,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         lastIndexedAt: now,
         recordCount: nextRecords.length,
         scopeKey: existingState?.scopeKey ?? '',
+        sourceIdentity: mediaSourceResourceIdentity(source),
         emptyAutoRebuildAttempted: nextRecords.isNotEmpty
             ? false
             : (existingState?.emptyAutoRebuildAttempted ?? false),

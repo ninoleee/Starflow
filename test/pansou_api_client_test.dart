@@ -141,6 +141,136 @@ void main() {
       expect(requestedPaths, ['/api/auth/login', '/api/search']);
     });
 
+    test('prefers fresh login when a configured token is stale', () async {
+      final requestedPaths = <String>[];
+      final client = PanSouApiClient(
+        MockClient((request) async {
+          requestedPaths.add(request.url.path);
+          if (request.url.path == '/api/auth/login') {
+            expect(request.headers['Authorization'], isNull);
+            return http.Response(
+              jsonEncode({'token': 'fresh-token'}),
+              200,
+            );
+          }
+
+          expect(request.headers['Authorization'], 'Bearer fresh-token');
+          expect(request.headers['Authorization'], isNot('Bearer stale-token'));
+          return http.Response.bytes(
+            Uint8List.fromList(
+              utf8.encode(
+                jsonEncode({
+                  'code': 0,
+                  'data': {
+                    'merged_by_type': {
+                      'quark': [
+                        {
+                          'url': 'https://pan.quark.cn/s/fresh',
+                          'password': '',
+                          'note': '新 Token 搜索结果',
+                          'datetime': '',
+                          'source': '',
+                          'images': [],
+                        },
+                      ],
+                    },
+                  },
+                }),
+              ),
+            ),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+
+      final results = await client.search(
+        '开庭',
+        provider: const SearchProviderConfig(
+          id: 'authenticated-pansou',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://pansou.example.com',
+          enabled: true,
+          parserHint: 'pansou-api',
+          apiKey: 'stale-token',
+          username: 'admin',
+          password: 'current-password',
+        ),
+      );
+
+      expect(results.single.title, '新 Token 搜索结果');
+      expect(requestedPaths, ['/api/auth/login', '/api/search']);
+    });
+
+    test('uses configured token when login credentials are incomplete',
+        () async {
+      final client = PanSouApiClient(
+        MockClient((request) async {
+          expect(request.url.path, '/api/search');
+          expect(request.headers['Authorization'], 'Bearer configured-token');
+          return http.Response(
+            jsonEncode({
+              'code': 0,
+              'data': {'merged_by_type': {}}
+            }),
+            200,
+          );
+        }),
+      );
+
+      await client.search(
+        '开庭',
+        provider: const SearchProviderConfig(
+          id: 'token-pansou',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://pansou.example.com',
+          enabled: true,
+          parserHint: 'pansou-api',
+          apiKey: 'configured-token',
+          username: 'admin',
+        ),
+      );
+    });
+
+    test('accepts nested access token login responses', () async {
+      final client = PanSouApiClient(
+        MockClient((request) async {
+          if (request.url.path == '/api/auth/login') {
+            return http.Response(
+              jsonEncode({
+                'data': {'access_token': 'nested-token'},
+              }),
+              200,
+            );
+          }
+          expect(request.headers['Authorization'], 'Bearer nested-token');
+          return http.Response(
+            jsonEncode({
+              'code': 0,
+              'data': {'merged_by_type': {}}
+            }),
+            200,
+          );
+        }),
+      );
+
+      await client.search(
+        '开庭',
+        provider: const SearchProviderConfig(
+          id: 'nested-token-pansou',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://pansou.example.com',
+          enabled: true,
+          parserHint: 'pansou-api',
+          username: 'admin',
+          password: 'current-password',
+        ),
+      );
+    });
+
     test('falls back to results payload when merged links are absent',
         () async {
       final client = PanSouApiClient(
