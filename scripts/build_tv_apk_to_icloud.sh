@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ICLOUD_ROOT="${ICLOUD_ROOT:-$HOME/Library/Mobile Documents/com~apple~CloudDocs}"
-ICLOUD_APK_DIR="${ICLOUD_APK_DIR:-$ICLOUD_ROOT/APK}"
+ICLOUD_INSTALLER_DIR="${ICLOUD_INSTALLER_DIR:-$ICLOUD_ROOT/Installers}"
 
 cd "$PROJECT_ROOT"
 
@@ -103,9 +103,9 @@ if [[ ! -f "$SOURCE_APK" ]]; then
 fi
 
 TARGET_NAME="${NAME_PREFIX}-${VERSION}.apk"
-mkdir -p "$ICLOUD_APK_DIR"
-cp -f "$SOURCE_APK" "$ICLOUD_APK_DIR/$TARGET_NAME"
+mkdir -p "$ICLOUD_INSTALLER_DIR"
+cp -f "$SOURCE_APK" "$ICLOUD_INSTALLER_DIR/$TARGET_NAME"
 
 echo "Version=$VERSION"
 echo "BuildDate=$BUILD_DATE"
-echo "APK=$ICLOUD_APK_DIR/$TARGET_NAME"
+echo "APK=$ICLOUD_INSTALLER_DIR/$TARGET_NAME"

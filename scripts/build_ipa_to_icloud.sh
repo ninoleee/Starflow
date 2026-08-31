@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ICLOUD_ROOT="${ICLOUD_ROOT:-$HOME/Library/Mobile Documents/com~apple~CloudDocs}"
-ICLOUD_IPA_DIR="${ICLOUD_IPA_DIR:-$ICLOUD_ROOT/IPA}"
+ICLOUD_INSTALLER_DIR="${ICLOUD_INSTALLER_DIR:-$ICLOUD_ROOT/Installers}"
 
 cd "$PROJECT_ROOT"
 
@@ -91,9 +91,9 @@ mkdir -p "$PACKAGE_DIR/Payload"
 ditto "$APP_BUNDLE" "$PACKAGE_DIR/Payload/Runner.app"
 (cd "$PACKAGE_DIR" && zip -qry "$PROJECT_ROOT/$SOURCE_IPA" Payload)
 
-mkdir -p "$ICLOUD_IPA_DIR"
-cp -f "$SOURCE_IPA" "$ICLOUD_IPA_DIR/$OUTPUT_NAME"
+mkdir -p "$ICLOUD_INSTALLER_DIR"
+cp -f "$SOURCE_IPA" "$ICLOUD_INSTALLER_DIR/$OUTPUT_NAME"
 
 echo "Done."
 echo "Source IPA: $SOURCE_IPA"
-echo "Copied to: $ICLOUD_IPA_DIR/$OUTPUT_NAME"
+echo "Copied to: $ICLOUD_INSTALLER_DIR/$OUTPUT_NAME"

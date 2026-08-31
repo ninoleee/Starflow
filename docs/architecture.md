@@ -180,6 +180,7 @@ lib/
 - 元数据调度器在前台交互结束后按可配置静默期恢复；首页、媒体库和集合页只在进入“内容加载中”状态时申请一次静默期，避免 widget rebuild 持续推迟后台任务
 - 单击导航栏首页会触发统一软恢复边界：页面 revision 终止旧的 Hero/评分预取会话，媒体刷新协调器取消后台 NAS/WebDAV/Emby 刷新，首页与元数据调度器只清除自身的批次/静默等待并继续 drain；活动任务、前台 lease 和并发计数不会被强制归零
 - `TV` 退出确认框使用短生命周期的元数据前台 lease，只在对话框显示期间阻止新的后台预取；取消后以零延迟释放，真正确认退出仍走播放器与系统会话清理，不复用导航软恢复
+- Android / TV 真正确认退出时，Flutter 先清理播放会话、媒体通知、画中画和后台播放，再通过 `starflow/platform` 调用原生 `finishAndRemoveTask()`；桥接不可用时才回退 `SystemNavigator.pop()`，避免任务仍留在启动器中被自动恢复
 - `AppRuntimeRecoveryBoundary` 统一监听应用生命周期和内存压力。后台状态通过引用计数 lease 暂停首页 load/apply 与元数据 prefetch/maintenance 的新准入；恢复前台后等待首帧和固定 `400ms` 静默期再释放。内存压力使用独立 `2s` lease，并 best-effort 取消媒体库后台刷新，因此生命周期与低内存两种暂停可以安全叠加
 - Flutter 的 `PaintingBinding` 会在内存压力时清理内存图片缓存；应用层只记录 `app.memory-pressure` 和降低后台负载，不重复清空 live/persistent 图片、不篡改活动请求计数，也不碰播放会话
 - `NetworkRequestGuard` 的熔断状态增加显式半开探测配额。手动首页/详情/信息管理/媒体库刷新会为当前已打开的每个主机熔断器武装一次探测；第一个请求独占配额，成功移除失败状态，失败重新延长熔断，自动任务不会绕过熔断

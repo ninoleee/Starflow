@@ -249,7 +249,7 @@ PowerShell 下推荐使用包装脚本运行 Flutter：
 - 当前 TV 显示版本号只保留标准三段式 `主版本.月份.序号`
 - 当前 Release APK 启用了 `v1 + v2` 签名，兼容老一些的电视安装器
 - 如果 TV 端覆盖安装失败，优先检查设备里是否已经装过其他签名的旧版 `com.example.starflow`；当前包仍使用本机 debug keystore 签名，这种情况通常需要先卸载旧包再安装
-- iOS 安装包默认用 `scripts/build_ipa_to_icloud.sh` 生成到 iCloud Drive 的 `IPA` 文件夹；脚本固定使用 `flutter build ios --release --no-codesign`，不再尝试签名版
+- iOS 安装包默认用 `scripts/build_ipa_to_icloud.sh` 生成到 iCloud Drive 的 `Installers` 文件夹；iOS IPA 和 Android TV APK 放在同一目录，脚本固定使用 `flutter build ios --release --no-codesign`，不再尝试签名版
 - Windows 安装器默认用 `.\scripts\build_windows_installer.ps1` 生成，并直接输出到桌面
 - 这条脚本会先执行 `flutter build windows`，再调用 Inno Setup 生成单个安装器
 - 当前脚本会优先在 `E:\Program Files (x86)\Inno Setup 6\ISCC.exe`、`E:\Program Files\Inno Setup 6\ISCC.exe`、`C:\Program Files (x86)\Inno Setup 6\ISCC.exe`、`C:\Program Files\Inno Setup 6\ISCC.exe` 查找 Inno Setup

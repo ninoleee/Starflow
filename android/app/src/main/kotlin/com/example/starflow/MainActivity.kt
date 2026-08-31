@@ -98,6 +98,19 @@ class MainActivity : FlutterActivity() {
                     )
                     result.success(enterPlaybackPictureInPicture())
                 }
+                "exitApplication" -> {
+                    playbackPictureInPictureEnabled = false
+                    playbackSystemSessionManager.setActive(false)
+                    completeNativePlaybackLaunch(false)
+                    result.success(true)
+                    window.decorView.post {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            finishAndRemoveTask()
+                        } else {
+                            finishAffinity()
+                        }
+                    }
+                }
                 "launchSystemVideoPlayer" -> {
                     val rawUrl = call.argument<String>("url")?.trim().orEmpty()
                     val title = call.argument<String>("title")?.trim().orEmpty()

@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/router/home_navigation_tap_coordinator.dart';
 import 'package:starflow/core/logging/app_logger.dart';
+import 'package:starflow/core/platform/application_exit.dart';
 import 'package:starflow/core/platform/android_picture_in_picture.dart';
 import 'package:starflow/core/platform/background_playback.dart';
 import 'package:starflow/core/platform/playback_system_session.dart';
@@ -699,6 +700,9 @@ class _TelevisionNavigationShellState
       await AndroidPictureInPictureController.detach();
     }
     await BackgroundPlaybackController.setEnabled(false);
+    if (await ApplicationExitController.exitNativeTask()) {
+      return;
+    }
     await SystemNavigator.pop();
   }
 
