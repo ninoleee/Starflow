@@ -2,6 +2,13 @@
 
 part of '../player_page.dart';
 
+const _nativeSmartStrmProbeOptions = PlaybackRemotePreflightOptions(
+  requestTimeout: Duration(milliseconds: 1200),
+  streamSampleTimeout: Duration(milliseconds: 300),
+  rangeProbeBytes: 64,
+  readSampleBytes: 64,
+);
+
 extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
   Future<void> _launchWithSystemPlayer(PlaybackTarget target) async {
     _traceQuarkPlaybackStartup(
@@ -108,12 +115,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       if (shouldProbeNativeSmartStrmMediaType(resolved)) {
         final preflight = await remotePreflight.probe(
           resolved,
-          options: const PlaybackRemotePreflightOptions(
-            requestTimeout: Duration(seconds: 3),
-            streamSampleTimeout: Duration(milliseconds: 500),
-            rangeProbeBytes: 32,
-            readSampleBytes: 0,
-          ),
+          options: _nativeSmartStrmProbeOptions,
         );
         mediaMimeType = resolveNativePlaybackMimeType(preflight) ?? '';
       }
@@ -131,12 +133,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     }
     final preflight = await _playbackRemotePreflight.probe(
       target,
-      options: const PlaybackRemotePreflightOptions(
-        requestTimeout: Duration(seconds: 3),
-        streamSampleTimeout: Duration(milliseconds: 500),
-        rangeProbeBytes: 32,
-        readSampleBytes: 0,
-      ),
+      options: _nativeSmartStrmProbeOptions,
     );
     final resolvedMimeType = resolveNativePlaybackMimeType(preflight);
     playbackTrace(
@@ -146,6 +143,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
         'contentType': preflight.contentType ?? '',
         'finalPath': preflight.finalUri?.path ?? '',
         'durationMs': preflight.duration.inMilliseconds,
+        'sampledBytes': preflight.sampledBytes,
         'resolvedMimeType': resolvedMimeType ?? '',
         'failureReason': preflight.failureReason.name,
       },

@@ -5,7 +5,7 @@ import 'package:starflow/features/playback/application/playback_remote_preflight
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
-  test('probes only ambiguous smartstrm hash paths', () {
+  test('probes smartstrm fid and ambiguous smartstrm hash paths', () {
     expect(
       shouldProbeNativeSmartStrmMediaType(
         _target(
@@ -19,6 +19,14 @@ void main() {
         _target('https://smartstrm.example.com/smartstrm/my/movie.mp4'),
       ),
       isFalse,
+    );
+    expect(
+      shouldProbeNativeSmartStrmMediaType(
+        _target(
+          'https://smartstrm.example.com/smartstrm_fid/quark/movie.mp4',
+        ),
+      ),
+      isTrue,
     );
     expect(
       shouldProbeNativeSmartStrmMediaType(
@@ -60,6 +68,69 @@ void main() {
     );
 
     expect(resolveNativePlaybackMimeType(result), kNativePlaybackHlsMimeType);
+  });
+
+  test('recognizes HLS from a small body sample despite MP4 content type', () {
+    const result = PlaybackRemotePreflightResult(
+      attempted: true,
+      canStream: true,
+      acceptableStatus: true,
+      supportsByteRange: false,
+      authLikelyInvalid: false,
+      linkLikelyExpired: false,
+      statusCode: 200,
+      sampledBytes: 32,
+      samplePrefix: <int>[
+        0xef,
+        0xbb,
+        0xbf,
+        0x0a,
+        0x23,
+        0x45,
+        0x58,
+        0x54,
+        0x4d,
+        0x33,
+        0x55,
+      ],
+      failureReason: PlaybackRemotePreflightFailureReason.none,
+      duration: Duration(milliseconds: 120),
+      contentType: 'video/mp4',
+    );
+
+    expect(resolveNativePlaybackMimeType(result), kNativePlaybackHlsMimeType);
+  });
+
+  test('recognizes a standard MP4 ftyp box from a small body sample', () {
+    const result = PlaybackRemotePreflightResult(
+      attempted: true,
+      canStream: true,
+      acceptableStatus: true,
+      supportsByteRange: true,
+      authLikelyInvalid: false,
+      linkLikelyExpired: false,
+      statusCode: 206,
+      sampledBytes: 16,
+      samplePrefix: <int>[
+        0x00,
+        0x00,
+        0x00,
+        0x18,
+        0x66,
+        0x74,
+        0x79,
+        0x70,
+        0x69,
+        0x73,
+        0x6f,
+        0x6d,
+      ],
+      failureReason: PlaybackRemotePreflightFailureReason.none,
+      duration: Duration(milliseconds: 120),
+      contentType: 'application/vnd.apple.mpegurl',
+    );
+
+    expect(resolveNativePlaybackMimeType(result), kNativePlaybackMp4MimeType);
   });
 
   test('keeps normal native inference for direct MP4 responses', () {

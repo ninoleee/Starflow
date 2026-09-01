@@ -83,6 +83,36 @@ void main() {
       expect(result.failureReason, PlaybackRemotePreflightFailureReason.none);
     });
 
+    test('keeps a bounded prefix from the sampled response body', () async {
+      final bytes = List<int>.generate(256, (index) => index);
+      http.BaseRequest? capturedRequest;
+      final helper = PlaybackRemotePreflight(
+        clientFactory: () => MockClient((request) async {
+          capturedRequest = request;
+          return http.Response.bytes(bytes, 206);
+        }),
+      );
+      const target = PlaybackTarget(
+        title: 'SmartStrm media',
+        sourceId: 'nas-main',
+        streamUrl: 'https://strm.example.com/smartstrm_fid/id/video.mp4',
+        sourceName: 'NAS',
+        sourceKind: MediaSourceKind.nas,
+      );
+
+      final result = await helper.probe(
+        target,
+        options: const PlaybackRemotePreflightOptions(
+          rangeProbeBytes: 64,
+          readSampleBytes: 64,
+        ),
+      );
+
+      expect(capturedRequest?.headers['Range'], 'bytes=0-63');
+      expect(result.samplePrefix, bytes.take(64));
+      expect(result.samplePrefix, hasLength(64));
+    });
+
     test('accepts 200 with accept-ranges bytes', () async {
       final helper = PlaybackRemotePreflight(
         clientFactory: () => MockClient((_) async {

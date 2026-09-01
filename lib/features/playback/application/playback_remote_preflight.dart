@@ -30,6 +30,7 @@ class PlaybackRemotePreflightResult {
     required this.sampledBytes,
     required this.failureReason,
     required this.duration,
+    this.samplePrefix = const <int>[],
     this.requestUri,
     this.finalUri,
     this.contentType,
@@ -46,6 +47,7 @@ class PlaybackRemotePreflightResult {
   final int sampledBytes;
   final PlaybackRemotePreflightFailureReason failureReason;
   final Duration duration;
+  final List<int> samplePrefix;
   final Uri? requestUri;
   final Uri? finalUri;
   final String? contentType;
@@ -139,7 +141,7 @@ class PlaybackRemotePreflight {
 
       final response =
           await client.send(request).timeout(options.requestTimeout);
-      final sampledBytes = await _readSampleBytes(
+      final sample = await _readSample(
         response,
         sampleBytes: options.readSampleBytes,
         timeout: options.streamSampleTimeout,
@@ -160,7 +162,8 @@ class PlaybackRemotePreflight {
         authLikelyInvalid: authLikelyInvalid,
         linkLikelyExpired: linkLikelyExpired,
         statusCode: statusCode,
-        sampledBytes: sampledBytes,
+        sampledBytes: sample.byteCount,
+        samplePrefix: sample.prefix,
         failureReason: _classifyFailureReason(
           statusCode: statusCode,
           acceptableStatus: acceptableStatus,
@@ -213,6 +216,7 @@ class PlaybackRemotePreflight {
     required PlaybackRemotePreflightFailureReason failureReason,
     int? statusCode,
     int sampledBytes = 0,
+    List<int> samplePrefix = const <int>[],
     Uri? requestUri,
     Uri? finalUri,
     String? contentType,
@@ -227,6 +231,7 @@ class PlaybackRemotePreflight {
       linkLikelyExpired: linkLikelyExpired,
       statusCode: statusCode,
       sampledBytes: sampledBytes,
+      samplePrefix: samplePrefix,
       failureReason: failureReason,
       duration: DateTime.now().difference(startedAt),
       requestUri: requestUri,
@@ -236,12 +241,13 @@ class PlaybackRemotePreflight {
     );
   }
 
-  Future<int> _readSampleBytes(
+  Future<({int byteCount, List<int> prefix})> _readSample(
     http.StreamedResponse response, {
     required int sampleBytes,
     required Duration timeout,
   }) async {
     var bytes = 0;
+    final prefix = <int>[];
     final iterator = StreamIterator<List<int>>(response.stream);
     try {
       while (bytes < sampleBytes) {
@@ -252,9 +258,18 @@ class PlaybackRemotePreflight {
         if (!hasNext) {
           break;
         }
-        bytes += iterator.current.length;
+        final chunk = iterator.current;
+        bytes += chunk.length;
+        if (prefix.length < _maxSamplePrefixBytes) {
+          prefix.addAll(
+            chunk.take(_maxSamplePrefixBytes - prefix.length),
+          );
+        }
       }
-      return bytes;
+      return (
+        byteCount: bytes,
+        prefix: List<int>.unmodifiable(prefix),
+      );
     } finally {
       await iterator.cancel();
     }
@@ -316,6 +331,8 @@ class PlaybackRemotePreflight {
     return streamUrl;
   }
 }
+
+const int _maxSamplePrefixBytes = 64;
 
 http.Client _defaultPreflightClientFactory() {
   return StarflowHttpClient(http.Client());
