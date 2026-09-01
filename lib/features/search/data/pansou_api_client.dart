@@ -2,18 +2,30 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 final panSouApiClientProvider = Provider<PanSouApiClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
-  return PanSouApiClient(client);
+  final searchClient = StarflowHttpClient(
+    http.Client(),
+    requestTimeout: PanSouApiClient.searchTimeout,
+  );
+  ref.onDispose(searchClient.close);
+  return PanSouApiClient(client, searchClient: searchClient);
 });
 
 class PanSouApiClient {
-  PanSouApiClient(this._client);
+  PanSouApiClient(
+    this._client, {
+    http.Client? searchClient,
+  }) : _searchClient = searchClient ?? _client;
 
   final http.Client _client;
+  final http.Client _searchClient;
+
+  static const Duration searchTimeout = Duration(seconds: 60);
 
   Future<List<SearchResult>> search(
     String query, {
@@ -24,32 +36,72 @@ class PanSouApiClient {
       return const [];
     }
 
-    final token = await _resolveToken(provider);
-    final response = await _client.post(
-      _resolveSearchUri(provider.endpoint),
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+    final stopwatch = Stopwatch()..start();
+    final searchUri = _resolveSearchUri(provider.endpoint);
+    appLogTrace(
+      'search.pansou',
+      'PanSou search started',
+      fields: {
+        'providerId': provider.id,
+        'host': searchUri.host,
+        'queryLength': keyword.runes.length,
+        'timeoutMs': searchTimeout.inMilliseconds,
       },
-      body: jsonEncode({
-        'kw': keyword,
-        'res': 'merge',
-      }),
     );
-
-    final payload = _decode(response);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw PanSouApiException(
-          _resolveErrorMessage(payload, response.statusCode));
-    }
-    if ((payload['code'] as int?) case final code? when code != 0) {
-      throw PanSouApiException(
-        _resolveErrorMessage(payload, response.statusCode),
+    try {
+      final token = await _resolveToken(provider);
+      final response = await _searchClient.post(
+        searchUri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'kw': keyword,
+          'res': 'merge',
+        }),
       );
-    }
 
-    return _parseMergedResults(_unwrapPayload(payload), provider);
+      final payload = _decode(response);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw PanSouApiException(
+            _resolveErrorMessage(payload, response.statusCode));
+      }
+      if ((payload['code'] as int?) case final code? when code != 0) {
+        throw PanSouApiException(
+          _resolveErrorMessage(payload, response.statusCode),
+        );
+      }
+
+      final results = _parseMergedResults(_unwrapPayload(payload), provider);
+      appLogInfo(
+        'search.pansou',
+        'PanSou search completed',
+        fields: {
+          'providerId': provider.id,
+          'host': searchUri.host,
+          'resultCount': results.length,
+          'durationMs': stopwatch.elapsedMilliseconds,
+        },
+      );
+      return results;
+    } catch (error, stackTrace) {
+      appLogError(
+        'search.pansou',
+        'PanSou search failed',
+        fields: {
+          'providerId': provider.id,
+          'host': searchUri.host,
+          'queryLength': keyword.runes.length,
+          'durationMs': stopwatch.elapsedMilliseconds,
+          'timeoutMs': searchTimeout.inMilliseconds,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
   }
 
   Future<PanSouHealthStatus> testConnection({
@@ -287,10 +339,26 @@ class PanSouApiClient {
   }
 
   Map<String, dynamic> _decode(http.Response response) {
-    if (response.body.trim().isEmpty) {
+    String body;
+    try {
+      body = utf8.decode(response.bodyBytes);
+    } on FormatException catch (error, stackTrace) {
+      appLogWarning(
+        'search.pansou',
+        'PanSou response contained malformed UTF-8',
+        fields: {
+          'statusCode': response.statusCode,
+          'bodyBytes': response.bodyBytes.length,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
+      body = utf8.decode(response.bodyBytes, allowMalformed: true);
+    }
+    if (body.trim().isEmpty) {
       return const {};
     }
-    final decoded = jsonDecode(response.body);
+    final decoded = jsonDecode(body);
     if (decoded is Map<String, dynamic>) {
       return decoded;
     }

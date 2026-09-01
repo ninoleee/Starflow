@@ -1,14 +1,124 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/search/data/pansou_api_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 void main() {
   group('PanSouApiClient', () {
+    test('allows slow searches to exceed the standard request timeout',
+        () async {
+      final inner = MockClient((request) async {
+        expect(request.url.path, '/api/search');
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        return http.Response(
+          jsonEncode({
+            'code': 0,
+            'data': {'merged_by_type': {}}
+          }),
+          200,
+        );
+      });
+      final standardClient = StarflowHttpClient(
+        inner,
+        requestTimeout: const Duration(milliseconds: 10),
+      );
+      final searchClient = StarflowHttpClient(
+        inner,
+        requestTimeout: const Duration(milliseconds: 100),
+      );
+      addTearDown(standardClient.close);
+      addTearDown(searchClient.close);
+      final client = PanSouApiClient(
+        standardClient,
+        searchClient: searchClient,
+      );
+
+      final results = await client.search(
+        '金色',
+        provider: const SearchProviderConfig(
+          id: 'pansou-api',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://so.252035.xyz',
+          enabled: true,
+          parserHint: 'pansou-api',
+        ),
+      );
+
+      expect(results, isEmpty);
+    });
+
+    test('keeps health checks on the standard request timeout', () async {
+      final standardClient = StarflowHttpClient(
+        MockClient((request) async {
+          expect(request.url.path, '/api/health');
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+          return http.Response(jsonEncode({'status': 'ok'}), 200);
+        }),
+        requestTimeout: const Duration(milliseconds: 10),
+      );
+      addTearDown(standardClient.close);
+      final client = PanSouApiClient(standardClient);
+
+      await expectLater(
+        client.testConnection(
+          provider: const SearchProviderConfig(
+            id: 'pansou-api',
+            name: 'PanSou',
+            kind: SearchProviderKind.panSou,
+            endpoint: 'https://so.252035.xyz',
+            enabled: true,
+            parserHint: 'pansou-api',
+          ),
+        ),
+        throwsA(isA<TimeoutException>()),
+      );
+    });
+
+    test('replaces malformed UTF-8 bytes and keeps valid search results',
+        () async {
+      final prefix = utf8.encode(
+        '{"code":0,"data":{"merged_by_type":{"quark":['
+        '{"url":"https://pan.quark.cn/s/demo","password":"",'
+        '"note":"金',
+      );
+      final suffix = utf8.encode(
+        '色","datetime":"","source":"","images":[]}]}}}',
+      );
+      final client = PanSouApiClient(
+        MockClient((request) async {
+          return http.Response.bytes(
+            <int>[...prefix, 0xe9, ...suffix],
+            200,
+            headers: const {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      final results = await client.search(
+        '金色',
+        provider: const SearchProviderConfig(
+          id: 'pansou-api',
+          name: 'PanSou',
+          kind: SearchProviderKind.panSou,
+          endpoint: 'https://so.252035.xyz',
+          enabled: true,
+          parserHint: 'pansou-api',
+        ),
+      );
+
+      expect(results, hasLength(1));
+      expect(results.single.resourceUrl, 'https://pan.quark.cn/s/demo');
+      expect(results.single.title, contains('金'));
+      expect(results.single.title, contains('色'));
+    });
+
     test('maps merged_by_type response into search results', () async {
       final client = PanSouApiClient(
         MockClient((request) async {

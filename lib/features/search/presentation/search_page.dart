@@ -444,7 +444,10 @@ class _SearchPageState extends ConsumerState<SearchPage>
     }
     final completed = _pendingSearchCompletedCount;
     final totalCount = _pendingSearchTotalCount;
-    final hasFinished = completed >= totalCount;
+    final hasPendingValidations = _quarkLinkValidationStates.values.any(
+      (state) => state == _QuarkLinkValidationState.pending,
+    );
+    final hasFinished = completed >= totalCount && !hasPendingValidations;
     final sortedResults = _sortResults(aggregated);
     setState(() {
       _completedSearchTaskCount = completed;
@@ -1312,7 +1315,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
     required ValueChanged<int> onFiltered,
     required int Function() getFiltered,
   }) async {
-    final pendingValidations = <Future<QuarkShareValidationResult>>[];
     try {
       final result = await operation.run();
       if (!mounted || requestId != _activeSearchRequestId) {
@@ -1339,22 +1341,32 @@ class _SearchPageState extends ConsumerState<SearchPage>
             }
             if (validation.isInvalid) {
               onFiltered(1);
-              return;
+            } else {
+              aggregated.add(item);
             }
-            aggregated.add(item);
+            _scheduleSearchUiCommit(
+              requestId: requestId,
+              aggregated: aggregated,
+              errors: errors,
+              totalCount: totalCount,
+              completedCount: getCompleted(),
+              filteredCount: getFiltered(),
+            );
           },
         );
         if (validationFuture == null) {
           aggregated.add(item);
-        } else {
-          pendingValidations.add(validationFuture);
         }
       }
       onFiltered(result.filteredCount + duplicateCount);
-      if (pendingValidations.isNotEmpty) {
-        setState(() {});
-        await Future.wait(pendingValidations);
-      }
+      _scheduleSearchUiCommit(
+        requestId: requestId,
+        aggregated: aggregated,
+        errors: errors,
+        totalCount: totalCount,
+        completedCount: getCompleted(),
+        filteredCount: getFiltered(),
+      );
     } catch (error) {
       if (!mounted || requestId != _activeSearchRequestId) {
         return;

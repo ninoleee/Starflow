@@ -225,7 +225,7 @@ void main() {
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'search-query');
   });
 
-  testWidgets('online Quark results are shown only after link validation',
+  testWidgets('other results show while Quark links are still validating',
       (tester) async {
     SharedPreferences.setMockInitialValues(const {});
     final repository = _PendingSearchRepository();
@@ -294,6 +294,18 @@ void main() {
         filteredCount: 0,
         items: const [
           SearchResult(
+            id: 'baidu-1',
+            title: '立即显示的电影',
+            posterUrl: '',
+            providerId: 'online',
+            providerName: 'Online',
+            quality: '4K',
+            sizeLabel: '10GB',
+            seeders: 0,
+            summary: 'online result',
+            resourceUrl: 'https://pan.baidu.com/s/abc123',
+          ),
+          SearchResult(
             id: 'quark-1',
             title: '待验证电影',
             posterUrl: '',
@@ -313,6 +325,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 20));
     }
     expect(validationStarted.isCompleted, isTrue);
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(find.text('立即显示的电影'), findsOneWidget);
     expect(find.text('待验证电影'), findsNothing);
     expect(find.textContaining('正在验证链接'), findsOneWidget);
 
@@ -333,7 +347,7 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
 
     expect(find.text('待验证电影'), findsOneWidget);
   });
