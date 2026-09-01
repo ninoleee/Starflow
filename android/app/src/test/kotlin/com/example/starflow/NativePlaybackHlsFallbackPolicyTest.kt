@@ -17,11 +17,33 @@ class NativePlaybackHlsFallbackPolicyTest {
     }
 
     @Test
+    fun `retries smartstrm fid container parse failures as hls`() {
+        assertTrue(
+            NativePlaybackHlsFallbackPolicy.shouldRetryAsHls(
+                errorCode = 3003,
+                url = "https://strm.example.com/smartstrm_fid/quark/id/movie.mp4",
+                alreadyAttempted = false,
+            ),
+        )
+    }
+
+    @Test
     fun `does not retry normal mp4 urls as hls`() {
         assertFalse(
             NativePlaybackHlsFallbackPolicy.shouldRetryAsHls(
                 errorCode = 3003,
                 url = "https://media.example.com/movie.mp4",
+                alreadyAttempted = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `does not match unrelated smartstrm path prefixes`() {
+        assertFalse(
+            NativePlaybackHlsFallbackPolicy.shouldRetryAsHls(
+                errorCode = 3003,
+                url = "https://media.example.com/not-smartstrm_fid/movie.mp4",
                 alreadyAttempted = false,
             ),
         )

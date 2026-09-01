@@ -1296,6 +1296,7 @@ class NativePlaybackActivity : Activity() {
         smartStrmHlsFallbackAttempted = true
         pendingResumePositionOverrideMs = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
         nextInitializePlayWhenReady = player?.playWhenReady ?: true
+        intent.putExtra(EXTRA_MEDIA_MIME_TYPE, MimeTypes.APPLICATION_M3U8)
         logPlayback(
             "native.playback.smartstrm-hls-fallback " +
                 "resumeMs=$pendingResumePositionOverrideMs " +

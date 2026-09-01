@@ -26,6 +26,7 @@
 - `MPV` 的远程流调优和 `ISO` 设备源判断已经收口到本地策略层；重型视频不再自动切换播放器或降级质量预设
 - Android（含 TV）与 iOS 的内置 `MPV` 构建会下载 media-kit 上游 full 原生库并校验 SHA-256，以补齐 `MLP / TrueHD` 解码器；这是构建期依赖下载，运行期播放不新增网络请求
 - HTTP / HTTPS 远程播放启动只执行一次 Range 预检；授权、临时链接、状态码、Range 能力、速度估算及后续超时 / 缓冲调节复用同一份结果，不再并行发起额外测速请求
+- Android ExoPlayer 对 `/smartstrm/` 与 `/smartstrm_*/` 地址遇到 Media3 容器解析错误 `3003` 时，会保留当前进度、显式改按 HLS 并自动重试一次；普通 MP4、内置 MPV 和外部播放器不进入该兜底
 - 旧的 trace helper 保持静音；应用生命周期、首页、媒体库、详情、刷新调度和网络故障统一写入可配置的结构化本地日志
 - `NasMediaIndexer` 当前已经拆成 `refresh_flow / storage_access / indexing / grouping / refresh_support` 多段 `part` 文件；这次拆分只是在本地把刷新编排、索引计算、分组和缓存访问解耦，不新增任何新的网络协议或请求源
 - `PlaybackMemoryRepository` 新增的单调时间戳策略只影响本地“最近播放”排序稳定性，尤其是 Windows 下的同毫秒写入场景；它不涉及任何网络请求

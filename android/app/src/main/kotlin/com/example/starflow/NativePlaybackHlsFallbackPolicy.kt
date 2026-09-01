@@ -2,6 +2,7 @@ package com.example.starflow
 
 object NativePlaybackHlsFallbackPolicy {
     private const val PARSING_CONTAINER_UNSUPPORTED_ERROR_CODE = 3003
+    private val smartStrmPath = Regex("/smartstrm(?:_[^/]+)?/")
 
     fun shouldRetryAsHls(
         errorCode: Int,
@@ -16,6 +17,6 @@ object NativePlaybackHlsFallbackPolicy {
     fun isSmartStrmUrl(url: String): Boolean {
         val normalized = url.trim().lowercase()
         return (normalized.startsWith("http://") || normalized.startsWith("https://")) &&
-            normalized.contains("/smartstrm/")
+            smartStrmPath.containsMatchIn(normalized)
     }
 }

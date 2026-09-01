@@ -6,11 +6,13 @@ const String kNativePlaybackHlsMimeType = 'application/x-mpegURL';
 bool shouldProbeNativeSmartStrmMediaType(PlaybackTarget target) {
   final url = target.streamUrl.trim().toLowerCase();
   if ((!url.startsWith('http://') && !url.startsWith('https://')) ||
-      !url.contains('/smartstrm/')) {
+      !_smartStrmPathPattern.hasMatch(url)) {
     return false;
   }
   return url.contains('#') || url.contains('%23');
 }
+
+final RegExp _smartStrmPathPattern = RegExp(r'/smartstrm(?:_[^/]+)?/');
 
 String? resolveNativePlaybackMimeType(
   PlaybackRemotePreflightResult result,

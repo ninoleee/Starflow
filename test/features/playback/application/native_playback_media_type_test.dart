@@ -22,7 +22,23 @@ void main() {
     );
     expect(
       shouldProbeNativeSmartStrmMediaType(
+        _target(
+          'https://smartstrm.example.com/smartstrm_fid/quark/Talk%20%2323.mp4',
+        ),
+      ),
+      isTrue,
+    );
+    expect(
+      shouldProbeNativeSmartStrmMediaType(
         _target('https://media.example.com/Talk%20%2323.mp4'),
+      ),
+      isFalse,
+    );
+    expect(
+      shouldProbeNativeSmartStrmMediaType(
+        _target(
+          'https://media.example.com/not-smartstrm_fid/Talk%20%2323.mp4',
+        ),
       ),
       isFalse,
     );
