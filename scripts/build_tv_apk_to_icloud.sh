@@ -9,6 +9,7 @@
 #
 # Usage:
 #   ./build_tv_apk_to_icloud.sh [path/to/settings.json]
+#   STARFLOW_RELEASE_VERSION=1.9.6 ./build_tv_apk_to_icloud.sh
 #
 # When a settings JSON path is supplied, the APK is named
 # starflow-tv-config-<ver>.apk and the settings are embedded; otherwise it
@@ -63,7 +64,24 @@ update_pubspec_version() {
   printf '%s\n' "$next_version"
 }
 
-VERSION="$(update_pubspec_version pubspec.yaml)"
+set_pubspec_version() {
+  local pubspec_path="$1"
+  local version="$2"
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: STARFLOW_RELEASE_VERSION must use major.month.sequence." >&2
+    exit 1
+  fi
+  perl -0pi -e "s/^version:\s*\d+\.\d+\.\d+(?:\+\d+)?\s*$/version: ${version}/m" "$pubspec_path"
+  printf '%s\n' "$version"
+}
+
+VERSION="$(
+  if [[ -n "${STARFLOW_RELEASE_VERSION:-}" ]]; then
+    set_pubspec_version pubspec.yaml "$STARFLOW_RELEASE_VERSION"
+  else
+    update_pubspec_version pubspec.yaml
+  fi
+)"
 BUILD_DATE="$(date +%Y-%m-%d)"
 
 SETTINGS_JSON_PATH="${1:-}"

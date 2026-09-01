@@ -142,6 +142,7 @@ lib/
 - 内部默认使用 `flutter build apk --release --android-skip-build-dependency-validation`
 - TV 文件名使用 `starflow-tv[-config]-主版本.月份.序号.apk`
 - 当前显示版本号按标准三段式 `主版本.月份.序号` 自动递增
+- macOS 的 TV/iOS iCloud 发布脚本可通过同一个 `STARFLOW_RELEASE_VERSION` 固定批次版本；省略时仍按月和序号分别自动递增
 - 当前 Release APK 会继续启用 `v1 + v2` 签名，并沿用本机 debug keystore
 - `scripts/build_windows_installer.ps1` 默认把 Windows 安装器输出到桌面
 - 这条脚本会先执行 `flutter build windows`，再调用 Inno Setup 生成单个安装器

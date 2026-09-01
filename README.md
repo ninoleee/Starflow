@@ -712,6 +712,7 @@ flutter build apk --release
 
 ```bash
 ./scripts/build_ipa_to_icloud.sh
+STARFLOW_RELEASE_VERSION=1.9.6 ./scripts/build_ipa_to_icloud.sh
 ```
 
 构建 TV 安装包：
@@ -720,6 +721,15 @@ flutter build apk --release
 .\scripts\build_tv_apk.ps1
 .\scripts\build_tv_apk.ps1 -SettingsJsonPath "D:\OneDrive\Desktop\starflow-settings.json"
 ```
+
+macOS 直接构建 TV release APK 到 iCloud：
+
+```bash
+./scripts/build_tv_apk_to_icloud.sh
+STARFLOW_RELEASE_VERSION=1.9.6 ./scripts/build_tv_apk_to_icloud.sh
+```
+
+同一批同时发布 TV 与 iOS 时，给两个 iCloud 脚本传入相同的 `STARFLOW_RELEASE_VERSION`，可避免两个脚本依次自动递增成不同版本；不传时仍沿用各自的自动递增规则。
 
 `integration_test` 只保留在 `dev_dependencies`；当前 Flutter release 构建会过滤开发插件，TV 预设不再临时改写 `pubspec.yaml`。
 
@@ -755,6 +765,7 @@ flutter build apk --release
 - 内部版本号沿用三段式 `主版本.月份.序号` 自动递增规则
 - 内部构建命令固定使用 `flutter build ios --release --no-codesign`
 - 不再尝试生成签名版；输出文件名为 `starflow_v主版本.月份.序号_unsigned.ipa`
+- 可通过 `STARFLOW_RELEASE_VERSION=主版本.月份.序号` 固定本批版本；TV 的 iCloud 脚本支持同一变量
 
 当前 Windows 安装器打包规则：
 

@@ -52,6 +52,17 @@ update_pubspec_version() {
   printf '%s\n' "$next_version"
 }
 
+set_pubspec_version() {
+  local pubspec_path="$1"
+  local version="$2"
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: STARFLOW_RELEASE_VERSION must use major.month.sequence." >&2
+    exit 1
+  fi
+  perl -0pi -e "s/^version:\s*\d+\.\d+\.\d+(?:\+\d+)?\s*$/version: ${version}/m" "$pubspec_path"
+  printf '%s\n' "$version"
+}
+
 APP_NAME="$(awk '/^name:[[:space:]]*/ {print $2; exit}' pubspec.yaml)"
 
 if [[ -z "${APP_NAME:-}" ]]; then
@@ -59,7 +70,13 @@ if [[ -z "${APP_NAME:-}" ]]; then
   exit 1
 fi
 
-VERSION="$(update_pubspec_version pubspec.yaml)"
+VERSION="$(
+  if [[ -n "${STARFLOW_RELEASE_VERSION:-}" ]]; then
+    set_pubspec_version pubspec.yaml "$STARFLOW_RELEASE_VERSION"
+  else
+    update_pubspec_version pubspec.yaml
+  fi
+)"
 BUILD_NUMBER="$VERSION"
 BUILD_DATE="$(date +%Y-%m-%d)"
 OUTPUT_NAME="${APP_NAME}_v${VERSION}_unsigned.ipa"
