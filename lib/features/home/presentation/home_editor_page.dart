@@ -104,6 +104,14 @@ class _HomeModuleCard extends StatelessWidget {
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
+                  ] else if (module.supportsDisplayStyle) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      module.displayStyle.label,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
                   ],
                 ],
               ),
@@ -997,9 +1005,13 @@ class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
       text: existing?.doubanListUrl ?? initialPreset?.url ?? '',
     );
     var selectedPresetUrl = initialPreset?.url ?? _kCustomDoubanListPresetValue;
+    var displayStyle = existing?.displayStyle ?? HomeModuleDisplayStyle.poster;
     final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final titleFocusNode = FocusNode(debugLabel: 'home-douban-title');
     final urlFocusNode = FocusNode(debugLabel: 'home-douban-url');
+    final displayStyleFocusNode = FocusNode(
+      debugLabel: 'home-douban-display-style',
+    );
     final cancelFocusNode = FocusNode(debugLabel: 'home-douban-cancel');
     final saveFocusNode = FocusNode(debugLabel: 'home-douban-save');
 
@@ -1070,6 +1082,30 @@ class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
                           decoration: const InputDecoration(labelText: '片单地址'),
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      wrapTelevisionDialogFieldTraversal(
+                        enabled: isTelevision,
+                        child: DropdownButtonFormField<HomeModuleDisplayStyle>(
+                          initialValue: displayStyle,
+                          focusNode: displayStyleFocusNode,
+                          decoration: const InputDecoration(labelText: '展示样式'),
+                          items: HomeModuleDisplayStyle.values
+                              .map(
+                                (style) => DropdownMenuItem(
+                                  value: style,
+                                  child: Text(style.label),
+                                ),
+                              )
+                              .toList(growable: false),
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                displayStyle = value;
+                              });
+                            }
+                          },
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1098,12 +1134,14 @@ class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
                                         ? '豆瓣片单'
                                         : titleController.text.trim(),
                                     url: url,
+                                    displayStyle: displayStyle,
                                   )
                                 : existing.copyWith(
                                     title: titleController.text.trim().isEmpty
                                         ? existing.title
                                         : titleController.text.trim(),
                                     doubanListUrl: url,
+                                    displayStyle: displayStyle,
                                   ),
                           );
                       Navigator.of(dialogContext).pop();
@@ -1116,7 +1154,11 @@ class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
                 enabled: isTelevision,
                 dialogContext: dialogContext,
                 inputFocusNodes: [titleFocusNode, urlFocusNode],
-                contentFocusNodes: [titleFocusNode, urlFocusNode],
+                contentFocusNodes: [
+                  titleFocusNode,
+                  urlFocusNode,
+                  displayStyleFocusNode,
+                ],
                 actionFocusNodes: [saveFocusNode, cancelFocusNode],
                 child: dialog,
               );
@@ -1128,6 +1170,7 @@ class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
         urlController.dispose();
         titleFocusNode.dispose();
         urlFocusNode.dispose();
+        displayStyleFocusNode.dispose();
         cancelFocusNode.dispose();
         saveFocusNode.dispose();
       }),
@@ -1142,8 +1185,12 @@ class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
     final titleController = TextEditingController(text: module.title);
     var interestStatus = module.doubanInterestStatus;
     var suggestionType = module.doubanSuggestionType;
+    var displayStyle = module.displayStyle;
     final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final titleFocusNode = FocusNode(debugLabel: 'home-module-title');
+    final displayStyleFocusNode = FocusNode(
+      debugLabel: 'home-module-display-style',
+    );
     final cancelFocusNode = FocusNode(debugLabel: 'home-module-cancel');
     final saveFocusNode = FocusNode(debugLabel: 'home-module-save');
 
@@ -1220,6 +1267,34 @@ class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
                           },
                         ),
                       ],
+                      if (module.supportsDisplayStyle) ...[
+                        const SizedBox(height: 12),
+                        wrapTelevisionDialogFieldTraversal(
+                          enabled: isTelevision,
+                          child:
+                              DropdownButtonFormField<HomeModuleDisplayStyle>(
+                            initialValue: displayStyle,
+                            focusNode: displayStyleFocusNode,
+                            decoration:
+                                const InputDecoration(labelText: '展示样式'),
+                            items: HomeModuleDisplayStyle.values
+                                .map(
+                                  (style) => DropdownMenuItem(
+                                    value: style,
+                                    child: Text(style.label),
+                                  ),
+                                )
+                                .toList(growable: false),
+                            onChanged: (value) {
+                              if (value != null) {
+                                setState(() {
+                                  displayStyle = value;
+                                });
+                              }
+                            },
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1244,6 +1319,7 @@ class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
                                   : titleController.text.trim(),
                               doubanInterestStatus: interestStatus,
                               doubanSuggestionType: suggestionType,
+                              displayStyle: displayStyle,
                             ),
                           );
                       Navigator.of(dialogContext).pop();
@@ -1256,7 +1332,7 @@ class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
                 enabled: isTelevision,
                 dialogContext: dialogContext,
                 inputFocusNodes: [titleFocusNode],
-                contentFocusNodes: [titleFocusNode],
+                contentFocusNodes: [titleFocusNode, displayStyleFocusNode],
                 actionFocusNodes: [saveFocusNode, cancelFocusNode],
                 child: dialog,
               );
@@ -1266,6 +1342,7 @@ class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
       ).whenComplete(() {
         titleController.dispose();
         titleFocusNode.dispose();
+        displayStyleFocusNode.dispose();
         cancelFocusNode.dispose();
         saveFocusNode.dispose();
       }),

@@ -322,6 +322,44 @@ void main() {
     expect(find.text('全部内容'), findsOneWidget);
   });
 
+  testWidgets('home editor exposes per-module display style', (tester) async {
+    final settings = SeedData.defaultSettings.copyWith(
+      homeModules: const [
+        HomeModuleConfig(
+          id: HomeModuleConfig.heroModuleId,
+          type: HomeModuleType.hero,
+          title: 'Hero',
+          enabled: true,
+        ),
+        HomeModuleConfig(
+          id: 'module-a',
+          type: HomeModuleType.recentlyAdded,
+          title: '最近新增',
+          enabled: true,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+          appSettingsProvider.overrideWithValue(settings),
+          homeEditorCollectionsProvider.overrideWith((ref) async => []),
+        ],
+        child: const MaterialApp(home: HomeEditorPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('竖版海报'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.edit_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text('展示样式'), findsOneWidget);
+    expect(find.text('竖版海报'), findsAtLeastNWidgets(1));
+  });
+
   testWidgets('TV home editor restores focus after a module sheet closes',
       (tester) async {
     final settings = SeedData.defaultSettings.copyWith(

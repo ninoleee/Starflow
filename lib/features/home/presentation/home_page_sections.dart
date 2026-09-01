@@ -2,6 +2,12 @@ part of 'home_page.dart';
 
 const double _kHomePosterRailFocusOverflowPadding = 10;
 const double _kHomeCarouselFocusOverflowPadding = 10;
+const double _kHomePosterTileWidth = 140;
+const double _kHomePosterTileAspectRatio = 0.7;
+const double _kHomePosterRailHeight = 246;
+const double _kHomeLandscapeTileWidth = 260;
+const double _kHomeLandscapeTileAspectRatio = 16 / 9;
+const double _kHomeLandscapeRailHeight = 196;
 
 String _homeSectionViewAllFocusKey(HomeSectionViewModel section) {
   return 'view-all:${section.id}';
@@ -81,6 +87,7 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
       layout: widget.module.type == HomeModuleType.doubanCarousel
           ? HomeSectionLayout.carousel
           : HomeSectionLayout.posterRail,
+      displayStyle: widget.module.displayStyle,
     );
   }
 
@@ -109,6 +116,15 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
           widget.homeMetadataAutoRefreshRevision;
     }
     final viewAllTarget = section.viewAllTarget;
+    final displayStyle = widget.module.displayStyle;
+    final isLandscape = displayStyle == HomeModuleDisplayStyle.landscape;
+    final tileWidth =
+        isLandscape ? _kHomeLandscapeTileWidth : _kHomePosterTileWidth;
+    final tileAspectRatio = isLandscape
+        ? _kHomeLandscapeTileAspectRatio
+        : _kHomePosterTileAspectRatio;
+    final railHeight =
+        isLandscape ? _kHomeLandscapeRailHeight : _kHomePosterRailHeight;
     final openViewAll = viewAllTarget == null
         ? null
         : () {
@@ -141,7 +157,7 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
           : section.items.isEmpty
               ? _SectionEmptyState(message: section.emptyMessage)
               : SizedBox(
-                  height: 246 + _kHomePosterRailFocusOverflowPadding,
+                  height: railHeight + _kHomePosterRailFocusOverflowPadding,
                   child: DesktopHorizontalPager(
                     builder: (context, controller) => ListView.separated(
                       controller: controller,
@@ -168,6 +184,8 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
                               _homeSectionViewAllFocusKey(section),
                             ),
                             focusId: 'home:section:${section.id}:view-all',
+                            width: tileWidth,
+                            imageAspectRatio: tileAspectRatio,
                             onTap: openViewAll!,
                           );
                         }
@@ -176,6 +194,8 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
                           key: posterItemKeys[index],
                           module: widget.module,
                           item: item,
+                          width: tileWidth,
+                          imageAspectRatio: tileAspectRatio,
                           focusNode: widget.focusNodeForContent(
                             _homeSectionItemFocusKey(section, item),
                           ),
@@ -216,6 +236,8 @@ class _HomePosterTile extends StatelessWidget {
     super.key,
     required this.module,
     required this.item,
+    required this.width,
+    required this.imageAspectRatio,
     this.focusNode,
     this.focusId,
     required this.autofocus,
@@ -223,19 +245,27 @@ class _HomePosterTile extends StatelessWidget {
 
   final HomeModuleConfig module;
   final HomeCardViewModel item;
+  final double width;
+  final double imageAspectRatio;
   final FocusNode? focusNode;
   final String? focusId;
   final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
+    final artworkSources = _buildHomeTileArtworkSources(
+      item,
+      displayStyle: module.displayStyle,
+    );
+    final primaryArtwork = artworkSources.isEmpty ? null : artworkSources.first;
     return MediaPosterTile(
       title: item.title,
       subtitle: item.subtitle,
-      posterUrl: item.posterUrl,
-      posterCachePolicy: item.detailTarget.sourceKind == MediaSourceKind.emby
-          ? AppNetworkImageCachePolicy.networkOnly
-          : AppNetworkImageCachePolicy.persistent,
+      posterUrl: primaryArtwork?.url ?? '',
+      posterCachePolicy:
+          primaryArtwork?.cachePolicy ?? AppNetworkImageCachePolicy.persistent,
+      width: width,
+      imageAspectRatio: imageAspectRatio,
       imageBadgeText: _resolveHomePosterBadgeText(
         module: module,
         item: item,
@@ -246,8 +276,8 @@ class _HomePosterTile extends StatelessWidget {
       focusNode: focusNode,
       focusId: focusId,
       autofocus: autofocus,
-      posterHeaders: item.detailTarget.posterHeaders,
-      posterFallbackSources: _buildPosterFallbackSources(item.detailTarget),
+      posterHeaders: primaryArtwork?.headers ?? const {},
+      posterFallbackSources: artworkSources.skip(1).toList(growable: false),
       titleColor: Colors.white,
       subtitleColor: const Color(0xFF98A7C2),
       onTap: () {
@@ -543,13 +573,22 @@ class _HomeSectionLoading extends StatelessWidget {
   const _HomeSectionLoading({
     required this.title,
     required this.layout,
+    required this.displayStyle,
   });
 
   final String title;
   final HomeSectionLayout layout;
+  final HomeModuleDisplayStyle displayStyle;
 
   @override
   Widget build(BuildContext context) {
+    final isLandscape = displayStyle == HomeModuleDisplayStyle.landscape;
+    final railHeight =
+        isLandscape ? _kHomeLandscapeRailHeight : _kHomePosterRailHeight;
+    final placeholderWidth = isLandscape ? _kHomeLandscapeTileWidth : 154.0;
+    final imageAspectRatio = isLandscape
+        ? _kHomeLandscapeTileAspectRatio
+        : _kHomePosterTileAspectRatio;
     return _HomeSection(
       title: title,
       child: layout == HomeSectionLayout.carousel
@@ -571,7 +610,7 @@ class _HomeSectionLoading extends StatelessWidget {
               ),
             )
           : SizedBox(
-              height: 246 + _kHomePosterRailFocusOverflowPadding,
+              height: railHeight + _kHomePosterRailFocusOverflowPadding,
               child: ListView.separated(
                 primary: false,
                 physics: const NeverScrollableScrollPhysics(),
@@ -586,7 +625,10 @@ class _HomeSectionLoading extends StatelessWidget {
                 itemCount: 3,
                 separatorBuilder: (context, index) => const SizedBox(width: 10),
                 itemBuilder: (context, index) {
-                  return const _PosterPlaceholderCard();
+                  return _PosterPlaceholderCard(
+                    width: placeholderWidth,
+                    imageAspectRatio: imageAspectRatio,
+                  );
                 },
               ),
             ),
@@ -595,12 +637,18 @@ class _HomeSectionLoading extends StatelessWidget {
 }
 
 class _PosterPlaceholderCard extends StatelessWidget {
-  const _PosterPlaceholderCard();
+  const _PosterPlaceholderCard({
+    required this.width,
+    required this.imageAspectRatio,
+  });
+
+  final double width;
+  final double imageAspectRatio;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 154,
+      width: width,
       child: LayoutBuilder(
         builder: (context, constraints) {
           if (!constraints.hasBoundedHeight) {
@@ -609,7 +657,7 @@ class _PosterPlaceholderCard extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  height: 206,
+                  height: width / imageAspectRatio,
                   decoration: BoxDecoration(
                     color: const Color(0xFF112036).withValues(alpha: 0.72),
                     borderRadius: BorderRadius.circular(22),
@@ -642,8 +690,9 @@ class _PosterPlaceholderCard extends StatelessWidget {
               (constraints.maxHeight - detailsReservedHeight)
                   .clamp(0.0, constraints.maxHeight)
                   .toDouble();
-          final naturalPosterHeight =
-              constraints.hasBoundedWidth ? constraints.maxWidth / 0.7 : 0.0;
+          final naturalPosterHeight = constraints.hasBoundedWidth
+              ? constraints.maxWidth / imageAspectRatio
+              : 0.0;
           final posterHeight = naturalPosterHeight < availablePosterHeight
               ? naturalPosterHeight
               : availablePosterHeight;
@@ -739,11 +788,15 @@ class _HomeSectionViewAllTile extends ConsumerWidget {
   const _HomeSectionViewAllTile({
     super.key,
     required this.onTap,
+    required this.width,
+    required this.imageAspectRatio,
     this.focusNode,
     this.focusId,
   });
 
   final VoidCallback onTap;
+  final double width;
+  final double imageAspectRatio;
   final FocusNode? focusNode;
   final String? focusId;
 
@@ -751,7 +804,7 @@ class _HomeSectionViewAllTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final content = SizedBox(
-      width: 140,
+      width: width,
       child: LayoutBuilder(
         builder: (context, constraints) {
           const detailsReservedHeight = 42.0;
@@ -759,8 +812,9 @@ class _HomeSectionViewAllTile extends ConsumerWidget {
               (constraints.maxHeight - detailsReservedHeight)
                   .clamp(0.0, constraints.maxHeight)
                   .toDouble();
-          final naturalPosterHeight =
-              constraints.hasBoundedWidth ? constraints.maxWidth / 0.7 : 0.0;
+          final naturalPosterHeight = constraints.hasBoundedWidth
+              ? constraints.maxWidth / imageAspectRatio
+              : 0.0;
           final posterHeight = naturalPosterHeight < availablePosterHeight
               ? naturalPosterHeight
               : availablePosterHeight;
@@ -1155,11 +1209,13 @@ class _EmptyHomeState extends StatelessWidget {
   }
 }
 
-List<AppNetworkImageSource> _buildPosterFallbackSources(
-  MediaDetailTarget target,
-) {
+List<AppNetworkImageSource> _buildHomeTileArtworkSources(
+  HomeCardViewModel item, {
+  required HomeModuleDisplayStyle displayStyle,
+}) {
+  final target = item.detailTarget;
   final sources = <AppNetworkImageSource>[];
-  final seen = <String>{target.posterUrl.trim()};
+  final seen = <String>{};
   final cachePolicy = target.sourceKind == MediaSourceKind.emby
       ? AppNetworkImageCachePolicy.networkOnly
       : AppNetworkImageCachePolicy.persistent;
@@ -1178,9 +1234,20 @@ List<AppNetworkImageSource> _buildPosterFallbackSources(
     );
   }
 
-  add(target.bannerUrl, target.bannerHeaders);
-  if (!_isHomeDetailOnlyEpisodeBackdrop(target)) {
-    add(target.backdropUrl, target.backdropHeaders);
+  if (displayStyle == HomeModuleDisplayStyle.landscape) {
+    if (!_isHomeDetailOnlyEpisodeBackdrop(target)) {
+      add(target.backdropUrl, target.backdropHeaders);
+    }
+    add(target.bannerUrl, target.bannerHeaders);
+    add(item.posterUrl, target.posterHeaders);
+    add(target.posterUrl, target.posterHeaders);
+  } else {
+    add(item.posterUrl, target.posterHeaders);
+    add(target.posterUrl, target.posterHeaders);
+    add(target.bannerUrl, target.bannerHeaders);
+    if (!_isHomeDetailOnlyEpisodeBackdrop(target)) {
+      add(target.backdropUrl, target.backdropHeaders);
+    }
   }
   return sources;
 }

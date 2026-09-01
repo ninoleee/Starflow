@@ -53,6 +53,27 @@ extension HomeModuleTypeX on HomeModuleType {
   }
 }
 
+enum HomeModuleDisplayStyle { poster, landscape }
+
+extension HomeModuleDisplayStyleX on HomeModuleDisplayStyle {
+  String get label {
+    switch (this) {
+      case HomeModuleDisplayStyle.poster:
+        return '竖版海报';
+      case HomeModuleDisplayStyle.landscape:
+        return '横版卡片';
+    }
+  }
+
+  static HomeModuleDisplayStyle fromName(String raw) {
+    return switch (raw) {
+      'landscape' => HomeModuleDisplayStyle.landscape,
+      'poster' => HomeModuleDisplayStyle.poster,
+      _ => HomeModuleDisplayStyle.poster,
+    };
+  }
+}
+
 enum HomeHeroDisplayMode { normal, borderless }
 
 extension HomeHeroDisplayModeX on HomeHeroDisplayMode {
@@ -597,6 +618,7 @@ class HomeModuleConfig {
     this.doubanInterestStatus = DoubanInterestStatus.mark,
     this.doubanSuggestionType = DoubanSuggestionMediaType.movie,
     this.doubanListUrl = '',
+    this.displayStyle = HomeModuleDisplayStyle.poster,
   });
 
   final String id;
@@ -610,6 +632,7 @@ class HomeModuleConfig {
   final DoubanInterestStatus doubanInterestStatus;
   final DoubanSuggestionMediaType doubanSuggestionType;
   final String doubanListUrl;
+  final HomeModuleDisplayStyle displayStyle;
 
   static const heroModuleId = 'home-module-hero';
 
@@ -641,6 +664,9 @@ class HomeModuleConfig {
   bool get isLibrarySection =>
       type == HomeModuleType.librarySection && sourceId.trim().isNotEmpty;
 
+  bool get supportsDisplayStyle =>
+      type != HomeModuleType.hero && type != HomeModuleType.doubanCarousel;
+
   HomeModuleConfig copyWith({
     String? id,
     HomeModuleType? type,
@@ -653,6 +679,7 @@ class HomeModuleConfig {
     DoubanInterestStatus? doubanInterestStatus,
     DoubanSuggestionMediaType? doubanSuggestionType,
     String? doubanListUrl,
+    HomeModuleDisplayStyle? displayStyle,
   }) {
     return HomeModuleConfig(
       id: id ?? this.id,
@@ -666,6 +693,7 @@ class HomeModuleConfig {
       doubanInterestStatus: doubanInterestStatus ?? this.doubanInterestStatus,
       doubanSuggestionType: doubanSuggestionType ?? this.doubanSuggestionType,
       doubanListUrl: doubanListUrl ?? this.doubanListUrl,
+      displayStyle: displayStyle ?? this.displayStyle,
     );
   }
 
@@ -682,6 +710,7 @@ class HomeModuleConfig {
       'doubanInterestStatus': doubanInterestStatus.value,
       'doubanSuggestionType': doubanSuggestionType.value,
       'doubanListUrl': doubanListUrl,
+      'displayStyle': displayStyle.name,
     };
   }
 
@@ -709,6 +738,9 @@ class HomeModuleConfig {
             DoubanSuggestionMediaType.movie.value,
       ),
       doubanListUrl: json['doubanListUrl'] as String? ?? '',
+      displayStyle: HomeModuleDisplayStyleX.fromName(
+        json['displayStyle'] as String? ?? '',
+      ),
     );
   }
 
@@ -800,6 +832,7 @@ class HomeModuleConfig {
   static HomeModuleConfig doubanList({
     required String title,
     required String url,
+    HomeModuleDisplayStyle displayStyle = HomeModuleDisplayStyle.poster,
   }) {
     return HomeModuleConfig(
       id: 'home-module-${DateTime.now().millisecondsSinceEpoch}',
@@ -807,6 +840,7 @@ class HomeModuleConfig {
       title: title,
       enabled: true,
       doubanListUrl: url,
+      displayStyle: displayStyle,
     );
   }
 

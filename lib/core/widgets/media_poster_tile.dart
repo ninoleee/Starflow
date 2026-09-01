@@ -16,6 +16,7 @@ class MediaPosterTile extends ConsumerStatefulWidget {
     required this.onTap,
     this.onContextAction,
     this.width = 140,
+    this.imageAspectRatio = 0.7,
     this.titleColor,
     this.subtitleColor,
     this.imageBadgeText = '',
@@ -37,6 +38,7 @@ class MediaPosterTile extends ConsumerStatefulWidget {
   final VoidCallback onTap;
   final VoidCallback? onContextAction;
   final double? width;
+  final double imageAspectRatio;
   final Color? titleColor;
   final Color? subtitleColor;
   final String imageBadgeText;
@@ -119,7 +121,10 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
       }
     }
     final pixelRatio = MediaQuery.devicePixelRatioOf(context);
-    final cacheHeight = (196 * pixelRatio).round();
+    final resolvedWidth = widget.width ?? 140;
+    final safeAspectRatio =
+        widget.imageAspectRatio > 0 ? widget.imageAspectRatio : 0.7;
+    final cacheHeight = (resolvedWidth / safeAspectRatio * pixelRatio).round();
     final posterUri = Uri.tryParse(effectivePosterUrl);
     final host = posterUri?.host.toLowerCase() ?? '';
     // 豆瓣带 imageView2 等参数的图在部分设备上与 decode 尺寸限制组合可能解码失败，故不缩采样。
@@ -256,7 +261,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             AspectRatio(
-              aspectRatio: 0.7,
+              aspectRatio: safeAspectRatio,
               child: buildPosterFrame(),
             ),
             const SizedBox(height: 4),

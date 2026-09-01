@@ -189,6 +189,61 @@ final homeModuleByIdProvider =
   return null;
 });
 
+typedef _HomeModuleSeedConfig = ({
+  String id,
+  HomeModuleType type,
+  String title,
+  bool enabled,
+  String sourceId,
+  String sourceName,
+  String sectionId,
+  String sectionName,
+  DoubanInterestStatus doubanInterestStatus,
+  DoubanSuggestionMediaType doubanSuggestionType,
+  String doubanListUrl,
+});
+
+_HomeModuleSeedConfig _homeModuleSeedConfig(HomeModuleConfig module) {
+  return (
+    id: module.id,
+    type: module.type,
+    title: module.title,
+    enabled: module.enabled,
+    sourceId: module.sourceId,
+    sourceName: module.sourceName,
+    sectionId: module.sectionId,
+    sectionName: module.sectionName,
+    doubanInterestStatus: module.doubanInterestStatus,
+    doubanSuggestionType: module.doubanSuggestionType,
+    doubanListUrl: module.doubanListUrl,
+  );
+}
+
+final _homeSectionModuleProvider =
+    Provider.family<HomeModuleConfig?, String>((ref, moduleId) {
+  final seedConfig = ref.watch(
+    homeModuleByIdProvider(moduleId).select(
+      (module) => module == null ? null : _homeModuleSeedConfig(module),
+    ),
+  );
+  if (seedConfig == null) {
+    return null;
+  }
+  return HomeModuleConfig(
+    id: seedConfig.id,
+    type: seedConfig.type,
+    title: seedConfig.title,
+    enabled: seedConfig.enabled,
+    sourceId: seedConfig.sourceId,
+    sourceName: seedConfig.sourceName,
+    sectionId: seedConfig.sectionId,
+    sectionName: seedConfig.sectionName,
+    doubanInterestStatus: seedConfig.doubanInterestStatus,
+    doubanSuggestionType: seedConfig.doubanSuggestionType,
+    doubanListUrl: seedConfig.doubanListUrl,
+  );
+});
+
 final homeRecentItemsProvider = FutureProvider<List<MediaItem>>((ref) async {
   ref.watch(nasMediaIndexRevisionProvider);
   final enabledModules = ref.watch(homeEnabledModulesProvider);
@@ -221,7 +276,7 @@ final _homeSectionSeedProvider = FutureProvider.autoDispose
     .family<HomeSectionViewModel?, String>((ref, moduleId) async {
   ref.watch(nasMediaIndexRevisionProvider);
   ref.watch(libraryRefreshRevisionProvider);
-  final module = ref.watch(homeModuleByIdProvider(moduleId));
+  final module = ref.watch(_homeSectionModuleProvider(moduleId));
   if (module == null) {
     return null;
   }
@@ -234,7 +289,6 @@ final _homeSectionSeedProvider = FutureProvider.autoDispose
   final discoveryRepository = ref.read(discoveryRepositoryProvider);
   final doubanAccount = ref.watch(homeDoubanAccountProvider);
   final mediaSources = ref.watch(homeMediaSourcesProvider);
-  final enabledModules = ref.watch(homeEnabledModulesProvider);
   final playbackMemoryRepository = ref.read(playbackMemoryRepositoryProvider);
   return ref.read(homeFeedLoadSchedulerProvider).runLoad(
         moduleId: module.id,
@@ -244,14 +298,14 @@ final _homeSectionSeedProvider = FutureProvider.autoDispose
         task: () async {
           final recentItems = module.type == HomeModuleType.recentlyAdded
               ? homeFeedRepository.loadRecentItems(
-                  enabledModules: enabledModules,
+                  enabledModules: [module],
                   mediaRepository: mediaRepository,
                 )
               : Future<List<MediaItem>>.value(const <MediaItem>[]);
           final recentPlaybackEntries =
               module.type == HomeModuleType.recentPlayback
                   ? homeFeedRepository.loadRecentPlaybackEntries(
-                      enabledModules: enabledModules,
+                      enabledModules: [module],
                       playbackMemoryRepository: playbackMemoryRepository,
                     )
                   : Future<List<PlaybackProgressEntry>>.value(
@@ -259,7 +313,7 @@ final _homeSectionSeedProvider = FutureProvider.autoDispose
                     );
           final carouselItems = module.type == HomeModuleType.doubanCarousel
               ? homeFeedRepository.loadCarouselItems(
-                  enabledModules: enabledModules,
+                  enabledModules: [module],
                   discoveryRepository: discoveryRepository,
                 )
               : Future<List<DoubanCarouselEntry>>.value(

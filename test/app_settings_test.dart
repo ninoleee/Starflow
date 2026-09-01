@@ -7,6 +7,22 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  test('home module display style defaults safely and persists', () {
+    final legacy = HomeModuleConfig.fromJson(const {
+      'id': 'legacy-module',
+      'type': 'recentlyAdded',
+      'title': '旧模块',
+      'enabled': true,
+    });
+    expect(legacy.displayStyle, HomeModuleDisplayStyle.poster);
+
+    final restored = HomeModuleConfig.fromJson(
+      legacy.copyWith(displayStyle: HomeModuleDisplayStyle.landscape).toJson(),
+    );
+    expect(restored.displayStyle, HomeModuleDisplayStyle.landscape);
+    expect(restored.toJson()['displayStyle'], 'landscape');
+  });
+
   test('app settings persist and clamp scheduling limits', () {
     final settings = AppSettings.fromJson(const <String, dynamic>{
       'taskMaxConcurrency': 4,

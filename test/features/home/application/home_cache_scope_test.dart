@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
@@ -123,6 +124,60 @@ void main() {
     expect(container.read(homeSectionsProvider), [refreshedSection]);
     expect(discoveryRepository.fetchEntriesCallCount, 1);
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 2);
+  });
+
+  test('changing only module display style does not refetch section data',
+      () async {
+    final module = HomeModuleConfig.doubanInterest(DoubanInterestStatus.mark);
+    final settingsProvider = StateProvider<AppSettings>((ref) {
+      return AppSettings(
+        mediaSources: const [],
+        searchProviders: const [],
+        doubanAccount: const DoubanAccountConfig(
+          enabled: true,
+          userId: 'demo-user',
+        ),
+        homeModules: [module],
+      );
+    });
+    final discoveryRepository = _CountingDiscoveryRepository(
+      entries: const [
+        DoubanEntry(
+          id: '1292052',
+          title: '肖申克的救赎',
+          year: 1994,
+          posterUrl: '',
+          note: '',
+          subjectType: 'movie',
+        ),
+      ],
+    );
+    final cacheRepository = _MutableLocalStorageCacheRepository();
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsProvider.overrideWith(
+          (ref) => ref.watch(settingsProvider),
+        ),
+        mediaRepositoryProvider.overrideWithValue(_NoopMediaRepository()),
+        discoveryRepositoryProvider.overrideWithValue(discoveryRepository),
+        localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final initial = await container.read(homeSectionProvider(module.id).future);
+    final current = container.read(settingsProvider);
+    container.read(settingsProvider.notifier).state = current.copyWith(
+      homeModules: [
+        module.copyWith(displayStyle: HomeModuleDisplayStyle.landscape),
+      ],
+    );
+    final afterStyleChange =
+        await container.read(homeSectionProvider(module.id).future);
+
+    expect(identical(afterStyleChange, initial), isTrue);
+    expect(discoveryRepository.fetchEntriesCallCount, 1);
+    expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
   });
 }
 

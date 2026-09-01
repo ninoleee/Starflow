@@ -15,6 +15,7 @@ import 'package:http/testing.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
+import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_episode_browser.dart';
@@ -593,6 +594,86 @@ void main() {
     final moduleATop = tester.getTopLeft(find.text('Module A')).dy;
     final moduleBTop = tester.getTopLeft(find.text('Module B')).dy;
     expect(moduleATop, lessThan(moduleBTop));
+  });
+
+  testWidgets('home landscape module prefers backdrop and uses 16:9 cards',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const module = HomeModuleConfig(
+      id: 'landscape-module',
+      type: HomeModuleType.recentlyAdded,
+      title: '横版模块',
+      enabled: true,
+      displayStyle: HomeModuleDisplayStyle.landscape,
+    );
+    const target = MediaDetailTarget(
+      title: '横版影片',
+      posterUrl: 'https://example.com/poster.jpg',
+      backdropUrl: 'https://example.com/backdrop.jpg',
+      overview: '',
+      itemId: 'landscape-item',
+    );
+    const section = HomeSectionViewModel(
+      id: 'landscape-module',
+      title: '横版模块',
+      subtitle: '',
+      emptyMessage: '',
+      layout: HomeSectionLayout.posterRail,
+      items: [
+        HomeCardViewModel(
+          id: 'landscape-item',
+          title: '横版影片',
+          subtitle: '2026',
+          posterUrl: 'https://example.com/poster.jpg',
+          detailTarget: target,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(
+            SeedData.defaultSettings.copyWith(
+              homeModules: const [
+                HomeModuleConfig(
+                  id: HomeModuleConfig.heroModuleId,
+                  type: HomeModuleType.hero,
+                  title: 'Hero',
+                  enabled: false,
+                ),
+                module,
+              ],
+              homeHeroBackgroundEnabled: false,
+            ),
+          ),
+          homeResolvedSectionsProvider.overrideWith(
+            (ref) => const HomeResolvedSectionsState(sections: [section]),
+          ),
+          homeSectionProvider.overrideWith((ref, moduleId) async => section),
+        ],
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    final tile = tester.widget<MediaPosterTile>(
+      find.byWidgetPredicate(
+        (widget) => widget is MediaPosterTile && widget.title == '横版影片',
+      ),
+    );
+    expect(tile.width, 260);
+    expect(tile.imageAspectRatio, closeTo(16 / 9, 0.001));
+    expect(tile.posterUrl, 'https://example.com/backdrop.jpg');
+    expect(
+      tile.posterFallbackSources.map((source) => source.url),
+      contains('https://example.com/poster.jpg'),
+    );
   });
 
   testWidgets(
