@@ -7,6 +7,7 @@ data class NativePlaybackBufferConfig(
     val bufferForPlaybackAfterRebufferMs: Int,
     val targetBufferBytes: Int,
     val prioritizeTimeOverSizeThresholds: Boolean,
+    val bandwidthProfile: String = "unknown",
 )
 
 object NativePlaybackBufferPolicy {
@@ -16,9 +17,11 @@ object NativePlaybackBufferPolicy {
         isTelevision: Boolean,
         memoryClassMb: Int,
         isHeavyPlayback: Boolean,
+        cachedBandwidthBytesPerSecond: Long = 0L,
+        sourceBitrate: Long = 0L,
     ): NativePlaybackBufferConfig {
-        if (!isTelevision) {
-            return NativePlaybackBufferConfig(
+        val base = if (!isTelevision) {
+            NativePlaybackBufferConfig(
                 minBufferMs = 50_000,
                 maxBufferMs = 90_000,
                 bufferForPlaybackMs = 2_500,
@@ -26,9 +29,7 @@ object NativePlaybackBufferPolicy {
                 targetBufferBytes = -1,
                 prioritizeTimeOverSizeThresholds = true,
             )
-        }
-
-        return when {
+        } else when {
             memoryClassMb <= 256 -> NativePlaybackBufferConfig(
                 minBufferMs = 20_000,
                 maxBufferMs = 60_000,
@@ -55,6 +56,33 @@ object NativePlaybackBufferPolicy {
                 targetBufferBytes = (if (isHeavyPlayback) 128 else 96) * MEBIBYTE,
                 prioritizeTimeOverSizeThresholds = false,
             )
+        }
+
+        if (cachedBandwidthBytesPerSecond <= 0L || sourceBitrate <= 0L) {
+            return base
+        }
+        val bandwidthRatio = (cachedBandwidthBytesPerSecond * 8.0) / sourceBitrate
+        return when {
+            bandwidthRatio >= 2.5 -> base.copy(
+                bufferForPlaybackMs = minOf(base.bufferForPlaybackMs, 1_200),
+                bufferForPlaybackAfterRebufferMs = minOf(
+                    base.bufferForPlaybackAfterRebufferMs,
+                    3_500,
+                ),
+                bandwidthProfile = "fast",
+            )
+            bandwidthRatio < 1.25 -> base.copy(
+                bufferForPlaybackMs = minOf(
+                    base.minBufferMs,
+                    base.bufferForPlaybackMs + 500,
+                ),
+                bufferForPlaybackAfterRebufferMs = minOf(
+                    base.minBufferMs,
+                    base.bufferForPlaybackAfterRebufferMs + 2_000,
+                ),
+                bandwidthProfile = "constrained",
+            )
+            else -> base.copy(bandwidthProfile = "balanced")
         }
     }
 }

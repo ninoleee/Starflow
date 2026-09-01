@@ -1035,34 +1035,35 @@ extension _PlayerPageStateControls on _PlayerPageState {
   }
 
   void _bindWindowsMpvTraceStreams(Player player) {
-    if (!_shouldTraceWindowsMpv) {
-      return;
-    }
-    _lastTracedVideoWidth = null;
-    _lastTracedVideoHeight = null;
-    _lastTracedBufferingState = null;
-    _lastTracedBufferingBucket = null;
-    _traceWindowsMpvVideoDimensions(
-      width: player.state.width,
-      height: player.state.height,
-    );
-    _traceWindowsMpvBufferingState(
-      player.state.buffering,
-      percentage: player.state.bufferingPercentage,
-    );
-    _playerWidthSubscription = player.stream.width.listen((width) {
-      _traceWindowsMpvVideoDimensions(
-        width: width,
-        height: player.state.height,
-      );
-    });
-    _playerHeightSubscription = player.stream.height.listen((height) {
+    if (_shouldTraceWindowsMpv) {
+      _lastTracedVideoWidth = null;
+      _lastTracedVideoHeight = null;
+      _lastTracedBufferingState = null;
+      _lastTracedBufferingBucket = null;
       _traceWindowsMpvVideoDimensions(
         width: player.state.width,
-        height: height,
+        height: player.state.height,
       );
-    });
+      _traceWindowsMpvBufferingState(
+        player.state.buffering,
+        percentage: player.state.bufferingPercentage,
+      );
+      _playerWidthSubscription = player.stream.width.listen((width) {
+        _traceWindowsMpvVideoDimensions(
+          width: width,
+          height: player.state.height,
+        );
+      });
+      _playerHeightSubscription = player.stream.height.listen((height) {
+        _traceWindowsMpvVideoDimensions(
+          width: player.state.width,
+          height: height,
+        );
+      });
+    }
+    _mpvPerformanceTracker?.onBufferingChanged(player.state.buffering);
     _playerBufferingSubscription = player.stream.buffering.listen((buffering) {
+      _mpvPerformanceTracker?.onBufferingChanged(buffering);
       _traceWindowsMpvBufferingState(
         buffering,
         percentage: player.state.bufferingPercentage,

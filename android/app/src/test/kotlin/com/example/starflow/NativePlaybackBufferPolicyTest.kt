@@ -61,4 +61,34 @@ class NativePlaybackBufferPolicyTest {
         assertEquals(-1, config.targetBufferBytes)
         assertTrue(config.prioritizeTimeOverSizeThresholds)
     }
+
+    @Test
+    fun cachedFastHostBandwidthReducesStartupBufferWait() {
+        val config = NativePlaybackBufferPolicy.resolve(
+            isTelevision = true,
+            memoryClassMb = 192,
+            isHeavyPlayback = true,
+            cachedBandwidthBytesPerSecond = 5_000_000L,
+            sourceBitrate = 10_000_000L,
+        )
+
+        assertEquals(1_200, config.bufferForPlaybackMs)
+        assertEquals(3_500, config.bufferForPlaybackAfterRebufferMs)
+        assertEquals("fast", config.bandwidthProfile)
+    }
+
+    @Test
+    fun constrainedHostBandwidthRaisesRebufferThreshold() {
+        val config = NativePlaybackBufferPolicy.resolve(
+            isTelevision = true,
+            memoryClassMb = 192,
+            isHeavyPlayback = false,
+            cachedBandwidthBytesPerSecond = 1_000_000L,
+            sourceBitrate = 8_000_000L,
+        )
+
+        assertEquals(2_000, config.bufferForPlaybackMs)
+        assertEquals(6_000, config.bufferForPlaybackAfterRebufferMs)
+        assertEquals("constrained", config.bandwidthProfile)
+    }
 }

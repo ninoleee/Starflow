@@ -39,6 +39,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -46,7 +47,6 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.BandwidthMeter
 import androidx.media3.exoplayer.upstream.DefaultAllocator
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
-import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.ui.DefaultTrackNameProvider
 import androidx.media3.ui.R as Media3UiR
 import androidx.media3.ui.AspectRatioFrameLayout
@@ -71,6 +71,9 @@ class NativePlaybackActivity : Activity() {
     private var latestNetworkBytesPerSecond = 0L
     private var latestNetworkSampleAtMs = 0L
     private var networkSpeedVisible = false
+    private var bandwidthWarningShown = false
+    private val playbackPerformanceTracker = NativePlaybackPerformanceTracker()
+    private val playbackHostBandwidthCache = NativePlaybackHostBandwidthCache()
     private lateinit var playerView: PlayerView
     private var baseMediaItem: MediaItem? = null
     private var playbackTargetJson = "{}"
@@ -175,7 +178,48 @@ class NativePlaybackActivity : Activity() {
             else -> 0L
         }
         latestNetworkSampleAtMs = SystemClock.elapsedRealtime()
+        playbackPerformanceTracker.onBandwidthSample(latestNetworkBytesPerSecond)
+        playbackHostBandwidthCache.record(
+            currentPlaybackHost(),
+            latestNetworkBytesPerSecond,
+        )
         updateNetworkSpeedLabelIfVisible()
+    }
+    private val playbackPerformanceAnalyticsListener = object : AnalyticsListener {
+        override fun onVideoDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime,
+            decoderName: String,
+            initializedTimestampMs: Long,
+            initializationDurationMs: Long,
+        ) {
+            playbackPerformanceTracker.onVideoDecoder(decoderName)
+        }
+
+        override fun onAudioDecoderInitialized(
+            eventTime: AnalyticsListener.EventTime,
+            decoderName: String,
+            initializedTimestampMs: Long,
+            initializationDurationMs: Long,
+        ) {
+            playbackPerformanceTracker.onAudioDecoder(decoderName)
+        }
+
+        override fun onDroppedVideoFrames(
+            eventTime: AnalyticsListener.EventTime,
+            droppedFrames: Int,
+            elapsedMs: Long,
+        ) {
+            playbackPerformanceTracker.onDroppedVideoFrames(droppedFrames)
+        }
+
+        override fun onAudioUnderrun(
+            eventTime: AnalyticsListener.EventTime,
+            bufferSize: Int,
+            bufferSizeMs: Long,
+            elapsedSinceLastFeedMs: Long,
+        ) {
+            playbackPerformanceTracker.onAudioUnderrun()
+        }
     }
     private val playbackSystemSessionManager by lazy {
         PlaybackSystemSessionManager(
@@ -188,6 +232,10 @@ class NativePlaybackActivity : Activity() {
     }
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            playbackPerformanceTracker.onBufferingChanged(
+                buffering = player?.playbackState == Player.STATE_BUFFERING,
+                playWhenReady = player?.playWhenReady == true,
+            )
             if (isPlaying) {
                 markPlaybackWatchdogActivity(player?.currentPosition ?: 0L)
             } else if (player?.playWhenReady == false) {
@@ -208,6 +256,10 @@ class NativePlaybackActivity : Activity() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            playbackPerformanceTracker.onBufferingChanged(
+                buffering = playbackState == Player.STATE_BUFFERING,
+                playWhenReady = player?.playWhenReady == true,
+            )
             if (playbackState == Player.STATE_READY ||
                 playbackState == Player.STATE_BUFFERING
             ) {
@@ -232,6 +284,13 @@ class NativePlaybackActivity : Activity() {
 
         override fun onRenderedFirstFrame() {
             playbackFirstFrameRendered = true
+            val firstFrameMs = playbackPerformanceTracker.onFirstFrame()
+            if (firstFrameMs >= 0L) {
+                NativeAppLogger.info(
+                    "playback.performance",
+                    "Playback first frame rendered engine=exo firstFrameMs=$firstFrameMs",
+                )
+            }
             logPlaybackRuntime(reason = "first-frame")
             cancelPlaybackLaunchTimeout()
             reportPlaybackLaunchResult(RESULT_PLAYBACK_READY)
@@ -351,6 +410,7 @@ class NativePlaybackActivity : Activity() {
             message = "播放请求已被新的影片替换",
         )
         persistPlaybackProgress(force = true)
+        finishPlaybackPerformanceSession("replaced")
         releasePlayer()
         playbackErrorDialog?.dismiss()
         playbackErrorDialog = null
@@ -419,6 +479,7 @@ class NativePlaybackActivity : Activity() {
             resultCode = RESULT_PLAYBACK_CANCELLED,
             message = "原生播放器在画面就绪前已关闭",
         )
+        finishPlaybackPerformanceSession("destroyed")
         releasePlayer()
         playbackErrorDialog?.dismiss()
         playbackErrorDialog = null
@@ -438,6 +499,7 @@ class NativePlaybackActivity : Activity() {
             ?.trim()
             .orEmpty()
             .ifEmpty { "{}" }
+        beginPlaybackPerformanceSession()
         playbackItemKey = playbackIntent.getStringExtra(EXTRA_PLAYBACK_ITEM_KEY)
             ?.trim()
             .orEmpty()
@@ -549,6 +611,7 @@ class NativePlaybackActivity : Activity() {
             .setCancelable(false)
             .setPositiveButton("重试") { _, _ ->
                 playbackErrorDialog = null
+                playbackPerformanceTracker.onRecovery()
                 nextInitializePlayWhenReady = true
                 initializePlayer()
             }
@@ -908,6 +971,10 @@ class NativePlaybackActivity : Activity() {
             isTelevision = isTelevisionDevice,
             memoryClassMb = memoryClassMb,
             isHeavyPlayback = isHeavyPlayback,
+            cachedBandwidthBytesPerSecond = playbackHostBandwidthCache.resolve(
+                currentPlaybackHost(),
+            ),
+            sourceBitrate = bitrate.toLong(),
         )
         logPlayback(
             "native.buffer-policy television=$isTelevisionDevice " +
@@ -915,8 +982,17 @@ class NativePlaybackActivity : Activity() {
                 "minMs=${bufferConfig.minBufferMs} maxMs=${bufferConfig.maxBufferMs} " +
                 "startMs=${bufferConfig.bufferForPlaybackMs} " +
                 "rebufferMs=${bufferConfig.bufferForPlaybackAfterRebufferMs} " +
-                "targetBytes=${bufferConfig.targetBufferBytes}",
+                "targetBytes=${bufferConfig.targetBufferBytes} " +
+                "bandwidthProfile=${bufferConfig.bandwidthProfile}",
         )
+        playbackPerformanceTracker.configureBuffer(
+            targetBufferBytes = bufferConfig.targetBufferBytes,
+            memoryClassMb = memoryClassMb,
+        )
+        if (bufferConfig.bandwidthProfile == "constrained" && !bandwidthWarningShown) {
+            bandwidthWarningShown = true
+            showToast("当前网速低于片源码率，可能持续缓冲")
+        }
 
         return DefaultLoadControl.Builder()
             .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
@@ -1119,7 +1195,7 @@ class NativePlaybackActivity : Activity() {
             .setMediaSourceFactory(
                 DefaultMediaSourceFactory(dataSourceFactory)
                     .setLoadErrorHandlingPolicy(
-                        DefaultLoadErrorHandlingPolicy(NATIVE_LOAD_ERROR_RETRY_COUNT),
+                        NativePlaybackLoadErrorPolicy(),
                     ),
             )
             .build()
@@ -1137,6 +1213,7 @@ class NativePlaybackActivity : Activity() {
         }
         player = exoPlayer
         exoPlayer.addListener(playerListener)
+        exoPlayer.addAnalyticsListener(playbackPerformanceAnalyticsListener)
         val initialMediaItemBuilder = MediaItem.Builder()
             .setUri(url)
             .setMediaMetadata(
@@ -1261,6 +1338,7 @@ class NativePlaybackActivity : Activity() {
         }
 
         transcodedVideoFallbackAttempted = true
+        playbackPerformanceTracker.onRecovery()
         val currentPlayer = player ?: return
         val fallbackUrl = buildTranscodedVideoFallbackUrl(
             intent.getStringExtra(EXTRA_URL)?.trim().orEmpty(),
@@ -1294,6 +1372,7 @@ class NativePlaybackActivity : Activity() {
         }
 
         smartStrmHlsFallbackAttempted = true
+        playbackPerformanceTracker.onRecovery()
         pendingResumePositionOverrideMs = player?.currentPosition?.coerceAtLeast(0L) ?: 0L
         nextInitializePlayWhenReady = player?.playWhenReady ?: true
         intent.putExtra(EXTRA_MEDIA_MIME_TYPE, MimeTypes.APPLICATION_M3U8)
@@ -1563,6 +1642,7 @@ class NativePlaybackActivity : Activity() {
         stopPlaybackRuntimeLoop()
         playerView.player = null
         player?.removeListener(playerListener)
+        player?.removeAnalyticsListener(playbackPerformanceAnalyticsListener)
         player?.release()
         player = null
         playbackBandwidthMeter?.removeEventListener(bandwidthEventListener)
@@ -1790,7 +1870,17 @@ class NativePlaybackActivity : Activity() {
             return true
         }
         playbackWatchdogLastRecoveryAtMs = nowMs
+        if (isCurrentBandwidthInsufficient()) {
+            if (!bandwidthWarningShown) {
+                bandwidthWarningShown = true
+                showToast("当前网速低于片源码率，继续等待缓冲")
+            }
+            playbackWatchdogLastProgressAtMs = nowMs
+            playbackWatchdogLastBufferActivityAtMs = nowMs
+            return true
+        }
         playbackWatchdogRecoveries += 1
+        playbackPerformanceTracker.onRecovery()
 
         if (playbackWatchdogRecoveries <= PLAYBACK_WATCHDOG_SOFT_RECOVERY_LIMIT) {
             playbackSystemSessionManager.prepareForPlayback()
@@ -2049,6 +2139,7 @@ class NativePlaybackActivity : Activity() {
         }
 
         persistPlaybackProgress(force = true)
+        finishPlaybackPerformanceSession("episode-switch")
         releasePlayer()
 
         episodeQueue = nextQueue
@@ -2056,6 +2147,7 @@ class NativePlaybackActivity : Activity() {
         smartStrmHlsFallbackAttempted = false
         transcodedVideoFallbackAttempted = false
         playbackTargetJson = nextEntry.playbackTargetJson
+        beginPlaybackPerformanceSession()
         playbackItemKey = nextEntry.playbackItemKey
         seriesKey = nextEntry.seriesKey
         externalSubtitleSource = null
@@ -4236,6 +4328,60 @@ class NativePlaybackActivity : Activity() {
         }
     }
 
+    private fun currentPlaybackHost(): String {
+        val rawUrl = intent.getStringExtra(EXTRA_URL)?.trim().orEmpty()
+        return try {
+            Uri.parse(rawUrl).host?.trim().orEmpty()
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
+    private fun beginPlaybackPerformanceSession() {
+        val targetObject = try {
+            JSONObject(playbackTargetJson)
+        } catch (_: Throwable) {
+            JSONObject()
+        }
+        playbackPerformanceTracker.begin(
+            sourceBitrate = targetObject.optLong("bitrate", 0L),
+        )
+        bandwidthWarningShown = false
+    }
+
+    private fun isCurrentBandwidthInsufficient(): Boolean {
+        val bitrate = decodePlaybackTargetObject().optLong("bitrate", 0L)
+        val bytesPerSecond = playbackHostBandwidthCache.resolve(currentPlaybackHost())
+        return bitrate > 0L && bytesPerSecond > 0L && bytesPerSecond * 8 < bitrate * 0.9
+    }
+
+    private fun finishPlaybackPerformanceSession(reason: String) {
+        val summary = playbackPerformanceTracker.finish(reason) ?: return
+        NativeAppLogger.info(
+            "playback.performance",
+            "Playback session completed engine=exo " +
+                "reason=${summary.reason} " +
+                "sessionMs=${summary.sessionDurationMs} " +
+                "firstFrameMs=${summary.firstFrameMs} " +
+                "bufferingCount=${summary.bufferingCount} " +
+                "bufferingMs=${summary.bufferingDurationMs} " +
+                "recoveries=${summary.recoveryCount} " +
+                "droppedFrames=${summary.droppedVideoFrames} " +
+                "audioUnderruns=${summary.audioUnderrunCount} " +
+                "avgBytesPerSecond=${summary.averageNetworkBytesPerSecond} " +
+                "minBytesPerSecond=${summary.minimumNetworkBytesPerSecond} " +
+                "maxBytesPerSecond=${summary.maximumNetworkBytesPerSecond} " +
+                "sourceBitrate=${summary.sourceBitrate} " +
+                "bandwidthRatio=${summary.bandwidthToBitrateRatio?.let {
+                    String.format(Locale.US, "%.2f", it)
+                } ?: "-"} " +
+                "videoDecoder=${summary.videoDecoder.ifBlank { "-" }} " +
+                "audioDecoder=${summary.audioDecoder.ifBlank { "-" }} " +
+                "targetBufferBytes=${summary.targetBufferBytes} " +
+                "memoryClassMb=${summary.memoryClassMb}",
+        )
+    }
+
     private fun guessVideoMimeType(targetObject: JSONObject, url: String): String {
         val container = targetObject.optString("container").trim().lowercase(Locale.US)
         return when {
@@ -4296,7 +4442,6 @@ class NativePlaybackActivity : Activity() {
         private const val NATIVE_HTTP_CONNECT_TIMEOUT_MS = 15_000
         private const val NETWORK_SPEED_STALE_AFTER_MS = 2_500L
         private const val NATIVE_HTTP_READ_TIMEOUT_MS = 30_000
-        private const val NATIVE_LOAD_ERROR_RETRY_COUNT = 8
         private const val PLAYBACK_LAUNCH_TIMEOUT_MS = 30_000L
         private const val PLAYBACK_WATCHDOG_INTERVAL_MS = 5_000L
         private const val PLAYBACK_WATCHDOG_PROGRESS_TIMEOUT_MS = 15_000L

@@ -1,6 +1,7 @@
 package com.example.starflow
 
 import android.app.PictureInPictureParams
+import android.app.ActivityManager
 import android.app.PendingIntent
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -78,6 +79,10 @@ class MainActivity : FlutterActivity() {
                 "isTelevision" -> {
                     val currentMode = resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK
                     result.success(currentMode == Configuration.UI_MODE_TYPE_TELEVISION)
+                }
+                "getMemoryClassMb" -> {
+                    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                    result.success(activityManager.memoryClass)
                 }
                 "isPictureInPictureSupported" -> {
                     result.success(isPictureInPictureSupported())

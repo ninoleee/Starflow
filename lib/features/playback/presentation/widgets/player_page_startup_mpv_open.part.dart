@@ -37,19 +37,26 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         return opened;
       } catch (error, stackTrace) {
         lastError = error;
+        final failureKind = classifyMpvOpenFailure(error);
+        final shouldRetry = _isLikelyRemotePlaybackTarget(resolvedTarget) &&
+            failureKind == MpvOpenFailureKind.transientNetwork &&
+            !_isBandwidthBelowSourceBitrate(resolvedTarget);
         _traceWindowsMpv(
           'windows-mpv.open.attempt-failed',
-          fields: {'attempt': attempt},
+          fields: {
+            'attempt': attempt,
+            'failureKind': failureKind.name,
+            'willRetry': shouldRetry,
+          },
           error: error,
           stackTrace: stackTrace,
         );
-        if (attempt >= _PlayerPageState._maxPlaybackAttempts) {
+        if (attempt >= _PlayerPageState._maxPlaybackAttempts || !shouldRetry) {
           break;
         }
-        if (_isLikelyRemotePlaybackTarget(resolvedTarget)) {
-          final backoff = Duration(milliseconds: 650 * attempt);
-          await Future<void>.delayed(backoff);
-        }
+        _mpvPerformanceTracker?.recordRecovery();
+        final backoff = Duration(milliseconds: 650 * attempt);
+        await Future<void>.delayed(backoff);
       }
     }
 
@@ -144,6 +151,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         timeout: _remainingMpvOpenTimeout(deadline),
         startupError: startupError!.future,
       );
+      _markMpvFirstFrame();
       await player.play().timeout(_remainingMpvOpenTimeout(deadline));
       await _awaitStrictPlaybackReady(
         player,

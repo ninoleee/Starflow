@@ -11,6 +11,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   Future<void> _initialize({
     PlaybackTarget? initialTarget,
   }) async {
+    _playbackStartupStartedAt = DateTime.now();
+    _playbackTargetResolutionMs = 0;
     final startupTarget = initialTarget ?? widget.target;
     await ActivePlaybackCleanupCoordinator.cleanupAll(
       reason: 'player-page-initialize',
@@ -47,6 +49,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         isTelevision: _isTelevisionPlaybackDevice,
         isWeb: kIsWeb,
       );
+      _playbackTargetResolutionMs =
+          DateTime.now().difference(_playbackStartupStartedAt!).inMilliseconds;
       final resolvedTarget = outcome.resolvedTarget;
       _traceQuarkPlaybackStartup(
         'quark.startup.outcome',
@@ -105,10 +109,18 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       if (!shouldOpen) {
         return;
       }
+      await _resolveAndroidMemoryClassIfNeeded();
+      _beginMpvPerformanceSession(resolvedTarget);
       _adaptiveTopChromeController.setVisible(true);
       final diagnostics = await _prepareStartupDiagnostics(resolvedTarget);
       final preflight = diagnostics.preflight;
       final networkEstimate = diagnostics.networkEstimate;
+      _recordMpvPreflightBandwidth(
+        networkEstimate.estimatedSpeedBytesPerSecond,
+      );
+      if (_isBandwidthBelowSourceBitrate(resolvedTarget)) {
+        _showMessage('当前网速低于片源码率，可能持续缓冲');
+      }
       final settings = outcome.settings;
       final timeoutSeconds = _resolvePlaybackOpenTimeoutSeconds(
         baseSeconds: settings.playbackOpenTimeoutSeconds.clamp(1, 600),
@@ -228,6 +240,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         _runtimeMpvErrorRecoveryInProgress = false;
       });
       _startMpvStallWatchdog(playback.player, resolvedTarget);
+      _startMpvPerformanceSampling(playback.player, resolvedTarget);
       _traceWindowsMpv(
         'windows-mpv.initialize.ready',
         fields: {
@@ -257,6 +270,10 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       if (!mounted) {
         return;
       }
+      await _finishMpvPerformanceSession(
+        reason: 'failed',
+        player: _player,
+      );
       _adaptiveTopChromeController.setVisible(true);
       setState(() {
         _error = _buildPlaybackErrorMessage(error);
@@ -271,10 +288,28 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         PlaybackRemotePreflightResult? preflight,
         _PlaybackNetworkEstimate networkEstimate
       })> _prepareStartupDiagnostics(PlaybackTarget target) async {
+    final cachedBytesPerSecond =
+        _PlayerPageState._hostBandwidthCache.resolve(target);
     final preflight = await (_shouldRunRemotePreflight(target)
-        ? _playbackRemotePreflight.probe(target)
+        ? _playbackRemotePreflight.probe(
+            target,
+            options: cachedBytesPerSecond == null
+                ? const PlaybackRemotePreflightOptions()
+                : const PlaybackRemotePreflightOptions(
+                    rangeProbeBytes: 64,
+                    readSampleBytes: 0,
+                  ),
+          )
         : Future<PlaybackRemotePreflightResult?>.value(null));
-    final networkEstimate = _PlaybackNetworkEstimate.fromPreflight(preflight);
+    final freshBytesPerSecond = preflight?.estimatedSpeedBytesPerSecond;
+    if (freshBytesPerSecond != null && freshBytesPerSecond > 0) {
+      _PlayerPageState._hostBandwidthCache.record(target, freshBytesPerSecond);
+    }
+    final networkEstimate = freshBytesPerSecond != null
+        ? _PlaybackNetworkEstimate.fromBytesPerSecond(freshBytesPerSecond)
+        : cachedBytesPerSecond != null
+            ? _PlaybackNetworkEstimate.fromBytesPerSecond(cachedBytesPerSecond)
+            : const _PlaybackNetworkEstimate.none();
 
     if (preflight != null) {
       _traceWindowsMpv(
@@ -287,6 +322,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
           'failureReason': preflight.failureReason.name,
           'authLikelyInvalid': preflight.authLikelyInvalid,
           'linkLikelyExpired': preflight.linkLikelyExpired,
+          'bandwidthCacheHit':
+              freshBytesPerSecond == null && cachedBytesPerSecond != null,
         },
       );
     }

@@ -779,6 +779,9 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android 原生播放器的跨集字幕恢复由 `NativeSubtitleSessionPreferencePolicy` 匹配新的 `TrackSelectionOverride`；双字幕恢复成功后再重新配置 `NativeDualSubtitleController` 的主/副路由，不保存上一集的 Media3 group 或 override 实例
 - 非 Web 内置 MPV 使用原生 `sid / secondary-sid` 选择两条分离的内封文本轨，同时向 libmpv 写入 `sub-pos / secondary-sub-pos / secondary-sub-scale`；由于当前 `libass=false`，画面上的主/副字幕由 Starflow 自定义 Flutter 叠层分别渲染，保证窗口态与全屏态都使用独立位置和字号。跨集时由 `PlaybackSubtitleSessionPreference` 分别匹配新的 `sid / secondary-sid`。图片字幕和临时外挂字幕不进入特殊模式。播放设置一级通过“更多”打开二级页，二级页同时提供字幕布局、后台播放、手势、卡顿恢复和性能调优开关
 - 非 Web MPV 控制层左上角以返回按钮作为第一个控件，不保留人为前置间距；其右侧网速标签使用轻量轮询读取 libmpv `cache-speed`，展示当前缓存下层 I/O 读取速度。桌面 / 手机 Adaptive 控制层和 TV chrome 复用同一排列与网速组件
+- MPV 缓冲预算由 `resolveMpvBufferBudget` 统一计算，并通过 Android `starflow/platform -> getMemoryClassMb` 读取 TV 应用内存等级；低内存 TV 将夸克/激进前向缓冲封顶 `96 MB`、回看封顶 `16 MB`，中高内存和非 TV 继续使用原预算。`resolveMpvRemotePlaybackTuningProfile` 还会比较启动速度与片源码率，达到 `2.5x` 且非高风险容器时进入 `fast-start`，否则保留 standard/high-risk 档
+- MPV 打开重试先由 `classifyMpvOpenFailure` 分类，只有临时网络错误才在统一总超时内重建最多 `3` 次；永久资源/权限/格式错误与未知错误不再无条件重复创建播放器。进程内 `PlaybackHostBandwidthCache` 按主机缓存速度 `10` 分钟，缓存命中后的下一集预检只读取响应状态和 Range 能力
+- 当平滑后的同主机速度低于片源码率 `0.9x` 时，MPV 不再因启动超时或 hard stall 重建同一连接，Exo watchdog 也不重建播放器；两者保留当前连接继续缓冲并给出一次提示
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
 - Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；`/smartstrm_fid/` 和其他含 `#/%23` 的 SmartStrm 原生启动会执行最多 `64` 字节、约 `1.5s` 的轻量预检，以 MP4 `ftyp` 或 HLS `#EXTM3U` 文件头优先选择 MediaSource，响应头和最终路径作为 HLS 辅助判断，不持久化短期重定向地址。预检失败或文件头不明确时继续按原格式启动；标准 `/smartstrm/` 与 `/smartstrm_*/` 路径在首次解析错误 `3003` 后仍由 `NativePlaybackHlsFallbackPolicy` 保留进度并强制切换 HLS 一次
 - Android 原生启动通过 `buildDeferredNativeEpisodeQueue` 携带当前季的完整未解析队列并保留真实 `currentIndex`，只用已解析目标替换当前条目；原生选集、上一集、下一集和播放结束自动续播统一通过 `starflow/native_playback_resolver` 回调 Flutter，按选中的单集执行 `PlaybackTargetResolver` 和必要的 SmartStrm MP4/HLS 探测。异步解析期间旧播放器不释放，成功后才更新队列条目并切换，失败或会话变化则保留当前视频
@@ -788,6 +791,10 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android / iOS 播放记忆仓库使用带 `reload()` 的 legacy SharedPreferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v1`；首次读取会按 `updatedAt` 合并并迁移旧异步存储快照，返回前台时递增播放历史 revision 使首页和详情页重新读取
 - Android 原生播放器每 `10s` 记录一次位置、时长、缓冲位置、缓冲比例、播放态、首帧状态与视频尺寸；位置不连续事件单独记录旧/新位置和 Media3 原因码
 - Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
+- Android 原生播放器的 `NativePlaybackLoadErrorPolicy` 取代统一 `8` 次加载重试：`400/401/403/404/405/410/416` 立即停止，`408/425/429/5xx`、超时和连接类异常最多退避重试 `6` 次，间隔从 `500ms` 增长并封顶 `8s`
+- `NativePlaybackHostBandwidthCache` 在当前原生 Activity 内按主机保留 `10` 分钟带宽；`NativePlaybackBufferPolicy` 用带宽/片源码率的 `2.5x / 1.25x` 阈值选择 fast/balanced/constrained 启动与二次缓冲参数，但目标缓存字节仍由内存等级和重片源档位约束
+- Flutter MPV 与 Android Exo 分别通过 `PlaybackPerformanceTracker / NativePlaybackPerformanceTracker` 汇总同一组会话指标，并统一写入 `playback.performance`：首帧、缓冲次数与累计时长、恢复次数、速度 min/avg/max、片源码率及比值、解码器/硬解、掉帧、音频欠载和缓冲预算。首帧记录一次，会话切集、失败或退出时记录一次摘要
+- Flutter 启动层额外记录 `targetResolutionMs / startupToFirstFrameMs`，用来把播放地址解析时间与播放器自身首帧时间分开；这条记录不增加网络请求
 - iOS 原生播放器容器页当前使用原生 `AVPlayerViewController` 全屏承载播放，不退出 App；它会复用同一份续播记忆，并补了在线字幕搜索入口，但解码走系统链路，当前不提供软硬解切换或字幕偏移
 - iOS 原生播放器切集前从 `currentMediaSelection` 读取当前系统字幕选择，下一集的 legible group 可用后按语言与显示名称恢复；没有匹配项时回退全局自动字幕策略
 - 详情页“从头播放”从当前选择生成 `allowResume=false` 的目标，“继续播放”从历史记录恢复具体目标并设置 `allowResume=true`；该字段在播放地址解析后保持不变，内置 `MPV`、Android `ExoPlayer` 和 iOS `AVPlayer` 都以它作为是否读取历史进度的唯一入口语义

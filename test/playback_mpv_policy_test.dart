@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
@@ -101,6 +103,92 @@ void main() {
       expect(profile.cachePauseWait, '5.2');
       expect(profile.cachePauseInitial, 'yes');
       expect(profile.networkTimeoutSeconds, '32');
+    });
+
+    test('caps quark buffers on low-memory televisions', () {
+      const target = PlaybackTarget(
+        title: 'Quark 4K',
+        sourceId: 'quark-main',
+        streamUrl: 'https://download.example.com/movie.mkv',
+        sourceName: 'Quark',
+        sourceKind: MediaSourceKind.quark,
+        width: 3840,
+        height: 2160,
+      );
+
+      final budget = resolveMpvBufferBudget(
+        target: target,
+        aggressiveTuning: true,
+        isTelevision: true,
+        memoryClassMb: 192,
+      );
+
+      expect(budget.forwardBytes, 96 * 1024 * 1024);
+      expect(budget.backBytes, 16 * 1024 * 1024);
+      expect(budget.memoryCapApplied, isTrue);
+    });
+
+    test('keeps full quark buffer budget on non-television devices', () {
+      const target = PlaybackTarget(
+        title: 'Quark 4K',
+        sourceId: 'quark-main',
+        streamUrl: 'https://download.example.com/movie.mkv',
+        sourceName: 'Quark',
+        sourceKind: MediaSourceKind.quark,
+      );
+
+      final budget = resolveMpvBufferBudget(
+        target: target,
+        aggressiveTuning: true,
+        isTelevision: false,
+        memoryClassMb: 192,
+      );
+
+      expect(budget.forwardBytes, 256 * 1024 * 1024);
+      expect(budget.memoryCapApplied, isFalse);
+    });
+
+    test('classifies only transient network failures for open retry', () {
+      expect(
+        classifyMpvOpenFailure(TimeoutException('network timeout')),
+        MpvOpenFailureKind.transientNetwork,
+      );
+      expect(
+        classifyMpvOpenFailure(Exception('HTTP error 404 file not found')),
+        MpvOpenFailureKind.permanent,
+      );
+      expect(
+        classifyMpvOpenFailure(Exception('server returned status code 503')),
+        MpvOpenFailureKind.transientNetwork,
+      );
+      expect(
+        classifyMpvOpenFailure(Exception('decoder initialization failed')),
+        MpvOpenFailureKind.unknown,
+      );
+    });
+
+    test('uses fast-start profile when throughput comfortably beats bitrate',
+        () {
+      const target = PlaybackTarget(
+        title: 'Fast MP4',
+        sourceId: 'nas-main',
+        streamUrl: 'https://media.example.com/movie.mp4',
+        sourceName: 'NAS',
+        sourceKind: MediaSourceKind.nas,
+        container: 'mp4',
+        bitrate: 10000000,
+      );
+
+      final profile = resolveMpvRemotePlaybackTuningProfile(
+        target: target,
+        aggressiveTuning: false,
+        heavyPlayback: false,
+        preflightEstimatedMegabitsPerSecond: 30,
+      );
+
+      expect(profile?.name, 'fast-start');
+      expect(profile?.cachePauseInitial, 'no');
+      expect(profile?.demuxerReadaheadSecs, '12');
     });
 
     test('keeps unified high-risk tuning for heavy aggressive quark playback',

@@ -46,6 +46,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
 
     _runtimeMpvErrorRecoveryInProgress = true;
     _runtimeMpvErrorRecoveryAttempts += 1;
+    _mpvPerformanceTracker?.recordRecovery();
     _showMessage('连接波动，正在尝试恢复播放…');
     final baselinePosition = player.state.position;
 
@@ -264,12 +265,15 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
       );
     }
     return MpvStallWatchdogConfig(
-      minBufferingBeforeCheck:
-          startupPhase ? const Duration(seconds: 2) : const Duration(seconds: 3),
-      softRecoverAfter:
-          startupPhase ? const Duration(seconds: 5) : const Duration(seconds: 6),
-      hardRecoverAfter:
-          startupPhase ? const Duration(seconds: 10) : const Duration(seconds: 12),
+      minBufferingBeforeCheck: startupPhase
+          ? const Duration(seconds: 2)
+          : const Duration(seconds: 3),
+      softRecoverAfter: startupPhase
+          ? const Duration(seconds: 5)
+          : const Duration(seconds: 6),
+      hardRecoverAfter: startupPhase
+          ? const Duration(seconds: 10)
+          : const Duration(seconds: 12),
       requirePlaying: !startupPhase,
     );
   }
@@ -370,6 +374,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     }
     if (decision.level == MpvStallRecoveryLevel.soft) {
       _mpvStallRecoveryInProgress = true;
+      _mpvPerformanceTracker?.recordRecovery();
       try {
         await _attemptSoftMpvStallRecovery(
           player,
@@ -392,7 +397,12 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     if (_mpvStallRecoveryInProgress || _player != player) {
       return;
     }
+    if (_isBandwidthBelowSourceBitrate(target)) {
+      _showMessage('当前网速低于片源码率，继续等待缓冲');
+      return;
+    }
     _mpvStallRecoveryInProgress = true;
+    _mpvPerformanceTracker?.recordRecovery();
     _traceWindowsMpv(
       'windows-mpv.stall.recover-hard',
       fields: {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -13,6 +15,114 @@ const Set<String> _kLowLatencyRemotePlaybackSchemes = {
   'rtsp',
   'rtmp',
 };
+
+const int _mib = 1024 * 1024;
+
+class MpvBufferBudget {
+  const MpvBufferBudget({
+    required this.forwardBytes,
+    required this.backBytes,
+    required this.memoryCapApplied,
+  });
+
+  final int forwardBytes;
+  final int backBytes;
+  final bool memoryCapApplied;
+}
+
+MpvBufferBudget resolveMpvBufferBudget({
+  required PlaybackTarget target,
+  required bool aggressiveTuning,
+  required bool isTelevision,
+  int? memoryClassMb,
+}) {
+  final remote = isLikelyRemotePlaybackTargetTransport(target);
+  final heavy = isHeavyPlaybackTargetMetadata(target);
+  final quark = isLikelyQuarkPlaybackTarget(target);
+  var forwardBytes = switch ((quark, aggressiveTuning, remote, heavy)) {
+    (true, true, _, _) => 256 * _mib,
+    (true, false, _, _) => 192 * _mib,
+    (false, true, _, _) => 128 * _mib,
+    (false, false, true, _) when isTelevision => 96 * _mib,
+    (false, false, _, true) => 96 * _mib,
+    (false, false, true, false) => 64 * _mib,
+    _ => 32 * _mib,
+  };
+  var backCapBytes = quark ? 64 * _mib : 32 * _mib;
+  final originalForwardBytes = forwardBytes;
+
+  if (isTelevision && memoryClassMb != null && memoryClassMb > 0) {
+    if (memoryClassMb <= 256) {
+      forwardBytes = forwardBytes.clamp(
+        32 * _mib,
+        (quark || heavy) ? 96 * _mib : 64 * _mib,
+      );
+      backCapBytes = 16 * _mib;
+    } else if (memoryClassMb <= 512) {
+      forwardBytes = forwardBytes.clamp(32 * _mib, 160 * _mib);
+      backCapBytes = 32 * _mib;
+    }
+  }
+
+  final backBytes = (forwardBytes ~/ 4).clamp(8 * _mib, backCapBytes);
+  return MpvBufferBudget(
+    forwardBytes: forwardBytes,
+    backBytes: backBytes,
+    memoryCapApplied: forwardBytes < originalForwardBytes,
+  );
+}
+
+enum MpvOpenFailureKind { transientNetwork, permanent, unknown }
+
+MpvOpenFailureKind classifyMpvOpenFailure(Object error) {
+  if (error is TimeoutException) {
+    return MpvOpenFailureKind.transientNetwork;
+  }
+  final message = '$error'.trim().toLowerCase();
+  final statusMatch = RegExp(
+    r'(?:http(?:\s+error)?|status\s+code)\s*[:=]?\s*(\d{3})',
+  ).firstMatch(message);
+  final statusCode = int.tryParse(statusMatch?.group(1) ?? '');
+  if (statusCode != null) {
+    if (statusCode == 408 ||
+        statusCode == 425 ||
+        statusCode == 429 ||
+        (statusCode >= 500 && statusCode <= 599)) {
+      return MpvOpenFailureKind.transientNetwork;
+    }
+    if (<int>{400, 401, 403, 404, 405, 410, 416}.contains(statusCode)) {
+      return MpvOpenFailureKind.permanent;
+    }
+  }
+  const permanentFragments = <String>[
+    'protocol not found',
+    'no such file',
+    'file not found',
+    'permission denied',
+    'invalid argument',
+    'unsupported',
+    'unrecognized file format',
+    'no video or audio streams selected',
+  ];
+  if (permanentFragments.any(message.contains)) {
+    return MpvOpenFailureKind.permanent;
+  }
+  const transientFragments = <String>[
+    'connection',
+    'timed out',
+    'timeout',
+    'network',
+    'broken pipe',
+    'temporarily unavailable',
+    'i/o error',
+    'reset by peer',
+    'failed to open',
+  ];
+  if (transientFragments.any(message.contains)) {
+    return MpvOpenFailureKind.transientNetwork;
+  }
+  return MpvOpenFailureKind.unknown;
+}
 
 String playbackUrlScheme(String url) {
   return Uri.tryParse(url.trim())?.scheme.toLowerCase() ?? '';
@@ -109,6 +219,7 @@ bool _isVeryHeavyPlaybackTargetMetadata(PlaybackTarget target) {
 
 class MpvRemotePlaybackTuningProfile {
   const MpvRemotePlaybackTuningProfile({
+    required this.name,
     required this.networkTimeoutSeconds,
     required this.cacheOnDisk,
     required this.cacheSecs,
@@ -119,6 +230,7 @@ class MpvRemotePlaybackTuningProfile {
     required this.lowLatency,
   });
 
+  final String name;
   final String networkTimeoutSeconds;
   final String cacheOnDisk;
   final String cacheSecs;
@@ -142,6 +254,16 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
       : target.streamUrl;
   final scheme = playbackUrlScheme(transportUrl);
   final measuredSpeedMbps = preflightEstimatedMegabitsPerSecond;
+  final bitrateMbps =
+      (target.bitrate ?? 0) > 0 ? (target.bitrate! / 1000000) : null;
+  final throughputToBitrateRatio = measuredSpeedMbps != null &&
+          measuredSpeedMbps > 0 &&
+          bitrateMbps != null &&
+          bitrateMbps > 0
+      ? measuredSpeedMbps / bitrateMbps
+      : null;
+  final fastStartupSpeed =
+      throughputToBitrateRatio != null && throughputToBitrateRatio >= 2.5;
   final lowStartupSpeed = measuredSpeedMbps != null &&
       measuredSpeedMbps > 0 &&
       measuredSpeedMbps < 16;
@@ -154,6 +276,7 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
   final veryHeavyPlayback = _isVeryHeavyPlaybackTargetMetadata(target);
   if (_kLowLatencyRemotePlaybackSchemes.contains(scheme)) {
     return const MpvRemotePlaybackTuningProfile(
+      name: 'low-latency',
       networkTimeoutSeconds: '10',
       cacheOnDisk: 'no',
       cacheSecs: '',
@@ -166,6 +289,19 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
   }
 
   if (_kBufferedRemotePlaybackSchemes.contains(scheme)) {
+    if (fastStartupSpeed && !veryHeavyPlayback && !highRiskContainer) {
+      return const MpvRemotePlaybackTuningProfile(
+        name: 'fast-start',
+        networkTimeoutSeconds: '16',
+        cacheOnDisk: 'no',
+        cacheSecs: '45',
+        demuxerReadaheadSecs: '12',
+        demuxerHysteresisSecs: '5',
+        cachePauseWait: '1.2',
+        cachePauseInitial: 'no',
+        lowLatency: false,
+      );
+    }
     final highRisk = isLikelyQuarkPlaybackTarget(target) ||
         criticalStartupSpeed ||
         lowStartupSpeed ||
@@ -175,6 +311,7 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
         heavyPlayback;
     if (highRisk) {
       return const MpvRemotePlaybackTuningProfile(
+        name: 'buffered-high-risk',
         networkTimeoutSeconds: '32',
         cacheOnDisk: 'no',
         cacheSecs: '150',
@@ -186,6 +323,7 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
       );
     }
     return const MpvRemotePlaybackTuningProfile(
+      name: 'buffered-standard',
       networkTimeoutSeconds: '24',
       cacheOnDisk: 'no',
       cacheSecs: '90',

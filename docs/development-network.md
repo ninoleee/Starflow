@@ -126,6 +126,10 @@
 - Android TV 对 `DDP / E-AC-3` 启用的 PCM 兼容输出只调整设备本地 Media3 音频渲染，并由随 APK 打包的 FFmpeg 扩展解码音频；不改变 Emby 播放地址、鉴权请求头、直连/转码选择或网络重试行为
 - 非 `TV` 内嵌 `MPV` 改为 Starflow 自己的轻量播放叠层，也只是本地播放器 UI 收敛；控制首层只保留返回 / 播放 / 进度 / 全屏 / 更多，播放设置一级再以“更多”进入字幕布局和 MPV 参数二级页。字幕、音轨、外挂字幕、在线字幕、字幕偏移、后台播放和 MPV 运行参数仍然复用现有播放链路，不新增新的服务端接口
 - Exo 右上角网速来自 Media3 当前会话已有传输事件；MPV 顶栏以左上角返回按钮起始，右侧网速来自本地 libmpv `cache-speed` 属性。两者都不额外发起测速或网络请求；控制栏隐藏只隐藏标签，MPV 的属性读取也只发生在本地进程
+- Exo 与 MPV 会把同主机实测速度在进程内保留 `10` 分钟用于下一集调参，不写入配置或磁盘。MPV 缓存命中后仍发起极小 Range 请求检查鉴权、状态和 Range 能力，但不重复读取默认 `16 KB` 测速样本；Exo 直接复用同一原生 Activity 的 Media3 带宽样本
+- MPV 仅对临时网络失败重试；Exo 的 Media3 加载策略也只对超时、连接类、`408/425/429/5xx` 做有限退避。鉴权、文件不存在、永久 HTTP 状态和格式/解码错误不会因新策略产生额外请求
+- 同主机速度使用最近样本的轻量平滑值；低于片源码率 `0.9x` 时，MPV/Exo 都保留当前连接继续缓冲，不再重复释放并重建播放器；提示不新增测速请求
+- `playback.performance` 只在地址解析、首帧等启动关键边界与会话结束记录本地统计，不触发测速或远端上报；MPV 会在释放前以每项最多 `250ms` 读取本地 libmpv 解码器、掉帧和缓存速度属性，Exo 直接消费现有 Analytics/BandwidthMeter 事件
 - 内置 `MPV` 主动退出时会先立即关闭播放页，再在后台保存进度并完成 `pause -> stop -> dispose`；下一次打开前仍串行等待上一实例释放，关闭后台播放和打开新片源也复用同一套本地清理流程，不新增网络请求
 - `lib/core/utils/playback_trace.dart`、`lib/core/utils/subtitle_search_trace.dart`、`lib/core/utils/metadata_search_trace.dart`、`lib/core/utils/detail_resource_switch_trace.dart` 当前都已静音；保留这些 helper 主要是为了兼容已有调用点
 - 非 `TV` 叠层里的 fullscreen 状态透传、窗口态 click-only 唤醒、auto-hide 定时器取消、播放设置弹窗 Material 化和 dispose 保护也都属于本地 widget 生命周期修正，不涉及新的网络协议

@@ -34,6 +34,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
   }
 
   Future<void> _launchWithNativeContainer(PlaybackTarget target) async {
+    final nativeLaunchStartedAt = DateTime.now();
     _traceQuarkPlaybackStartup(
       'quark.launch.native.begin',
       target: target,
@@ -44,6 +45,22 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       },
     );
     final result = await _launchNativePlaybackTarget(target);
+    appLogInfo(
+      'playback.performance',
+      'Native playback launch completed',
+      fields: <String, Object?>{
+        'engine': 'exo',
+        'targetResolutionMs': _playbackTargetResolutionMs,
+        'nativeLaunchMs':
+            DateTime.now().difference(nativeLaunchStartedAt).inMilliseconds,
+        'startupToFirstFrameMs': _playbackStartupStartedAt == null
+            ? 0
+            : DateTime.now()
+                .difference(_playbackStartupStartedAt!)
+                .inMilliseconds,
+        'launched': result.launched,
+      },
+    );
     _traceQuarkPlaybackStartup(
       'quark.launch.native.result',
       target: target,

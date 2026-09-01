@@ -127,24 +127,32 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
   }
 
   int _resolveMpvBufferSizeBytes(PlaybackTarget target) {
-    if (isLikelyQuarkPlaybackTarget(target)) {
-      return _shouldUseAggressiveMpvTuning(target)
-          ? _PlayerPageState._kAggressiveQuarkMpvBufferSizeBytes
-          : _PlayerPageState._kQuarkMpvBufferSizeBytes;
+    return _resolveMpvBufferBudget(target).forwardBytes;
+  }
+
+  MpvBufferBudget _resolveMpvBufferBudget(PlaybackTarget target) {
+    return resolveMpvBufferBudget(
+      target: target,
+      aggressiveTuning: _shouldUseAggressiveMpvTuning(target),
+      isTelevision: _isTelevisionPlaybackDevice,
+      memoryClassMb: _androidMemoryClassMb,
+    );
+  }
+
+  Future<void> _resolveAndroidMemoryClassIfNeeded() async {
+    if (_androidMemoryClassResolved ||
+        defaultTargetPlatform != TargetPlatform.android ||
+        !_isTelevisionPlaybackDevice) {
+      return;
     }
-    if (_shouldUseAggressiveMpvTuning(target)) {
-      return _PlayerPageState._kAggressiveMpvBufferSizeBytes;
+    _androidMemoryClassResolved = true;
+    try {
+      final value = await _PlayerPageState._platformChannel
+          .invokeMethod<num>('getMemoryClassMb');
+      _androidMemoryClassMb = value?.toInt();
+    } catch (_) {
+      _androidMemoryClassMb = null;
     }
-    if (_isTelevisionPlaybackDevice && _isLikelyRemotePlaybackTarget(target)) {
-      return _PlayerPageState._kHeavyMpvBufferSizeBytes;
-    }
-    if (_isHeavyPlaybackTarget(target)) {
-      return _PlayerPageState._kHeavyMpvBufferSizeBytes;
-    }
-    if (_isLikelyRemotePlaybackTarget(target)) {
-      return _PlayerPageState._kNetworkMpvBufferSizeBytes;
-    }
-    return _PlayerPageState._kDefaultMpvBufferSizeBytes;
   }
 
   bool _isLikelyRemotePlaybackTarget(PlaybackTarget target) {
@@ -161,6 +169,17 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     }
     return _isHeavyPlaybackTarget(target) ||
         _isLikelyRemotePlaybackTarget(target);
+  }
+
+  bool _isBandwidthBelowSourceBitrate(PlaybackTarget target) {
+    final bytesPerSecond =
+        _PlayerPageState._hostBandwidthCache.resolve(target) ??
+            _networkEstimate.estimatedSpeedBytesPerSecond;
+    final bitrate = target.bitrate ?? 0;
+    if (bytesPerSecond == null || bytesPerSecond <= 0 || bitrate <= 0) {
+      return false;
+    }
+    return bytesPerSecond * 8 < bitrate * 0.9;
   }
 
   PlaybackMpvQualityPreset _resolveEffectiveMpvQualityPreset(
@@ -300,15 +319,13 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
         'qualityPresetApplied': qualityPreset.name,
         'bufferSizeBytes': bufferSizeBytes,
         'backBufferBytes': backBufferBytes,
+        'memoryClassMb': _androidMemoryClassMb ?? 0,
+        'memoryCapApplied': _resolveMpvBufferBudget(target).memoryCapApplied,
         'quarkTuning': isLikelyQuarkPlaybackTarget(target),
         'preflightEstimatedMbps':
             _networkEstimateMegabitsPerSecond?.toStringAsFixed(2) ?? '',
         'rangeRisk': _remotePreflightIndicatesRangeRisk,
-        'remoteProfile': remoteProfile == null
-            ? ''
-            : remoteProfile.lowLatency
-                ? 'low-latency'
-                : 'buffered',
+        'remoteProfile': remoteProfile?.name ?? '',
         'skipLoopFilter': shouldSkipLoopFilter ? 'nonref' : 'none',
       },
     );
@@ -318,16 +335,7 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     PlaybackTarget target, {
     required int bufferSizeBytes,
   }) {
-    final maxBackBufferBytes = isLikelyQuarkPlaybackTarget(target)
-        ? _PlayerPageState._kMaxQuarkMpvBackBufferSizeBytes
-        : _PlayerPageState._kMaxMpvBackBufferSizeBytes;
-    var backBufferBytes = bufferSizeBytes ~/ 4;
-    if (backBufferBytes < _PlayerPageState._kMinMpvBackBufferSizeBytes) {
-      backBufferBytes = _PlayerPageState._kMinMpvBackBufferSizeBytes;
-    } else if (backBufferBytes > maxBackBufferBytes) {
-      backBufferBytes = maxBackBufferBytes;
-    }
-    return backBufferBytes;
+    return _resolveMpvBufferBudget(target).backBytes;
   }
 
   bool get _remotePreflightIndicatesRangeRisk {

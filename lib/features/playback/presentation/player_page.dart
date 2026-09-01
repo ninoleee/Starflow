@@ -17,6 +17,7 @@ import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -26,6 +27,7 @@ import 'package:starflow/features/playback/application/playback_subtitle_session
 import 'package:starflow/features/playback/application/native_playback_episode_queue_policy.dart';
 import 'package:starflow/features/playback/application/native_playback_media_type.dart';
 import 'package:starflow/features/playback/application/playback_episode_queue_resolver.dart';
+import 'package:starflow/features/playback/application/playback_performance_tracker.dart';
 import 'package:starflow/features/playback/application/playback_remote_preflight.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
@@ -61,6 +63,7 @@ part 'widgets/player_page_startup_mpv_open.part.dart';
 part 'widgets/player_page_startup_mpv_recovery.part.dart';
 part 'widgets/player_page_startup_mpv_launch.part.dart';
 part 'widgets/player_page_startup_mpv_tuning.part.dart';
+part 'widgets/player_page_performance.part.dart';
 part 'widgets/player_page_runtime_actions.part.dart';
 part 'widgets/player_page_controls.part.dart';
 
@@ -119,16 +122,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   static const _kSeekStep = Duration(seconds: 10);
   static const _kSubtitleDelaySteps = <double>[-2, -1, -0.5, 0, 0.5, 1, 2];
   static const _kProgressPersistInterval = Duration(seconds: 10);
-  static const int _kDefaultMpvBufferSizeBytes = 32 * 1024 * 1024;
-  static const int _kNetworkMpvBufferSizeBytes = 64 * 1024 * 1024;
-  static const int _kHeavyMpvBufferSizeBytes = 96 * 1024 * 1024;
-  static const int _kAggressiveMpvBufferSizeBytes = 128 * 1024 * 1024;
-  static const int _kQuarkMpvBufferSizeBytes = 192 * 1024 * 1024;
-  static const int _kAggressiveQuarkMpvBufferSizeBytes = 256 * 1024 * 1024;
-  static const int _kMinMpvBackBufferSizeBytes = 8 * 1024 * 1024;
-  static const int _kMaxMpvBackBufferSizeBytes = 32 * 1024 * 1024;
-  static const int _kMaxQuarkMpvBackBufferSizeBytes = 64 * 1024 * 1024;
   static Future<void> _playerShutdownQueue = Future<void>.value();
+  static final PlaybackHostBandwidthCache _hostBandwidthCache =
+      PlaybackHostBandwidthCache();
 
   Player? _player;
   VideoController? _videoController;
@@ -143,7 +139,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   StreamSubscription<double>? _playerBufferingPercentageSubscription;
   PlaybackTarget? _resolvedTarget;
   PlaybackEpisodeQueue? _episodeQueue;
-  _PlaybackNetworkEstimate _networkEstimate = const _PlaybackNetworkEstimate();
+  _PlaybackNetworkEstimate _networkEstimate =
+      const _PlaybackNetworkEstimate.none();
   SeriesSkipPreference? _seriesSkipPreference;
   Object? _error;
   bool _isReady = false;
@@ -287,6 +284,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   int _runtimeMpvErrorRecoveryAttempts = 0;
   bool _runtimeMpvErrorRecoveryInProgress = false;
   bool _episodeQueueAdvanceInProgress = false;
+  int? _androidMemoryClassMb;
+  bool _androidMemoryClassResolved = false;
+  PlaybackPerformanceTracker? _mpvPerformanceTracker;
+  Timer? _mpvPerformanceSampleTimer;
+  bool _mpvPerformanceSampleInProgress = false;
+  DateTime? _playbackStartupStartedAt;
+  int _playbackTargetResolutionMs = 0;
 
   @override
   void initState() {
@@ -357,6 +361,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Player? _detachActivePlayerState({
     bool clearStallRecoveryFlag = true,
   }) {
+    _stopMpvPerformanceSampling();
     final player = _player;
     _player = null;
     _videoController = null;
@@ -377,6 +382,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     required bool persistProgress,
     required bool teardownPlatformState,
   }) async {
+    await _finishMpvPerformanceSession(reason: reason, player: player);
     if (persistProgress) {
       await _persistPlaybackProgress(
         force: true,
@@ -1013,21 +1019,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 }
 
 class _PlaybackNetworkEstimate {
-  const _PlaybackNetworkEstimate({
-    this.estimatedSpeedBytesPerSecond,
-  });
+  const _PlaybackNetworkEstimate.none() : estimatedSpeedBytesPerSecond = null;
 
-  factory _PlaybackNetworkEstimate.fromPreflight(
-    PlaybackRemotePreflightResult? preflight,
-  ) {
-    final bytesPerSecond = preflight?.estimatedSpeedBytesPerSecond;
-    if (bytesPerSecond == null) {
-      return const _PlaybackNetworkEstimate();
-    }
-    return _PlaybackNetworkEstimate(
-      estimatedSpeedBytesPerSecond: bytesPerSecond,
-    );
-  }
+  const _PlaybackNetworkEstimate.fromBytesPerSecond(
+    int this.estimatedSpeedBytesPerSecond,
+  );
 
   final int? estimatedSpeedBytesPerSecond;
 
