@@ -3,21 +3,25 @@ part of 'home_page.dart';
 const double _kHomePosterRailFocusOverflowPadding = 10;
 const double _kHomeCarouselFocusOverflowPadding = 10;
 
+String _homeSectionViewAllFocusKey(HomeSectionViewModel section) {
+  return 'view-all:${section.id}';
+}
+
 class _HomeSectionSlot extends ConsumerStatefulWidget {
   const _HomeSectionSlot({
     super.key,
     required this.module,
     required this.isPageVisible,
-    required this.useHeroNextSectionFocusNode,
-    required this.heroNextSectionFocusNode,
+    required this.focusNodeForContent,
+    required this.autofocusFirstItem,
     required this.homeMetadataAutoRefreshRevision,
     required this.homeNavigationResetRevision,
   });
 
   final HomeModuleConfig module;
   final bool isPageVisible;
-  final bool useHeroNextSectionFocusNode;
-  final FocusNode heroNextSectionFocusNode;
+  final FocusNode Function(String focusKey) focusNodeForContent;
+  final bool autofocusFirstItem;
   final int homeMetadataAutoRefreshRevision;
   final int homeNavigationResetRevision;
 
@@ -113,15 +117,26 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
               extra: viewAllTarget.extra,
             );
           };
+    final posterItemKeys = <Key>[
+      for (final item in section.items)
+        ValueKey<String>(_homeSectionItemFocusKey(section, item)),
+      if (openViewAll != null)
+        ValueKey<String>(_homeSectionViewAllFocusKey(section)),
+    ];
+    final posterIndicesByKey = <Key, int>{
+      for (var index = 0; index < posterItemKeys.length; index += 1)
+        posterItemKeys[index]: index,
+    };
     return _HomeSection(
       title: section.title,
       child: section.layout == HomeSectionLayout.carousel
           ? _HomeCarousel(
               items: section.carouselItems,
               focusScopePrefix: 'home:carousel:${section.id}',
-              firstItemFocusNode: widget.useHeroNextSectionFocusNode
-                  ? widget.heroNextSectionFocusNode
-                  : null,
+              focusNodeForItem: (item) => widget.focusNodeForContent(
+                _homeCarouselItemFocusKey(section, item),
+              ),
+              autofocusFirstItem: widget.autofocusFirstItem,
             )
           : section.items.isEmpty
               ? _SectionEmptyState(message: section.emptyMessage)
@@ -142,27 +157,31 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
                       scrollDirection: Axis.horizontal,
                       itemCount:
                           section.items.length + (openViewAll == null ? 0 : 1),
+                      findItemIndexCallback: (key) => posterIndicesByKey[key],
                       separatorBuilder: (context, index) =>
                           const SizedBox(width: 10),
                       itemBuilder: (context, index) {
                         if (index >= section.items.length) {
                           return _HomeSectionViewAllTile(
+                            key: posterItemKeys[index],
+                            focusNode: widget.focusNodeForContent(
+                              _homeSectionViewAllFocusKey(section),
+                            ),
                             focusId: 'home:section:${section.id}:view-all',
                             onTap: openViewAll!,
                           );
                         }
                         final item = section.items[index];
                         return _HomePosterTile(
+                          key: posterItemKeys[index],
                           module: widget.module,
                           item: item,
-                          focusNode:
-                              widget.useHeroNextSectionFocusNode && index == 0
-                                  ? widget.heroNextSectionFocusNode
-                                  : null,
+                          focusNode: widget.focusNodeForContent(
+                            _homeSectionItemFocusKey(section, item),
+                          ),
                           focusId:
                               'home:section:${section.id}:item:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
-                          autofocus:
-                              widget.useHeroNextSectionFocusNode && index == 0,
+                          autofocus: widget.autofocusFirstItem && index == 0,
                         );
                       },
                     ),
@@ -194,6 +213,7 @@ String _resolveHomePosterBadgeText({
 
 class _HomePosterTile extends StatelessWidget {
   const _HomePosterTile({
+    super.key,
     required this.module,
     required this.item,
     this.focusNode,
@@ -717,11 +737,14 @@ class _HomeSection extends StatelessWidget {
 
 class _HomeSectionViewAllTile extends ConsumerWidget {
   const _HomeSectionViewAllTile({
+    super.key,
     required this.onTap,
+    this.focusNode,
     this.focusId,
   });
 
   final VoidCallback onTap;
+  final FocusNode? focusNode;
   final String? focusId;
 
   @override
@@ -767,6 +790,7 @@ class _HomeSectionViewAllTile extends ConsumerWidget {
     if (isTelevision) {
       return TvFocusableAction(
         onPressed: onTap,
+        focusNode: focusNode,
         focusId: focusId,
         borderRadius: BorderRadius.circular(18),
         visualStyle: TvFocusVisualStyle.floating,
@@ -786,12 +810,14 @@ class _HomeCarousel extends ConsumerStatefulWidget {
   const _HomeCarousel({
     required this.items,
     required this.focusScopePrefix,
-    this.firstItemFocusNode,
+    required this.focusNodeForItem,
+    this.autofocusFirstItem = false,
   });
 
   final List<HomeCarouselItemViewModel> items;
   final String focusScopePrefix;
-  final FocusNode? firstItemFocusNode;
+  final FocusNode Function(HomeCarouselItemViewModel item) focusNodeForItem;
+  final bool autofocusFirstItem;
 
   @override
   ConsumerState<_HomeCarousel> createState() => _HomeCarouselState();
@@ -838,6 +864,16 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
     }
 
     if (isTelevision) {
+      final itemKeys = <Key>[
+        for (final item in items)
+          ValueKey<String>(
+            '${widget.focusScopePrefix}:${_homeCarouselResourceIdentity(item)}',
+          ),
+      ];
+      final itemIndicesByKey = <Key, int>{
+        for (var index = 0; index < itemKeys.length; index += 1)
+          itemKeys[index]: index,
+      };
       return SizedBox(
         height: 184 + _kHomeCarouselFocusOverflowPadding,
         child: ListView.separated(
@@ -847,18 +883,20 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
           clipBehavior: Clip.none,
           scrollDirection: Axis.horizontal,
           itemCount: items.length,
+          findItemIndexCallback: (key) => itemIndicesByKey[key],
           separatorBuilder: (context, index) => const SizedBox(width: 10),
           itemBuilder: (context, index) {
             final item = items[index];
             return SizedBox(
+              key: itemKeys[index],
               width: 320,
               child: _HomeCarouselTile(
                 item: item,
                 isTelevision: true,
                 focusId:
                     '${widget.focusScopePrefix}:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
-                focusNode: index == 0 ? widget.firstItemFocusNode : null,
-                autofocus: widget.firstItemFocusNode != null && index == 0,
+                focusNode: widget.focusNodeForItem(item),
+                autofocus: widget.autofocusFirstItem && index == 0,
               ),
             );
           },
@@ -871,9 +909,23 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
       child: PageView.builder(
         controller: _mobilePageController,
         itemCount: items.length,
+        findChildIndexCallback: (key) {
+          for (var index = 0; index < items.length; index += 1) {
+            final itemKey = ValueKey<String>(
+              '${widget.focusScopePrefix}:${_homeCarouselResourceIdentity(items[index])}',
+            );
+            if (itemKey == key) {
+              return index;
+            }
+          }
+          return null;
+        },
         itemBuilder: (context, index) {
           final item = items[index];
           return Padding(
+            key: ValueKey<String>(
+              '${widget.focusScopePrefix}:${_homeCarouselResourceIdentity(item)}',
+            ),
             padding: EdgeInsets.only(right: index == items.length - 1 ? 0 : 6),
             child: _HomeCarouselTile(
               item: item,
@@ -1013,7 +1065,13 @@ class _HomeCarouselCard extends StatelessWidget {
 }
 
 class _HomeEditButton extends ConsumerWidget {
-  const _HomeEditButton();
+  const _HomeEditButton({
+    this.focusNode,
+    this.autofocus = false,
+  });
+
+  final FocusNode? focusNode;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1029,6 +1087,9 @@ class _HomeEditButton extends ConsumerWidget {
                   icon: Icons.tune_rounded,
                   onPressed: () => context.pushNamed('home-editor'),
                   variant: TvButtonVariant.text,
+                  focusNode: focusNode,
+                  focusId: 'home:edit',
+                  autofocus: autofocus,
                 )
               : TextButton.icon(
                   onPressed: () => context.pushNamed('home-editor'),
@@ -1053,7 +1114,13 @@ class _HomeEditButton extends ConsumerWidget {
 }
 
 class _EmptyHomeState extends StatelessWidget {
-  const _EmptyHomeState();
+  const _EmptyHomeState({
+    this.editFocusNode,
+    this.autofocusEdit = false,
+  });
+
+  final FocusNode? editFocusNode;
+  final bool autofocusEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -1064,17 +1131,20 @@ class _EmptyHomeState extends StatelessWidget {
           padding: EdgeInsets.zero,
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: constraints.maxHeight),
-            child: const Center(
+            child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  StarflowLogo(
+                  const StarflowLogo(
                     iconSize: 112,
                     showWordmark: true,
                     wordmarkSize: 34,
                   ),
-                  SizedBox(height: 18),
-                  _HomeEditButton(),
+                  const SizedBox(height: 18),
+                  _HomeEditButton(
+                    focusNode: editFocusNode,
+                    autofocus: autofocusEdit,
+                  ),
                 ],
               ),
             ),

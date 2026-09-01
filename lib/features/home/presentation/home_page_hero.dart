@@ -181,7 +181,7 @@ class _FeaturedHeroItem {
       landscapeImage: landscapeImage,
     );
     return _FeaturedHeroItem(
-      id: item.id,
+      id: _homeCarouselResourceIdentity(item),
       title: item.title,
       landscapeImage: landscapeImage,
       portraitImage: portraitImage,
@@ -213,7 +213,7 @@ class _FeaturedHeroItem {
       landscapeImage: landscapeImage,
     );
     return _FeaturedHeroItem(
-      id: item.id,
+      id: _homeCardResourceIdentity(item),
       title: item.title,
       landscapeImage: landscapeImage,
       portraitImage: portraitImage,
@@ -379,6 +379,7 @@ class _FeaturedHero extends StatefulWidget {
   const _FeaturedHero({
     super.key,
     required this.items,
+    required this.contentScopeId,
     required this.displayMode,
     required this.isTelevision,
     required this.staticModeEnabled,
@@ -387,12 +388,14 @@ class _FeaturedHero extends StatefulWidget {
     required this.logoTitleEnabled,
     required this.translucentEffectsEnabled,
     required this.focusScopePrefix,
+    required this.autofocusCurrentItem,
     this.onFocusBelowControl,
     this.onHeroFocusGained,
     this.onFocusedItemChanged,
   });
 
   final List<_FeaturedHeroItem> items;
+  final String contentScopeId;
   final HomeHeroDisplayMode displayMode;
   final bool isTelevision;
   final bool staticModeEnabled;
@@ -401,6 +404,7 @@ class _FeaturedHero extends StatefulWidget {
   final bool logoTitleEnabled;
   final bool translucentEffectsEnabled;
   final String focusScopePrefix;
+  final bool autofocusCurrentItem;
   final VoidCallback? onFocusBelowControl;
   final VoidCallback? onHeroFocusGained;
   final ValueChanged<_FeaturedHeroItem>? onFocusedItemChanged;
@@ -417,6 +421,8 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
       FocusNode(debugLabel: 'home-hero-prev');
   final FocusNode _nextPagerButtonFocusNode =
       FocusNode(debugLabel: 'home-hero-next');
+  bool _cardFocusNodePruneScheduled = false;
+  Set<String> _pendingCardFocusNodeIds = const <String>{};
   double _page = 0;
   int _lastReportedIndex = -1;
   String _lastReportedItemId = '';
@@ -435,18 +441,33 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   @override
   void didUpdateWidget(covariant _FeaturedHero oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _syncCardFocusNodes();
-    final oldLength = oldWidget.items.length;
-    final newLength = widget.items.length;
+    final oldPageIndex = oldWidget.items.isEmpty
+        ? 0
+        : _page.round().clamp(0, oldWidget.items.length - 1);
+    final previousItemId =
+        oldWidget.items.isEmpty ? '' : oldWidget.items[oldPageIndex].id;
+    final cardHadFocus = previousItemId.isNotEmpty &&
+        (_cardFocusNodes[previousItemId]?.hasFocus ?? false);
+    _scheduleCardFocusNodePrune();
+    final contentScopeChanged =
+        oldWidget.contentScopeId != widget.contentScopeId;
+    final nextPageIndex = contentScopeChanged
+        ? 0
+        : _resolveUpdatedPageIndex(
+            previousItemId: previousItemId,
+            previousPageIndex: oldPageIndex,
+          );
+    final pagerBecomesDisabled =
+        (_previousPagerButtonFocusNode.hasFocus && nextPageIndex <= 0) ||
+            (_nextPagerButtonFocusNode.hasFocus &&
+                nextPageIndex >= widget.items.length - 1);
+    final restoreCardFocus = cardHadFocus || pagerBecomesDisabled;
     if (oldWidget.displayMode != widget.displayMode) {
-      final int nextPage = widget.items.isEmpty
-          ? 0
-          : _page.round().clamp(0, widget.items.length - 1);
       _controller
         ..removeListener(_handlePageChange)
         ..dispose();
-      _controller = _buildController(initialPage: nextPage);
-      _page = nextPage.toDouble();
+      _controller = _buildController(initialPage: nextPageIndex);
+      _page = nextPageIndex.toDouble();
       _pageNotifier.value = _page;
       _lastReportedIndex = -1;
       _lastReportedItemId = '';
@@ -455,17 +476,26 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
         if (!mounted) {
           return;
         }
-        _notifyFocusedItem(nextPage);
+        _notifyFocusedItem(nextPageIndex);
+        if (restoreCardFocus) {
+          _focusCurrentCard();
+        }
       });
       return;
     }
 
-    if (oldLength != newLength) {
-      _syncCurrentPageToVisibleItems();
+    final oldIds =
+        oldWidget.items.map((item) => item.id).toList(growable: false);
+    final newIds = widget.items.map((item) => item.id).toList(growable: false);
+    if (contentScopeChanged || !listEquals(oldIds, newIds)) {
+      _syncCurrentPageToVisibleItems(
+        targetPageIndex: nextPageIndex,
+        restoreCardFocus: restoreCardFocus,
+      );
       return;
     }
 
-    if (newLength > 0) {
+    if (widget.items.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || widget.items.isEmpty) {
           return;
@@ -504,6 +534,47 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     for (final id in obsoleteIds) {
       _cardFocusNodes.remove(id)?.dispose();
     }
+  }
+
+  void _scheduleCardFocusNodePrune() {
+    _pendingCardFocusNodeIds = widget.items
+        .map((item) => item.id)
+        .where((item) => item.trim().isNotEmpty)
+        .toSet();
+    if (_cardFocusNodePruneScheduled) {
+      return;
+    }
+    _cardFocusNodePruneScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _cardFocusNodePruneScheduled = false;
+      if (!mounted) {
+        return;
+      }
+      final validIds = _pendingCardFocusNodeIds;
+      final obsoleteIds = _cardFocusNodes.keys
+          .where((item) => !validIds.contains(item))
+          .toList(growable: false);
+      for (final id in obsoleteIds) {
+        _cardFocusNodes.remove(id)?.dispose();
+      }
+    });
+  }
+
+  int _resolveUpdatedPageIndex({
+    required String previousItemId,
+    required int previousPageIndex,
+  }) {
+    if (widget.items.isEmpty) {
+      return 0;
+    }
+    if (previousItemId.isNotEmpty) {
+      final retainedIndex =
+          widget.items.indexWhere((item) => item.id == previousItemId);
+      if (retainedIndex >= 0) {
+        return retainedIndex;
+      }
+    }
+    return previousPageIndex.clamp(0, widget.items.length - 1);
   }
 
   FocusNode _focusNodeForItem(String itemId) {
@@ -557,7 +628,10 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     widget.onFocusedItemChanged?.call(currentItem);
   }
 
-  void _syncCurrentPageToVisibleItems() {
+  void _syncCurrentPageToVisibleItems({
+    required int targetPageIndex,
+    required bool restoreCardFocus,
+  }) {
     if (widget.items.isEmpty) {
       _page = 0;
       _pageNotifier.value = _page;
@@ -566,32 +640,21 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
       _lastReportedVisualFingerprint = '';
       return;
     }
-    final maxPage = (widget.items.length - 1).toDouble();
-    _page = _page.clamp(0.0, maxPage);
+    final boundedTargetPage = targetPageIndex.clamp(0, widget.items.length - 1);
+    _page = boundedTargetPage.toDouble();
     _pageNotifier.value = _page;
-    if (!_controller.hasClients) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_controller.hasClients || widget.items.isEmpty) {
-          return;
-        }
-        _controller.jumpToPage(_currentPageIndex);
-        _notifyFocusedItem(_currentPageIndex);
-      });
-      return;
-    }
-    final currentControllerPage = _controller.page ?? _page;
-    final boundedControllerPage = currentControllerPage.clamp(0.0, maxPage);
-    if ((boundedControllerPage - currentControllerPage).abs() >= 0.0001) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_controller.hasClients || widget.items.isEmpty) {
-          return;
-        }
-        _controller.jumpToPage(_currentPageIndex);
-        _notifyFocusedItem(_currentPageIndex);
-      });
-      return;
-    }
-    _notifyFocusedItem(_currentPageIndex);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || widget.items.isEmpty) {
+        return;
+      }
+      if (_controller.hasClients) {
+        _controller.jumpToPage(boundedTargetPage);
+      }
+      _notifyFocusedItem(boundedTargetPage);
+      if (restoreCardFocus) {
+        _focusCurrentCard();
+      }
+    });
   }
 
   Future<void> _moveToIndex(int index) async {
@@ -600,6 +663,14 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     }
     if (widget.staticModeEnabled) {
       _controller.jumpToPage(index);
+      if (widget.isTelevision &&
+          (index == 0 || index == widget.items.length - 1)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _focusCurrentCard();
+          }
+        });
+      }
       return;
     }
     await _controller.animateToPage(
@@ -607,6 +678,10 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
     );
+    if (widget.isTelevision &&
+        (index == 0 || index == widget.items.length - 1)) {
+      _focusCurrentCard();
+    }
   }
 
   bool _focusPagerButton(FocusNode focusNode) {
@@ -620,6 +695,10 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   }
 
   void _focusPreviousControl() {
+    if (_currentPageIndex <= 0) {
+      TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
+      return;
+    }
     if (_focusPagerButton(_previousPagerButtonFocusNode)) {
       return;
     }
@@ -627,6 +706,13 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   }
 
   void _focusNextControl() {
+    if (_currentPageIndex >= widget.items.length - 1) {
+      handleTvDirectionalFocusBoundary(
+        context,
+        TraversalDirection.right,
+      );
+      return;
+    }
     if (_focusPagerButton(_nextPagerButtonFocusNode)) {
       return;
     }
@@ -669,9 +755,25 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                       ? const NeverScrollableScrollPhysics()
                       : const PageScrollPhysics(),
                   itemCount: widget.items.length,
+                  findChildIndexCallback: (key) {
+                    for (var index = 0;
+                        index < widget.items.length;
+                        index += 1) {
+                      final itemKey = ValueKey<String>(
+                        '${widget.focusScopePrefix}:${widget.items[index].id}',
+                      );
+                      if (itemKey == key) {
+                        return index;
+                      }
+                    }
+                    return null;
+                  },
                   itemBuilder: (context, index) {
                     final item = widget.items[index];
                     return Padding(
+                      key: ValueKey<String>(
+                        '${widget.focusScopePrefix}:${item.id}',
+                      ),
                       padding: EdgeInsets.only(
                         right: index == widget.items.length - 1
                             ? 0
@@ -687,7 +789,8 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                         simplifyVisualEffects: simplifyVisualEffects,
                         focusNode: _focusNodeForItem(item.id),
                         focusId: '${widget.focusScopePrefix}:${item.id}',
-                        autofocus: index == _currentPageIndex,
+                        autofocus: widget.autofocusCurrentItem &&
+                            index == _currentPageIndex,
                         onFocusPreviousControl: _focusPreviousControl,
                         onFocusNextControl: _focusNextControl,
                         onFocusBelowControl: widget.onFocusBelowControl,

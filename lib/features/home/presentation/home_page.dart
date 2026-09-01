@@ -66,6 +66,67 @@ HomeHeroPrefetchDecision resolveHomeHeroPrefetchDecision({
   );
 }
 
+String _homeSectionItemFocusKey(
+  HomeSectionViewModel section,
+  HomeCardViewModel item,
+) {
+  return 'item:${section.id}:${_homeCardResourceIdentity(item)}';
+}
+
+String _homeCarouselItemFocusKey(
+  HomeSectionViewModel section,
+  HomeCarouselItemViewModel item,
+) {
+  return 'carousel:${section.id}:${_homeCarouselResourceIdentity(item)}';
+}
+
+String _homeCardResourceIdentity(HomeCardViewModel item) {
+  return _homeResourceIdentity(
+    id: item.id,
+    target: item.detailTarget,
+    fallbackTitle: item.title,
+  );
+}
+
+String _homeCarouselResourceIdentity(HomeCarouselItemViewModel item) {
+  return _homeResourceIdentity(
+    id: item.id,
+    target: item.detailTarget,
+    fallbackTitle: item.title,
+  );
+}
+
+String _homeResourceIdentity({
+  required String id,
+  required MediaDetailTarget target,
+  required String fallbackTitle,
+}) {
+  final normalizedId = id.trim();
+  if (normalizedId.isNotEmpty) {
+    return normalizedId;
+  }
+  final itemId = target.itemId.trim();
+  if (itemId.isNotEmpty) {
+    final sourceId = target.sourceId.trim();
+    return sourceId.isEmpty ? itemId : '$sourceId:$itemId';
+  }
+  for (final externalId in <String>[
+    target.doubanId,
+    target.tmdbId,
+    target.imdbId,
+    target.tvdbId,
+    target.resourcePath,
+    target.playbackTarget?.itemId ?? '',
+    target.playbackTarget?.streamUrl ?? '',
+  ]) {
+    final normalizedExternalId = externalId.trim();
+    if (normalizedExternalId.isNotEmpty) {
+      return normalizedExternalId;
+    }
+  }
+  return fallbackTitle.trim();
+}
+
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
@@ -105,18 +166,29 @@ class _HomePageState extends ConsumerState<HomePage>
       HomeHeroPrefetchCoordinator();
   final GlobalKey<_FeaturedHeroState> _featuredHeroKey =
       GlobalKey<_FeaturedHeroState>();
-  final FocusNode _heroNextSectionFocusNode =
-      FocusNode(debugLabel: 'home-hero-next-section');
+  final Map<String, FocusNode> _contentFocusNodes = <String, FocusNode>{};
+  final FocusNode _homeEditFocusNode =
+      FocusNode(debugLabel: 'home-edit-action');
+  String _firstFocusableContentKey = '';
+  bool _contentFocusNodePruneScheduled = false;
+  Set<String> _pendingContentFocusNodeKeys = const <String>{};
   int _heroFocusBelowRequestVersion = 0;
   List<String> _lastFeaturedHeroIds = const [];
+  String _lastFeaturedHeroSectionId = '';
   int _observedHomeMetadataAutoRefreshRevision = 0;
   int _observedHomeNavigationResetRevision = 0;
   int _scheduledHeroMetadataAutoRefreshRevision = 0;
   int _scheduledHeroExplicitRefreshRevision = 0;
   bool _contentLoadingDeferralActive = false;
   bool _missingFocusRecoveryScheduled = false;
+  int _missingFocusRecoveryVersion = 0;
+  bool _hasPendingSections = false;
   List<String> _observedEnabledModuleIds = const <String>[];
   bool _didObserveEnabledModuleIds = false;
+  List<String> _observedFocusableSectionIds = const <String>[];
+  bool _didObserveFocusableSectionIds = false;
+  List<String> _observedFocusTopology = const <String>[];
+  bool _didObserveFocusTopology = false;
 
   bool get _showHeroPagerButtons {
     if (kIsWeb) {
@@ -139,7 +211,11 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void dispose() {
     _scrollController.dispose();
-    _heroNextSectionFocusNode.dispose();
+    for (final focusNode in _contentFocusNodes.values) {
+      focusNode.dispose();
+    }
+    _contentFocusNodes.clear();
+    _homeEditFocusNode.dispose();
     _heroSelectionNotifier.dispose();
     super.dispose();
   }
@@ -196,36 +272,179 @@ class _HomePageState extends ConsumerState<HomePage>
       if (!mounted || !_isHomeRouteVisible) {
         return;
       }
-      final primaryFocus = FocusManager.instance.primaryFocus;
-      final hasActionableFocus = _hasActionableHomeFocus(primaryFocus);
-      if (hasActionableFocus) {
-        return;
-      }
-      if (_requestHeroNextSectionFocus()) {
-        return;
-      }
-      final menuScope = TvMenuButtonScope.maybeOf(context);
-      if (menuScope == null) {
-        return;
-      }
-      appLogInfo(
-        'tv.focus-recovery',
-        'Home focus recovery requested',
-        fields: <String, Object?>{
-          'reason': reason,
-          'previousFocus': describeTvFocusNode(primaryFocus),
-          'previousFocusType': primaryFocus?.runtimeType.toString() ?? 'none',
-          'contextAttached': primaryFocus?.context != null,
-          'canRequestFocus': primaryFocus?.canRequestFocus ?? false,
-        },
-      );
-      menuScope.onMenuButtonPressed();
+      unawaited(_recoverMissingHomeFocus(reason: reason));
     });
+  }
+
+  Future<void> _recoverMissingHomeFocus({required String reason}) async {
+    final requestVersion = ++_missingFocusRecoveryVersion;
+    if (!mounted || !_isHomeRouteVisible) {
+      return;
+    }
+    var primaryFocus = FocusManager.instance.primaryFocus;
+    if (_isFirstHomeTarget(primaryFocus)) {
+      _ensureFocusNodeVisible(primaryFocus!);
+      return;
+    }
+    if (_hasActionableHomeFocus(primaryFocus)) {
+      return;
+    }
+    if (_requestFirstHomeContentFocus()) {
+      return;
+    }
+
+    final hasKnownOffscreenTarget = _firstFocusableContentKey.isNotEmpty ||
+        (!_hasPendingSections && _homeEditFocusNode.context == null);
+    if (hasKnownOffscreenTarget &&
+        await _revealAndRequestFirstHomeContentFocus(requestVersion)) {
+      return;
+    }
+
+    if (!mounted ||
+        requestVersion != _missingFocusRecoveryVersion ||
+        !_isHomeRouteVisible) {
+      return;
+    }
+    primaryFocus = FocusManager.instance.primaryFocus;
+    if (_isFirstHomeTarget(primaryFocus)) {
+      _ensureFocusNodeVisible(primaryFocus!);
+      return;
+    }
+    if (_hasActionableHomeFocus(primaryFocus) ||
+        _requestFirstHomeContentFocus()) {
+      return;
+    }
+    final menuScope = TvMenuButtonScope.maybeOf(context);
+    if (menuScope == null) {
+      return;
+    }
+    appLogInfo(
+      'tv.focus-recovery',
+      'Home focus recovery requested',
+      fields: <String, Object?>{
+        'reason': reason,
+        'previousFocus': describeTvFocusNode(primaryFocus),
+        'previousFocusType': primaryFocus?.runtimeType.toString() ?? 'none',
+        'contextAttached': primaryFocus?.context != null,
+        'canRequestFocus': primaryFocus?.canRequestFocus ?? false,
+      },
+    );
+    menuScope.onMenuButtonPressed();
+  }
+
+  Future<bool> _revealAndRequestFirstHomeContentFocus(
+    int requestVersion,
+  ) {
+    return _scrollUntilFirstHomeTargetCanFocus(
+      isRequestActive: () =>
+          mounted &&
+          requestVersion == _missingFocusRecoveryVersion &&
+          _isHomeRouteVisible,
+      shouldStopForFocus: _hasActionableHomeFocus,
+    );
+  }
+
+  Future<bool> _scrollUntilFirstHomeTargetCanFocus({
+    required bool Function() isRequestActive,
+    required bool Function(FocusNode? focus) shouldStopForFocus,
+  }) async {
+    if (!_scrollController.hasClients) {
+      await _waitForNextFrame();
+    }
+    if (!isRequestActive() || !_scrollController.hasClients) {
+      return false;
+    }
+
+    final initialOffset = _scrollController.offset;
+    var lastOffset = initialOffset;
+    var stalledFrames = 0;
+    for (var attempt = 0; attempt < 40; attempt += 1) {
+      if (!isRequestActive()) {
+        return false;
+      }
+      final primaryFocus = FocusManager.instance.primaryFocus;
+      if (_isFirstHomeTarget(primaryFocus)) {
+        _ensureFocusNodeVisible(primaryFocus!);
+        return true;
+      }
+      if (shouldStopForFocus(primaryFocus)) {
+        return true;
+      }
+      if (_requestFirstHomeContentFocus()) {
+        return true;
+      }
+      if (!_scrollController.hasClients) {
+        break;
+      }
+
+      final position = _scrollController.position;
+      final viewportStep = position.viewportDimension.isFinite
+          ? position.viewportDimension * 0.72
+          : 360.0;
+      final nextOffset = (position.pixels + viewportStep)
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+      if ((nextOffset - lastOffset).abs() < 1) {
+        stalledFrames += 1;
+        if (stalledFrames >= 2) {
+          break;
+        }
+      } else {
+        stalledFrames = 0;
+        lastOffset = nextOffset;
+        position.jumpTo(nextOffset);
+      }
+      await _waitForNextFrame();
+    }
+
+    if (isRequestActive() &&
+        _scrollController.hasClients &&
+        !shouldStopForFocus(FocusManager.instance.primaryFocus)) {
+      final position = _scrollController.position;
+      position.jumpTo(
+        initialOffset
+            .clamp(position.minScrollExtent, position.maxScrollExtent)
+            .toDouble(),
+      );
+    }
+    return false;
+  }
+
+  bool _isFirstHomeTarget(FocusNode? focus) {
+    if (focus == null) {
+      return false;
+    }
+    final contentTarget = _contentFocusNodes[_firstFocusableContentKey];
+    if (contentTarget != null &&
+        contentTarget.context != null &&
+        contentTarget.canRequestFocus) {
+      return identical(focus, contentTarget);
+    }
+    return _firstFocusableContentKey.isEmpty &&
+        _homeEditFocusNode.context != null &&
+        _homeEditFocusNode.canRequestFocus &&
+        identical(focus, _homeEditFocusNode);
+  }
+
+  void _ensureFocusNodeVisible(FocusNode focusNode) {
+    final focusContext = focusNode.context;
+    if (focusContext == null) {
+      return;
+    }
+    unawaited(
+      Scrollable.ensureVisible(
+        focusContext,
+        alignment: 0.52,
+        duration: Duration.zero,
+      ),
+    );
   }
 
   bool get _isHomeRouteVisible {
     final route = ModalRoute.of(context);
-    return isPageVisible || route == null || route.isCurrent;
+    return isPageVisible &&
+        TickerMode.valuesOf(context).enabled &&
+        (route?.isCurrent ?? true);
   }
 
   bool _hasActionableHomeFocus(FocusNode? focus) {
@@ -250,6 +469,7 @@ class _HomePageState extends ConsumerState<HomePage>
     // Inactive should cancel in-flight home-only work, but avoid invalidating
     // section providers to prevent unnecessary re-fetch/rebuild on resume.
     _heroFocusBelowRequestVersion += 1;
+    _missingFocusRecoveryVersion += 1;
     _heroPrefetchCoordinator.reset();
   }
 
@@ -345,6 +565,22 @@ class _HomePageState extends ConsumerState<HomePage>
     final simplifyHeroBackdrop = lightweightHomeHeroEnabled;
     final resolvedSections = resolvedSectionsState.sections;
     final hasPendingSections = resolvedSectionsState.hasPendingSections;
+    _hasPendingSections = hasPendingSections;
+    final focusTopology = _resolveHomeFocusTopology(resolvedSections);
+    if (!hasPendingSections) {
+      _scheduleContentFocusNodePrune(focusTopology.toSet());
+    }
+    if (!listEquals(focusTopology, _observedFocusTopology)) {
+      final shouldRecoverFocus = _didObserveFocusTopology;
+      _didObserveFocusTopology = true;
+      _observedFocusTopology = focusTopology;
+      if (shouldRecoverFocus) {
+        _scheduleMissingFocusRecovery(reason: 'focus-content-changed');
+      }
+    }
+    final shouldAutofocusHomeTarget = isTelevision &&
+        _isHomeRouteVisible &&
+        !_hasActionableHomeFocus(FocusManager.instance.primaryFocus);
     _deferPrefetchWhileContentLoading(hasPendingSections);
 
     return AppPrimaryScrollController(
@@ -354,10 +590,13 @@ class _HomePageState extends ConsumerState<HomePage>
         child: Scaffold(
           backgroundColor: Colors.transparent,
           body: enabledModules.isEmpty
-              ? const _HomeShell(
+              ? _HomeShell(
                   backgroundImageUrl: '',
                   backgroundImageHeaders: {},
-                  child: _EmptyHomeState(),
+                  child: _EmptyHomeState(
+                    editFocusNode: isTelevision ? _homeEditFocusNode : null,
+                    autofocusEdit: shouldAutofocusHomeTarget,
+                  ),
                 )
               : _buildLoadedHome(
                   context: context,
@@ -378,6 +617,7 @@ class _HomePageState extends ConsumerState<HomePage>
                   homeExplicitRefreshRevision: homeExplicitRefreshRevision,
                   homeNavigationResetRevision: homeNavigationResetRevision,
                   isTelevision: isTelevision,
+                  shouldAutofocusHomeTarget: shouldAutofocusHomeTarget,
                   heroDisplayMode: heroDisplayMode,
                 ),
         ),
@@ -402,6 +642,7 @@ class _HomePageState extends ConsumerState<HomePage>
     required int homeExplicitRefreshRevision,
     required int homeNavigationResetRevision,
     required bool isTelevision,
+    required bool shouldAutofocusHomeTarget,
     required HomeHeroDisplayMode heroDisplayMode,
     required bool simplifyHeroBackdrop,
   }) {
@@ -425,10 +666,17 @@ class _HomePageState extends ConsumerState<HomePage>
         : _buildFeaturedItems(
             featuredSection: featuredSection,
           );
-    final activeHero = _resolveActiveHeroItem(featuredItems);
+    final featuredHeroSectionId = featuredSection?.id ?? '';
+    final heroSectionChanged =
+        featuredHeroSectionId != _lastFeaturedHeroSectionId;
+    _lastFeaturedHeroSectionId = featuredHeroSectionId;
+    final activeHero = heroSectionChanged
+        ? featuredItems.firstOrNull
+        : _resolveActiveHeroItem(featuredItems);
     final currentHeroIds =
         featuredItems.map((item) => item.id.trim()).toList(growable: false);
-    final heroListChanged = !listEquals(currentHeroIds, _lastFeaturedHeroIds);
+    final heroListChanged =
+        heroSectionChanged || !listEquals(currentHeroIds, _lastFeaturedHeroIds);
     _lastFeaturedHeroIds = currentHeroIds;
     final heroPrefetchDecision = resolveHomeHeroPrefetchDecision(
       isPageVisible: isPageVisible,
@@ -452,18 +700,48 @@ class _HomePageState extends ConsumerState<HomePage>
     }
     if (heroListChanged) {
       _scheduleHeroSelectionSync(activeHero);
+      _scheduleMissingFocusRecovery(reason: 'hero-content-changed');
     }
     // Hero references a section; it does not consume that module's normal
     // slot. Keeping both avoids a first module (often Recent Playback)
     // disappearing whenever automatic Hero selection pins it.
     final visibleModules = enabledModules;
-    final firstFocusableSectionId = _resolveFirstFocusableSectionId(
+    final focusableSectionIds = _resolveFocusableSectionIds(
       enabledModules: visibleModules,
+      resolvedSections: resolvedSections,
     );
+    if (!listEquals(focusableSectionIds, _observedFocusableSectionIds)) {
+      final shouldRecoverFocus = _didObserveFocusableSectionIds;
+      _didObserveFocusableSectionIds = true;
+      _observedFocusableSectionIds = focusableSectionIds;
+      if (shouldRecoverFocus) {
+        _scheduleMissingFocusRecovery(reason: 'focusable-sections-changed');
+      }
+    }
+    final firstFocusableSectionId = focusableSectionIds.firstOrNull;
+    _firstFocusableContentKey = _resolveFirstFocusableContentKey(
+          enabledModules: visibleModules,
+          resolvedSections: resolvedSections,
+        ) ??
+        '';
     final hasHeroListSlot =
         heroEnabled && (featuredItems.isNotEmpty || hasPendingSections);
     final moduleListOffset = hasHeroListSlot ? 1 : 0;
     final listItemCount = moduleListOffset + visibleModules.length + 2;
+    const heroListKey = ValueKey<String>('home:list:hero');
+    const spacerListKey = ValueKey<String>('home:list:spacer');
+    const editListKey = ValueKey<String>('home:list:edit');
+    final moduleListKeys = <String, Key>{
+      for (final module in visibleModules)
+        module.id: ValueKey<String>('home:list:module:${module.id}'),
+    };
+    final listIndicesByKey = <Key, int>{
+      if (hasHeroListSlot) heroListKey: 0,
+      for (var index = 0; index < visibleModules.length; index += 1)
+        moduleListKeys[visibleModules[index].id]!: moduleListOffset + index,
+      spacerListKey: moduleListOffset + visibleModules.length,
+      editListKey: moduleListOffset + visibleModules.length + 1,
+    };
 
     final content = RefreshIndicator(
       color: Colors.white,
@@ -476,16 +754,19 @@ class _HomePageState extends ConsumerState<HomePage>
         ),
         padding: EdgeInsets.zero,
         itemCount: listItemCount,
+        findChildIndexCallback: (key) => listIndicesByKey[key],
         itemBuilder: (context, index) {
           if (hasHeroListSlot && index == 0) {
             if (featuredItems.isNotEmpty) {
               return RepaintBoundary(
+                key: heroListKey,
                 child: _HomeKeepAlive(
                   child: Padding(
                     padding: heroDisplayMode.heroPadding(context),
                     child: _FeaturedHero(
                       key: _featuredHeroKey,
                       items: featuredItems,
+                      contentScopeId: featuredHeroSectionId,
                       isTelevision: isTelevision,
                       staticModeEnabled: staticHomeHeroEnabled,
                       lightweightVisualEnabled: lightweightHomeHeroEnabled,
@@ -494,6 +775,7 @@ class _HomePageState extends ConsumerState<HomePage>
                       translucentEffectsEnabled: translucentEffectsEnabled,
                       displayMode: heroDisplayMode,
                       focusScopePrefix: 'home:hero',
+                      autofocusCurrentItem: shouldAutofocusHomeTarget,
                       onFocusBelowControl: _focusBelowHeroContent,
                       onHeroFocusGained: _jumpToHeroTop,
                       onFocusedItemChanged: _handleFocusedHeroChanged,
@@ -503,6 +785,7 @@ class _HomePageState extends ConsumerState<HomePage>
               );
             }
             return RepaintBoundary(
+              key: heroListKey,
               child: _HomeKeepAlive(
                 child: Padding(
                   padding: heroDisplayMode.heroPadding(context),
@@ -516,6 +799,7 @@ class _HomePageState extends ConsumerState<HomePage>
           if (moduleIndex >= 0 && moduleIndex < visibleModules.length) {
             final module = visibleModules[moduleIndex];
             return RepaintBoundary(
+              key: moduleListKeys[module.id],
               child: Padding(
                 padding: EdgeInsets.only(
                   top: !heroEnabled && moduleIndex == 0 ? 20 : 0,
@@ -525,9 +809,10 @@ class _HomePageState extends ConsumerState<HomePage>
                   key: ValueKey<String>('home:section-slot:${module.id}'),
                   module: module,
                   isPageVisible: isPageVisible,
-                  useHeroNextSectionFocusNode:
+                  focusNodeForContent: _focusNodeForContent,
+                  autofocusFirstItem: shouldAutofocusHomeTarget &&
+                      !hasHeroListSlot &&
                       module.id == firstFocusableSectionId,
-                  heroNextSectionFocusNode: _heroNextSectionFocusNode,
                   homeMetadataAutoRefreshRevision:
                       homeMetadataAutoRefreshRevision,
                   homeNavigationResetRevision: homeNavigationResetRevision,
@@ -538,9 +823,18 @@ class _HomePageState extends ConsumerState<HomePage>
 
           final trailingIndex = moduleIndex - visibleModules.length;
           if (trailingIndex == 0) {
-            return const SizedBox(height: 6);
+            return const SizedBox(key: spacerListKey, height: 6);
           }
-          return const RepaintBoundary(child: _HomeEditButton());
+          return RepaintBoundary(
+            key: editListKey,
+            child: _HomeEditButton(
+              focusNode:
+                  firstFocusableSectionId == null ? _homeEditFocusNode : null,
+              autofocus: shouldAutofocusHomeTarget &&
+                  !hasHeroListSlot &&
+                  firstFocusableSectionId == null,
+            ),
+          );
         },
       ),
     );
@@ -561,13 +855,87 @@ class _HomePageState extends ConsumerState<HomePage>
     );
   }
 
-  String? _resolveFirstFocusableSectionId({
+  List<String> _resolveFocusableSectionIds({
     required List<HomeModuleConfig> enabledModules,
+    required List<HomeSectionViewModel> resolvedSections,
   }) {
+    final focusableSectionIds = <String>{
+      for (final section in resolvedSections)
+        if (section.items.isNotEmpty || section.carouselItems.isNotEmpty)
+          section.id,
+    };
+    return enabledModules
+        .map((module) => module.id)
+        .where(focusableSectionIds.contains)
+        .toList(growable: false);
+  }
+
+  String? _resolveFirstFocusableContentKey({
+    required List<HomeModuleConfig> enabledModules,
+    required List<HomeSectionViewModel> resolvedSections,
+  }) {
+    final sectionsById = <String, HomeSectionViewModel>{
+      for (final section in resolvedSections) section.id: section,
+    };
     for (final module in enabledModules) {
-      return module.id;
+      final section = sectionsById[module.id];
+      if (section == null) {
+        continue;
+      }
+      if (section.items.isNotEmpty) {
+        return _homeSectionItemFocusKey(section, section.items.first);
+      }
+      if (section.carouselItems.isNotEmpty) {
+        return _homeCarouselItemFocusKey(
+          section,
+          section.carouselItems.first,
+        );
+      }
     }
     return null;
+  }
+
+  FocusNode _focusNodeForContent(String focusKey) {
+    return _contentFocusNodes.putIfAbsent(
+      focusKey,
+      () => FocusNode(debugLabel: 'home-content:$focusKey'),
+    );
+  }
+
+  void _scheduleContentFocusNodePrune(Set<String> validFocusKeys) {
+    _pendingContentFocusNodeKeys = Set<String>.from(validFocusKeys);
+    if (_contentFocusNodePruneScheduled) {
+      return;
+    }
+    _contentFocusNodePruneScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _contentFocusNodePruneScheduled = false;
+      if (!mounted) {
+        return;
+      }
+      final retainedKeys = _pendingContentFocusNodeKeys;
+      final obsoleteKeys = _contentFocusNodes.keys
+          .where((focusKey) => !retainedKeys.contains(focusKey))
+          .toList(growable: false);
+      for (final focusKey in obsoleteKeys) {
+        _contentFocusNodes.remove(focusKey)?.dispose();
+      }
+    });
+  }
+
+  List<String> _resolveHomeFocusTopology(
+    List<HomeSectionViewModel> sections,
+  ) {
+    return <String>[
+      for (final section in sections) ...<String>[
+        'section:${section.id}:${section.layout.name}',
+        for (final item in section.items)
+          _homeSectionItemFocusKey(section, item),
+        for (final item in section.carouselItems)
+          _homeCarouselItemFocusKey(section, item),
+        if (section.viewAllTarget != null) _homeSectionViewAllFocusKey(section),
+      ],
+    ];
   }
 
   void _focusBelowHeroContent() {
@@ -587,22 +955,24 @@ class _HomePageState extends ConsumerState<HomePage>
 
   Future<void> _focusBelowHeroContentAsync() async {
     final requestVersion = ++_heroFocusBelowRequestVersion;
-    if (_requestHeroNextSectionFocus()) {
+    final sourceFocus = FocusManager.instance.primaryFocus;
+    if (_requestFirstHomeContentFocus()) {
       return;
     }
-
-    if (!mounted || requestVersion != _heroFocusBelowRequestVersion) {
+    final focusedTarget = await _scrollUntilFirstHomeTargetCanFocus(
+      isRequestActive: () =>
+          mounted &&
+          requestVersion == _heroFocusBelowRequestVersion &&
+          _isHomeRouteVisible &&
+          (sourceFocus?.hasFocus ?? false),
+      shouldStopForFocus: (focus) =>
+          !identical(focus, sourceFocus) && _hasActionableHomeFocus(focus),
+    );
+    if (focusedTarget ||
+        !mounted ||
+        requestVersion != _heroFocusBelowRequestVersion ||
+        !(sourceFocus?.hasFocus ?? false)) {
       return;
-    }
-
-    for (var attempt = 0; attempt < 3; attempt++) {
-      await _waitForNextFrame();
-      if (!mounted || requestVersion != _heroFocusBelowRequestVersion) {
-        return;
-      }
-      if (_requestHeroNextSectionFocus()) {
-        return;
-      }
     }
 
     handleTvDirectionalFocusBoundary(
@@ -612,13 +982,48 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   bool _requestHeroNextSectionFocus() {
-    final targetContext = _heroNextSectionFocusNode.context;
-    if (targetContext == null || !_heroNextSectionFocusNode.canRequestFocus) {
+    final targetNode = _contentFocusNodes[_firstFocusableContentKey];
+    final targetContext = targetNode?.context;
+    if (targetNode == null ||
+        targetContext == null ||
+        !targetNode.canRequestFocus) {
       return false;
     }
     requestTvFocus(
-      _heroNextSectionFocusNode,
+      targetNode,
       scope: FocusScope.of(targetContext),
+    );
+    unawaited(
+      Scrollable.ensureVisible(
+        targetContext,
+        alignment: 0.52,
+        duration: Duration.zero,
+      ),
+    );
+    return true;
+  }
+
+  bool _requestFirstHomeContentFocus() {
+    if (_requestHeroNextSectionFocus()) {
+      return true;
+    }
+    if (_firstFocusableContentKey.isNotEmpty) {
+      return false;
+    }
+    final editContext = _homeEditFocusNode.context;
+    if (editContext == null || !_homeEditFocusNode.canRequestFocus) {
+      return false;
+    }
+    requestTvFocus(
+      _homeEditFocusNode,
+      scope: FocusScope.of(editContext),
+    );
+    unawaited(
+      Scrollable.ensureVisible(
+        editContext,
+        alignment: 0.52,
+        duration: Duration.zero,
+      ),
     );
     return true;
   }

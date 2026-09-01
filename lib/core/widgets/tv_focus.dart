@@ -928,6 +928,7 @@ class StarflowIconButton extends StatelessWidget {
     this.autofocus = false,
     this.focusNode,
     this.focusId,
+    this.onFocused,
     this.tooltip = '',
     this.size = 42,
   });
@@ -939,6 +940,7 @@ class StarflowIconButton extends StatelessWidget {
   final bool autofocus;
   final FocusNode? focusNode;
   final String? focusId;
+  final VoidCallback? onFocused;
   final String tooltip;
   final double size;
 
@@ -955,6 +957,7 @@ class StarflowIconButton extends StatelessWidget {
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,
+      onFocused: onFocused,
       borderRadius: radius,
       borderWidth: 1.6,
       child: DecoratedBox(

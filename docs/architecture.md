@@ -181,6 +181,9 @@ lib/
 - 单击导航栏首页会触发统一软恢复边界：页面 revision 终止旧的 Hero/评分预取会话，媒体刷新协调器取消后台 NAS/WebDAV/Emby 刷新，首页与元数据调度器只清除自身的批次/静默等待并继续 drain；活动任务、前台 lease 和并发计数不会被强制归零
 - `TV` 退出确认框使用短生命周期的元数据前台 lease，只在对话框显示期间阻止新的后台预取；取消后以零延迟释放，真正确认退出仍走播放器与系统会话清理，不复用导航软恢复
 - 首页重新 active 或模块 ID 顺序变化时会在下一帧校验焦点所属路由；编辑器等已退出路由遗留的 FocusNode 不视为有效首页焦点，优先请求 Hero 下方首个模块，失败才回侧栏
+- 首页按 `sectionId + resourceId` 为每张海报、轮播卡和 view-all 入口保留稳定 FocusNode，并给纵向模块与横向资源列表提供 key 到新索引的映射；标题或来源元数据补全和重排因此不会替换焦点节点。Hero 另跟踪来源 section，切换来源不会误继承同名资源的旧页码。首焦点只授予首个实际有卡片的 section，连续空 section 会通过渐进滚动定位，全部为空时才使用“编辑首页”兜底
+- 首页额外跟踪 section/item/view-all 的可聚焦拓扑；刷新移除当前聚焦目标时，下一帧只在焦点确实失效的情况下恢复到仍存在的首卡或其它有效内容。Hero 按资源 ID 同步页码和焦点，边界翻页按钮失效时退回当前 Hero 卡，普通列表更新不抢焦点
+- 首页编辑器按模块 ID 保留开关焦点，并在来源异步变化、模块重排/删除、移动按钮到达边界及 sheet/dialog 关闭后校验当前路由焦点；只有原目标失效时才请求同模块或首个有效目标
 - Android / TV 真正确认退出时，Flutter 先清理播放会话、媒体通知、画中画和后台播放，再通过 `starflow/platform` 调用原生 `finishAndRemoveTask()`；桥接不可用时才回退 `SystemNavigator.pop()`，避免任务仍留在启动器中被自动恢复
 - `AppRuntimeRecoveryBoundary` 统一监听应用生命周期和内存压力。后台状态通过引用计数 lease 暂停首页 load/apply 与元数据 prefetch/maintenance 的新准入；恢复前台后等待首帧和固定 `400ms` 静默期再释放。内存压力使用独立 `2s` lease，并 best-effort 取消媒体库后台刷新，因此生命周期与低内存两种暂停可以安全叠加
 - Flutter 的 `PaintingBinding` 会在内存压力时清理内存图片缓存；应用层只记录 `app.memory-pressure` 和降低后台负载，不重复清空 live/persistent 图片、不篡改活动请求计数，也不碰播放会话

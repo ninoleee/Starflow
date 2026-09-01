@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -54,6 +57,7 @@ class _HomeModuleCard extends StatelessWidget {
     required this.module,
     required this.leading,
     required this.onToggle,
+    this.toggleFocusNode,
     this.onEdit,
     this.onRemove,
   });
@@ -61,6 +65,7 @@ class _HomeModuleCard extends StatelessWidget {
   final HomeModuleConfig module;
   final Widget leading;
   final VoidCallback onToggle;
+  final FocusNode? toggleFocusNode;
   final VoidCallback? onEdit;
   final VoidCallback? onRemove;
 
@@ -130,6 +135,8 @@ class _HomeModuleCard extends StatelessWidget {
                   ? null
                   : Theme.of(context).colorScheme.onSurfaceVariant,
               onPressed: onToggle,
+              focusNode: toggleFocusNode,
+              focusId: 'home-editor:${module.id}:toggle',
               variant: module.enabled
                   ? StarflowButtonVariant.primary
                   : StarflowButtonVariant.secondary,
@@ -251,11 +258,223 @@ const _defaultDoubanListPresets = <_DoubanListPreset>[
   ),
 ];
 
-class HomeEditorPage extends ConsumerWidget {
+class HomeEditorPage extends ConsumerStatefulWidget {
   const HomeEditorPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeEditorPage> createState() => _HomeEditorPageState();
+}
+
+class _HomeEditorPageState extends ConsumerState<HomeEditorPage> {
+  final Map<String, FocusNode> _moduleToggleFocusNodes = <String, FocusNode>{};
+  final Map<String, FocusNode> _sourceFocusNodes = <String, FocusNode>{};
+  List<String> _observedModuleIds = const <String>[];
+  List<String> _observedSourceIds = const <String>[];
+  FocusNode? _preferredFocusNode;
+  bool _focusRecoveryScheduled = false;
+  bool _focusNodePruneScheduled = false;
+  Set<String> _pendingModuleFocusNodeIds = const <String>{};
+  bool _sourceFocusNodePruneScheduled = false;
+  Set<String> _pendingSourceFocusNodeIds = const <String>{};
+  FocusNode? _forcedRecoveryFocusNode;
+  ({String moduleId, bool moveUp, FocusNode focusNode})? _focusedMoveAction;
+
+  FocusNode _focusNodeForModule(String moduleId) {
+    return _moduleToggleFocusNodes.putIfAbsent(
+      moduleId,
+      () => FocusNode(debugLabel: 'home-editor-toggle:$moduleId'),
+    );
+  }
+
+  FocusNode _focusNodeForSource(String sourceId) {
+    return _sourceFocusNodes.putIfAbsent(
+      sourceId,
+      () => FocusNode(debugLabel: 'home-editor-source:$sourceId'),
+    );
+  }
+
+  void _syncEditorFocus({
+    required bool isTelevision,
+    required List<HomeModuleConfig> modules,
+    required HomeModuleConfig? heroModule,
+    required List<HomeModuleConfig> sortableModules,
+    required List<String> sourceIds,
+  }) {
+    if (!isTelevision) {
+      return;
+    }
+    final moduleIds =
+        modules.map((module) => module.id).toList(growable: false);
+    _scheduleModuleFocusNodePrune(moduleIds.toSet());
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    final focusedMoveAction = _focusedMoveAction;
+    if (focusedMoveAction != null &&
+        identical(primaryFocus, focusedMoveAction.focusNode)) {
+      final focusedModuleIndex = sortableModules.indexWhere(
+        (module) => module.id == focusedMoveAction.moduleId,
+      );
+      if (focusedModuleIndex >= 0 &&
+          ((focusedMoveAction.moveUp && focusedModuleIndex == 0) ||
+              (!focusedMoveAction.moveUp &&
+                  focusedModuleIndex == sortableModules.length - 1))) {
+        _forcedRecoveryFocusNode =
+            _focusNodeForModule(focusedMoveAction.moduleId);
+      }
+    } else {
+      _focusedMoveAction = null;
+    }
+    final requiresForcedRecovery = _forcedRecoveryFocusNode != null;
+    _preferredFocusNode = heroModule != null
+        ? _focusNodeForModule(heroModule.id)
+        : sortableModules.isNotEmpty
+            ? _focusNodeForModule(sortableModules.first.id)
+            : _focusNodeForSource('builtin');
+    final sourcesChanged = !listEquals(sourceIds, _observedSourceIds);
+    _observedSourceIds = sourceIds;
+    _scheduleSourceFocusNodePrune(sourceIds.toSet());
+    if (listEquals(moduleIds, _observedModuleIds) &&
+        !sourcesChanged &&
+        !requiresForcedRecovery &&
+        FocusManager.instance.primaryFocus != null) {
+      return;
+    }
+    _observedModuleIds = moduleIds;
+    _scheduleEditorFocusRecovery();
+  }
+
+  void _scheduleSourceFocusNodePrune(Set<String> validSourceIds) {
+    _pendingSourceFocusNodeIds = <String>{
+      'builtin',
+      'douban',
+      ...validSourceIds,
+    };
+    if (_sourceFocusNodePruneScheduled) {
+      return;
+    }
+    _sourceFocusNodePruneScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _sourceFocusNodePruneScheduled = false;
+      if (!mounted) {
+        return;
+      }
+      final retainedIds = _pendingSourceFocusNodeIds;
+      final obsoleteIds = _sourceFocusNodes.keys
+          .where((sourceId) => !retainedIds.contains(sourceId))
+          .toList(growable: false);
+      for (final sourceId in obsoleteIds) {
+        _sourceFocusNodes.remove(sourceId)?.dispose();
+      }
+    });
+  }
+
+  void _scheduleModuleFocusNodePrune(Set<String> validModuleIds) {
+    _pendingModuleFocusNodeIds = Set<String>.from(validModuleIds);
+    if (_focusNodePruneScheduled) {
+      return;
+    }
+    _focusNodePruneScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNodePruneScheduled = false;
+      if (!mounted) {
+        return;
+      }
+      final retainedIds = _pendingModuleFocusNodeIds;
+      final obsoleteIds = _moduleToggleFocusNodes.keys
+          .where((moduleId) => !retainedIds.contains(moduleId))
+          .toList(growable: false);
+      for (final moduleId in obsoleteIds) {
+        _moduleToggleFocusNodes.remove(moduleId)?.dispose();
+      }
+    });
+  }
+
+  void _scheduleEditorFocusRecovery() {
+    if (_focusRecoveryScheduled) {
+      return;
+    }
+    _focusRecoveryScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusRecoveryScheduled = false;
+      if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) {
+        return;
+      }
+      final primaryFocus = FocusManager.instance.primaryFocus;
+      final focusContext = primaryFocus?.context;
+      final route = focusContext == null ? null : ModalRoute.of(focusContext);
+      final editorRoute = ModalRoute.of(context);
+      final hasEditorFocus = primaryFocus != null &&
+          primaryFocus is! FocusScopeNode &&
+          focusContext != null &&
+          primaryFocus.canRequestFocus &&
+          route == editorRoute;
+      final forcedTarget = _forcedRecoveryFocusNode;
+      if (hasEditorFocus && forcedTarget == null) {
+        return;
+      }
+      final target = forcedTarget ?? _preferredFocusNode;
+      final targetContext = target?.context;
+      if (target == null || targetContext == null || !target.canRequestFocus) {
+        if (forcedTarget != null) {
+          _scheduleEditorFocusRecovery();
+        }
+        return;
+      }
+      requestTvFocus(target, scope: FocusScope.of(targetContext));
+      if (identical(target, forcedTarget)) {
+        _forcedRecoveryFocusNode = null;
+        _focusedMoveAction = null;
+      }
+      unawaited(
+        Scrollable.ensureVisible(
+          targetContext,
+          alignment: 0.3,
+          duration: Duration.zero,
+        ),
+      );
+    });
+  }
+
+  Future<T> _runEditorOverlay<T>(Future<T> Function() showOverlay) async {
+    final previousFocus = FocusManager.instance.primaryFocus;
+    try {
+      return await showOverlay();
+    } finally {
+      if (mounted && (ref.read(isTelevisionProvider).value ?? false)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) {
+            return;
+          }
+          final previousContext = previousFocus?.context;
+          if (previousFocus != null &&
+              previousContext != null &&
+              previousFocus.canRequestFocus) {
+            requestTvFocus(
+              previousFocus,
+              scope: FocusScope.of(previousContext),
+            );
+            return;
+          }
+          _scheduleEditorFocusRecovery();
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final focusNode in _moduleToggleFocusNodes.values) {
+      focusNode.dispose();
+    }
+    _moduleToggleFocusNodes.clear();
+    for (final focusNode in _sourceFocusNodes.values) {
+      focusNode.dispose();
+    }
+    _sourceFocusNodes.clear();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final List<HomeModuleConfig> modules = ref.watch(homeModulesProvider);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final heroModule = _homeEditorHeroModule(modules);
@@ -276,6 +495,14 @@ class HomeEditorPage extends ConsumerWidget {
               visibleSourceIds.contains(item.id),
         )
         .toList();
+    _syncEditorFocus(
+      isTelevision: isTelevision,
+      modules: modules,
+      heroModule: heroModule,
+      sortableModules: sortableModules,
+      sourceIds:
+          scopedSources.map((source) => source.id).toList(growable: false),
+    );
 
     return PopScope<void>(
       onPopInvokedWithResult: (didPop, result) {
@@ -304,6 +531,8 @@ class HomeEditorPage extends ConsumerWidget {
                               if (heroModule != null)
                                 _HomeModuleCard(
                                   module: heroModule,
+                                  toggleFocusNode:
+                                      _focusNodeForModule(heroModule.id),
                                   leading: const Icon(
                                     Icons.vertical_align_top_rounded,
                                   ),
@@ -337,6 +566,8 @@ class HomeEditorPage extends ConsumerWidget {
                                     return _HomeModuleCard(
                                       key: ValueKey(module.id),
                                       module: module,
+                                      toggleFocusNode:
+                                          _focusNodeForModule(module.id),
                                       leading: isTelevision
                                           ? Row(
                                               mainAxisSize: MainAxisSize.min,
@@ -346,6 +577,18 @@ class HomeEditorPage extends ConsumerWidget {
                                                       .arrow_upward_rounded,
                                                   tooltip: '上移',
                                                   size: 38,
+                                                  onFocused: () {
+                                                    final focusNode =
+                                                        FocusManager.instance
+                                                            .primaryFocus;
+                                                    if (focusNode != null) {
+                                                      _focusedMoveAction = (
+                                                        moduleId: module.id,
+                                                        moveUp: true,
+                                                        focusNode: focusNode,
+                                                      );
+                                                    }
+                                                  },
                                                   focusId:
                                                       'home-editor:${module.id}:move-up',
                                                   onPressed: index > 0
@@ -362,6 +605,18 @@ class HomeEditorPage extends ConsumerWidget {
                                                       .arrow_downward_rounded,
                                                   tooltip: '下移',
                                                   size: 38,
+                                                  onFocused: () {
+                                                    final focusNode =
+                                                        FocusManager.instance
+                                                            .primaryFocus;
+                                                    if (focusNode != null) {
+                                                      _focusedMoveAction = (
+                                                        moduleId: module.id,
+                                                        moveUp: false,
+                                                        focusNode: focusNode,
+                                                      );
+                                                    }
+                                                  },
                                                   focusId:
                                                       'home-editor:${module.id}:move-down',
                                                   onPressed: index <
@@ -417,12 +672,14 @@ class HomeEditorPage extends ConsumerWidget {
                         _SourceCategoryTile(
                           title: '内置',
                           icon: Icons.auto_awesome_rounded,
+                          focusNode: _focusNodeForSource('builtin'),
                           onTap: () => _showBuiltinModuleSheet(context, ref),
                         ),
                         const SizedBox(height: 10),
                         _SourceCategoryTile(
                           title: '豆瓣',
                           icon: Icons.movie_filter_rounded,
+                          focusNode: _focusNodeForSource('douban'),
                           onTap: () => _showDoubanModuleSheet(context, ref),
                         ),
                         if (scopedSources.isNotEmpty) ...[
@@ -432,6 +689,7 @@ class HomeEditorPage extends ConsumerWidget {
                               padding: const EdgeInsets.only(bottom: 10),
                               child: _SourceCategoryTile(
                                 title: source.name,
+                                focusNode: _focusNodeForSource(source.id),
                                 icon: source.kind == MediaSourceKind.emby
                                     ? Icons.video_library_rounded
                                     : Icons.storage_rounded,
@@ -487,155 +745,169 @@ class HomeEditorPage extends ConsumerWidget {
                 visibleSourceIds.contains(item.id),
           )
           .toList();
-      return showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        builder: (context) {
-          return _HomeEditorSecondarySheetBody(
-            title: '选择来源分类',
-            tiles: [
-              _AddModuleTile(
-                title: '内置',
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  await _showBuiltinModuleSheet(context, ref);
-                },
-              ),
-              _AddModuleTile(
-                title: '豆瓣',
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  await _showDoubanModuleSheet(context, ref);
-                },
-              ),
-              ...scopedSources.map(
-                (source) => _AddModuleTile(
-                  title: source.name,
+      return _runEditorOverlay(
+        () => showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          builder: (context) {
+            return _HomeEditorSecondarySheetBody(
+              title: '选择来源分类',
+              tiles: [
+                _AddModuleTile(
+                  title: '内置',
+                  autofocus: true,
                   onTap: () async {
                     Navigator.of(context).pop();
-                    await _showMediaSourceModuleSheet(
-                      context,
-                      ref,
-                      source,
-                    );
+                    await _showBuiltinModuleSheet(context, ref);
                   },
                 ),
-              ),
-            ],
-          );
-        },
+                _AddModuleTile(
+                  title: '豆瓣',
+                  onTap: () async {
+                    Navigator.of(context).pop();
+                    await _showDoubanModuleSheet(context, ref);
+                  },
+                ),
+                ...scopedSources.map(
+                  (source) => _AddModuleTile(
+                    title: source.name,
+                    onTap: () async {
+                      Navigator.of(context).pop();
+                      await _showMediaSourceModuleSheet(
+                        context,
+                        ref,
+                        source,
+                      );
+                    },
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       );
     });
   }
 
   Future<void> _showBuiltinModuleSheet(BuildContext context, WidgetRef ref) {
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return _HomeEditorSecondarySheetBody(
-          title: '内置模块',
-          tiles: [
-            _AddModuleTile(
-              title: '最近新增',
-              onTap: () {
-                ref
-                    .read(settingsControllerProvider.notifier)
-                    .saveHomeModule(HomeModuleConfig.recentlyAdded());
-                Navigator.of(context).pop();
-              },
-            ),
-            _AddModuleTile(
-              title: '最近播放',
-              onTap: () {
-                ref
-                    .read(settingsControllerProvider.notifier)
-                    .saveHomeModule(HomeModuleConfig.recentPlayback());
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
-        );
-      },
+    return _runEditorOverlay(
+      () => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) {
+          return _HomeEditorSecondarySheetBody(
+            title: '内置模块',
+            tiles: [
+              _AddModuleTile(
+                title: '最近新增',
+                autofocus: true,
+                onTap: () {
+                  ref
+                      .read(settingsControllerProvider.notifier)
+                      .saveHomeModule(HomeModuleConfig.recentlyAdded());
+                  Navigator.of(context).pop();
+                },
+              ),
+              _AddModuleTile(
+                title: '最近播放',
+                onTap: () {
+                  ref
+                      .read(settingsControllerProvider.notifier)
+                      .saveHomeModule(HomeModuleConfig.recentPlayback());
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
   Future<void> _showDoubanModuleSheet(BuildContext context, WidgetRef ref) {
     final doubanAccount = ref.read(homeDoubanAccountProvider);
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return _HomeEditorSecondarySheetBody(
-          title: '豆瓣模块',
-          tiles: [
-            _AddModuleTile(
-              title: '豆瓣账号设置',
-              onTap: () async {
-                Navigator.of(context).pop();
-                await Navigator.of(context, rootNavigator: true).push<void>(
-                  SettingsMaterialPageRoute<void>(
-                    builder: (context) => DoubanAccountEditorPage(
-                      initial: doubanAccount,
+    return _runEditorOverlay(
+      () => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) {
+          return _HomeEditorSecondarySheetBody(
+            title: '豆瓣模块',
+            tiles: [
+              _AddModuleTile(
+                title: '豆瓣账号设置',
+                autofocus: true,
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _runEditorOverlay(
+                    () => Navigator.of(
+                      context,
+                      rootNavigator: true,
+                    ).push<void>(
+                      SettingsMaterialPageRoute<void>(
+                        builder: (context) => DoubanAccountEditorPage(
+                          initial: doubanAccount,
+                        ),
+                      ),
                     ),
-                  ),
-                );
-              },
-            ),
-            _AddModuleTile(
-              title: '豆瓣我想看',
-              onTap: () {
-                ref.read(settingsControllerProvider.notifier).saveHomeModule(
-                      HomeModuleConfig.doubanInterest(
-                        DoubanInterestStatus.mark,
-                      ),
-                    );
-                Navigator.of(context).pop();
-              },
-            ),
-            _AddModuleTile(
-              title: '豆瓣随机想看',
-              onTap: () {
-                ref.read(settingsControllerProvider.notifier).saveHomeModule(
-                      HomeModuleConfig.doubanInterest(
-                        DoubanInterestStatus.randomMark,
-                      ),
-                    );
-                Navigator.of(context).pop();
-              },
-            ),
-            _AddModuleTile(
-              title: '豆瓣个性化推荐 · 电影',
-              onTap: () {
-                ref.read(settingsControllerProvider.notifier).saveHomeModule(
-                      HomeModuleConfig.doubanSuggestion(
-                        DoubanSuggestionMediaType.movie,
-                      ),
-                    );
-                Navigator.of(context).pop();
-              },
-            ),
-            _AddModuleTile(
-              title: '豆瓣个性化推荐 · 电视',
-              onTap: () {
-                ref.read(settingsControllerProvider.notifier).saveHomeModule(
-                      HomeModuleConfig.doubanSuggestion(
-                        DoubanSuggestionMediaType.tv,
-                      ),
-                    );
-                Navigator.of(context).pop();
-              },
-            ),
-            _AddModuleTile(
-              title: '豆瓣片单',
-              onTap: () async {
-                Navigator.of(context).pop();
-                await _showDoubanListDialog(context, ref);
-              },
-            ),
-          ],
-        );
-      },
+                  );
+                },
+              ),
+              _AddModuleTile(
+                title: '豆瓣我想看',
+                onTap: () {
+                  ref.read(settingsControllerProvider.notifier).saveHomeModule(
+                        HomeModuleConfig.doubanInterest(
+                          DoubanInterestStatus.mark,
+                        ),
+                      );
+                  Navigator.of(context).pop();
+                },
+              ),
+              _AddModuleTile(
+                title: '豆瓣随机想看',
+                onTap: () {
+                  ref.read(settingsControllerProvider.notifier).saveHomeModule(
+                        HomeModuleConfig.doubanInterest(
+                          DoubanInterestStatus.randomMark,
+                        ),
+                      );
+                  Navigator.of(context).pop();
+                },
+              ),
+              _AddModuleTile(
+                title: '豆瓣个性化推荐 · 电影',
+                onTap: () {
+                  ref.read(settingsControllerProvider.notifier).saveHomeModule(
+                        HomeModuleConfig.doubanSuggestion(
+                          DoubanSuggestionMediaType.movie,
+                        ),
+                      );
+                  Navigator.of(context).pop();
+                },
+              ),
+              _AddModuleTile(
+                title: '豆瓣个性化推荐 · 电视',
+                onTap: () {
+                  ref.read(settingsControllerProvider.notifier).saveHomeModule(
+                        HomeModuleConfig.doubanSuggestion(
+                          DoubanSuggestionMediaType.tv,
+                        ),
+                      );
+                  Navigator.of(context).pop();
+                },
+              ),
+              _AddModuleTile(
+                title: '豆瓣片单',
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _showDoubanListDialog(context, ref);
+                },
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -661,45 +933,54 @@ class HomeEditorPage extends ConsumerWidget {
       return;
     }
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return _HomeEditorSecondarySheetBody(
-          title: source.name,
-          tiles: [
-            if (source.kind == MediaSourceKind.nas)
-              _AddModuleTile(
-                title: '全部内容',
-                onTap: () {
-                  ref
-                      .read(settingsControllerProvider.notifier)
-                      .saveHomeModule(HomeModuleConfig.librarySource(source));
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('已添加 ${source.name} 全部内容')),
-                  );
-                },
-              ),
-            ...sourceCollections.map(
-              (collection) => _AddModuleTile(
-                title: collection.title,
-                onTap: () {
-                  ref.read(settingsControllerProvider.notifier).saveHomeModule(
-                        HomeModuleConfig.libraryCollection(collection),
-                      );
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('已添加 ${collection.title}'),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        );
-      },
+    await _runEditorOverlay(
+      () => showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) {
+          return _HomeEditorSecondarySheetBody(
+            title: source.name,
+            tiles: [
+              if (source.kind == MediaSourceKind.nas)
+                _AddModuleTile(
+                  title: '全部内容',
+                  autofocus: true,
+                  onTap: () {
+                    ref
+                        .read(settingsControllerProvider.notifier)
+                        .saveHomeModule(HomeModuleConfig.librarySource(source));
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('已添加 ${source.name} 全部内容')),
+                    );
+                  },
+                ),
+              for (var index = 0; index < sourceCollections.length; index++)
+                _AddModuleTile(
+                  autofocus: source.kind != MediaSourceKind.nas && index == 0,
+                  title: sourceCollections[index].title,
+                  onTap: () {
+                    ref
+                        .read(settingsControllerProvider.notifier)
+                        .saveHomeModule(
+                          HomeModuleConfig.libraryCollection(
+                            sourceCollections[index],
+                          ),
+                        );
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          '已添加 ${sourceCollections[index].title}',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -722,133 +1003,135 @@ class HomeEditorPage extends ConsumerWidget {
     final cancelFocusNode = FocusNode(debugLabel: 'home-douban-cancel');
     final saveFocusNode = FocusNode(debugLabel: 'home-douban-save');
 
-    return showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            final dialog = AlertDialog(
-              title: Text(existing == null ? '新增豆瓣片单' : '编辑豆瓣片单'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedPresetUrl,
-                      decoration: const InputDecoration(labelText: '默认片单'),
-                      items: [
-                        for (final preset in _defaultDoubanListPresets)
-                          DropdownMenuItem<String>(
-                            value: preset.url,
-                            child: Text(preset.title),
+    return _runEditorOverlay(
+      () => showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setState) {
+              final dialog = AlertDialog(
+                title: Text(existing == null ? '新增豆瓣片单' : '编辑豆瓣片单'),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedPresetUrl,
+                        decoration: const InputDecoration(labelText: '默认片单'),
+                        items: [
+                          for (final preset in _defaultDoubanListPresets)
+                            DropdownMenuItem<String>(
+                              value: preset.url,
+                              child: Text(preset.title),
+                            ),
+                          const DropdownMenuItem<String>(
+                            value: _kCustomDoubanListPresetValue,
+                            child: Text('自定义输入'),
                           ),
-                        const DropdownMenuItem<String>(
-                          value: _kCustomDoubanListPresetValue,
-                          child: Text('自定义输入'),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) {
+                            return;
+                          }
+                          setState(() {
+                            selectedPresetUrl = value;
+                            if (value == _kCustomDoubanListPresetValue) {
+                              return;
+                            }
+                            final preset = _findDoubanListPreset(value);
+                            if (preset == null) {
+                              return;
+                            }
+                            titleController.text = preset.title;
+                            urlController.text = preset.url;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      wrapTelevisionDialogFieldTraversal(
+                        enabled: isTelevision,
+                        child: TextField(
+                          controller: titleController,
+                          focusNode: titleFocusNode,
+                          autofocus: true,
+                          textInputAction: TextInputAction.next,
+                          decoration: const InputDecoration(labelText: '标题'),
                         ),
-                      ],
-                      onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
-                        setState(() {
-                          selectedPresetUrl = value;
-                          if (value == _kCustomDoubanListPresetValue) {
-                            return;
-                          }
-                          final preset = _findDoubanListPreset(value);
-                          if (preset == null) {
-                            return;
-                          }
-                          titleController.text = preset.title;
-                          urlController.text = preset.url;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    wrapTelevisionDialogFieldTraversal(
-                      enabled: isTelevision,
-                      child: TextField(
-                        controller: titleController,
-                        focusNode: titleFocusNode,
-                        autofocus: true,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(labelText: '标题'),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    wrapTelevisionDialogFieldTraversal(
-                      enabled: isTelevision,
-                      child: TextField(
-                        controller: urlController,
-                        focusNode: urlFocusNode,
-                        minLines: 2,
-                        maxLines: 3,
-                        textInputAction: TextInputAction.done,
-                        decoration: const InputDecoration(labelText: '片单地址'),
+                      const SizedBox(height: 12),
+                      wrapTelevisionDialogFieldTraversal(
+                        enabled: isTelevision,
+                        child: TextField(
+                          controller: urlController,
+                          focusNode: urlFocusNode,
+                          minLines: 2,
+                          maxLines: 3,
+                          textInputAction: TextInputAction.done,
+                          decoration: const InputDecoration(labelText: '片单地址'),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              actions: [
-                StarflowButton(
-                  label: '取消',
-                  focusNode: cancelFocusNode,
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  variant: StarflowButtonVariant.ghost,
-                  compact: true,
-                ),
-                StarflowButton(
-                  label: '保存',
-                  focusNode: saveFocusNode,
-                  onPressed: () {
-                    final url = urlController.text.trim();
-                    if (url.isEmpty) {
-                      return;
-                    }
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveHomeModule(
-                          existing == null
-                              ? HomeModuleConfig.doubanList(
-                                  title: titleController.text.trim().isEmpty
-                                      ? '豆瓣片单'
-                                      : titleController.text.trim(),
-                                  url: url,
-                                )
-                              : existing.copyWith(
-                                  title: titleController.text.trim().isEmpty
-                                      ? existing.title
-                                      : titleController.text.trim(),
-                                  doubanListUrl: url,
-                                ),
-                        );
-                    Navigator.of(dialogContext).pop();
-                  },
-                  compact: true,
-                ),
-              ],
-            );
-            return wrapTelevisionDialogBackHandling(
-              enabled: isTelevision,
-              dialogContext: dialogContext,
-              inputFocusNodes: [titleFocusNode, urlFocusNode],
-              contentFocusNodes: [titleFocusNode, urlFocusNode],
-              actionFocusNodes: [saveFocusNode, cancelFocusNode],
-              child: dialog,
-            );
-          },
-        );
-      },
-    ).whenComplete(() {
-      titleController.dispose();
-      urlController.dispose();
-      titleFocusNode.dispose();
-      urlFocusNode.dispose();
-      cancelFocusNode.dispose();
-      saveFocusNode.dispose();
-    });
+                actions: [
+                  StarflowButton(
+                    label: '取消',
+                    focusNode: cancelFocusNode,
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    variant: StarflowButtonVariant.ghost,
+                    compact: true,
+                  ),
+                  StarflowButton(
+                    label: '保存',
+                    focusNode: saveFocusNode,
+                    onPressed: () {
+                      final url = urlController.text.trim();
+                      if (url.isEmpty) {
+                        return;
+                      }
+                      ref
+                          .read(settingsControllerProvider.notifier)
+                          .saveHomeModule(
+                            existing == null
+                                ? HomeModuleConfig.doubanList(
+                                    title: titleController.text.trim().isEmpty
+                                        ? '豆瓣片单'
+                                        : titleController.text.trim(),
+                                    url: url,
+                                  )
+                                : existing.copyWith(
+                                    title: titleController.text.trim().isEmpty
+                                        ? existing.title
+                                        : titleController.text.trim(),
+                                    doubanListUrl: url,
+                                  ),
+                          );
+                      Navigator.of(dialogContext).pop();
+                    },
+                    compact: true,
+                  ),
+                ],
+              );
+              return wrapTelevisionDialogBackHandling(
+                enabled: isTelevision,
+                dialogContext: dialogContext,
+                inputFocusNodes: [titleFocusNode, urlFocusNode],
+                contentFocusNodes: [titleFocusNode, urlFocusNode],
+                actionFocusNodes: [saveFocusNode, cancelFocusNode],
+                child: dialog,
+              );
+            },
+          );
+        },
+      ).whenComplete(() {
+        titleController.dispose();
+        urlController.dispose();
+        titleFocusNode.dispose();
+        urlFocusNode.dispose();
+        cancelFocusNode.dispose();
+        saveFocusNode.dispose();
+      }),
+    );
   }
 
   Future<void> _showEditModuleDialog(
@@ -872,119 +1155,121 @@ class HomeEditorPage extends ConsumerWidget {
       );
     }
 
-    return showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            final dialog = AlertDialog(
-              title: const Text('编辑模块'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    wrapTelevisionDialogFieldTraversal(
-                      enabled: isTelevision,
-                      child: TextField(
-                        controller: titleController,
-                        focusNode: titleFocusNode,
-                        autofocus: true,
-                        decoration: const InputDecoration(labelText: '标题'),
+    return _runEditorOverlay(
+      () => showDialog<void>(
+        context: context,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setState) {
+              final dialog = AlertDialog(
+                title: const Text('编辑模块'),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      wrapTelevisionDialogFieldTraversal(
+                        enabled: isTelevision,
+                        child: TextField(
+                          controller: titleController,
+                          focusNode: titleFocusNode,
+                          autofocus: true,
+                          decoration: const InputDecoration(labelText: '标题'),
+                        ),
                       ),
-                    ),
-                    if (module.type == HomeModuleType.doubanInterest) ...[
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<DoubanInterestStatus>(
-                        initialValue: interestStatus,
-                        decoration: const InputDecoration(labelText: '豆瓣状态'),
-                        items: DoubanInterestStatus.values
-                            .map(
-                              (item) => DropdownMenuItem(
-                                value: item,
-                                child: Text(item.label),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() {
-                              interestStatus = value;
-                            });
-                          }
-                        },
-                      ),
+                      if (module.type == HomeModuleType.doubanInterest) ...[
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<DoubanInterestStatus>(
+                          initialValue: interestStatus,
+                          decoration: const InputDecoration(labelText: '豆瓣状态'),
+                          items: DoubanInterestStatus.values
+                              .map(
+                                (item) => DropdownMenuItem(
+                                  value: item,
+                                  child: Text(item.label),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                interestStatus = value;
+                              });
+                            }
+                          },
+                        ),
+                      ],
+                      if (module.type == HomeModuleType.doubanSuggestion) ...[
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<DoubanSuggestionMediaType>(
+                          initialValue: suggestionType,
+                          decoration: const InputDecoration(labelText: '推荐类型'),
+                          items: DoubanSuggestionMediaType.values
+                              .map(
+                                (item) => DropdownMenuItem(
+                                  value: item,
+                                  child: Text(item.label),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                suggestionType = value;
+                              });
+                            }
+                          },
+                        ),
+                      ],
                     ],
-                    if (module.type == HomeModuleType.doubanSuggestion) ...[
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<DoubanSuggestionMediaType>(
-                        initialValue: suggestionType,
-                        decoration: const InputDecoration(labelText: '推荐类型'),
-                        items: DoubanSuggestionMediaType.values
-                            .map(
-                              (item) => DropdownMenuItem(
-                                value: item,
-                                child: Text(item.label),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() {
-                              suggestionType = value;
-                            });
-                          }
-                        },
-                      ),
-                    ],
-                  ],
+                  ),
                 ),
-              ),
-              actions: [
-                StarflowButton(
-                  label: '取消',
-                  focusNode: cancelFocusNode,
-                  onPressed: () => Navigator.of(dialogContext).pop(),
-                  variant: StarflowButtonVariant.ghost,
-                  compact: true,
-                ),
-                StarflowButton(
-                  label: '保存',
-                  focusNode: saveFocusNode,
-                  onPressed: () {
-                    ref
-                        .read(settingsControllerProvider.notifier)
-                        .saveHomeModule(
-                          module.copyWith(
-                            title: titleController.text.trim().isEmpty
-                                ? module.title
-                                : titleController.text.trim(),
-                            doubanInterestStatus: interestStatus,
-                            doubanSuggestionType: suggestionType,
-                          ),
-                        );
-                    Navigator.of(dialogContext).pop();
-                  },
-                  compact: true,
-                ),
-              ],
-            );
-            return wrapTelevisionDialogBackHandling(
-              enabled: isTelevision,
-              dialogContext: dialogContext,
-              inputFocusNodes: [titleFocusNode],
-              contentFocusNodes: [titleFocusNode],
-              actionFocusNodes: [saveFocusNode, cancelFocusNode],
-              child: dialog,
-            );
-          },
-        );
-      },
-    ).whenComplete(() {
-      titleController.dispose();
-      titleFocusNode.dispose();
-      cancelFocusNode.dispose();
-      saveFocusNode.dispose();
-    });
+                actions: [
+                  StarflowButton(
+                    label: '取消',
+                    focusNode: cancelFocusNode,
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    variant: StarflowButtonVariant.ghost,
+                    compact: true,
+                  ),
+                  StarflowButton(
+                    label: '保存',
+                    focusNode: saveFocusNode,
+                    onPressed: () {
+                      ref
+                          .read(settingsControllerProvider.notifier)
+                          .saveHomeModule(
+                            module.copyWith(
+                              title: titleController.text.trim().isEmpty
+                                  ? module.title
+                                  : titleController.text.trim(),
+                              doubanInterestStatus: interestStatus,
+                              doubanSuggestionType: suggestionType,
+                            ),
+                          );
+                      Navigator.of(dialogContext).pop();
+                    },
+                    compact: true,
+                  ),
+                ],
+              );
+              return wrapTelevisionDialogBackHandling(
+                enabled: isTelevision,
+                dialogContext: dialogContext,
+                inputFocusNodes: [titleFocusNode],
+                contentFocusNodes: [titleFocusNode],
+                actionFocusNodes: [saveFocusNode, cancelFocusNode],
+                child: dialog,
+              );
+            },
+          );
+        },
+      ).whenComplete(() {
+        titleController.dispose();
+        titleFocusNode.dispose();
+        cancelFocusNode.dispose();
+        saveFocusNode.dispose();
+      }),
+    );
   }
 }
 
@@ -1016,10 +1301,12 @@ class _AddModuleTile extends StatelessWidget {
   const _AddModuleTile({
     required this.title,
     required this.onTap,
+    this.autofocus = false,
   });
 
   final String title;
   final VoidCallback onTap;
+  final bool autofocus;
 
   @override
   Widget build(BuildContext context) {
@@ -1028,6 +1315,8 @@ class _AddModuleTile extends StatelessWidget {
       child: StarflowSelectionTile(
         title: title,
         onPressed: onTap,
+        autofocus: autofocus,
+        focusId: 'home-editor:add:$title',
         trailing: const Icon(Icons.add_circle_outline_rounded),
       ),
     );
@@ -1039,11 +1328,13 @@ class _SourceCategoryTile extends StatelessWidget {
     required this.title,
     required this.icon,
     required this.onTap,
+    this.focusNode,
   });
 
   final String title;
   final IconData icon;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -1056,6 +1347,8 @@ class _SourceCategoryTile extends StatelessWidget {
       ),
       title: title,
       onPressed: onTap,
+      focusNode: focusNode,
+      focusId: focusNode?.debugLabel,
     );
   }
 }
