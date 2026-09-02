@@ -4,12 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/network/starflow_http_transport.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 
 final panSouApiClientProvider = Provider<PanSouApiClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
   final searchClient = StarflowHttpClient(
-    http.Client(),
+    createStarflowTransportClient(),
     requestTimeout: PanSouApiClient.searchTimeout,
   );
   ref.onDispose(searchClient.close);

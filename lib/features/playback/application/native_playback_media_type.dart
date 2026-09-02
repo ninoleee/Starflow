@@ -10,13 +10,33 @@ bool shouldProbeNativeSmartStrmMediaType(PlaybackTarget target) {
       !_smartStrmPathPattern.hasMatch(url)) {
     return false;
   }
-  return _smartStrmFidPathPattern.hasMatch(url) ||
-      url.contains('#') ||
-      url.contains('%23');
+  if (url.contains('#') || url.contains('%23')) {
+    return true;
+  }
+  if (!_smartStrmFidPathPattern.hasMatch(url)) {
+    return false;
+  }
+  final container = target.container.trim().toLowerCase();
+  final extension = _playbackExtension(url);
+  return container == 'mp4' ||
+      container == 'm4v' ||
+      extension == 'mp4' ||
+      extension == 'm4v' ||
+      (container.isEmpty && extension.isEmpty);
 }
 
 final RegExp _smartStrmPathPattern = RegExp(r'/smartstrm(?:_[^/]+)?/');
 final RegExp _smartStrmFidPathPattern = RegExp(r'/smartstrm_fid/');
+
+String _playbackExtension(String url) {
+  final path = Uri.tryParse(url)?.path ?? url;
+  final fileName = path.split('/').last;
+  final dotIndex = fileName.lastIndexOf('.');
+  if (dotIndex < 0 || dotIndex == fileName.length - 1) {
+    return '';
+  }
+  return fileName.substring(dotIndex + 1).toLowerCase();
+}
 
 String? resolveNativePlaybackMimeType(
   PlaybackRemotePreflightResult result,

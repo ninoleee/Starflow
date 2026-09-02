@@ -314,7 +314,6 @@ class _MetadataIndexManagementPageState
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
         SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
-        SingleActivator(LogicalKeyboardKey.backspace): DismissIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{

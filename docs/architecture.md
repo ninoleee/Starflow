@@ -185,7 +185,7 @@ lib/
 - 首页按 `sectionId + resourceId` 为每张海报、轮播卡和 view-all 入口保留稳定 FocusNode，并给纵向模块与横向资源列表提供 key 到新索引的映射；标题或来源元数据补全和重排因此不会替换焦点节点。Hero 另跟踪来源 section，切换来源不会误继承同名资源的旧页码。首焦点只授予首个实际有卡片的 section，连续空 section 会通过渐进滚动定位，全部为空时才使用“编辑首页”兜底
 - 首页额外跟踪 section/item/view-all 的可聚焦拓扑；刷新移除当前聚焦目标时，下一帧只在焦点确实失效的情况下恢复到仍存在的首卡或其它有效内容。Hero 按资源 ID 同步页码和焦点，边界翻页按钮失效时退回当前 Hero 卡，普通列表更新不抢焦点
 - 首页编辑器按模块 ID 保留开关焦点，并在来源异步变化、模块重排/删除、移动按钮到达边界及 sheet/dialog 关闭后校验当前路由焦点；只有原目标失效时才请求同模块或首个有效目标
-- Android / TV 真正确认退出时，Flutter 先清理播放会话、媒体通知、画中画和后台播放，再通过 `starflow/platform` 调用原生 `finishAndRemoveTask()`；桥接不可用时才回退 `SystemNavigator.pop()`，避免任务仍留在启动器中被自动恢复
+- Android / TV 真正确认退出时，Flutter 先清理播放会话、媒体通知、画中画和后台播放，再通过 `starflow/platform` 进入原生退出窗口。`MainActivity` 持续跟踪按下的遥控器键并吞掉退出后的尾部事件；确认键已经抬起时等待 `120ms`，仍按住时等到全部按键抬起，未收到抬起事件则以 `2s` 超时兜底，再枚举 `ActivityManager.appTasks` 移除本应用全部 task。退出请求后的 `5s` launcher guard 会拒绝按键穿透或电视启动器自动恢复造成的 `MAIN / LAUNCHER / LEANBACK_LAUNCHER` 重启，桥接不可用时才回退 `SystemNavigator.pop()`
 - `AppRuntimeRecoveryBoundary` 统一监听应用生命周期和内存压力。后台状态通过引用计数 lease 暂停首页 load/apply 与元数据 prefetch/maintenance 的新准入；恢复前台后等待首帧和固定 `400ms` 静默期再释放。内存压力使用独立 `2s` lease，并 best-effort 取消媒体库后台刷新，因此生命周期与低内存两种暂停可以安全叠加
 - Flutter 的 `PaintingBinding` 会在内存压力时清理内存图片缓存；应用层只记录 `app.memory-pressure` 和降低后台负载，不重复清空 live/persistent 图片、不篡改活动请求计数，也不碰播放会话
 - `NetworkRequestGuard` 的熔断状态增加显式半开探测配额。手动首页/详情/信息管理/媒体库刷新会为当前已打开的每个主机熔断器武装一次探测；第一个请求独占配额，成功移除失败状态，失败重新延长熔断，自动任务不会绕过熔断
@@ -270,6 +270,8 @@ lib/
 运行期网络入口分成“共享传输层”和“业务策略层”：
 
 - `StarflowHttpClient` 是 Emby、WebDAV、豆瓣、元数据、搜索、字幕、夸克和 SmartStrm 等客户端的共享传输包装；默认等待响应头上限为 `20` 秒
+- `NetworkProxyConfig` 保存运行期 HTTP 代理地址、可选 Basic 认证和局域网直连策略；`NetworkProxyRuntime` 提供进程内当前快照与 revision，IO 传输层在 revision 变化后为后续请求切换连接池，不中断已经交给旧连接池的请求
+- 持久化图片缓存的网络读取也复用 `StarflowHttpClient`；`networkOnly` 图片先通过共享传输取得字节再交给 `MemoryImage`，不会绕过代理配置
 - `network_failure.dart` 把错误统一归类为 `timeout / tlsHandshake / dns / connection / connectionClosed / httpStatus / circuitOpen / cancelled / unknown`
 - `NetworkRequestGuard` 按 `policy + host` 保存连续临时故障状态，提供总请求超时、可选的幂等重试和熔断；非幂等操作默认不重试
 - 豆瓣与元数据策略当前使用 `6` 秒总请求超时、连续 `3` 次临时故障后熔断、熔断 `2` 分钟；保留原有业务异常类型以兼容调用方
@@ -386,6 +388,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 首页 `Hero`、背景图与海报图会按显示尺寸传递 decode 尺寸；移动端 `PageController` 也做了边界稳定化，降低首屏切换和大图解码抖动
 - 静态 Hero 与精简 Hero 视觉由一个界面开关原子更新，全屏背景图仍单独持久化
 - `TV` 首页会给 Hero、模块标题和内容区之间补齐明确的方向焦点路径，避免焦点停在 Hero 图片层后无法继续下移
+- `TV` 信息管理页的搜索输入框只用 `goBack / escape` 退出编辑状态，不在输入框外层覆盖 `backspace`；软键盘删除键因此继续交给 `EditableText` 删除字符并保持输入焦点
 - 桌面端首页普通横向内容流也会复用统一的左右翻页按钮，而不是只让 Hero 独占这套交互
 
 ## 7. 媒体库链路
@@ -784,8 +787,9 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - MPV 打开重试先由 `classifyMpvOpenFailure` 分类，只有临时网络错误才在统一总超时内重建最多 `3` 次；永久资源/权限/格式错误与未知错误不再无条件重复创建播放器。进程内 `PlaybackHostBandwidthCache` 按主机缓存速度 `10` 分钟，缓存命中后的下一集预检只读取响应状态和 Range 能力
 - 当平滑后的同主机速度低于片源码率 `0.9x` 时，MPV 不再因启动超时或 hard stall 重建同一连接，Exo watchdog 也不重建播放器；两者保留当前连接继续缓冲并给出一次提示
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
-- Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；`/smartstrm_fid/` 和其他含 `#/%23` 的 SmartStrm 原生启动会执行最多 `64` 字节、约 `1.5s` 的轻量预检，以 MP4 `ftyp` 或 HLS `#EXTM3U` 文件头优先选择 MediaSource，响应头和最终路径作为 HLS 辅助判断，不持久化短期重定向地址。预检失败或文件头不明确时继续按原格式启动；标准 `/smartstrm/` 与 `/smartstrm_*/` 路径在首次解析错误 `3003` 后仍由 `NativePlaybackHlsFallbackPolicy` 保留进度并强制切换 HLS 一次
+- Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；`/smartstrm_fid/` 只在目标为 MP4/未知格式时执行最多 `64` 字节、约 `1.5s` 的轻量预检，以 MP4 `ftyp` 或 HLS `#EXTM3U` 文件头优先选择 MediaSource。已知 MKV 等其他容器不再产生额外 Range 探测；其他含 `#/%23` 的 SmartStrm 地址仍保留探测。预检失败或文件头不明确时继续按原格式启动；标准 `/smartstrm/` 与 `/smartstrm_*/` 路径在首次解析错误 `3003` 后仍由 `NativePlaybackHlsFallbackPolicy` 保留进度并强制切换 HLS 一次
 - Android 原生启动通过 `buildDeferredNativeEpisodeQueue` 携带当前季的完整未解析队列并保留真实 `currentIndex`，只用已解析目标替换当前条目；原生选集、上一集、下一集和播放结束自动续播统一通过 `starflow/native_playback_resolver` 回调 Flutter，按选中的单集执行 `PlaybackTargetResolver` 和必要的 SmartStrm MP4/HLS 探测。异步解析期间旧播放器不释放，成功后才更新队列条目并切换，失败或会话变化则保留当前视频
+- Android TV 原生播放器内切换远程剧集时，`releasePlayer()` 先清理旧 Exo、Surface、Analytics/带宽监听、运行循环、看门狗和系统媒体会话；新集不继承旧 URL、MediaSource 或缓冲数据。低内存 TV 的内部切集档使用 `minBuffer=30s / start=6s / rebuffer=12s / target=48 MB`，首次外部启动继续使用原快启档。`native.queue.old-player-released` 与 `native.buffer-policy episodeSwitchWarmup=true` 用于验证两段边界
 - 内置 MPV 的 TV、Material 和 Material Desktop 控制层都直接消费 `PlaybackEpisodeQueue`，不使用 media_kit 内部单媒体 playlist 的上一项/下一项按钮；三端统一显示边界可用状态和完整选集弹窗。手动选集、相邻集及自动续播最终收口到 `_switchPlaybackQueueIndex`：先用 `PlaybackTargetResolver` 解析目标单集并校验可播地址，成功后才保存旧集进度、关闭旧播放器并初始化新集，解析失败时队列索引和当前播放器保持不变
 - Flutter、Android MediaSession 和 iOS MPRemoteCommandCenter 通过 `hasEpisodeQueue / hasPrevious / hasNext` 共享系统媒体动作语义：存在多集队列时隐藏 10 秒快退/快进并发布上一集/下一集，普通影片则继续发布快退/快进与进度拖动；系统命令不再在剧集边界回退成 seek。MPV、Android 原生和 iOS 原生的切集成功路径均不显示额外提示，只保留解析中与失败反馈
 - Android 原生播放器复用每秒运行循环做续播采样，实际仍按约 `10s` 的位置差值节流落盘；内置 `MPV` 和 iOS 原生播放器使用同一量级，生命周期暂停、返回、切集和关闭路径会强制保存
@@ -849,6 +853,11 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - 当前夸克保存目录管理与删除
   - `SmartStrm` Webhook、任务名、`STRM` 触发等待时间
   - 自动增量刷新索引的媒体源选择与“索引刷新等待时间”
+- 网络代理
+  - HTTP 代理服务器与端口
+  - 可选 Basic 用户名和密码
+  - localhost、私有 IP 与 `.local` 地址直连
+  - 真实 HTTPS 连接测试
 - 元数据匹配
 - 媒体源管理内的详情页匹配来源
 - 播放超时
@@ -885,7 +894,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 内置 MPV 的触屏交互、卡顿自动恢复和激进性能调优保留在全局设置的独立“MPV”一级页；播放器内的播放设置一级只提供“更多”入口，二级页复用同一组持久化字段，并额外集中提供后台播放与主/副字幕布局
 - 三个页面都不再维护需要手动提交的页面草稿：选择、开关和步进项修改后立即排入持久化队列，文本输入使用 `250ms` 合并窗口；返回时会先把最后草稿加入有序写入队列，再立即关闭页面，不再显示保存确认框或工具栏提交按钮
 - 三个全局设置页各自只写自己那段字段：播放页走 `savePlaybackPreferences(...)`、字幕页走 `savePlaybackSubtitlePreferences(...)`、MPV 页走 `savePlaybackMpvPreferences(...)`；播放器内二级“更多”使用 `savePlaybackRuntimePreferences(...)` 原子保存其当前完整快照，避免连续操作互相覆盖
-- 媒体源、搜索服务、豆瓣账号和网络存储编辑页复用 `SettingsAutoSaveCoordinator`：以当前配置 JSON 作为指纹去重，连续修改使用 `250ms` 防抖并按队列顺序持久化，返回时立即冲刷最后草稿，删除前取消尚未开始的保存，避免删除后被旧任务重新创建
+- 媒体源、搜索服务、豆瓣账号、网络存储和网络代理编辑页复用 `SettingsAutoSaveCoordinator`：以当前配置 JSON 作为指纹去重，连续修改使用 `250ms` 防抖并按队列顺序持久化，返回时立即冲刷最后草稿，删除前取消尚未开始的保存，避免删除后被旧任务重新创建
 - 媒体源资源身份由类型、endpoint / 根目录及服务端资源身份字段组成；删除来源或改变资源身份时先持久化新设置，再提升来源失效版本、等待旧扫描结束并清理来源级缓存，防止旧任务在清理后反写
 - 本地、文件和局域网导入在落盘前统一调用媒体源引用协调：移除不存在来源的首页模块、匹配/搜索来源、同步目录和刷新目标；可确认相对目录的新地址会保存到当前媒体源根，无法确认的旧引用不会继续使用
 - 整页编辑不再保留保存按钮或未保存确认；单个文本输入弹窗里的“保存”仍只负责把该输入提交回当前草稿。新建媒体源/搜索服务在草稿没有实际内容时不会生成空记录
@@ -954,6 +963,7 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 - 应用设置
 - 当前设置 payload 使用 `starflow.settings.v2`，并要求 `schemaVersion: 2`
+- 代理配置作为 `networkProxy` 子对象保存在同一 payload 中；旧配置缺少该对象时默认保持直连
 - Emby 本地库缓存的 `v2` manifest、来源 summary / fallback shard 与 section shards
 - 详情缓存
 - 详情缓存里的完整本地资源候选列表与当前选中候选；UI 会由它恢复来源选择及当前来源内的播放版本
@@ -1004,6 +1014,7 @@ Android TV 下的设置页还额外做了遥控器适配：
 - 磁盘层会保存 metadata，并按 `30` 天 TTL 做过期判断
 - 远端失败但本地还保留旧字节时，会优先回退到 stale bytes，减少短期网络抖动导致的图片缺失
 - 单次网络读取最多等待 `15s`；组件在全部候选失败后按 `1s / 4s / 12s` 重试，失败与恢复分别写入 `image.load` 日志
+- IO 平台的图片网络读取遵循运行期代理配置；Web 端仍由浏览器网络栈和 `STARFLOW_WEB_PROXY_BASE` 开发转发入口决定
 - raster 解码失败会同步从 Flutter image cache 与持久化缓存中淘汰对应条目，下一次重试重新请求原图
 - 内存层按条目数和字节预算双阈值淘汰，尽量减少重复 decode
 

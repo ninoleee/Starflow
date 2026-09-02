@@ -6,9 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/network_failure.dart';
+import 'package:starflow/core/network/network_proxy_runtime.dart';
+import 'package:starflow/core/network/starflow_http_transport.dart';
 
 final starflowHttpClientProvider = Provider<http.Client>((ref) {
-  final client = StarflowHttpClient(http.Client());
+  final client = StarflowHttpClient(createStarflowTransportClient());
   ref.onDispose(client.close);
   return client;
 });
@@ -75,6 +77,7 @@ class StarflowHttpClient extends http.BaseClient {
           'failureKind': failure.kind.name,
           'transient': failure.isTransient,
           'timeoutMs': requestTimeout.inMilliseconds,
+          'proxyEnabled': _usesProxyFor(originalUrl),
         },
         error: error,
         stackTrace: stackTrace,
@@ -131,7 +134,13 @@ class StarflowHttpClient extends http.BaseClient {
       'port': originalUrl.hasPort ? originalUrl.port : null,
       'path': originalUrl.path,
       if (statusCode != null) 'statusCode': statusCode,
+      'proxyEnabled': _usesProxyFor(originalUrl),
     };
+  }
+
+  bool _usesProxyFor(Uri uri) {
+    return _proxyEnabled ||
+        (!kIsWeb && networkProxyRuntime.config.shouldProxy(uri));
   }
 
   @override

@@ -72,6 +72,7 @@ class NativePlaybackActivity : Activity() {
     private var latestNetworkSampleAtMs = 0L
     private var networkSpeedVisible = false
     private var bandwidthWarningShown = false
+    private var internalEpisodeSwitchPlayback = false
     private val playbackPerformanceTracker = NativePlaybackPerformanceTracker()
     private val playbackHostBandwidthCache = NativePlaybackHostBandwidthCache()
     private lateinit var playerView: PlayerView
@@ -559,6 +560,7 @@ class NativePlaybackActivity : Activity() {
         outroSkipApplied = false
         subtitleSearchActive = false
         resumePlaybackAfterSubtitleSearch = false
+        internalEpisodeSwitchPlayback = false
     }
 
     @Suppress("DEPRECATION")
@@ -975,6 +977,8 @@ class NativePlaybackActivity : Activity() {
                 currentPlaybackHost(),
             ),
             sourceBitrate = bitrate.toLong(),
+            isRemoteEpisodeSwitch = internalEpisodeSwitchPlayback &&
+                isHttpPlaybackUrl(intent.getStringExtra(EXTRA_URL).orEmpty()),
         )
         logPlayback(
             "native.buffer-policy television=$isTelevisionDevice " +
@@ -983,7 +987,8 @@ class NativePlaybackActivity : Activity() {
                 "startMs=${bufferConfig.bufferForPlaybackMs} " +
                 "rebufferMs=${bufferConfig.bufferForPlaybackAfterRebufferMs} " +
                 "targetBytes=${bufferConfig.targetBufferBytes} " +
-                "bandwidthProfile=${bufferConfig.bandwidthProfile}",
+                "bandwidthProfile=${bufferConfig.bandwidthProfile} " +
+                "episodeSwitchWarmup=${bufferConfig.episodeSwitchWarmup}",
         )
         playbackPerformanceTracker.configureBuffer(
             targetBufferBytes = bufferConfig.targetBufferBytes,
@@ -2141,12 +2146,18 @@ class NativePlaybackActivity : Activity() {
         persistPlaybackProgress(force = true)
         finishPlaybackPerformanceSession("episode-switch")
         releasePlayer()
+        logPlayback(
+            "native.queue.old-player-released " +
+                "reason=$reason playerCleared=${player == null} " +
+                "bandwidthCleared=${playbackBandwidthMeter == null}",
+        )
 
         episodeQueue = nextQueue
         episodeResolutionInProgress = false
         smartStrmHlsFallbackAttempted = false
         transcodedVideoFallbackAttempted = false
         playbackTargetJson = nextEntry.playbackTargetJson
+        internalEpisodeSwitchPlayback = true
         beginPlaybackPerformanceSession()
         playbackItemKey = nextEntry.playbackItemKey
         seriesKey = nextEntry.seriesKey
@@ -4334,6 +4345,15 @@ class NativePlaybackActivity : Activity() {
             Uri.parse(rawUrl).host?.trim().orEmpty()
         } catch (_: Throwable) {
             ""
+        }
+    }
+
+    private fun isHttpPlaybackUrl(rawUrl: String): Boolean {
+        return try {
+            val scheme = Uri.parse(rawUrl.trim()).scheme?.lowercase(Locale.US)
+            scheme == "http" || scheme == "https"
+        } catch (_: Throwable) {
+            false
         }
     }
 

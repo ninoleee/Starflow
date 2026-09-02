@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -80,5 +81,53 @@ void main() {
       'metadata-index-auto-refresh',
     );
     expect(focusHistory, isNot(contains('metadata-index-search')));
+  });
+
+  testWidgets('TV metadata title field keeps focus when backspace deletes text',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(const {});
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(
+            const AppSettings(
+              mediaSources: <MediaSourceConfig>[],
+              searchProviders: <SearchProviderConfig>[],
+              doubanAccount: DoubanAccountConfig(enabled: false),
+              homeModules: <HomeModuleConfig>[],
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: MetadataIndexManagementPage(
+            target: MediaDetailTarget(
+              title: '测试影片',
+              posterUrl: '',
+              overview: '',
+              sourceKind: MediaSourceKind.emby,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final titleField = find.widgetWithText(TextField, '片名 / 搜索词');
+    await tester.tap(titleField);
+    await tester.pump();
+    await tester.enterText(titleField, '测试');
+    await tester.sendKeyEvent(LogicalKeyboardKey.backspace);
+    await tester.pump();
+
+    expect(
+      tester.widget<TextField>(titleField).controller?.text,
+      '测',
+    );
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'metadata-index-query',
+    );
   });
 }

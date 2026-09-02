@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/network/starflow_http_transport.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
@@ -335,5 +336,5 @@ class PlaybackRemotePreflight {
 const int _maxSamplePrefixBytes = 64;
 
 http.Client _defaultPreflightClientFactory() {
-  return StarflowHttpClient(http.Client());
+  return StarflowHttpClient(createStarflowTransportClient());
 }

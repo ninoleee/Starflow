@@ -8,6 +8,7 @@ data class NativePlaybackBufferConfig(
     val targetBufferBytes: Int,
     val prioritizeTimeOverSizeThresholds: Boolean,
     val bandwidthProfile: String = "unknown",
+    val episodeSwitchWarmup: Boolean = false,
 )
 
 object NativePlaybackBufferPolicy {
@@ -19,6 +20,7 @@ object NativePlaybackBufferPolicy {
         isHeavyPlayback: Boolean,
         cachedBandwidthBytesPerSecond: Long = 0L,
         sourceBitrate: Long = 0L,
+        isRemoteEpisodeSwitch: Boolean = false,
     ): NativePlaybackBufferConfig {
         val base = if (!isTelevision) {
             NativePlaybackBufferConfig(
@@ -58,31 +60,59 @@ object NativePlaybackBufferPolicy {
             )
         }
 
-        if (cachedBandwidthBytesPerSecond <= 0L || sourceBitrate <= 0L) {
-            return base
+        val bandwidthAdjusted = if (
+            cachedBandwidthBytesPerSecond <= 0L || sourceBitrate <= 0L
+        ) {
+            base
+        } else {
+            val bandwidthRatio = (cachedBandwidthBytesPerSecond * 8.0) / sourceBitrate
+            when {
+                bandwidthRatio >= 2.5 -> base.copy(
+                    bufferForPlaybackMs = minOf(base.bufferForPlaybackMs, 1_200),
+                    bufferForPlaybackAfterRebufferMs = minOf(
+                        base.bufferForPlaybackAfterRebufferMs,
+                        3_500,
+                    ),
+                    bandwidthProfile = "fast",
+                )
+                bandwidthRatio < 1.25 -> base.copy(
+                    bufferForPlaybackMs = minOf(
+                        base.minBufferMs,
+                        base.bufferForPlaybackMs + 500,
+                    ),
+                    bufferForPlaybackAfterRebufferMs = minOf(
+                        base.minBufferMs,
+                        base.bufferForPlaybackAfterRebufferMs + 2_000,
+                    ),
+                    bandwidthProfile = "constrained",
+                )
+                else -> base.copy(bandwidthProfile = "balanced")
+            }
         }
-        val bandwidthRatio = (cachedBandwidthBytesPerSecond * 8.0) / sourceBitrate
-        return when {
-            bandwidthRatio >= 2.5 -> base.copy(
-                bufferForPlaybackMs = minOf(base.bufferForPlaybackMs, 1_200),
-                bufferForPlaybackAfterRebufferMs = minOf(
-                    base.bufferForPlaybackAfterRebufferMs,
-                    3_500,
-                ),
-                bandwidthProfile = "fast",
-            )
-            bandwidthRatio < 1.25 -> base.copy(
-                bufferForPlaybackMs = minOf(
-                    base.minBufferMs,
-                    base.bufferForPlaybackMs + 500,
-                ),
-                bufferForPlaybackAfterRebufferMs = minOf(
-                    base.minBufferMs,
-                    base.bufferForPlaybackAfterRebufferMs + 2_000,
-                ),
-                bandwidthProfile = "constrained",
-            )
-            else -> base.copy(bandwidthProfile = "balanced")
+
+        if (!isTelevision || !isRemoteEpisodeSwitch) {
+            return bandwidthAdjusted
         }
+        val episodeTargetBufferBytes = when {
+            memoryClassMb <= 256 -> 48 * MEBIBYTE
+            memoryClassMb <= 512 -> 80 * MEBIBYTE
+            else -> 96 * MEBIBYTE
+        }
+        return bandwidthAdjusted.copy(
+            minBufferMs = maxOf(bandwidthAdjusted.minBufferMs, 30_000),
+            bufferForPlaybackMs = maxOf(
+                bandwidthAdjusted.bufferForPlaybackMs,
+                6_000,
+            ),
+            bufferForPlaybackAfterRebufferMs = maxOf(
+                bandwidthAdjusted.bufferForPlaybackAfterRebufferMs,
+                12_000,
+            ),
+            targetBufferBytes = maxOf(
+                bandwidthAdjusted.targetBufferBytes,
+                episodeTargetBufferBytes,
+            ),
+            episodeSwitchWarmup = true,
+        )
     }
 }

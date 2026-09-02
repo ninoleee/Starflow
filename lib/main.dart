@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:starflow/app/app.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/logging/app_frame_performance_monitor.dart';
+import 'package:starflow/core/network/network_proxy_runtime.dart';
 import 'package:starflow/core/state/riverpod_retry.dart';
 import 'package:starflow/features/bootstrap/application/startup_crash_recovery.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
@@ -22,6 +23,7 @@ Future<void> main() async {
       StackTrace? settingsLoadStackTrace;
       try {
         final initialSettings = await LocalAppSettingsRepository().load();
+        networkProxyRuntime.configure(initialSettings.networkProxy);
         await appLogger.configure(
           enabled: initialSettings.localLoggingEnabled,
           maxBytes: initialSettings.localLogMaxSizeMb * 1024 * 1024,

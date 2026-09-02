@@ -31,6 +31,24 @@ void main() {
     expect(
       shouldProbeNativeSmartStrmMediaType(
         _target(
+          'https://smartstrm.example.com/smartstrm_fid/quark/episode.mkv',
+          container: 'mkv',
+        ),
+      ),
+      isFalse,
+    );
+    expect(
+      shouldProbeNativeSmartStrmMediaType(
+        _target(
+          'https://smartstrm.example.com/smartstrm_fid/quark/episode.mkv',
+          container: '',
+        ),
+      ),
+      isFalse,
+    );
+    expect(
+      shouldProbeNativeSmartStrmMediaType(
+        _target(
           'https://smartstrm.example.com/smartstrm_fid/quark/Talk%20%2323.mp4',
         ),
       ),
@@ -152,13 +170,13 @@ void main() {
   });
 }
 
-PlaybackTarget _target(String streamUrl) {
+PlaybackTarget _target(String streamUrl, {String container = 'mp4'}) {
   return PlaybackTarget(
     title: 'Talk',
     sourceId: 'nas-main',
     streamUrl: streamUrl,
     sourceName: 'NAS',
     sourceKind: MediaSourceKind.nas,
-    container: 'mp4',
+    container: container,
   );
 }

@@ -91,4 +91,53 @@ class NativePlaybackBufferPolicyTest {
         assertEquals(6_000, config.bufferForPlaybackAfterRebufferMs)
         assertEquals("constrained", config.bandwidthProfile)
     }
+
+    @Test
+    fun lowMemoryTelevisionUsesStableWarmupAfterRemoteEpisodeSwitch() {
+        val config = NativePlaybackBufferPolicy.resolve(
+            isTelevision = true,
+            memoryClassMb = 192,
+            isHeavyPlayback = false,
+            isRemoteEpisodeSwitch = true,
+        )
+
+        assertEquals(30_000, config.minBufferMs)
+        assertEquals(6_000, config.bufferForPlaybackMs)
+        assertEquals(12_000, config.bufferForPlaybackAfterRebufferMs)
+        assertEquals(48 * 1024 * 1024, config.targetBufferBytes)
+        assertTrue(config.episodeSwitchWarmup)
+    }
+
+    @Test
+    fun initialPlaybackKeepsFastStartupPolicy() {
+        val config = NativePlaybackBufferPolicy.resolve(
+            isTelevision = true,
+            memoryClassMb = 192,
+            isHeavyPlayback = false,
+            isRemoteEpisodeSwitch = false,
+        )
+
+        assertEquals(1_500, config.bufferForPlaybackMs)
+        assertEquals(4_000, config.bufferForPlaybackAfterRebufferMs)
+        assertEquals(32 * 1024 * 1024, config.targetBufferBytes)
+        assertFalse(config.episodeSwitchWarmup)
+    }
+
+    @Test
+    fun cachedFastBandwidthCannotBypassEpisodeSwitchWarmup() {
+        val config = NativePlaybackBufferPolicy.resolve(
+            isTelevision = true,
+            memoryClassMb = 192,
+            isHeavyPlayback = false,
+            cachedBandwidthBytesPerSecond = 5_000_000L,
+            sourceBitrate = 10_000_000L,
+            isRemoteEpisodeSwitch = true,
+        )
+
+        assertEquals("fast", config.bandwidthProfile)
+        assertEquals(6_000, config.bufferForPlaybackMs)
+        assertEquals(12_000, config.bufferForPlaybackAfterRebufferMs)
+        assertEquals(48 * 1024 * 1024, config.targetBufferBytes)
+        assertTrue(config.episodeSwitchWarmup)
+    }
 }

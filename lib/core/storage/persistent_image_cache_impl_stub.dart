@@ -3,12 +3,14 @@ import 'dart:typed_data';
 import 'package:flutter/painting.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/network/starflow_http_transport.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/core/storage/persistent_image_cache_api.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
 
-PersistentImageCache createPersistentImageCache() =>
-    _StubPersistentImageCache(StarflowHttpClient(http.Client()));
+PersistentImageCache createPersistentImageCache() => _StubPersistentImageCache(
+      StarflowHttpClient(createStarflowTransportClient()),
+    );
 
 class _StubPersistentImageCache implements PersistentImageCache {
   _StubPersistentImageCache(this._client);

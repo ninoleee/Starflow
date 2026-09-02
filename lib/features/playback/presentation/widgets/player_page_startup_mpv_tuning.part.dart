@@ -65,6 +65,16 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     await _setMpvOption(player, 'secondary-sub-ass-override', 'force');
   }
 
+  Future<void> _applyMpvNetworkProxy(
+    Player player,
+    PlaybackTarget target,
+  ) async {
+    final uri = Uri.tryParse(target.streamUrl.trim());
+    final proxyUrl =
+        uri == null ? '' : _playbackSettings.networkProxy.mpvProxyUrlFor(uri);
+    await _setMpvOption(player, 'http-proxy', proxyUrl);
+  }
+
   Future<void> _applyMpvVisualQualityPreset(
     Player player,
     PlaybackMpvQualityPreset preset,

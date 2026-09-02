@@ -15,6 +15,7 @@ import android.os.Looper
 import android.os.ResultReceiver
 import android.provider.Settings
 import android.util.Rational
+import android.view.KeyEvent
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import kotlin.math.roundToInt
@@ -30,6 +31,9 @@ class MainActivity : FlutterActivity() {
     private var playbackSessionChannel: MethodChannel? = null
     private var playbackPictureInPictureEnabled = false
     private var playbackPictureInPictureAspectRatio = Rational(16, 9)
+    private var applicationExitPending = false
+    private val pressedKeyCodes = mutableSetOf<Int>()
+    private val applicationExitHandler = Handler(Looper.getMainLooper())
     private val nativePlaybackLaunchHandler = Handler(Looper.getMainLooper())
     private var pendingNativePlaybackLaunchResult: MethodChannel.Result? = null
     private var pendingNativePlaybackLaunchRequestId = ""
@@ -48,6 +52,26 @@ class MainActivity : FlutterActivity() {
             }
             playbackSessionChannel?.invokeMethod("onPlaybackRemoteCommand", payload)
         }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        val suppressLauncherRelaunch = ApplicationExitGate.shouldSuppressLauncherRelaunch(
+            context = this,
+            intent = intent,
+        )
+        applicationExitPending = suppressLauncherRelaunch
+        super.onCreate(savedInstanceState)
+        if (!suppressLauncherRelaunch) {
+            return
+        }
+        NativeAppLogger.info(
+            "native.app-exit",
+            "Launcher relaunch suppressed inside the exit guard window",
+        )
+        scheduleApplicationTaskRemoval(
+            reason = "suppressed-launcher-relaunch",
+            delayMs = 0L,
+        )
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -104,17 +128,39 @@ class MainActivity : FlutterActivity() {
                     result.success(enterPlaybackPictureInPicture())
                 }
                 "exitApplication" -> {
+                    if (applicationExitPending) {
+                        result.success(true)
+                        return@setMethodCallHandler
+                    }
+                    applicationExitPending = true
                     playbackPictureInPictureEnabled = false
                     playbackSystemSessionManager.setActive(false)
                     completeNativePlaybackLaunch(false)
+                    ApplicationExitGate.markExitRequested(this)
+                    val appTaskCount = runCatching {
+                        (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager)
+                            .appTasks
+                            .size
+                    }.getOrDefault(0)
+                    NativeAppLogger.info(
+                        "native.app-exit",
+                        "Exit requested; waiting for TV input release " +
+                            "taskId=$taskId appTaskCount=$appTaskCount " +
+                            "pressedKeyCount=${pressedKeyCodes.size}",
+                    )
                     result.success(true)
-                    window.decorView.post {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            finishAndRemoveTask()
+                    scheduleApplicationTaskRemoval(
+                        reason = if (pressedKeyCodes.isEmpty()) {
+                            "input-already-released"
                         } else {
-                            finishAffinity()
-                        }
-                    }
+                            "input-release-timeout"
+                        },
+                        delayMs = if (pressedKeyCodes.isEmpty()) {
+                            ApplicationExitPolicy.POST_INPUT_RELEASE_DELAY_MS
+                        } else {
+                            ApplicationExitPolicy.INPUT_RELEASE_TIMEOUT_MS
+                        },
+                    )
                 }
                 "launchSystemVideoPlayer" -> {
                     val rawUrl = call.argument<String>("url")?.trim().orEmpty()
@@ -316,7 +362,53 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onNewIntent(newIntent: Intent) {
+        super.onNewIntent(newIntent)
+        setIntent(newIntent)
+        if (!ApplicationExitGate.shouldSuppressLauncherRelaunch(this, newIntent)) {
+            if (applicationExitPending &&
+                ApplicationExitPolicy.isLauncherIntent(newIntent.action, newIntent.categories)
+            ) {
+                applicationExitHandler.removeCallbacksAndMessages(null)
+                applicationExitPending = false
+                NativeAppLogger.info(
+                    "native.app-exit",
+                    "Launcher start allowed after the exit guard window",
+                )
+            }
+            return
+        }
+        applicationExitPending = true
+        NativeAppLogger.info(
+            "native.app-exit",
+            "Existing activity ignored a launcher relaunch inside the exit guard window",
+        )
+        scheduleApplicationTaskRemoval(
+            reason = "suppressed-launcher-new-intent",
+            delayMs = 0L,
+        )
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> pressedKeyCodes.add(event.keyCode)
+            KeyEvent.ACTION_UP -> pressedKeyCodes.remove(event.keyCode)
+        }
+        if (applicationExitPending) {
+            if (event.action == KeyEvent.ACTION_UP && pressedKeyCodes.isEmpty()) {
+                scheduleApplicationTaskRemoval(
+                    reason = "input-released",
+                    delayMs = ApplicationExitPolicy.POST_INPUT_RELEASE_DELAY_MS,
+                )
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onDestroy() {
+        applicationExitHandler.removeCallbacksAndMessages(null)
+        pressedKeyCodes.clear()
         completeNativePlaybackLaunch(false)
         nativePlaybackResolverChannel = null
         playbackSessionChannel?.setMethodCallHandler(null)
@@ -453,6 +545,54 @@ class MainActivity : FlutterActivity() {
         pendingNativePlaybackLaunchResult = null
         pendingNativePlaybackLaunchRequestId = ""
         result?.success(launched)
+    }
+
+    private fun scheduleApplicationTaskRemoval(reason: String, delayMs: Long) {
+        applicationExitHandler.removeCallbacksAndMessages(null)
+        applicationExitHandler.postDelayed(
+            { removeAllApplicationTasks(reason = reason) },
+            delayMs.coerceAtLeast(0L),
+        )
+    }
+
+    private fun removeAllApplicationTasks(reason: String) {
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val appTasks = runCatching { activityManager.appTasks.toList() }
+            .getOrElse { error ->
+                NativeAppLogger.warning(
+                    "native.app-exit",
+                    "Could not enumerate application tasks",
+                    error,
+                )
+                emptyList()
+            }
+        var removedTaskCount = 0
+        for (appTask in appTasks) {
+            try {
+                appTask.finishAndRemoveTask()
+                removedTaskCount += 1
+            } catch (error: Throwable) {
+                NativeAppLogger.warning(
+                    "native.app-exit",
+                    "Could not remove one application task",
+                    error,
+                )
+            }
+        }
+        NativeAppLogger.info(
+            "native.app-exit",
+            "Application task removal completed " +
+                "reason=$reason removedTaskCount=$removedTaskCount " +
+                "discoveredTaskCount=${appTasks.size}",
+        )
+        if (isFinishing) {
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            finishAndRemoveTask()
+        } else {
+            finishAffinity()
+        }
     }
 
     override fun onUserLeaveHint() {

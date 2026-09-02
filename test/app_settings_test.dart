@@ -623,6 +623,39 @@ void main() {
     expect(defaults.networkStorage.hasAnyConfigured, isFalse);
   });
 
+  test('app settings persist and default network proxy config', () {
+    final settings = AppSettings.fromJson(const <String, dynamic>{
+      'networkProxy': <String, dynamic>{
+        'enabled': true,
+        'host': 'proxy.example.com',
+        'port': 8080,
+        'username': 'alice',
+        'password': 'secret',
+        'bypassLocalAddresses': false,
+      },
+    });
+
+    expect(settings.networkProxy.isActive, isTrue);
+    expect(settings.networkProxy.displayAddress, 'proxy.example.com:8080');
+    expect(settings.networkProxy.username, 'alice');
+    expect(settings.networkProxy.password, 'secret');
+    expect(settings.networkProxy.bypassLocalAddresses, isFalse);
+    expect(settings.toJson()['networkProxy'], <String, dynamic>{
+      'enabled': true,
+      'host': 'proxy.example.com',
+      'port': 8080,
+      'username': 'alice',
+      'password': 'secret',
+      'bypassLocalAddresses': false,
+    });
+
+    final defaults = AppSettings.fromJson(const <String, dynamic>{});
+    expect(defaults.networkProxy.enabled, isFalse);
+    expect(defaults.networkProxy.isActive, isFalse);
+    expect(defaults.networkProxy.port, 7890);
+    expect(defaults.networkProxy.bypassLocalAddresses, isTrue);
+  });
+
   test('seed defaults enable douban and preload built-in douban modules', () {
     final settings = SeedData.defaultSettings;
 

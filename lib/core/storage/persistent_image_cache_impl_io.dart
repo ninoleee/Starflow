@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/network/starflow_http_transport.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/core/storage/persistent_image_cache_api.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
@@ -14,7 +16,11 @@ import 'package:starflow/core/utils/network_image_headers.dart';
 PersistentImageCache createPersistentImageCache() => _IoPersistentImageCache();
 
 class _IoPersistentImageCache implements PersistentImageCache {
-  _IoPersistentImageCache() : _client = http.Client();
+  _IoPersistentImageCache()
+      : _client = StarflowHttpClient(
+          createStarflowTransportClient(),
+          requestTimeout: _networkRequestTimeout,
+        );
 
   static const int _maxMemoryEntries = 256;
   static const int _maxMemoryBytes = 72 * 1024 * 1024;
@@ -157,10 +163,11 @@ class _IoPersistentImageCache implements PersistentImageCache {
     }
     final normalizedHeaders = _normalizeHeaders(headers);
     if (!persist) {
-      return NetworkImage(
-        trimmedUrl,
-        headers: normalizedHeaders.isEmpty ? null : normalizedHeaders,
+      final bytes = await _fetchNetworkBytes(
+        url: trimmedUrl,
+        headers: normalizedHeaders,
       );
+      return MemoryImage(bytes);
     }
 
     final cacheKey = _cacheIdentity(trimmedUrl, normalizedHeaders);
@@ -290,9 +297,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
     required String url,
     required Map<String, String>? headers,
   }) async {
-    final response = await _client
-        .get(Uri.parse(url), headers: headers)
-        .timeout(_networkRequestTimeout);
+    final response = await _client.get(Uri.parse(url), headers: headers);
     return validateNetworkImageHttpResponse(response, url: url);
   }
 

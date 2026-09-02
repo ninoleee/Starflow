@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/network/network_proxy_config.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
@@ -21,6 +22,7 @@ import 'package:starflow/features/settings/presentation/local_storage_settings_p
 import 'package:starflow/features/settings/presentation/logging_settings_page.dart';
 import 'package:starflow/features/settings/presentation/mpv_settings_page.dart';
 import 'package:starflow/features/settings/presentation/network_storage_settings_page.dart';
+import 'package:starflow/features/settings/presentation/network_proxy_settings_page.dart';
 import 'package:starflow/features/settings/presentation/playback_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_service_settings_page.dart';
 import 'package:starflow/features/settings/presentation/settings_management_page.dart';
@@ -52,6 +54,9 @@ class SettingsPage extends ConsumerStatefulWidget {
     final navigationDestinationIds = ref.watch(
       appSettingsProvider
           .select((settings) => settings.navigationDestinationIds),
+    );
+    final networkProxy = ref.watch(
+      appSettingsProvider.select((settings) => settings.networkProxy),
     );
 
     return AppPrimaryScrollController(
@@ -180,6 +185,15 @@ class SettingsPage extends ConsumerStatefulWidget {
                 ),
                 const SizedBox(height: 18),
                 SectionPanel(
+                  title: '网络',
+                  child: _SettingsNavigationTile(
+                    title: '代理设置',
+                    subtitle: _networkProxySummary(networkProxy),
+                    onTap: () => _openNetworkProxySettings(context),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SectionPanel(
                   title: '数据与维护',
                   child: Column(
                     children: [
@@ -240,6 +254,14 @@ class SettingsPage extends ConsumerStatefulWidget {
     return Navigator.of(context, rootNavigator: true).push<void>(
       SettingsMaterialPageRoute<void>(
         builder: (context) => const NetworkStorageSettingsPage(),
+      ),
+    );
+  }
+
+  Future<void> _openNetworkProxySettings(BuildContext context) {
+    return Navigator.of(context, rootNavigator: true).push<void>(
+      SettingsMaterialPageRoute<void>(
+        builder: (context) => const NetworkProxySettingsPage(),
       ),
     );
   }
@@ -520,6 +542,19 @@ String _enabledCountSummary(List<MediaSourceConfig> sources) {
   }
   final enabledCount = sources.where((source) => source.enabled).length;
   return '已启用 $enabledCount / ${sources.length}';
+}
+
+String _networkProxySummary(NetworkProxyConfig config) {
+  if (kIsWeb) {
+    return '由浏览器与构建环境管理';
+  }
+  if (!config.enabled) {
+    return '未启用';
+  }
+  if (!config.isValid) {
+    return '配置不完整';
+  }
+  return config.displayAddress;
 }
 
 class _SettingsPageHeader extends StatelessWidget {

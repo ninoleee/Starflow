@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/core/logging/app_logger.dart';
+import 'package:starflow/core/network/network_proxy_config.dart';
+import 'package:starflow/core/network/network_proxy_runtime.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/seed_data.dart';
@@ -60,7 +62,9 @@ class SettingsController extends AsyncNotifier<AppSettings> {
 
   @override
   FutureOr<AppSettings> build() async {
-    return _repository.load();
+    final settings = await _repository.load();
+    networkProxyRuntime.configure(settings.networkProxy);
+    return settings;
   }
 
   Future<void> toggleMediaSource(String id, bool enabled) async {
@@ -169,6 +173,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> saveNetworkStorage(NetworkStorageConfig config) async {
     final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(networkStorage: config));
+  }
+
+  Future<void> saveNetworkProxy(NetworkProxyConfig config) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(current.copyWith(networkProxy: config));
   }
 
   Future<void> setTmdbMetadataMatchEnabled(bool enabled) async {
@@ -700,6 +709,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
       homeModules: _normalizeHomeModuleOrder(next.homeModules),
     );
     state = AsyncData(normalized);
+    networkProxyRuntime.configure(normalized.networkProxy);
     final saveFuture = _persistenceTail.then(
       (_) => _repository.save(normalized),
     );

@@ -1,4 +1,5 @@
 import 'package:starflow/core/logging/app_log_api.dart';
+import 'package:starflow/core/network/network_proxy_config.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -1079,6 +1080,7 @@ class AppSettings {
     required this.doubanAccount,
     required this.homeModules,
     this.networkStorage = const NetworkStorageConfig(),
+    this.networkProxy = const NetworkProxyConfig(),
     this.homeHeroSourceModuleId = '',
     this.homeHeroDisplayMode = HomeHeroDisplayMode.normal,
     this.homeHeroStyle = HomeHeroStyle.composite,
@@ -1158,6 +1160,7 @@ class AppSettings {
   final DoubanAccountConfig doubanAccount;
   final List<HomeModuleConfig> homeModules;
   final NetworkStorageConfig networkStorage;
+  final NetworkProxyConfig networkProxy;
   final String homeHeroSourceModuleId;
   final HomeHeroDisplayMode homeHeroDisplayMode;
   final HomeHeroStyle homeHeroStyle;
@@ -1230,6 +1233,7 @@ class AppSettings {
     DoubanAccountConfig? doubanAccount,
     List<HomeModuleConfig>? homeModules,
     NetworkStorageConfig? networkStorage,
+    NetworkProxyConfig? networkProxy,
     String? homeHeroSourceModuleId,
     HomeHeroDisplayMode? homeHeroDisplayMode,
     HomeHeroStyle? homeHeroStyle,
@@ -1301,6 +1305,7 @@ class AppSettings {
       doubanAccount: doubanAccount ?? this.doubanAccount,
       homeModules: homeModules ?? this.homeModules,
       networkStorage: networkStorage ?? this.networkStorage,
+      networkProxy: networkProxy ?? this.networkProxy,
       homeHeroSourceModuleId:
           homeHeroSourceModuleId ?? this.homeHeroSourceModuleId,
       homeHeroDisplayMode: homeHeroDisplayMode ?? this.homeHeroDisplayMode,
@@ -1466,6 +1471,7 @@ class AppSettings {
       'doubanAccount': doubanAccount.toJson(),
       'homeModules': homeModules.map((item) => item.toJson()).toList(),
       'networkStorage': networkStorage.toJson(),
+      'networkProxy': networkProxy.toJson(),
       'homeHeroSourceModuleId': homeHeroSourceModuleId,
       'homeHeroDisplayMode': homeHeroDisplayMode.name,
       'homeHeroStyle': homeHeroStyle.name,
@@ -1582,6 +1588,9 @@ class AppSettings {
       homeModules: _normalizeHomeModules(rawHomeModules),
       networkStorage: NetworkStorageConfig.fromJson(
         Map<String, dynamic>.from((json['networkStorage'] as Map?) ?? const {}),
+      ),
+      networkProxy: NetworkProxyConfig.fromJson(
+        Map<String, dynamic>.from((json['networkProxy'] as Map?) ?? const {}),
       ),
       homeHeroSourceModuleId: json['homeHeroSourceModuleId'] as String? ?? '',
       homeHeroDisplayMode: HomeHeroDisplayModeX.fromName(

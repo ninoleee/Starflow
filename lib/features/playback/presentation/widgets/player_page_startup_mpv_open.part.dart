@@ -127,6 +127,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     });
 
     try {
+      await _applyMpvNetworkProxy(player, resolvedTarget);
       await _applyMpvPerformanceTuning(player, resolvedTarget);
       _traceWindowsMpv('windows-mpv.open.tuning-applied');
       final deadline = DateTime.now().add(timeout);
