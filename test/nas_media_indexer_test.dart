@@ -437,6 +437,21 @@ void main() {
           seasonNumber: 3,
           episodeNumber: 8,
         ),
+        _episodeItem(
+          id: 'crossroads-004',
+          path:
+              '/movies/strm/quark/罗永浩的十字路口/#004 五条人之仁科 × 罗永浩！近五个小时的超长对谈！/五条人之仁科 × 罗永浩！近五个小时的超长对谈！.mp4',
+          title: '五条人之仁科 × 罗永浩！近五个小时的超长对谈！',
+          seasonNumber: 1,
+          episodeNumber: 4,
+        ),
+        _episodeItem(
+          id: 'crossroads-005',
+          path: '/movies/strm/quark/罗永浩的十字路口/#005 下一期长谈/下一期长谈.mp4',
+          title: '下一期长谈',
+          seasonNumber: 1,
+          episodeNumber: 5,
+        ),
       ],
     );
     final settings = SeedData.defaultSettings.copyWith(
@@ -468,7 +483,7 @@ void main() {
     );
     expect(
       library.map((item) => item.title).toSet(),
-      {'老友记', '陈鲁豫', '我的天才女友'},
+      {'老友记', '陈鲁豫', '我的天才女友', '罗永浩的十字路口'},
     );
 
     final friends = library.singleWhere((item) => item.title == '老友记');
@@ -528,6 +543,36 @@ void main() {
     expect(
       brilliantFriendSeasons.map((item) => item.seasonNumber).toSet(),
       {1, 2, 3},
+    );
+
+    final crossroads = library.singleWhere((item) => item.title == '罗永浩的十字路口');
+    final crossroadsSeasons = await indexer.loadChildren(
+      source,
+      parentId: crossroads.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(crossroadsSeasons, hasLength(1));
+    expect(crossroadsSeasons.single.seasonNumber, 1);
+    expect(crossroadsSeasons.single.title, '第 1 季');
+    final crossroadsEpisodes = await indexer.loadChildren(
+      source,
+      parentId: crossroadsSeasons.single.id,
+      sectionId: collection.id,
+      scopedCollections: [collection],
+      limit: 50,
+    );
+    expect(
+      crossroadsEpisodes.map((item) => item.episodeNumber).toList(),
+      [4, 5],
+    );
+    expect(
+      crossroadsEpisodes.map((item) => item.title),
+      containsAll([
+        '五条人之仁科 × 罗永浩！近五个小时的超长对谈！',
+        '下一期长谈',
+      ]),
     );
   });
 
@@ -2842,7 +2887,7 @@ void main() {
     );
     final indexedAt = DateTime.utc(2026, 4, 5, 12);
     final scopeKey =
-        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v11';
+        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v12';
     final record = NasMediaIndexRecord(
       id: NasMediaIndexRecord.buildRecordId(
         sourceId: source.id,

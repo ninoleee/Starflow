@@ -1638,6 +1638,20 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _isSavingOnlineResourceUpdate = true;
     });
 
+    void showProgress(QuarkSaveWorkflowProgress progress) {
+      if (!mounted) {
+        return;
+      }
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(progress.message),
+          duration: const Duration(days: 1),
+        ),
+      );
+    }
+
     try {
       detailResourceSwitchTrace(
         'online-update.save.begin',
@@ -1651,6 +1665,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                 shareUrl: favoriteMatch.result.resourceUrl,
                 saveFolderName: favoriteMatch.folderName,
                 networkStorage: networkStorage,
+                onProgress: showProgress,
               );
       detailResourceSwitchTrace(
         'online-update.save.done',
@@ -1662,7 +1677,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(
           content: Text(response.buildSuccessMessage()),
         ),
@@ -1679,7 +1696,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(content: Text(error.message)),
       );
     } on SmartStrmWebhookException catch (error) {
@@ -1694,7 +1713,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(content: Text('夸克保存成功，但 STRM 触发失败：${error.message}')),
       );
     } catch (error, stackTrace) {
@@ -1710,7 +1731,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(content: Text('保存失败：$error')),
       );
     } finally {

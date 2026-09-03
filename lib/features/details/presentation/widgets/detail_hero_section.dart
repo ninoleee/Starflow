@@ -296,24 +296,26 @@ class DetailHeroContent extends StatelessWidget {
     }
 
     final playbackActions = <Widget>[
-      if (startPlaybackTarget != null)
-        buildPlaybackButton(
-          label: '从头播放',
-          icon: Icons.play_arrow_rounded,
-          playbackTarget: startPlaybackTarget!,
-          focusNode: playFocusNode,
-          focusId: 'detail:hero:play:start',
-          autofocus: true,
-        ),
       if (resumePlaybackTarget != null)
         buildPlaybackButton(
           label: '继续播放',
           icon: Icons.history_rounded,
           playbackTarget: resumePlaybackTarget!,
-          focusNode: startPlaybackTarget == null ? playFocusNode : null,
+          focusNode: playFocusNode,
           focusId: 'detail:hero:play:resume',
-          autofocus: startPlaybackTarget == null,
-          televisionVariant: TvButtonVariant.outlined,
+          autofocus: true,
+        ),
+      if (startPlaybackTarget != null)
+        buildPlaybackButton(
+          label: '从头播放',
+          icon: Icons.play_arrow_rounded,
+          playbackTarget: startPlaybackTarget!,
+          focusNode: resumePlaybackTarget == null ? playFocusNode : null,
+          focusId: 'detail:hero:play:start',
+          autofocus: resumePlaybackTarget == null,
+          televisionVariant: resumePlaybackTarget == null
+              ? TvButtonVariant.filled
+              : TvButtonVariant.outlined,
         ),
     ];
 

@@ -700,6 +700,12 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
     if (seasonNumber == 0) {
       return true;
     }
+    // Indexing already resolved a real season for this record, so a keyword
+    // in the name is just part of the title.  Merging it by title instead of
+    // by season/episode would break variant merging for regular episodes.
+    if (seasonNumber != null) {
+      return false;
+    }
     return _matchedSpecialEpisodeKeyword(
           record,
           specialEpisodeKeywords: specialEpisodeKeywords,
@@ -756,16 +762,28 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
     NasMediaIndexRecord record, {
     required List<String> specialEpisodeKeywords,
   }) {
-    return MediaNaming.bestMatchedKeyword(
+    return MediaNaming.bestMatchedSpecialCategoryKeyword(
       [
         record.originalFileName,
         record.item.title,
         record.recognizedTitle,
-        record.resourcePath,
+        // Scoped to the containing directory on purpose: matching the whole
+        // resource path let a keyword in the mount point or library root
+        // reclassify every file below it.
+        _lastPathSegment(_parentDirectoryPath(record.resourcePath)),
         record.parentTitle,
       ],
       keywords: specialEpisodeKeywords,
     );
+  }
+
+  String _parentDirectoryPath(String path) {
+    final normalized = path.trim().replaceAll('\\', '/');
+    final slashIndex = normalized.lastIndexOf('/');
+    if (slashIndex <= 0) {
+      return '';
+    }
+    return normalized.substring(0, slashIndex);
   }
 
   String _seasonLabel({
@@ -936,43 +954,19 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
         !parentMatchesFilter;
     final prefersStructureGrouping =
         _prefersStructureRootSeriesGrouping(record, structureResolution);
-    final filteredStructureStopTriggered =
-        structureResolution.hasPublicBoundary;
-    final normalizedParentTitle = _normalizeMetadataQueryToken(parentTitle);
-    final normalizedRecognizedTitle =
-        _normalizeMetadataQueryToken(recognizedTitle);
-    final normalizedStructureTitle =
-        _normalizeMetadataQueryToken(structureSeriesTitle);
     final hasCanonicalIds = record.item.imdbId.trim().isNotEmpty ||
         record.item.tmdbId.trim().isNotEmpty ||
         record.item.doubanId.trim().isNotEmpty;
-    final parentAlignsWithStructure = normalizedParentTitle.isEmpty ||
-        normalizedStructureTitle.isEmpty ||
-        normalizedParentTitle == normalizedStructureTitle;
-    final parentWasExplicitlyPromoted = hasCanonicalIds &&
-        canUseParentTitle &&
-        normalizedParentTitle.isNotEmpty &&
-        normalizedParentTitle == normalizedRecognizedTitle;
-    final parentConflictsWithFilteredStructure =
-        filteredStructureStopTriggered &&
-            normalizedParentTitle.isNotEmpty &&
-            normalizedStructureTitle.isNotEmpty &&
-            normalizedParentTitle != normalizedStructureTitle;
     if (prefersStructureGrouping && structureSeriesTitle.isNotEmpty) {
-      if (parentWasExplicitlyPromoted) {
+      if (record.manualMetadataLocked && hasCanonicalIds && canUseParentTitle) {
+        // A manual edit applied to the synthetic mother series deliberately
+        // renames that series. Automatic child/file metadata never reaches
+        // this branch because it is not manually locked.
         return parentTitle;
       }
-      if (itemType == 'episode' &&
-          canUseParentTitle &&
-          parentAlignsWithStructure &&
-          !parentConflictsWithFilteredStructure) {
-        return parentTitle;
-      }
-      if (record.preferSeries &&
-          canUseParentTitle &&
-          parentAlignsWithStructure) {
-        return parentTitle;
-      }
+      // Structure inference owns the series boundary. Child directories and
+      // files may supply season, episode, and display metadata, but they must
+      // never replace the mother directory as the series title.
       return structureSeriesTitle;
     }
     if (itemType == 'episode' && hasCanonicalIds && canUseParentTitle) {

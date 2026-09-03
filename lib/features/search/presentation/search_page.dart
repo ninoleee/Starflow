@@ -1508,6 +1508,20 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _savingResultIds.add(result.id);
     });
 
+    void showProgress(QuarkSaveWorkflowProgress progress) {
+      if (!mounted) {
+        return;
+      }
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(progress.message),
+          duration: const Duration(days: 1),
+        ),
+      );
+    }
+
     try {
       final response =
           await ref.read(quarkSaveWorkflowServiceProvider).saveToQuark(
@@ -1518,11 +1532,14 @@ class _SearchPageState extends ConsumerState<SearchPage>
                   searchQuery: _controller.text.trim(),
                 ),
                 networkStorage: storage,
+                onProgress: showProgress,
               );
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(
           content: Text(response.buildSuccessMessage()),
         ),
@@ -1531,21 +1548,27 @@ class _SearchPageState extends ConsumerState<SearchPage>
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(content: Text(error.message)),
       );
     } on SmartStrmWebhookException catch (error) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(content: Text('夸克保存成功，但 STRM 触发失败：${error.message}')),
       );
     } catch (error) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
         SnackBar(content: Text('保存失败：$error')),
       );
     } finally {

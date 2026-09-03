@@ -492,7 +492,7 @@ class NasMediaRecognizer {
 
   static _EpisodeMatch? _matchHashEpisode(String input) {
     final match = RegExp(
-      r'(?:^|[\s._\-])#\s*0*(\d{1,4})(?:$|[\s._\-])',
+      r'(?:^|[\s._\-])[#＃]\s*0*(\d{1,4})(?:$|[\s._\-、])',
       caseSensitive: false,
     ).firstMatch(input.trim());
     final episodeNumber = int.tryParse(match?.group(1) ?? '');
@@ -516,6 +516,12 @@ class NasMediaRecognizer {
     if (cleanedParent.isEmpty ||
         _genericLibraryFolders.contains(cleanedParent)) {
       return false;
+    }
+    if (RegExp(r'^\s*[#＃]\s*0*\d{1,4}(?:$|[\s._\-、])').hasMatch(input.trim())) {
+      // Once the outer directory is a real series root, a leading ordinal
+      // names an episode folder. The child does not need to repeat the
+      // series title; it only supplies episode metadata.
+      return true;
     }
     final cleanedInput = _cleanTitle(input).trim().toLowerCase();
     return cleanedInput.contains(cleanedParent);
@@ -550,7 +556,7 @@ class NasMediaRecognizer {
     String input, {
     required List<String> specialEpisodeKeywords,
   }) {
-    return MediaNaming.matchesAnyKeyword(
+    return MediaNaming.matchesAnySpecialCategoryKeyword(
       [input],
       keywords: specialEpisodeKeywords,
     );

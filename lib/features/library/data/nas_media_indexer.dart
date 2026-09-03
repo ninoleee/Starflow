@@ -105,7 +105,7 @@ class NasMediaIndexer {
   static const String _seasonGroupPrefix = 'webdav-season';
   // Bump whenever structure classification changes so an existing index is
   // re-evaluated instead of reusing stale `webdav-series` records.
-  static const String _webDavMetadataSchemaVersion = 'webdav-v11';
+  static const String _webDavMetadataSchemaVersion = 'webdav-v12';
   final NasMediaIndexStore _store;
   final WebDavNasClient _webDavNasClient;
   final QuarkExternalStorageClient? _quarkExternalStorageClient;

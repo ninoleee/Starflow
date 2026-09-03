@@ -117,6 +117,8 @@ class _NetworkStorageEditorPageState
   late final TextEditingController _refreshDelayController;
   late String _quarkFolderId;
   late String _quarkFolderPath;
+  late bool _sanitizeSavedNamesEnabled;
+  late final TextEditingController _sanitizedNameCharactersController;
   late bool _syncDeleteQuarkEnabled;
   late List<NetworkStorageWebDavDirectory> _syncDeleteQuarkWebDavDirectories;
   late Set<String> _refreshSourceIds;
@@ -152,6 +154,11 @@ class _NetworkStorageEditorPageState
     _quarkFolderPath = widget.initial.quarkSaveFolderPath.trim().isEmpty
         ? '/'
         : widget.initial.quarkSaveFolderPath.trim();
+    _sanitizeSavedNamesEnabled =
+        widget.initial.quarkSanitizeSavedNamesEnabled;
+    _sanitizedNameCharactersController = TextEditingController(
+      text: widget.initial.quarkSanitizedNameCharacters,
+    );
     _syncDeleteQuarkEnabled = widget.initial.syncDeleteQuarkEnabled;
     _syncDeleteQuarkWebDavDirectories = [
       ...widget.initial.syncDeleteQuarkWebDavDirectories,
@@ -170,6 +177,7 @@ class _NetworkStorageEditorPageState
     }
     _autoSave.dispose();
     _quarkCookieController.dispose();
+    _sanitizedNameCharactersController.dispose();
     _smartStrmWebhookController.dispose();
     _smartStrmTaskNameController.dispose();
     _smartStrmDelayController.dispose();
@@ -179,6 +187,7 @@ class _NetworkStorageEditorPageState
 
   List<TextEditingController> get _draftTextControllers => [
         _quarkCookieController,
+        _sanitizedNameCharactersController,
         _smartStrmWebhookController,
         _smartStrmTaskNameController,
         _smartStrmDelayController,
@@ -269,6 +278,9 @@ class _NetworkStorageEditorPageState
       quarkCookie: _quarkCookieController.text.trim(),
       quarkSaveFolderId: _quarkFolderId,
       quarkSaveFolderPath: _quarkFolderPath,
+      quarkSanitizeSavedNamesEnabled: _sanitizeSavedNamesEnabled,
+      quarkSanitizedNameCharacters:
+          _sanitizedNameCharactersController.text.trim(),
       syncDeleteQuarkEnabled: _syncDeleteQuarkEnabled,
       syncDeleteQuarkWebDavDirectories: _normalizedSyncDeleteDirectories(
         settings,
@@ -583,6 +595,43 @@ class _NetworkStorageEditorPageState
             ),
             const SizedBox(height: 8),
             Text('默认保存到：$_quarkFolderPath'),
+            const SizedBox(height: 12),
+            const SettingsSectionTitle(label: '保存后修正名称'),
+            StarflowToggleTile(
+              title: '转存后自动修正名称',
+              subtitle: '转存完成、触发 SmartStrm 之前，把新存入的目录名和文件名里的特殊字符去掉。'
+                  '路径里的 # 会截断直链并导致签名校验失败，是这类播放失败最常见的原因。'
+                  '这会直接重命名夸克网盘里的真实文件，只作用于本次新存入的内容。',
+              value: _sanitizeSavedNamesEnabled,
+              focusId: 'network-storage-quark:sanitize',
+              onChanged: (value) {
+                setState(() {
+                  _sanitizeSavedNamesEnabled = value;
+                });
+              },
+            ),
+            if (_sanitizeSavedNamesEnabled) ...[
+              const SizedBox(height: 12),
+              SettingsTextInputField(
+                controller: _sanitizedNameCharactersController,
+                labelText: '要去掉的字符',
+                autocorrect: false,
+                hintText: kDefaultQuarkSanitizedNameCharacters,
+                summaryBuilder: (value) =>
+                    value.isEmpty ? '未填写（不会改名）' : value,
+                focusId: 'network-storage-quark:sanitize-characters',
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '逐个字符匹配，不是正则。留空则不改名。'
+                '只处理本次转存新存入的内容，已经在网盘里的旧文件不会被碰；'
+                '开启后转存去重也改按净化后的名字比对，不会重复保存；'
+                '同名冲突会跳过并在结果里提示。',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
           ],
           if (widget.section ==
               NetworkStorageEditorSection.synchronization) ...[

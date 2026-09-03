@@ -864,6 +864,11 @@ class HomeModuleConfig {
   }
 }
 
+/// Characters stripped from saved entry names when name sanitising is on.
+/// `#` is the one confirmed to break signed playback URLs; `%` and `?` carry
+/// the same class of risk.
+const String kDefaultQuarkSanitizedNameCharacters = '#%?';
+
 class NetworkStorageConfig {
   const NetworkStorageConfig({
     this.quarkCookie = '',
@@ -876,6 +881,8 @@ class NetworkStorageConfig {
     this.smartStrmDelaySeconds = 1,
     this.refreshMediaSourceIds = const [],
     this.refreshDelaySeconds = 1,
+    this.quarkSanitizeSavedNamesEnabled = false,
+    this.quarkSanitizedNameCharacters = kDefaultQuarkSanitizedNameCharacters,
   });
 
   final String quarkCookie;
@@ -889,6 +896,11 @@ class NetworkStorageConfig {
   final List<String> refreshMediaSourceIds;
   final int refreshDelaySeconds;
 
+  /// Renames entries containing [quarkSanitizedNameCharacters] right after a
+  /// save, before SmartStrm is told to generate .strm files for them.
+  final bool quarkSanitizeSavedNamesEnabled;
+  final String quarkSanitizedNameCharacters;
+
   bool get hasAnyConfigured {
     return quarkCookie.trim().isNotEmpty ||
         smartStrmWebhookUrl.trim().isNotEmpty ||
@@ -899,7 +911,8 @@ class NetworkStorageConfig {
         syncDeleteQuarkEnabled ||
         syncDeleteQuarkWebDavDirectories.isNotEmpty ||
         refreshMediaSourceIds.isNotEmpty ||
-        refreshDelaySeconds != 1;
+        refreshDelaySeconds != 1 ||
+        quarkSanitizeSavedNamesEnabled;
   }
 
   NetworkStorageConfig copyWith({
@@ -913,6 +926,8 @@ class NetworkStorageConfig {
     int? smartStrmDelaySeconds,
     List<String>? refreshMediaSourceIds,
     int? refreshDelaySeconds,
+    bool? quarkSanitizeSavedNamesEnabled,
+    String? quarkSanitizedNameCharacters,
   }) {
     return NetworkStorageConfig(
       quarkCookie: quarkCookie ?? this.quarkCookie,
@@ -929,6 +944,10 @@ class NetworkStorageConfig {
       refreshMediaSourceIds:
           refreshMediaSourceIds ?? this.refreshMediaSourceIds,
       refreshDelaySeconds: refreshDelaySeconds ?? this.refreshDelaySeconds,
+      quarkSanitizeSavedNamesEnabled: quarkSanitizeSavedNamesEnabled ??
+          this.quarkSanitizeSavedNamesEnabled,
+      quarkSanitizedNameCharacters:
+          quarkSanitizedNameCharacters ?? this.quarkSanitizedNameCharacters,
     );
   }
 
@@ -946,6 +965,8 @@ class NetworkStorageConfig {
       'smartStrmDelaySeconds': smartStrmDelaySeconds,
       'refreshMediaSourceIds': refreshMediaSourceIds,
       'refreshDelaySeconds': refreshDelaySeconds,
+      'quarkSanitizeSavedNamesEnabled': quarkSanitizeSavedNamesEnabled,
+      'quarkSanitizedNameCharacters': quarkSanitizedNameCharacters,
     };
   }
 
@@ -985,6 +1006,11 @@ class NetworkStorageConfig {
               .toList(growable: false),
       refreshDelaySeconds:
           resolvedRefreshDelaySeconds <= 0 ? 1 : resolvedRefreshDelaySeconds,
+      quarkSanitizeSavedNamesEnabled:
+          json['quarkSanitizeSavedNamesEnabled'] as bool? ?? false,
+      quarkSanitizedNameCharacters:
+          json['quarkSanitizedNameCharacters'] as String? ??
+              kDefaultQuarkSanitizedNameCharacters,
     );
   }
 }

@@ -30,6 +30,41 @@ String sanitizeQuarkDirectoryName(String rawName) {
   return sanitized == '.' || sanitized == '..' ? '' : sanitized;
 }
 
+/// Characters that survive the drive but break URL-addressed playback.
+///
+/// `#` opens a fragment, `?` opens a query and `%` opens a percent-escape, so a
+/// path segment containing one can be truncated or re-encoded before the
+/// request reaches the file — and any signature computed over the original path
+/// then fails to match.
+const String kQuarkUnsafeUrlNameCharacters = '#%?';
+
+/// Strips [characters] out of [rawName], collapsing the whitespace they leave
+/// behind. Returns an empty string when nothing usable remains, which callers
+/// treat as "leave this entry alone".
+String sanitizeQuarkNameForUrl(
+  String rawName, {
+  String characters = kQuarkUnsafeUrlNameCharacters,
+}) {
+  final unsafe = characters.runes
+      .map(String.fromCharCode)
+      .where((character) => character.trim().isNotEmpty)
+      .toSet();
+  if (unsafe.isEmpty) {
+    return rawName;
+  }
+  final buffer = StringBuffer();
+  for (final rune in rawName.runes) {
+    final character = String.fromCharCode(rune);
+    if (unsafe.contains(character)) {
+      continue;
+    }
+    buffer.write(character);
+  }
+  final collapsed =
+      buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+  return collapsed == '.' || collapsed == '..' ? '' : collapsed;
+}
+
 class QuarkSaveClient {
   QuarkSaveClient(this._client);
 
@@ -89,6 +124,9 @@ class QuarkSaveClient {
     String toPdirFid = '0',
     String toPdirPath = '/',
     String saveFolderName = '',
+    /// Non-empty when saved directories will be sanitised afterwards, so that
+    /// deduplication compares the names the drive will actually end up with.
+    String sanitizedNameCharacters = '',
   }) async {
     final trimmedCookie = cookie.trim();
     if (trimmedCookie.isEmpty) {
@@ -161,6 +199,7 @@ class QuarkSaveClient {
             cookie: trimmedCookie,
             targetDirectoryFid: resolvedTargetDirectoryId,
             entries: effectiveSharedEntries,
+            sanitizedNameCharacters: sanitizedNameCharacters,
           )
         : _QuarkRecursiveSavePlan(
             batches: [
@@ -178,14 +217,24 @@ class QuarkSaveClient {
         savedCount: 0,
         skippedCount: savePlan.skippedCount,
         targetFolderPath: resolvedTargetDirectoryPath,
+        targetFolderId: resolvedTargetDirectoryId,
       );
     }
 
     final taskIds = <String>[];
+    final savedEntries = <QuarkSavedEntry>[];
     var savedCount = 0;
     for (final batch in savePlan.batches) {
       if (batch.entries.isEmpty) {
         continue;
+      }
+      for (final entry in batch.entries) {
+        savedEntries.add(
+          QuarkSavedEntry(
+            parentFid: batch.targetDirectoryFid,
+            name: entry.name,
+          ),
+        );
       }
       final taskId = await _saveShareEntries(
         pwdId: parsed.pwdId,
@@ -200,11 +249,36 @@ class QuarkSaveClient {
       savedCount += batch.entries.length;
     }
 
+    // Quark copies in the background, so the entries are not listable the
+    // instant the task is submitted. Anything that inspects what was just
+    // saved — renaming it, for one — has to wait for the task to finish first.
+    var settled = taskIds.isEmpty;
+    if (sanitizedNameCharacters.trim().isNotEmpty && taskIds.isNotEmpty) {
+      settled = true;
+      for (final taskId in taskIds) {
+        try {
+          await _waitForTask(
+            cookie: trimmedCookie,
+            taskId: taskId,
+            taskLabel: '转存',
+          );
+        } on QuarkSaveException {
+          // The files were submitted successfully; a stalled or failed status
+          // poll must not fail the save. Report it so callers can skip the
+          // follow-up work that depends on the entries being listable.
+          settled = false;
+        }
+      }
+    }
+
     return QuarkSaveResult(
       taskId: taskIds.length == 1 ? taskIds.single : '',
       savedCount: savedCount,
       skippedCount: savePlan.skippedCount,
       targetFolderPath: resolvedTargetDirectoryPath,
+      targetFolderId: resolvedTargetDirectoryId,
+      savedEntries: List<QuarkSavedEntry>.unmodifiable(savedEntries),
+      savedEntriesSettled: settled,
     );
   }
 
@@ -325,6 +399,146 @@ class QuarkSaveClient {
         .map(QuarkFileEntry.fromJson)
         .whereType<QuarkFileEntry>()
         .toList(growable: false);
+  }
+
+  /// Renames a single drive entry. Works for files and directories alike; the
+  /// fid is stable across renames, so callers can rename a whole subtree in any
+  /// order without re-listing.
+  Future<void> renameEntry({
+    required String cookie,
+    required String fid,
+    required String name,
+  }) async {
+    final trimmedFid = fid.trim();
+    final trimmedName = name.trim();
+    if (trimmedFid.isEmpty || trimmedName.isEmpty) {
+      return;
+    }
+    final response = await _client.post(
+      Uri.parse('$_baseUrl/1/clouddrive/file/rename').replace(
+        queryParameters: const {
+          'pr': 'ucpro',
+          'fr': 'pc',
+          'uc_param_str': '',
+        },
+      ),
+      headers: _headers(cookie),
+      body: jsonEncode({
+        'fid': trimmedFid,
+        'file_name': trimmedName,
+      }),
+    );
+    final payload = _decode(response);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
+    }
+    final code = payload['code'] as int? ?? -1;
+    if (code != 0) {
+      throw QuarkSaveException(
+          _resolveErrorMessage(payload, response.statusCode));
+    }
+  }
+
+  /// Renames the entries this save just created whose name contains one of
+  /// [characters], so that URL-addressed playback keeps working.
+  ///
+  /// Scoped deliberately to [savedEntries] — what the save actually copied in.
+  /// An incremental save that adds one episode must not re-walk the dozens of
+  /// episode folders already sitting in the show directory, and must not touch
+  /// content a media server has already matched and scraped. Everything in
+  /// scope here is new: nothing downstream has seen it yet, which is why
+  /// renaming files is safe at this point but would not be later.
+  ///
+  /// A failure on one entry (most often a name collision with a sibling) is
+  /// recorded and the walk continues: the files are already saved, and aborting
+  /// here would leave the tree half-renamed.
+  Future<QuarkNameSanitizeResult> sanitizeSavedEntries({
+    required String cookie,
+    required List<QuarkSavedEntry> savedEntries,
+    required String characters,
+  }) async {
+    if (savedEntries.isEmpty || characters.trim().isEmpty) {
+      return const QuarkNameSanitizeResult();
+    }
+    final wantedNamesByParent = <String, Set<String>>{};
+    for (final saved in savedEntries) {
+      final parentFid = saved.parentFid.trim();
+      final name = saved.name.trim();
+      if (parentFid.isEmpty || name.isEmpty) {
+        continue;
+      }
+      wantedNamesByParent.putIfAbsent(parentFid, () => <String>{}).add(name);
+    }
+    if (wantedNamesByParent.isEmpty) {
+      return const QuarkNameSanitizeResult();
+    }
+
+    var renamedCount = 0;
+    var listedDirectoryCount = 0;
+    final failedNames = <String>[];
+    final visited = <String>{};
+
+    // Mutually recursive: a renamed directory is descended into, and each new
+    // child found there goes back through the same handling.
+    late final Future<void> Function(String directoryFid) descend;
+
+    /// Renames [entry] when its name is unsafe, then descends if it is a
+    /// directory. Everything below a directory this save created is also new,
+    /// so the whole subtree is in scope once we are inside one.
+    Future<void> handleNewEntry(QuarkFileEntry entry) async {
+      final sanitized = sanitizeQuarkNameForUrl(
+        entry.name,
+        characters: characters,
+      );
+      if (sanitized.isNotEmpty && sanitized != entry.name) {
+        try {
+          await renameEntry(cookie: cookie, fid: entry.fid, name: sanitized);
+          renamedCount += 1;
+        } on QuarkSaveException {
+          failedNames.add(entry.name);
+        }
+      }
+      if (!entry.isDirectory) {
+        return;
+      }
+      // The fid is stable across a rename, so descending afterwards is safe.
+      await descend(entry.fid);
+    }
+
+    descend = (String directoryFid) async {
+      if (!visited.add(directoryFid)) {
+        return;
+      }
+      listedDirectoryCount += 1;
+      final children = await listEntries(
+        cookie: cookie,
+        parentFid: directoryFid,
+      );
+      for (final child in children) {
+        await handleNewEntry(child);
+      }
+    };
+
+    for (final parentEntry in wantedNamesByParent.entries) {
+      listedDirectoryCount += 1;
+      final children = await listEntries(
+        cookie: cookie,
+        parentFid: parentEntry.key,
+      );
+      for (final child in children) {
+        if (!parentEntry.value.contains(child.name.trim())) {
+          continue;
+        }
+        await handleNewEntry(child);
+      }
+    }
+
+    return QuarkNameSanitizeResult(
+      renamedCount: renamedCount,
+      listedDirectoryCount: listedDirectoryCount,
+      failedNames: List<String>.unmodifiable(failedNames),
+    );
   }
 
   Future<QuarkDeleteResult> deleteEntries({
@@ -639,6 +853,7 @@ class QuarkSaveClient {
   Future<bool> _waitForTask({
     required String cookie,
     required String taskId,
+    String taskLabel = '删除',
   }) async {
     for (var attempt = 0; attempt < 80; attempt++) {
       final response = await _client.get(
@@ -677,12 +892,12 @@ class QuarkSaveClient {
       if (status < 0) {
         final message = '${data['message'] ?? data['msg'] ?? ''}'.trim();
         throw QuarkSaveException(
-          message.isNotEmpty ? message : '夸克删除任务执行失败',
+          message.isNotEmpty ? message : '夸克$taskLabel任务执行失败',
         );
       }
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
-    throw const QuarkSaveException('夸克删除任务执行超时，请稍后确认结果');
+    throw QuarkSaveException('夸克$taskLabel任务执行超时，请稍后确认结果');
   }
 
   Future<String> _fetchShareToken({
@@ -910,6 +1125,7 @@ class QuarkSaveClient {
     required String cookie,
     required String targetDirectoryFid,
     required List<_QuarkShareEntry> entries,
+    required String sanitizedNameCharacters,
   }) async {
     if (entries.isEmpty) {
       return const _QuarkRecursiveSavePlan();
@@ -931,7 +1147,8 @@ class QuarkSaveClient {
     }
     final existingFileNameKeys = existingEntries
         .where((item) => !item.isDirectory)
-        .map((item) => _normalizeQuarkEntryNameKey(item.name))
+        .map((item) =>
+            _normalizeQuarkSaveMatchKey(item.name, sanitizedNameCharacters))
         .where((item) => item.isNotEmpty)
         .toSet();
     final existingDirectoriesByName = <String, QuarkFileEntry>{};
@@ -939,7 +1156,12 @@ class QuarkSaveClient {
       if (!entry.isDirectory) {
         continue;
       }
-      final nameKey = _normalizeQuarkEntryNameKey(entry.name);
+      // Already-present directories are keyed by their current (possibly
+      // already sanitised) name.
+      final nameKey = _normalizeQuarkSaveMatchKey(
+        entry.name,
+        sanitizedNameCharacters,
+      );
       if (nameKey.isEmpty || existingDirectoriesByName.containsKey(nameKey)) {
         continue;
       }
@@ -950,7 +1172,10 @@ class QuarkSaveClient {
     final pendingEntries = <_QuarkShareEntry>[];
     var skippedCount = 0;
     for (final entry in entries) {
-      final nameKey = _normalizeQuarkEntryNameKey(entry.name);
+      final nameKey = _normalizeQuarkSaveMatchKey(
+        entry.name,
+        sanitizedNameCharacters,
+      );
       if (!entry.isDirectory) {
         if (nameKey.isNotEmpty && existingFileNameKeys.contains(nameKey)) {
           skippedCount += 1;
@@ -980,6 +1205,7 @@ class QuarkSaveClient {
         cookie: cookie,
         targetDirectoryFid: matchedDirectory.fid,
         entries: nestedEntries,
+        sanitizedNameCharacters: sanitizedNameCharacters,
       );
       skippedCount += nestedPlan.skippedCount;
       batches.addAll(nestedPlan.batches);
@@ -1230,12 +1456,26 @@ class QuarkSaveResult {
     required this.savedCount,
     this.skippedCount = 0,
     required this.targetFolderPath,
+    this.targetFolderId = '',
+    this.savedEntries = const [],
+    this.savedEntriesSettled = true,
   });
 
   final String taskId;
   final int savedCount;
   final int skippedCount;
   final String targetFolderPath;
+
+  /// Directory the entries landed in. Needed to walk what was just saved.
+  final String targetFolderId;
+
+  /// Entries this save actually copied in, so follow-up work can act on just
+  /// them instead of re-walking everything already in the target.
+  final List<QuarkSavedEntry> savedEntries;
+
+  /// Whether Quark reported the copy tasks as finished, i.e. whether
+  /// [savedEntries] can actually be listed in the drive yet.
+  final bool savedEntriesSettled;
 
   String get summary => '保存 $savedCount 个，略过 $skippedCount 个';
 }
@@ -1305,6 +1545,33 @@ class QuarkConnectionStatus {
   final int rootDirectoryCount;
 
   String get summary => '根目录文件夹 $rootDirectoryCount 个';
+}
+
+/// An entry a save copied in, and the directory it landed in.
+class QuarkSavedEntry {
+  const QuarkSavedEntry({
+    required this.parentFid,
+    required this.name,
+  });
+
+  final String parentFid;
+  final String name;
+}
+
+class QuarkNameSanitizeResult {
+  const QuarkNameSanitizeResult({
+    this.renamedCount = 0,
+    this.listedDirectoryCount = 0,
+    this.failedNames = const [],
+  });
+
+  final int renamedCount;
+
+  /// Number of directory listings issued, i.e. the API cost of the walk.
+  final int listedDirectoryCount;
+  final List<String> failedNames;
+
+  bool get changedAnything => renamedCount > 0;
 }
 
 class QuarkDeleteResult {
@@ -1552,6 +1819,21 @@ class _QuarkRecursiveSavePlan {
 
   final List<_QuarkSaveBatch> batches;
   final int skippedCount;
+}
+
+/// Dedup key for saved entries, files and directories alike.
+///
+/// When saved entries get sanitised afterwards, the copy sitting in the drive
+/// no longer carries the share's original name. Comparing raw names would then
+/// treat an already-saved entry as missing and copy it in again, only for the
+/// rename to collide with the sanitised original.
+String _normalizeQuarkSaveMatchKey(String raw, String sanitizedNameCharacters) {
+  if (sanitizedNameCharacters.trim().isEmpty) {
+    return _normalizeQuarkEntryNameKey(raw);
+  }
+  return _normalizeQuarkEntryNameKey(
+    sanitizeQuarkNameForUrl(raw, characters: sanitizedNameCharacters),
+  );
 }
 
 String _normalizeQuarkEntryNameKey(String raw) {

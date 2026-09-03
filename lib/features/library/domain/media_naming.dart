@@ -44,17 +44,10 @@ const List<String> kDefaultVarietySpecialEpisodeKeywords = <String>[
 
 const List<String> kDefaultVarietyExtraKeywords = <String>[
   '花絮',
-  '幕后',
-  '幕后花絮',
   '制作特辑',
   '预告',
   '预告片',
-  '采访',
-  '访谈',
-  '删减片段',
-  '未播',
-  '未播片段',
-  '未公开',
+  '片段',
   '未公开片段',
   'trailers',
   'trailer',
@@ -338,6 +331,43 @@ class MediaNaming {
       <String, RegExp>{};
   static final Map<String, RegExp> _asciiCompactKeywordPatternCache =
       <String, RegExp>{};
+  static final Map<String, RegExp> _trailingKeywordPatternCache =
+      <String, RegExp>{};
+
+  /// Built-in category keywords that are also ordinary words in real titles.
+  /// They only count when they end the file or directory name.
+  static const List<String> ambiguousSpecialCategoryKeywords = <String>[
+    'bts',
+    'bonus',
+    'sample',
+    'samples',
+    'clip',
+    'clips',
+    'interview',
+    'interviews',
+    'trailer',
+    'trailers',
+    'teaser',
+    'teasers',
+    'reaction',
+  ];
+
+  /// Suffixes that extend a Chinese category keyword instead of turning it
+  /// into a different word.
+  static const List<String> specialCategoryKeywordContinuations = <String>[
+    '版',
+    '篇',
+    '集',
+    '合集',
+    '集锦',
+    '汇总',
+    '精选',
+    '特辑',
+    '全纪录',
+    '纪录',
+    '大全',
+    '第',
+  ];
 
   static List<String> normalizeKeywords(Iterable<String> values) {
     return values
@@ -377,6 +407,126 @@ class MediaNaming {
       compactKeywordLabel(lowered),
       compactKeywordLabel(strippedExtension),
     }..removeWhere((item) => item.isEmpty);
+  }
+
+  /// Matches [rawValues] against special/extra category [keywords] with the
+  /// stricter rules the special-episode classifier needs.
+  ///
+  /// Plain [matchesAnyKeyword] is a substring test, which is fine for the
+  /// user-authored exclusion lists but far too loose here: the built-in table
+  /// contains ordinary English words (`interview`, `trailer`, `bonus`, `bts`)
+  /// and short Chinese fragments (`超前`, `小考`, `连麦`) that also occur inside
+  /// regular titles.  This variant keeps the loose behaviour for the specific
+  /// keywords and only tightens the ambiguous ones.
+  static bool matchesAnySpecialCategoryKeyword(
+    Iterable<String> rawValues, {
+    required Iterable<String> keywords,
+  }) {
+    return bestMatchedSpecialCategoryKeyword(
+          rawValues,
+          keywords: keywords,
+        ) !=
+        null;
+  }
+
+  static String? bestMatchedSpecialCategoryKeyword(
+    Iterable<String> rawValues, {
+    required Iterable<String> keywords,
+  }) {
+    final haystacks = <String>{};
+    for (final rawValue in rawValues) {
+      haystacks.addAll(keywordMatchForms(rawValue));
+    }
+    if (haystacks.isEmpty) {
+      return null;
+    }
+
+    String? bestMatch;
+    var bestLength = -1;
+    for (final keyword in keywords) {
+      if (!_matchesSpecialCategoryKeywordAcrossForms(haystacks, keyword)) {
+        continue;
+      }
+      final normalizedLength = compactKeywordLabel(keyword).length;
+      if (normalizedLength > bestLength) {
+        bestMatch = keyword;
+        bestLength = normalizedLength;
+      }
+    }
+    return bestMatch;
+  }
+
+  static bool _matchesSpecialCategoryKeywordAcrossForms(
+    Set<String> haystacks,
+    String rawKeyword,
+  ) {
+    final loweredKeyword = rawKeyword.trim().toLowerCase();
+    if (loweredKeyword.isEmpty) {
+      return false;
+    }
+    if (ambiguousSpecialCategoryKeywords.contains(loweredKeyword)) {
+      final pattern = _trailingKeywordPatternCache.putIfAbsent(
+        loweredKeyword,
+        () => _buildTrailingAsciiKeywordPattern(loweredKeyword),
+      );
+      return haystacks.any(pattern.hasMatch);
+    }
+    if (_looksLikeAsciiKeyword(loweredKeyword)) {
+      return _matchesKeywordAcrossForms(haystacks, loweredKeyword);
+    }
+    return haystacks.any(
+      (haystack) => _matchesCjkKeywordWithBoundary(haystack, loweredKeyword),
+    );
+  }
+
+  /// A CJK keyword must not be swallowed by a longer word: `小考` inside
+  /// `小考核`, `超前` inside `超前点播`, or `连麦` inside `大连麦当劳` are all
+  /// ordinary content rather than special-episode cues.  The keyword therefore
+  /// has to end the segment, be followed by a non-CJK character, or be
+  /// followed by one of the packaging suffixes that genuinely extend it
+  /// (`花絮合集`, `加更版`, `番外篇`).
+  static bool _matchesCjkKeywordWithBoundary(
+    String haystack,
+    String keyword,
+  ) {
+    var index = haystack.indexOf(keyword);
+    while (index >= 0) {
+      final tailStart = index + keyword.length;
+      if (tailStart >= haystack.length) {
+        return true;
+      }
+      final tail = haystack.substring(tailStart);
+      if (!_isCjkCodeUnit(tail.codeUnitAt(0)) ||
+          specialCategoryKeywordContinuations.any(tail.startsWith)) {
+        return true;
+      }
+      index = haystack.indexOf(keyword, index + 1);
+    }
+    return false;
+  }
+
+  static bool _isCjkCodeUnit(int codeUnit) {
+    return (codeUnit >= 0x3400 && codeUnit <= 0x9fff) ||
+        (codeUnit >= 0xf900 && codeUnit <= 0xfaff);
+  }
+
+  /// Anchors an ambiguous ASCII keyword to the end of the name, so it only
+  /// matches a dedicated folder (`Trailers/`), a bare file (`sample.mkv`) or a
+  /// Kodi-style suffix (`Movie-trailer.mkv`) instead of any title that happens
+  /// to start with the word.
+  static RegExp _buildTrailingAsciiKeywordPattern(String keyword) {
+    final parts = keyword
+        .split(RegExp(r'[\s._\-/&+]+'))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .map(RegExp.escape)
+        .toList(growable: false);
+    final pattern =
+        parts.isEmpty ? RegExp.escape(keyword) : parts.join(r'[\s._\-/&+]+');
+    return RegExp(
+      r'(^|[^a-z0-9])' '$pattern' r'\s*$',
+      caseSensitive: false,
+    );
   }
 
   static bool matchesAnyKeyword(
@@ -495,7 +645,7 @@ class MediaNaming {
       final compactPattern = _asciiCompactKeywordPatternCache.putIfAbsent(
         compactKeyword,
         () => RegExp(
-          '(^|[^a-z0-9])${RegExp.escape(compactKeyword)}(?=[^a-z0-9]|\\\$)',
+          '(^|[^a-z0-9])${RegExp.escape(compactKeyword)}' r'(?=[^a-z0-9]|$)',
           caseSensitive: false,
         ),
       );
@@ -523,7 +673,7 @@ class MediaNaming {
     final pattern =
         parts.isEmpty ? RegExp.escape(normalized) : parts.join(r'[\s._\-/&+]+');
     return RegExp(
-      '(^|[^a-z0-9])$pattern(?=[^a-z0-9]|\\\$)',
+      '(^|[^a-z0-9])$pattern' r'(?=[^a-z0-9]|$)',
       caseSensitive: false,
     );
   }

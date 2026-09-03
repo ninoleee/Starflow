@@ -86,6 +86,71 @@ void main() {
     );
   });
 
+  test('keeps leading hash episode folders under their mother series', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'crossroads-004',
+          address:
+              '/movies/strm/quark/罗永浩的十字路口/#004 五条人之仁科 × 罗永浩！近五个小时的超长对谈！/五条人之仁科 × 罗永浩！近五个小时的超长对谈！.mp4',
+          directories: const [
+            'strm',
+            'quark',
+            '罗永浩的十字路口',
+            '#004 五条人之仁科 × 罗永浩！近五个小时的超长对谈！',
+          ],
+        ),
+        _pendingItem(
+          id: 'crossroads-005',
+          address: '/movies/strm/quark/罗永浩的十字路口/#005 下一期长谈/下一期长谈.mp4',
+          directories: const [
+            'strm',
+            'quark',
+            '罗永浩的十字路口',
+            '#005 下一期长谈',
+          ],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('episode'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.seasonNumber),
+      everyElement(1),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.episodeNumber).toSet(),
+      {4, 5},
+    );
+  });
+
+  test('keeps one leading hash episode under its mother series', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'crossroads-only-004',
+          address:
+              '/movies/strm/quark/罗永浩的十字路口/#004 五条人之仁科 × 罗永浩！/五条人之仁科 × 罗永浩！.mp4',
+          directories: const [
+            'strm',
+            'quark',
+            '罗永浩的十字路口',
+            '#004 五条人之仁科 × 罗永浩！',
+          ],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved.single.metadataSeed.itemType, 'episode');
+    expect(resolved.single.metadataSeed.seasonNumber, 1);
+    expect(resolved.single.metadataSeed.episodeNumber, 4);
+  });
+
   test('uses leading ordinals to order direct files in a known series', () {
     final resolved = applyExternalDirectoryStructureInference(
       [

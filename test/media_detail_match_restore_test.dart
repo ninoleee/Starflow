@@ -701,6 +701,131 @@ void main() {
     expect(cacheRepository.lastSavedState?.libraryMatchChoices.length, 2);
   });
 
+  testWidgets('TV episode detail selects and persists a playback variant',
+      (tester) async {
+    tester.view.physicalSize = const Size(1280, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const choiceA = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：WebDAV · nas-A',
+      searchQuery: '测试剧 第 1 集',
+      sourceId: 'nas-a',
+      itemId: 'episode-a',
+      itemType: 'episode',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas-A',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '第 1 集',
+        sourceId: 'nas-a',
+        streamUrl: 'https://example.com/show-s01e01-a.mkv',
+        sourceName: 'nas-A',
+        sourceKind: MediaSourceKind.nas,
+        actualAddress: '/shows/测试剧/Season 1/第1集-A.mkv',
+        itemId: 'episode-a',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    const choiceB = MediaDetailTarget(
+      title: '第 1 集',
+      posterUrl: '',
+      overview: '',
+      year: 2026,
+      availabilityLabel: '资源已就绪：WebDAV · nas-A',
+      searchQuery: '测试剧 第 1 集',
+      sourceId: 'nas-a',
+      itemId: 'episode-b',
+      itemType: 'episode',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'nas-A',
+      seasonNumber: 1,
+      episodeNumber: 1,
+      playbackTarget: PlaybackTarget(
+        title: '第 1 集',
+        sourceId: 'nas-a',
+        streamUrl: 'https://example.com/show-s01e01-b.mkv',
+        sourceName: 'nas-A',
+        sourceKind: MediaSourceKind.nas,
+        actualAddress: '/shows/测试剧/Season 1/第1集-B.mkv',
+        itemId: 'episode-b',
+        itemType: 'episode',
+        seriesTitle: '测试剧',
+        seasonNumber: 1,
+        episodeNumber: 1,
+      ),
+    );
+    final settings = AppSettings.fromJson({
+      'mediaSources': const [],
+      'searchProviders': const [],
+      'doubanAccount': const {'enabled': false},
+      'homeModules': const [],
+      'tmdbMetadataMatchEnabled': false,
+      'wmdbMetadataMatchEnabled': false,
+      'imdbRatingMatchEnabled': false,
+      'detailAutoLibraryMatchEnabled': false,
+    });
+    final indexer = _buildNoopNasMediaIndexer(settings);
+    addTearDown(indexer.dispose);
+    final cacheRepository = _RecordingRestoreCacheRepository();
+    final service = _FakeDetailExternalEpisodeVariantService(
+      state: const DetailExternalEpisodeVariantState(
+        choices: [choiceA, choiceB],
+        selectedIndex: 0,
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(settings),
+          mediaRepositoryProvider.overrideWithValue(
+            const _NoopMediaRepository(),
+          ),
+          localStorageCacheRepositoryProvider
+              .overrideWithValue(cacheRepository),
+          nasMediaIndexerProvider.overrideWithValue(indexer),
+          detailExternalEpisodeVariantServiceProvider
+              .overrideWithValue(service),
+        ],
+        child: const MaterialApp(
+          home: MediaDetailPage(target: choiceA),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('播放版本'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('播放版本').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('选择播放版本'), findsOneWidget);
+    expect(find.text('nas-A · 第1集-B.mkv'), findsOneWidget);
+    await tester.tap(find.text('nas-A · 第1集-B.mkv'));
+    await tester.pumpAndSettle();
+
+    expect(cacheRepository.lastSavedState?.selectedLibraryMatchIndex, 1);
+    expect(
+      cacheRepository.lastSavedState?.target.itemId,
+      'episode-b',
+    );
+  });
+
   testWidgets(
       'detail page merges matched resources with same-episode file variants',
       (tester) async {

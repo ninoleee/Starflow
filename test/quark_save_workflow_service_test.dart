@@ -15,6 +15,7 @@ void main() {
           String toPdirFid = '0',
           String toPdirPath = '/',
           String saveFolderName = '',
+          String sanitizedNameCharacters = '',
         }) async {
           saveCalled = true;
           return const QuarkSaveResult(
@@ -23,6 +24,12 @@ void main() {
             targetFolderPath: '/',
           );
         },
+        sanitizeSavedNames: ({
+          required String cookie,
+          required List<QuarkSavedEntry> savedEntries,
+          required String characters,
+        }) async =>
+            const QuarkNameSanitizeResult(),
         triggerSmartStrm: ({
           required String webhookUrl,
           required String taskName,
@@ -78,6 +85,7 @@ void main() {
           String toPdirFid = '0',
           String toPdirPath = '/',
           String saveFolderName = '',
+          String sanitizedNameCharacters = '',
         }) async {
           saveCall = {
             'shareUrl': shareUrl,
@@ -93,6 +101,12 @@ void main() {
             targetFolderPath: '/影视/三体',
           );
         },
+        sanitizeSavedNames: ({
+          required String cookie,
+          required List<QuarkSavedEntry> savedEntries,
+          required String characters,
+        }) async =>
+            const QuarkNameSanitizeResult(),
         triggerSmartStrm: ({
           required String webhookUrl,
           required String taskName,
@@ -140,11 +154,13 @@ void main() {
         refreshDelaySeconds: 6,
         smartStrmDelaySeconds: 4,
       );
+      final progressStages = <QuarkSaveWorkflowStage>[];
 
       final result = await service.saveToQuark(
         shareUrl: 'https://pan.quark.cn/s/abc123',
         saveFolderName: '三体',
         networkStorage: storage,
+        onProgress: (progress) => progressStages.add(progress.stage),
       );
 
       expect(
@@ -177,6 +193,16 @@ void main() {
       );
       expect(result.saveResult.targetFolderPath, '/影视/三体');
       expect(
+        progressStages,
+        [
+          QuarkSaveWorkflowStage.saving,
+          QuarkSaveWorkflowStage.saveCompleted,
+          QuarkSaveWorkflowStage.triggeringSmartStrm,
+          QuarkSaveWorkflowStage.smartStrmTriggered,
+          QuarkSaveWorkflowStage.schedulingRefresh,
+        ],
+      );
+      expect(
         result.buildSuccessMessage(),
         '已提交到夸克，任务 task-1，保存 3 个，略过 1 个，STRM 已延迟 4 秒触发，6 秒后刷新媒体源',
       );
@@ -193,6 +219,7 @@ void main() {
           String toPdirFid = '0',
           String toPdirPath = '/',
           String saveFolderName = '',
+          String sanitizedNameCharacters = '',
         }) async {
           return const QuarkSaveResult(
             taskId: '',
@@ -201,6 +228,12 @@ void main() {
             targetFolderPath: '/影视/乘风破浪',
           );
         },
+        sanitizeSavedNames: ({
+          required String cookie,
+          required List<QuarkSavedEntry> savedEntries,
+          required String characters,
+        }) async =>
+            const QuarkNameSanitizeResult(),
         triggerSmartStrm: ({
           required String webhookUrl,
           required String taskName,

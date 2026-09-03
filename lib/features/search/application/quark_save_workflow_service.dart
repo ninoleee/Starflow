@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
@@ -13,6 +14,14 @@ typedef QuarkSaveWorkflowSaveShareLink = Future<QuarkSaveResult> Function({
   String toPdirFid,
   String toPdirPath,
   String saveFolderName,
+  String sanitizedNameCharacters,
+});
+
+typedef QuarkSaveWorkflowSanitizeSavedNames = Future<QuarkNameSanitizeResult>
+    Function({
+  required String cookie,
+  required List<QuarkSavedEntry> savedEntries,
+  required String characters,
 });
 
 typedef QuarkSaveWorkflowTriggerSmartStrm = Future<SmartStrmTriggerResult>
@@ -34,6 +43,30 @@ typedef QuarkSaveWorkflowRefreshSelectedSources = Future<void> Function({
   required bool invalidateWebDavDirectoryCache,
 });
 
+typedef QuarkSaveWorkflowProgressCallback = void Function(
+  QuarkSaveWorkflowProgress progress,
+);
+
+enum QuarkSaveWorkflowStage {
+  saving,
+  saveCompleted,
+  sanitizingNames,
+  namesSanitized,
+  triggeringSmartStrm,
+  smartStrmTriggered,
+  schedulingRefresh,
+}
+
+class QuarkSaveWorkflowProgress {
+  const QuarkSaveWorkflowProgress({
+    required this.stage,
+    required this.message,
+  });
+
+  final QuarkSaveWorkflowStage stage;
+  final String message;
+}
+
 final quarkSaveWorkflowServiceProvider = Provider<QuarkSaveWorkflowService>((
   ref,
 ) {
@@ -44,6 +77,7 @@ final quarkSaveWorkflowServiceProvider = Provider<QuarkSaveWorkflowService>((
       String toPdirFid = '0',
       String toPdirPath = '/',
       String saveFolderName = '',
+      String sanitizedNameCharacters = '',
     }) {
       return ref.read(quarkSaveClientProvider).saveShareLink(
             shareUrl: shareUrl,
@@ -51,6 +85,18 @@ final quarkSaveWorkflowServiceProvider = Provider<QuarkSaveWorkflowService>((
             toPdirFid: toPdirFid,
             toPdirPath: toPdirPath,
             saveFolderName: saveFolderName,
+            sanitizedNameCharacters: sanitizedNameCharacters,
+          );
+    },
+    sanitizeSavedNames: ({
+      required String cookie,
+      required List<QuarkSavedEntry> savedEntries,
+      required String characters,
+    }) {
+      return ref.read(quarkSaveClientProvider).sanitizeSavedEntries(
+            cookie: cookie,
+            savedEntries: savedEntries,
+            characters: characters,
           );
     },
     triggerSmartStrm: ({
@@ -94,15 +140,18 @@ final quarkSaveWorkflowServiceProvider = Provider<QuarkSaveWorkflowService>((
 class QuarkSaveWorkflowService {
   const QuarkSaveWorkflowService({
     required QuarkSaveWorkflowSaveShareLink saveShareLink,
+    required QuarkSaveWorkflowSanitizeSavedNames sanitizeSavedNames,
     required QuarkSaveWorkflowTriggerSmartStrm triggerSmartStrm,
     required QuarkSaveWorkflowResolveRefreshSourceIds resolveRefreshSourceIds,
     required QuarkSaveWorkflowRefreshSelectedSources refreshSelectedSources,
   })  : _saveShareLink = saveShareLink,
+        _sanitizeSavedNames = sanitizeSavedNames,
         _triggerSmartStrm = triggerSmartStrm,
         _resolveRefreshSourceIds = resolveRefreshSourceIds,
         _refreshSelectedSources = refreshSelectedSources;
 
   final QuarkSaveWorkflowSaveShareLink _saveShareLink;
+  final QuarkSaveWorkflowSanitizeSavedNames _sanitizeSavedNames;
   final QuarkSaveWorkflowTriggerSmartStrm _triggerSmartStrm;
   final QuarkSaveWorkflowResolveRefreshSourceIds _resolveRefreshSourceIds;
   final QuarkSaveWorkflowRefreshSelectedSources _refreshSelectedSources;
@@ -111,20 +160,41 @@ class QuarkSaveWorkflowService {
     required String shareUrl,
     required String saveFolderName,
     required NetworkStorageConfig networkStorage,
+    QuarkSaveWorkflowProgressCallback? onProgress,
   }) async {
     final cookie = networkStorage.quarkCookie.trim();
     if (cookie.isEmpty) {
       throw const QuarkSaveException('请先在搜索设置里填写夸克 Cookie');
     }
 
+    // Empty unless sanitising is on, so deduplication compares the names the
+    // drive will end up with rather than the share's original ones.
+    final sanitizedNameCharacters =
+        networkStorage.quarkSanitizeSavedNamesEnabled
+            ? networkStorage.quarkSanitizedNameCharacters.trim()
+            : '';
+
+    _emitProgress(
+      onProgress,
+      QuarkSaveWorkflowStage.saving,
+      '正在保存到夸克，请稍候...',
+    );
     final saveResult = await _saveShareLink(
       shareUrl: shareUrl,
       cookie: cookie,
       toPdirFid: networkStorage.quarkSaveFolderId,
       toPdirPath: networkStorage.quarkSaveFolderPath,
       saveFolderName: saveFolderName,
+      sanitizedNameCharacters: sanitizedNameCharacters,
     );
     final savedAnyFiles = saveResult.savedCount > 0;
+    _emitProgress(
+      onProgress,
+      QuarkSaveWorkflowStage.saveCompleted,
+      savedAnyFiles
+          ? '夸克保存完成，共保存 ${saveResult.savedCount} 个'
+          : '夸克检查完成，没有需要新增的文件',
+    );
     final refreshDelaySeconds = _normalizeDelaySeconds(
       networkStorage.refreshDelaySeconds,
     );
@@ -134,9 +204,94 @@ class QuarkSaveWorkflowService {
     var triggeredSmartStrm = false;
     SmartStrmTriggerResult? smartStrmResult;
 
+    // Must run before SmartStrm is triggered: otherwise .strm files are
+    // generated against the pre-rename paths and immediately go stale.
+    QuarkNameSanitizeResult? sanitizeResult;
+    if (sanitizedNameCharacters.isNotEmpty) {
+      final skipReason = !savedAnyFiles
+          ? 'nothing-saved'
+          : saveResult.savedEntries.isEmpty
+              ? 'no-entries-recorded'
+              : !saveResult.savedEntriesSettled
+                  // Quark never reported the copy as finished, so the entries
+                  // are not listable yet and matching them would silently
+                  // rename nothing.
+                  ? 'save-task-unsettled'
+                  : '';
+      if (skipReason.isNotEmpty) {
+        appLogWarning(
+          'quark.save',
+          'Saved name sanitising skipped',
+          fields: <String, Object?>{
+            'reason': skipReason,
+            'savedCount': saveResult.savedCount,
+            'savedEntryCount': saveResult.savedEntries.length,
+            'characters': sanitizedNameCharacters,
+          },
+        );
+      } else {
+        _emitProgress(
+          onProgress,
+          QuarkSaveWorkflowStage.sanitizingNames,
+          '正在修正本次保存的名称...',
+        );
+        appLogInfo(
+          'quark.save',
+          'Saved name sanitising started',
+          fields: <String, Object?>{
+            'savedEntryCount': saveResult.savedEntries.length,
+            'characters': sanitizedNameCharacters,
+          },
+        );
+        // The files are already saved; a rename failure must not fail the save.
+        try {
+          sanitizeResult = await _sanitizeSavedNames(
+            cookie: cookie,
+            savedEntries: saveResult.savedEntries,
+            characters: sanitizedNameCharacters,
+          );
+          appLogInfo(
+            'quark.save',
+            'Saved name sanitising completed',
+            fields: <String, Object?>{
+              'renamedCount': sanitizeResult.renamedCount,
+              'listedDirectoryCount': sanitizeResult.listedDirectoryCount,
+              'failedCount': sanitizeResult.failedNames.length,
+            },
+          );
+          _emitProgress(
+            onProgress,
+            QuarkSaveWorkflowStage.namesSanitized,
+            sanitizeResult.changedAnything
+                ? '名称修正完成，共修改 ${sanitizeResult.renamedCount} 个'
+                : '名称检查完成，无需修改',
+          );
+        } on QuarkSaveException catch (error) {
+          sanitizeResult = null;
+          appLogWarning(
+            'quark.save',
+            'Saved name sanitising failed',
+            error: error,
+          );
+          _emitProgress(
+            onProgress,
+            QuarkSaveWorkflowStage.namesSanitized,
+            '名称修正失败，继续处理 STRM',
+          );
+        }
+      }
+    }
+
     if (savedAnyFiles &&
         networkStorage.smartStrmWebhookUrl.trim().isNotEmpty &&
         networkStorage.smartStrmTaskName.trim().isNotEmpty) {
+      _emitProgress(
+        onProgress,
+        QuarkSaveWorkflowStage.triggeringSmartStrm,
+        smartStrmDelaySeconds > 0
+            ? '正在触发 STRM，任务将延迟 $smartStrmDelaySeconds 秒执行...'
+            : '正在触发 STRM...',
+      );
       smartStrmResult = await _triggerSmartStrm(
         webhookUrl: networkStorage.smartStrmWebhookUrl,
         taskName: networkStorage.smartStrmTaskName,
@@ -146,6 +301,14 @@ class QuarkSaveWorkflowService {
         delay: smartStrmDelaySeconds,
       );
       triggeredSmartStrm = true;
+      _emitProgress(
+        onProgress,
+        QuarkSaveWorkflowStage.smartStrmTriggered,
+        _buildSmartStrmSuccessMessage(
+          smartStrmResult,
+          delaySeconds: smartStrmDelaySeconds,
+        ),
+      );
     }
 
     final refreshSourceIds = _resolveRefreshSourceIds(
@@ -153,6 +316,13 @@ class QuarkSaveWorkflowService {
       includeConfiguredSources: savedAnyFiles,
     );
     if (refreshSourceIds.isNotEmpty) {
+      _emitProgress(
+        onProgress,
+        QuarkSaveWorkflowStage.schedulingRefresh,
+        refreshDelaySeconds > 0
+            ? '已安排媒体源在 $refreshDelaySeconds 秒后刷新'
+            : '已安排媒体源刷新',
+      );
       unawaited(
         _refreshSelectedSources(
           sourceIds: refreshSourceIds,
@@ -164,6 +334,7 @@ class QuarkSaveWorkflowService {
 
     return QuarkSaveWorkflowResult(
       saveResult: saveResult,
+      sanitizeResult: sanitizeResult,
       triggeredSmartStrm: triggeredSmartStrm,
       smartStrmResult: smartStrmResult,
       refreshSourceIds: refreshSourceIds,
@@ -173,9 +344,18 @@ class QuarkSaveWorkflowService {
   }
 }
 
+void _emitProgress(
+  QuarkSaveWorkflowProgressCallback? callback,
+  QuarkSaveWorkflowStage stage,
+  String message,
+) {
+  callback?.call(QuarkSaveWorkflowProgress(stage: stage, message: message));
+}
+
 class QuarkSaveWorkflowResult {
   const QuarkSaveWorkflowResult({
     required this.saveResult,
+    this.sanitizeResult,
     required this.triggeredSmartStrm,
     required this.smartStrmResult,
     required this.refreshSourceIds,
@@ -184,6 +364,7 @@ class QuarkSaveWorkflowResult {
   });
 
   final QuarkSaveResult saveResult;
+  final QuarkNameSanitizeResult? sanitizeResult;
   final bool triggeredSmartStrm;
   final SmartStrmTriggerResult? smartStrmResult;
   final List<String> refreshSourceIds;
@@ -200,12 +381,18 @@ class QuarkSaveWorkflowResult {
             delaySeconds: smartStrmDelaySeconds,
           )
         : '';
+    final sanitize = sanitizeResult;
+    final sanitizeMessage = sanitize == null || !sanitize.changedAnything
+        ? ''
+        : '，已修正 ${sanitize.renamedCount} 个名称'
+            '${sanitize.failedNames.isEmpty ? '' : '（${sanitize.failedNames.length} 个失败）'}';
     final refreshMessage = refreshSourceIds.isEmpty
         ? ''
         : refreshDelaySeconds > 0
             ? '，$refreshDelaySeconds 秒后刷新媒体源'
             : '，即将刷新媒体源';
-    return '$message${smartStrmMessage.isEmpty ? '' : '，$smartStrmMessage'}$refreshMessage';
+    return '$message$sanitizeMessage'
+        '${smartStrmMessage.isEmpty ? '' : '，$smartStrmMessage'}$refreshMessage';
   }
 }
 

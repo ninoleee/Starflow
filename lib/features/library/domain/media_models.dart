@@ -355,7 +355,7 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
     if (keywords.isEmpty) {
       return false;
     }
-    return MediaNaming.matchesAnyKeyword(
+    return MediaNaming.matchesAnySpecialCategoryKeyword(
       [rawValue],
       keywords: keywords,
     );
@@ -369,7 +369,7 @@ extension MediaSourceConfigWebDavFilterX on MediaSourceConfig {
     if (keywords.isEmpty) {
       return false;
     }
-    return MediaNaming.matchesAnyKeyword(
+    return MediaNaming.matchesAnySpecialCategoryKeyword(
       [rawValue],
       keywords: keywords,
     );

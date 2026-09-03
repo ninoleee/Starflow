@@ -117,6 +117,20 @@ void main() {
       expect(result.episodeNumber, 19);
     });
 
+    test('uses leading hash ordinals without repeating the series title', () {
+      final result = NasMediaRecognizer.recognize(
+        'Shows/罗永浩的十字路口/#004 五条人之仁科 × 罗永浩！/五条人之仁科 × 罗永浩！.mp4',
+        seriesTitleFilterKeywords: const ['shows'],
+      );
+
+      expect(result.title, '罗永浩的十字路口');
+      expect(result.parentTitle, '罗永浩的十字路口');
+      expect(result.itemType, 'episode');
+      expect(result.preferSeries, isTrue);
+      expect(result.seasonNumber, 1);
+      expect(result.episodeNumber, 4);
+    });
+
     test('does not treat unrelated hashtag folders as episodes', () {
       final result = NasMediaRecognizer.recognize(
         'Shows/纪录片/Research #19/video.mkv',

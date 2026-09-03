@@ -560,12 +560,17 @@ class _ExternalScanStructureModule {
       specialEpisodeKeywords: specialEpisodeKeywords,
       directoryNames: relativeDirectoriesAfterRoot,
     );
-    final hintedSeasonNumber = matchesSpecialEpisodeKeyword
+    // A keyword hit never overrules an explicit season: `S02E05` or a
+    // `Season 2` folder is a stronger signal than a word that merely appears
+    // in the name, and overruling it also destroyed the episode number.
+    final forceSpecialSeason =
+        matchesSpecialEpisodeKeyword && explicitSeasonNumber == null;
+    final hintedSeasonNumber = forceSpecialSeason
         ? 0
         : effectiveIsRootDirectFile
             ? null
             : plan.seasonNumberByChildDirectory[effectiveChildDirectoryName];
-    final derivedSeasonNumber = matchesSpecialEpisodeKeyword
+    final derivedSeasonNumber = forceSpecialSeason
         ? 0
         : effectiveIsRootDirectFile
             ? collapseChildDirectoryToRoot
@@ -575,7 +580,7 @@ class _ExternalScanStructureModule {
                     : 1
             : hintedSeasonNumber;
     final resolvedExplicitSeasonNumber =
-        matchesSpecialEpisodeKeyword ? 0 : explicitSeasonNumber;
+        explicitSeasonNumber ?? (forceSpecialSeason ? 0 : null);
     final seasonGroupKey = resolvedExplicitSeasonNumber != null
         ? _buildExplicitSeasonGroupKey(resolvedExplicitSeasonNumber)
         : effectiveIsRootDirectFile
@@ -641,7 +646,11 @@ class _ExternalScanStructureModule {
     final matchesSpecialEpisodeKeyword = _matchesSpecialEpisodeKeyword(
       item,
       specialEpisodeKeywords: context.specialEpisodeKeywords,
-      directoryNames: item.relativeDirectories,
+      // Only the directory the file actually lives in: a keyword in some
+      // ancestor (`/nas/clips/...`) would otherwise reclassify a whole source.
+      directoryNames: item.relativeDirectories.isEmpty
+          ? const <String>[]
+          : <String>[item.relativeDirectories.last],
     );
 
     if (seed.itemType.trim().isNotEmpty ||
@@ -659,7 +668,8 @@ class _ExternalScanStructureModule {
     return item.copyWith(
       metadataSeed: seed.copyWith(
         itemType: resolvedItemType,
-        seasonNumber: matchesSpecialEpisodeKeyword ? 0 : explicitSeasonNumber,
+        seasonNumber:
+            explicitSeasonNumber ?? (matchesSpecialEpisodeKeyword ? 0 : null),
         episodeNumber: explicitEpisodeNumber ??
             (matchesSpecialEpisodeKeyword && resolvedItemType == 'episode'
                 ? 1
@@ -1166,7 +1176,7 @@ class _ExternalScanStructureModule {
     Iterable<String> rawValues, {
     required List<String> specialEpisodeKeywords,
   }) {
-    return MediaNaming.matchesAnyKeyword(
+    return MediaNaming.matchesAnySpecialCategoryKeyword(
       rawValues,
       keywords: specialEpisodeKeywords,
     );
