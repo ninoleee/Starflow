@@ -638,13 +638,17 @@ void main() {
     test('sanitises before triggering SmartStrm', () async {
       final calls = <String>[];
       final progressStages = <QuarkSaveWorkflowStage>[];
+      final progressMessages = <String>[];
       final service = buildService(calls: calls);
 
       final result = await service.saveToQuark(
         shareUrl: 'https://pan.quark.cn/s/test',
         saveFolderName: '综艺',
         networkStorage: enabled,
-        onProgress: (progress) => progressStages.add(progress.stage),
+        onProgress: (progress) {
+          progressStages.add(progress.stage);
+          progressMessages.add(progress.message);
+        },
       );
 
       expect(
@@ -662,13 +666,11 @@ void main() {
         progressStages,
         [
           QuarkSaveWorkflowStage.saving,
-          QuarkSaveWorkflowStage.saveCompleted,
           QuarkSaveWorkflowStage.sanitizingNames,
-          QuarkSaveWorkflowStage.namesSanitized,
-          QuarkSaveWorkflowStage.triggeringSmartStrm,
-          QuarkSaveWorkflowStage.smartStrmTriggered,
         ],
       );
+      expect(progressMessages.first, '夸克保存中...');
+      expect(progressMessages[1], '已保存 2 个，名称修改中...');
     });
 
     test('skips sanitising when the copy task never settled', () async {

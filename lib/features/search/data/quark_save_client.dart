@@ -60,8 +60,7 @@ String sanitizeQuarkNameForUrl(
     }
     buffer.write(character);
   }
-  final collapsed =
-      buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+  final collapsed = buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
   return collapsed == '.' || collapsed == '..' ? '' : collapsed;
 }
 
@@ -124,6 +123,7 @@ class QuarkSaveClient {
     String toPdirFid = '0',
     String toPdirPath = '/',
     String saveFolderName = '',
+
     /// Non-empty when saved directories will be sanitised afterwards, so that
     /// deduplication compares the names the drive will actually end up with.
     String sanitizedNameCharacters = '',
@@ -1718,6 +1718,19 @@ class QuarkFileEntry {
               .trim(),
       extension: _resolveQuarkExtension(name),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'fid': fid,
+      'file_name': name,
+      'file_path': path,
+      'dir': isDirectory,
+      if (sizeBytes != null) 'size': sizeBytes,
+      if (updatedAt != null) 'updated_at': updatedAt!.millisecondsSinceEpoch,
+      'mime_type': mimeType,
+      'obj_category': category,
+    };
   }
 }
 

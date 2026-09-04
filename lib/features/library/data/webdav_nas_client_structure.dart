@@ -951,11 +951,19 @@ class _ExternalScanStructureModule {
         seasonHintsByChildDirectory[entry.key] = hint;
         structuralChildDirectories.add(entry.key);
       }
-      if (_isFlatWrapperChildDirectory(
-        directoryKey: directoryKey,
-        childDirectoryName: entry.key,
-        items: entry.value,
-      )) {
+      final isSingleVideoEpisodeDirectory = hint == null &&
+          _isSingleDirectVideoChildDirectory(
+            directoryKey: directoryKey,
+            childDirectoryName: entry.key,
+            items: entry.value,
+            filesByDirectory: filesByDirectory,
+          );
+      if (isSingleVideoEpisodeDirectory ||
+          _isFlatWrapperChildDirectory(
+            directoryKey: directoryKey,
+            childDirectoryName: entry.key,
+            items: entry.value,
+          )) {
         structuralChildDirectories.add(entry.key);
         collapseChildDirectoriesToRoot.add(entry.key);
       }
@@ -1055,6 +1063,22 @@ class _ExternalScanStructureModule {
 
   int? _parseLeadingNumericSeasonNumber(String value) {
     return parseLeadingNumericSeasonNumber(value);
+  }
+
+  bool _isSingleDirectVideoChildDirectory({
+    required String directoryKey,
+    required String childDirectoryName,
+    required List<_PendingWebDavScannedItem> items,
+    required Map<String, List<_PendingWebDavScannedItem>> filesByDirectory,
+  }) {
+    if (items.length != 1) {
+      return false;
+    }
+    final childDirectoryKey = _segmentsKey([
+      ..._segmentsFromKey(directoryKey),
+      childDirectoryName,
+    ]);
+    return filesByDirectory[childDirectoryKey]?.length == 1;
   }
 
   bool _isFlatWrapperChildDirectory({

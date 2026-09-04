@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/utils/metadata_search_trace.dart';
+import 'package:starflow/core/utils/metadata_text.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
@@ -538,7 +539,7 @@ class WmdbMetadataClient {
       originalTitle: '${json['originalName'] ?? title}'.trim(),
       alternateTitles: _splitAliases('${json['alias'] ?? ''}'),
       posterUrl: posterUrl,
-      overview: overview,
+      overview: sanitizeMetadataOverviewText(overview),
       year: year,
       durationLabel: durationLabel,
       genres: genres,

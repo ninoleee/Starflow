@@ -221,25 +221,29 @@ class MediaRefreshCoordinator {
 
     final repository = _ref.read(mediaRepositoryProvider);
     await repository.cancelActiveWebDavRefreshes(includeForceFull: true);
-    final webDavSourceIds = _ref
+    final cacheInvalidationSourceIds = _ref
         .read(appSettingsProvider)
         .mediaSources
         .where(
           (source) =>
               source.enabled &&
-              source.kind == MediaSourceKind.nas &&
+              (source.kind == MediaSourceKind.nas ||
+                  source.kind == MediaSourceKind.quark) &&
               scopedIds.contains(source.id),
         )
         .map((source) => source.id)
         .toList(growable: false);
-    if (invalidateWebDavDirectoryCache && webDavSourceIds.isNotEmpty) {
+    if (invalidateWebDavDirectoryCache &&
+        cacheInvalidationSourceIds.isNotEmpty) {
       final cacheStore = _ref.read(webDavDirectoryCacheStoreProvider);
-      await Future.wait(webDavSourceIds.map(cacheStore.removeSource));
+      await Future.wait(
+        cacheInvalidationSourceIds.map(cacheStore.removeSource),
+      );
       appLogInfo(
         'library.scan-cache',
-        'Persistent WebDAV directory cache invalidated before refresh',
+        'Persistent directory cache invalidated before refresh',
         fields: <String, Object?>{
-          'sourceIds': webDavSourceIds,
+          'sourceIds': cacheInvalidationSourceIds,
           'forceFullRescan': forceFullRescan,
         },
       );

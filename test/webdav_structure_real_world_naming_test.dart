@@ -128,6 +128,48 @@ void main() {
     );
   });
 
+  test('keeps sanitised zero-padded episode folders in one season', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'crossroads-clean-004',
+          address:
+              '/movies/strm/quark/罗永浩的十字路口/004 五条人之仁科 × 罗永浩！/五条人之仁科 × 罗永浩！.mp4',
+          directories: const [
+            'strm',
+            'quark',
+            '罗永浩的十字路口',
+            '004 五条人之仁科 × 罗永浩！',
+          ],
+        ),
+        _pendingItem(
+          id: 'crossroads-clean-005',
+          address: '/movies/strm/quark/罗永浩的十字路口/005 下一期长谈/下一期长谈.mp4',
+          directories: const [
+            'strm',
+            'quark',
+            '罗永浩的十字路口',
+            '005 下一期长谈',
+          ],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('episode'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.seasonNumber),
+      everyElement(1),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.episodeNumber).toSet(),
+      {4, 5},
+    );
+  });
+
   test('keeps one leading hash episode under its mother series', () {
     final resolved = applyExternalDirectoryStructureInference(
       [
@@ -487,7 +529,7 @@ void main() {
     expect(resolved.single.metadataSeed.episodeNumber, 1);
   });
 
-  test('treats unknown child directories as seasons of the parent series', () {
+  test('treats single-video child directories as episodes in one season', () {
     final resolved = applyExternalDirectoryStructureInference(
       [
         _pendingItem(
@@ -505,6 +547,48 @@ void main() {
     );
 
     expect(resolved, hasLength(2));
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('episode'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.seasonNumber).toSet(),
+      {1},
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.episodeNumber).toSet(),
+      {1, 2},
+    );
+  });
+
+  test('keeps multi-video unknown child directories as implicit seasons', () {
+    final resolved = applyExternalDirectoryStructureInference(
+      [
+        _pendingItem(
+          id: 'unknown-season-a-1',
+          address: '/movies/strm/quark/示例剧/内容A/video-a-1.mkv.strm',
+          directories: const ['strm', 'quark', '示例剧', '内容A'],
+        ),
+        _pendingItem(
+          id: 'unknown-season-a-2',
+          address: '/movies/strm/quark/示例剧/内容A/video-a-2.mkv.strm',
+          directories: const ['strm', 'quark', '示例剧', '内容A'],
+        ),
+        _pendingItem(
+          id: 'unknown-season-b-1',
+          address: '/movies/strm/quark/示例剧/内容B/video-b-1.mkv.strm',
+          directories: const ['strm', 'quark', '示例剧', '内容B'],
+        ),
+        _pendingItem(
+          id: 'unknown-season-b-2',
+          address: '/movies/strm/quark/示例剧/内容B/video-b-2.mkv.strm',
+          directories: const ['strm', 'quark', '示例剧', '内容B'],
+        ),
+      ],
+      source: source,
+    );
+
+    expect(resolved, hasLength(4));
     expect(
       resolved.map((item) => item.metadataSeed.itemType),
       everyElement('episode'),

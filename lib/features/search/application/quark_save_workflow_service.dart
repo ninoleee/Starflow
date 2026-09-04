@@ -177,7 +177,7 @@ class QuarkSaveWorkflowService {
     _emitProgress(
       onProgress,
       QuarkSaveWorkflowStage.saving,
-      '正在保存到夸克，请稍候...',
+      '夸克保存中...',
     );
     final saveResult = await _saveShareLink(
       shareUrl: shareUrl,
@@ -188,13 +188,6 @@ class QuarkSaveWorkflowService {
       sanitizedNameCharacters: sanitizedNameCharacters,
     );
     final savedAnyFiles = saveResult.savedCount > 0;
-    _emitProgress(
-      onProgress,
-      QuarkSaveWorkflowStage.saveCompleted,
-      savedAnyFiles
-          ? '夸克保存完成，共保存 ${saveResult.savedCount} 个'
-          : '夸克检查完成，没有需要新增的文件',
-    );
     final refreshDelaySeconds = _normalizeDelaySeconds(
       networkStorage.refreshDelaySeconds,
     );
@@ -233,7 +226,7 @@ class QuarkSaveWorkflowService {
         _emitProgress(
           onProgress,
           QuarkSaveWorkflowStage.sanitizingNames,
-          '正在修正本次保存的名称...',
+          '已保存 ${saveResult.savedCount} 个，名称修改中...',
         );
         appLogInfo(
           'quark.save',
@@ -259,24 +252,12 @@ class QuarkSaveWorkflowService {
               'failedCount': sanitizeResult.failedNames.length,
             },
           );
-          _emitProgress(
-            onProgress,
-            QuarkSaveWorkflowStage.namesSanitized,
-            sanitizeResult.changedAnything
-                ? '名称修正完成，共修改 ${sanitizeResult.renamedCount} 个'
-                : '名称检查完成，无需修改',
-          );
         } on QuarkSaveException catch (error) {
           sanitizeResult = null;
           appLogWarning(
             'quark.save',
             'Saved name sanitising failed',
             error: error,
-          );
-          _emitProgress(
-            onProgress,
-            QuarkSaveWorkflowStage.namesSanitized,
-            '名称修正失败，继续处理 STRM',
           );
         }
       }
@@ -285,13 +266,6 @@ class QuarkSaveWorkflowService {
     if (savedAnyFiles &&
         networkStorage.smartStrmWebhookUrl.trim().isNotEmpty &&
         networkStorage.smartStrmTaskName.trim().isNotEmpty) {
-      _emitProgress(
-        onProgress,
-        QuarkSaveWorkflowStage.triggeringSmartStrm,
-        smartStrmDelaySeconds > 0
-            ? '正在触发 STRM，任务将延迟 $smartStrmDelaySeconds 秒执行...'
-            : '正在触发 STRM...',
-      );
       smartStrmResult = await _triggerSmartStrm(
         webhookUrl: networkStorage.smartStrmWebhookUrl,
         taskName: networkStorage.smartStrmTaskName,
@@ -301,14 +275,6 @@ class QuarkSaveWorkflowService {
         delay: smartStrmDelaySeconds,
       );
       triggeredSmartStrm = true;
-      _emitProgress(
-        onProgress,
-        QuarkSaveWorkflowStage.smartStrmTriggered,
-        _buildSmartStrmSuccessMessage(
-          smartStrmResult,
-          delaySeconds: smartStrmDelaySeconds,
-        ),
-      );
     }
 
     final refreshSourceIds = _resolveRefreshSourceIds(
@@ -316,13 +282,6 @@ class QuarkSaveWorkflowService {
       includeConfiguredSources: savedAnyFiles,
     );
     if (refreshSourceIds.isNotEmpty) {
-      _emitProgress(
-        onProgress,
-        QuarkSaveWorkflowStage.schedulingRefresh,
-        refreshDelaySeconds > 0
-            ? '已安排媒体源在 $refreshDelaySeconds 秒后刷新'
-            : '已安排媒体源刷新',
-      );
       unawaited(
         _refreshSelectedSources(
           sourceIds: refreshSourceIds,

@@ -11,6 +11,7 @@ import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/library/data/quark_external_storage_client.dart';
+import 'package:starflow/features/library/data/webdav_directory_cache_store.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
@@ -24,6 +25,76 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('AppMediaRepository Quark source', () {
+    test('reuses cached Quark child listings while their updatedAt is stable',
+        () async {
+      final database = await databaseFactoryMemory.openDatabase(
+        'quark-directory-cache-test-${DateTime.now().microsecondsSinceEpoch}',
+      );
+      final store = WebDavDirectoryCacheStore(
+        databaseOpener: () async => database,
+      );
+      const source = MediaSourceConfig(
+        id: 'quark-cache-test',
+        name: 'Quark Cache Test',
+        kind: MediaSourceKind.quark,
+        endpoint: 'root-folder',
+        libraryPath: '/影视',
+        enabled: true,
+        webDavStructureInferenceEnabled: true,
+      );
+      final quarkClient = _FakeQuarkSaveClient(
+        entriesByParentFid: {
+          'root-folder': [
+            QuarkFileEntry(
+              fid: 'series-dir',
+              name: 'Series',
+              path: '/Series',
+              isDirectory: true,
+              updatedAt: DateTime(2026, 4, 10, 10),
+            ),
+          ],
+          'series-dir': [
+            QuarkFileEntry(
+              fid: 'episode-file',
+              name: 'The.Show.S01E01.mkv',
+              path: '/The.Show.S01E01.mkv',
+              isDirectory: false,
+              sizeBytes: 1024,
+              updatedAt: DateTime(2026, 4, 10, 9),
+              category: 'video',
+              extension: 'mkv',
+            ),
+          ],
+        },
+      );
+      final client = QuarkExternalStorageClient(
+        quarkSaveClient: quarkClient,
+        readSettings: () => SeedData.defaultSettings.copyWith(
+          networkStorage: const NetworkStorageConfig(
+            quarkCookie: 'kps=test; sign=test;',
+          ),
+        ),
+        directoryCacheStore: store,
+      );
+
+      final firstItems = await client.scanLibrary(source, limit: 20);
+      await _waitForQuarkCacheEntry(
+        store,
+        'quark-cache-test|quark-directory|series-dir',
+      );
+      final secondItems = await client.scanLibrary(source, limit: 20);
+
+      expect(firstItems, hasLength(1));
+      expect(secondItems, hasLength(1));
+      expect(secondItems.single.playbackItemId, 'episode-file');
+      expect(
+        quarkClient.listedParentFids.where((fid) => fid == 'series-dir'),
+        hasLength(1),
+        reason: '未变化的 Quark 子目录应直接复用缓存，不再请求 listEntries',
+      );
+      await database.close();
+    });
+
     test('lists collections and video items from a configured quark source',
         () async {
       const source = MediaSourceConfig(
@@ -1089,6 +1160,19 @@ Future<void> _waitUntil(
   }
   if (!condition()) {
     throw TimeoutException('Condition not satisfied within $timeout.');
+  }
+}
+
+Future<void> _waitForQuarkCacheEntry(
+  WebDavDirectoryCacheStore store,
+  String key,
+) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 5));
+  while (await store.load(key) == null && DateTime.now().isBefore(deadline)) {
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+  if (await store.load(key) == null) {
+    throw TimeoutException('Quark directory cache entry was not persisted.');
   }
 }
 

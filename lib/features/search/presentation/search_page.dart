@@ -155,6 +155,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
   int _completedSearchTaskCount = 0;
   int _filteredResultCount = 0;
   final Set<String> _savingResultIds = <String>{};
+  final Set<ScaffoldFeatureController<SnackBar, SnackBarClosedReason>>
+      _quarkSaveProgressSnackBars = {};
   final Map<String, _QuarkLinkValidationState> _quarkLinkValidationStates = {};
   final List<_QuarkLinkValidationJob> _quarkLinkValidationQueue = [];
   final Set<String> _queuedOrRunningQuarkValidationJobs = {};
@@ -199,6 +201,10 @@ class _SearchPageState extends ConsumerState<SearchPage>
   void dispose() {
     _cancelPendingSearchUiCommit(clearState: true);
     _cancelQuarkLinkValidations(clearStates: true);
+    for (final controller in _quarkSaveProgressSnackBars.toList()) {
+      controller.close();
+    }
+    _quarkSaveProgressSnackBars.clear();
     _queryFocusNode.dispose();
     _scrollController.dispose();
     _controller.dispose();
@@ -1508,16 +1514,38 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _savingResultIds.add(result.id);
     });
 
+    ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? progressSnackBar;
+
+    void closeProgress() {
+      final controller = progressSnackBar;
+      progressSnackBar = null;
+      if (controller == null) {
+        return;
+      }
+      if (!_quarkSaveProgressSnackBars.remove(controller)) {
+        return;
+      }
+      controller.close();
+    }
+
     void showProgress(QuarkSaveWorkflowProgress progress) {
       if (!mounted) {
         return;
       }
+      closeProgress();
       final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
+      messenger.removeCurrentSnackBar();
+      final controller = messenger.showSnackBar(
         SnackBar(
           content: Text(progress.message),
-          duration: const Duration(days: 1),
+          duration: const Duration(minutes: 2),
+        ),
+      );
+      progressSnackBar = controller;
+      _quarkSaveProgressSnackBars.add(controller);
+      unawaited(
+        controller.closed.whenComplete(
+          () => _quarkSaveProgressSnackBars.remove(controller),
         ),
       );
     }
@@ -1537,8 +1565,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
       if (!mounted) {
         return;
       }
+      closeProgress();
       final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
+      messenger.removeCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(
           content: Text(response.buildSuccessMessage()),
@@ -1548,8 +1577,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
       if (!mounted) {
         return;
       }
+      closeProgress();
       final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
+      messenger.removeCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(content: Text(error.message)),
       );
@@ -1557,8 +1587,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
       if (!mounted) {
         return;
       }
+      closeProgress();
       final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
+      messenger.removeCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(content: Text('夸克保存成功，但 STRM 触发失败：${error.message}')),
       );
@@ -1566,12 +1597,14 @@ class _SearchPageState extends ConsumerState<SearchPage>
       if (!mounted) {
         return;
       }
+      closeProgress();
       final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
+      messenger.removeCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(content: Text('保存失败：$error')),
       );
     } finally {
+      closeProgress();
       if (mounted) {
         setState(() {
           _savingResultIds.remove(result.id);

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/utils/metadata_text.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -674,8 +675,8 @@ class _DetailEpisodeCard extends ConsumerWidget {
     MediaItem item, {
     required MediaDetailTarget seriesTarget,
   }) {
-    final episodeOverview = item.overview.trim();
-    final seriesOverview = seriesTarget.overview.trim();
+    final episodeOverview = sanitizeMetadataOverviewText(item.overview);
+    final seriesOverview = sanitizeMetadataOverviewText(seriesTarget.overview);
     if (episodeOverview.isNotEmpty && episodeOverview != seriesOverview) {
       return episodeOverview;
     }

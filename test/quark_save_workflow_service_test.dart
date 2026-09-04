@@ -155,12 +155,16 @@ void main() {
         smartStrmDelaySeconds: 4,
       );
       final progressStages = <QuarkSaveWorkflowStage>[];
+      final progressMessages = <String>[];
 
       final result = await service.saveToQuark(
         shareUrl: 'https://pan.quark.cn/s/abc123',
         saveFolderName: '三体',
         networkStorage: storage,
-        onProgress: (progress) => progressStages.add(progress.stage),
+        onProgress: (progress) {
+          progressStages.add(progress.stage);
+          progressMessages.add(progress.message);
+        },
       );
 
       expect(
@@ -194,14 +198,9 @@ void main() {
       expect(result.saveResult.targetFolderPath, '/影视/三体');
       expect(
         progressStages,
-        [
-          QuarkSaveWorkflowStage.saving,
-          QuarkSaveWorkflowStage.saveCompleted,
-          QuarkSaveWorkflowStage.triggeringSmartStrm,
-          QuarkSaveWorkflowStage.smartStrmTriggered,
-          QuarkSaveWorkflowStage.schedulingRefresh,
-        ],
+        [QuarkSaveWorkflowStage.saving],
       );
+      expect(progressMessages.first, '夸克保存中...');
       expect(
         result.buildSuccessMessage(),
         '已提交到夸克，任务 task-1，保存 3 个，略过 1 个，STRM 已延迟 4 秒触发，6 秒后刷新媒体源',

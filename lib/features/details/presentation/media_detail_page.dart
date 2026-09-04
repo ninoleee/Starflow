@@ -14,6 +14,7 @@ import 'package:starflow/core/navigation/retained_async_controller.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
+import 'package:starflow/core/utils/metadata_text.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
@@ -1265,6 +1266,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   bool _isRefreshingMetadata = false;
   bool _isCheckingOnlineResourceUpdate = false;
   bool _isSavingOnlineResourceUpdate = false;
+  final Set<ScaffoldFeatureController<SnackBar, SnackBarClosedReason>>
+      _quarkSaveProgressSnackBars = {};
   bool _showDeferredDetailContent = false;
   bool _deferredDetailContentScheduled = false;
   List<SearchResult> _favoriteSearchResults = const <SearchResult>[];
@@ -1325,6 +1328,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   @override
   void dispose() {
     _cancelActiveLibraryMatch(reason: 'dispose');
+    for (final controller in _quarkSaveProgressSnackBars.toList()) {
+      controller.close();
+    }
+    _quarkSaveProgressSnackBars.clear();
     _pageController.dispose();
     _selectedSeasonIdNotifier.dispose();
     _heroArtworkFocusNode.dispose();
@@ -1638,16 +1645,38 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _isSavingOnlineResourceUpdate = true;
     });
 
+    ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? progressSnackBar;
+
+    void closeProgress() {
+      final controller = progressSnackBar;
+      progressSnackBar = null;
+      if (controller == null) {
+        return;
+      }
+      if (!_quarkSaveProgressSnackBars.remove(controller)) {
+        return;
+      }
+      controller.close();
+    }
+
     void showProgress(QuarkSaveWorkflowProgress progress) {
       if (!mounted) {
         return;
       }
+      closeProgress();
       final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
+      messenger.removeCurrentSnackBar();
+      final controller = messenger.showSnackBar(
         SnackBar(
           content: Text(progress.message),
-          duration: const Duration(days: 1),
+          duration: const Duration(minutes: 2),
+        ),
+      );
+      progressSnackBar = controller;
+      _quarkSaveProgressSnackBars.add(controller);
+      unawaited(
+        controller.closed.whenComplete(
+          () => _quarkSaveProgressSnackBars.remove(controller),
         ),
       );
     }
@@ -1677,8 +1706,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!mounted) {
         return;
       }
+      closeProgress();
       final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
+      messenger.removeCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(
           content: Text(response.buildSuccessMessage()),
@@ -1696,8 +1726,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!mounted) {
         return;
       }
+      closeProgress();
       final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
+      messenger.removeCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(content: Text(error.message)),
       );
@@ -1713,8 +1744,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!mounted) {
         return;
       }
+      closeProgress();
       final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
+      messenger.removeCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(content: Text('夸克保存成功，但 STRM 触发失败：${error.message}')),
       );
@@ -1731,12 +1763,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       if (!mounted) {
         return;
       }
+      closeProgress();
       final messenger = ScaffoldMessenger.of(context);
-      messenger.hideCurrentSnackBar();
+      messenger.removeCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(content: Text('保存失败：$error')),
       );
     } finally {
+      closeProgress();
       if (mounted) {
         setState(() {
           _isSavingOnlineResourceUpdate = false;
@@ -2976,6 +3010,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       currentTarget: target,
       pageTarget: widget.target,
     );
+    final overviewText = sanitizeMetadataOverviewText(target.overview);
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2991,9 +3026,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           ),
           if (includeOverview) const SizedBox(height: 10),
         ],
-        if (includeOverview)
+        if (includeOverview && overviewText.isNotEmpty)
           Text(
-            target.overview,
+            overviewText,
             style: const TextStyle(
               color: Color(0xFFDCE6F8),
               fontSize: 15,
@@ -3181,7 +3216,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                               if (showDeferredDetailContent && target.isSeries)
                                 _buildSeriesSection(target, seriesAsync),
                               if (showDeferredDetailContent &&
-                                  target.overview.trim().isNotEmpty)
+                                  sanitizeMetadataOverviewText(target.overview)
+                                      .isNotEmpty)
                                 DetailBlock(
                                   title: resolveDetailPrimaryTitle(
                                     currentTarget: target,
@@ -3195,7 +3231,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   ),
                                 ),
                               if (showDeferredDetailContent &&
-                                  target.overview.trim().isEmpty &&
+                                  sanitizeMetadataOverviewText(target.overview)
+                                      .isEmpty &&
                                   resolveDetailEpisodeTitleLine(
                                         currentTarget: target,
                                         pageTarget: widget.target,

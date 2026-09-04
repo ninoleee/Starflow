@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
+import 'package:starflow/features/library/data/webdav_directory_cache_store.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/nas_media_recognition.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
@@ -14,6 +15,7 @@ final quarkExternalStorageClientProvider =
   return QuarkExternalStorageClient(
     quarkSaveClient: ref.read(quarkSaveClientProvider),
     readSettings: () => ref.read(appSettingsProvider),
+    directoryCacheStore: ref.read(webDavDirectoryCacheStoreProvider),
   );
 });
 
@@ -21,11 +23,14 @@ class QuarkExternalStorageClient {
   QuarkExternalStorageClient({
     required QuarkSaveClient quarkSaveClient,
     required AppSettings Function() readSettings,
+    WebDavDirectoryCacheStore? directoryCacheStore,
   })  : _quarkSaveClient = quarkSaveClient,
-        _readSettings = readSettings;
+        _readSettings = readSettings,
+        _directoryCacheStore = directoryCacheStore;
 
   final QuarkSaveClient _quarkSaveClient;
   final AppSettings Function() _readSettings;
+  final WebDavDirectoryCacheStore? _directoryCacheStore;
 
   String get _quarkCookie {
     return _readSettings().networkStorage.quarkCookie.trim();
@@ -281,13 +286,29 @@ class QuarkExternalStorageClient {
         index++) {
       _throwIfCancelled(shouldCancel);
       final cursor = queue[index];
-      final entries = _normalizeQuarkListedEntries(
-        await _quarkSaveClient.listEntries(
-          cookie: cookie,
-          parentFid: cursor.fid,
-        ),
-        parentDirectoryPath: cursor.path,
+      final cachedEntries = await _loadCachedQuarkDirectoryEntries(
+        source,
+        fid: cursor.fid,
+        directoryUpdatedAt: cursor.directoryUpdatedAt,
       );
+      final entries = cachedEntries ??
+          _normalizeQuarkListedEntries(
+            await _quarkSaveClient.listEntries(
+              cookie: cookie,
+              parentFid: cursor.fid,
+            ),
+            parentDirectoryPath: cursor.path,
+          );
+      if (cachedEntries == null && cursor.directoryUpdatedAt != null) {
+        unawaited(
+          _storeCachedQuarkDirectoryEntries(
+            source,
+            fid: cursor.fid,
+            directoryUpdatedAt: cursor.directoryUpdatedAt,
+            entries: entries,
+          ),
+        );
+      }
       directoryEntriesByPath[cursor.path] = entries;
       for (final entry in entries) {
         if (source.matchesWebDavExcludedPath(entry.path)) {
@@ -301,6 +322,7 @@ class QuarkExternalStorageClient {
               rootPath: cursor.rootPath,
               sectionId: cursor.sectionId,
               sectionName: cursor.sectionName,
+              directoryUpdatedAt: entry.updatedAt,
             ),
           );
           continue;
@@ -325,6 +347,75 @@ class QuarkExternalStorageClient {
     return _QuarkLibraryScanResult(
       directoryEntriesByPath: directoryEntriesByPath,
       mediaEntries: mediaEntries,
+    );
+  }
+
+  String _quarkDirectoryCacheKey(MediaSourceConfig source, String fid) {
+    return '${source.id.trim()}|quark-directory|${fid.trim()}';
+  }
+
+  String _quarkDirectoryUpdatedAtKey(DateTime? updatedAt) {
+    if (updatedAt == null) {
+      return '';
+    }
+    return '${updatedAt.toUtc().millisecondsSinceEpoch}';
+  }
+
+  Future<List<QuarkFileEntry>?> _loadCachedQuarkDirectoryEntries(
+    MediaSourceConfig source, {
+    required String fid,
+    required DateTime? directoryUpdatedAt,
+  }) async {
+    final store = _directoryCacheStore;
+    if (store == null || directoryUpdatedAt == null) {
+      return null;
+    }
+    final key = _quarkDirectoryCacheKey(source, fid);
+    final payload = await store.load(key);
+    if (payload == null) {
+      return null;
+    }
+    if (payload['updatedAt'] !=
+        _quarkDirectoryUpdatedAtKey(directoryUpdatedAt)) {
+      return null;
+    }
+    final rawEntries = payload['entries'];
+    if (rawEntries is! List) {
+      return null;
+    }
+    final entries = <QuarkFileEntry>[];
+    for (final rawEntry in rawEntries) {
+      if (rawEntry is! Map) {
+        continue;
+      }
+      final entry = QuarkFileEntry.fromJson(
+        Map<String, dynamic>.from(rawEntry),
+      );
+      if (entry != null) {
+        entries.add(entry);
+      }
+    }
+    return entries;
+  }
+
+  Future<void> _storeCachedQuarkDirectoryEntries(
+    MediaSourceConfig source, {
+    required String fid,
+    required DateTime? directoryUpdatedAt,
+    required List<QuarkFileEntry> entries,
+  }) async {
+    final store = _directoryCacheStore;
+    if (store == null || directoryUpdatedAt == null) {
+      return;
+    }
+    await store.save(
+      _quarkDirectoryCacheKey(source, fid),
+      <String, dynamic>{
+        'sourceId': source.id.trim(),
+        'updatedAt': _quarkDirectoryUpdatedAtKey(directoryUpdatedAt),
+        'entries':
+            entries.map((entry) => entry.toJson()).toList(growable: false),
+      },
     );
   }
 
@@ -1491,6 +1582,7 @@ class _QuarkDirectoryCursor {
     required this.rootPath,
     this.sectionId = '',
     this.sectionName = '',
+    this.directoryUpdatedAt,
   });
 
   final String fid;
@@ -1498,6 +1590,7 @@ class _QuarkDirectoryCursor {
   final String rootPath;
   final String sectionId;
   final String sectionName;
+  final DateTime? directoryUpdatedAt;
 }
 
 class _QuarkQueuedMediaEntry {

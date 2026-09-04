@@ -279,7 +279,12 @@ class NasMediaRecognizer {
           seriesParent: grandParentRaw,
         )
             ? _matchHashEpisode(parentRaw)
-            : null);
+            : matchesSanitizedOrdinalEpisodeFolder(
+                parentRaw,
+                seriesParent: grandParentRaw,
+              )
+                ? _matchSanitizedOrdinalEpisode(parentRaw)
+                : null);
     final parentSeason = _matchSeason(parentRaw);
     final grandParentSeason = _matchSeason(grandParentRaw);
     final year = _findYear([fileBaseName, parentRaw, grandParentRaw]);
@@ -505,6 +510,21 @@ class NasMediaRecognizer {
     );
   }
 
+  static _EpisodeMatch? _matchSanitizedOrdinalEpisode(String input) {
+    final match = RegExp(
+      r'^\s*0+(\d{1,3})(?:$|[\s._\-、])',
+      caseSensitive: false,
+    ).firstMatch(input.trim());
+    final episodeNumber = int.tryParse(match?.group(1) ?? '');
+    if (episodeNumber == null || episodeNumber <= 0) {
+      return null;
+    }
+    return _EpisodeMatch(
+      seasonNumber: null,
+      episodeNumber: episodeNumber,
+    );
+  }
+
   static bool matchesHashNumberedEpisodeFolder(
     String input, {
     required String seriesParent,
@@ -525,6 +545,18 @@ class NasMediaRecognizer {
     }
     final cleanedInput = _cleanTitle(input).trim().toLowerCase();
     return cleanedInput.contains(cleanedParent);
+  }
+
+  static bool matchesSanitizedOrdinalEpisodeFolder(
+    String input, {
+    required String seriesParent,
+  }) {
+    if (_matchSanitizedOrdinalEpisode(input) == null) {
+      return false;
+    }
+    final cleanedParent = _cleanTitle(seriesParent).trim().toLowerCase();
+    return cleanedParent.isNotEmpty &&
+        !_genericLibraryFolders.contains(cleanedParent);
   }
 
   static String _extractEpisodePartToken(
@@ -725,6 +757,10 @@ class NasMediaRecognizer {
       }
       if ((_matchEpisode(rawSegment) != null) ||
           matchesHashNumberedEpisodeFolder(
+            rawSegment,
+            seriesParent: index > 0 ? pathSegments[index - 1] : '',
+          ) ||
+          matchesSanitizedOrdinalEpisodeFolder(
             rawSegment,
             seriesParent: index > 0 ? pathSegments[index - 1] : '',
           ) ||

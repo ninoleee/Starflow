@@ -2887,7 +2887,7 @@ void main() {
     );
     final indexedAt = DateTime.utc(2026, 4, 5, 12);
     final scopeKey =
-        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v12';
+        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v13';
     final record = NasMediaIndexRecord(
       id: NasMediaIndexRecord.buildRecordId(
         sourceId: source.id,
