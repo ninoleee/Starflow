@@ -3474,13 +3474,31 @@ class NativePlaybackActivity : Activity() {
             return
         }
         val label = findViewById<TextView?>(R.id.native_network_speed) ?: return
+        label.text = resolveNetworkSpeedText()
+        label.visibility = View.VISIBLE
+    }
+
+    private fun resolveNetworkSpeedText(): String {
+        // No sample has arrived yet (startup, before the first transfer
+        // completes). Reporting 0 B/s there reads as "the download is dead",
+        // so say the speed is still being measured instead.
+        if (latestNetworkSampleAtMs == 0L) {
+            return getString(R.string.native_network_speed_probing)
+        }
         val sampleIsFresh =
             SystemClock.elapsedRealtime() - latestNetworkSampleAtMs <=
                 NETWORK_SPEED_STALE_AFTER_MS
-        label.text = formatNetworkSpeed(
-            if (sampleIsFresh) latestNetworkBytesPerSecond else 0L,
-        )
-        label.visibility = View.VISIBLE
+        if (sampleIsFresh) {
+            return formatNetworkSpeed(latestNetworkBytesPerSecond)
+        }
+        // Bandwidth samples arrive per finished transfer, which on a long-lived
+        // progressive stream is often further apart than the staleness window.
+        // Fall back to the meter's running estimate rather than dropping to 0.
+        val estimatedBytesPerSecond = playbackBandwidthMeter
+            ?.bitrateEstimate
+            ?.takeIf { it > 0L }
+            ?.div(8L)
+        return formatNetworkSpeed(estimatedBytesPerSecond ?: latestNetworkBytesPerSecond)
     }
 
     private fun formatNetworkSpeed(bytesPerSecond: Long): String {

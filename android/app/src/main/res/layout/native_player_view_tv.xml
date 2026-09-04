@@ -11,6 +11,7 @@
         android:layout_height="match_parent"
         android:background="@android:color/black"
         app:controller_layout_id="@layout/native_player_control_view_tv"
+        app:show_buffering="when_playing"
         app:show_fastforward_button="false"
         app:show_next_button="false"
         app:show_previous_button="false"
