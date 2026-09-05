@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -806,17 +807,32 @@ void main() {
 
     await tester.pump();
     await tester.pumpAndSettle();
+    final variantSelector = find.byWidgetPredicate((widget) =>
+        widget is TvFocusableAction &&
+        widget.focusId == 'detail:resource:playable-selector');
     await tester.scrollUntilVisible(
-      find.text('播放版本'),
+      variantSelector,
       500,
       scrollable: find.byType(Scrollable).first,
     );
-    await tester.tap(find.text('播放版本').last);
+    tester
+        .widget<FocusableActionDetector>(find
+            .descendant(
+              of: variantSelector,
+              matching: find.byType(FocusableActionDetector),
+            )
+            .first)
+        .focusNode!
+        .requestFocus();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
     expect(find.text('选择播放版本'), findsOneWidget);
     expect(find.text('nas-A · 第1集-B.mkv'), findsOneWidget);
-    await tester.tap(find.text('nas-A · 第1集-B.mkv'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
     expect(cacheRepository.lastSavedState?.selectedLibraryMatchIndex, 1);
@@ -824,6 +840,8 @@ void main() {
       cacheRepository.lastSavedState?.target.itemId,
       'episode-b',
     );
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
   });
 
   testWidgets(

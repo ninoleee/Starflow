@@ -190,9 +190,9 @@ class _FeaturedHeroItem {
         fallbackImage: landscapeImage,
       ),
       metadata: _buildHeroMetadata(item.detailTarget, fallback: item.subtitle),
-      overview: item.detailTarget.overview.trim().isEmpty
-          ? item.subtitle
-          : item.detailTarget.overview,
+      overview: sanitizeMetadataOverviewText(item.detailTarget.overview).isEmpty
+          ? sanitizeMetadataOverviewText(item.subtitle)
+          : sanitizeMetadataOverviewText(item.detailTarget.overview),
       detailTarget: item.detailTarget,
     );
   }
@@ -225,7 +225,7 @@ class _FeaturedHeroItem {
         item.detailTarget,
         fallback: item.subtitle,
       ),
-      overview: item.detailTarget.overview,
+      overview: sanitizeMetadataOverviewText(item.detailTarget.overview),
       detailTarget: item.detailTarget,
     );
   }

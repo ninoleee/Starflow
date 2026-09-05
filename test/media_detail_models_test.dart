@@ -4,6 +4,16 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
+  test(
+      'raw overview survives cache round-trip while link-only text is not useful',
+      () {
+    const raw = '来源：<a href="https://example.com/watch">编号</a><br/>';
+    const target =
+        MediaDetailTarget(title: 'Test', posterUrl: '', overview: raw);
+    final restored = MediaDetailTarget.fromJson(target.toJson());
+    expect(restored.overview, raw);
+    expect(restored.hasUsefulOverview, isFalse);
+  });
   group('MediaDetailTarget.needsMetadataMatch', () {
     test('returns true when poster exists but rich metadata is missing', () {
       const target = MediaDetailTarget(

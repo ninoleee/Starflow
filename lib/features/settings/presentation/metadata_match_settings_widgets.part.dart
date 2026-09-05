@@ -15,6 +15,7 @@ class _TestResultCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final overviewText = sanitizeMetadataOverviewText(overview);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -62,10 +63,10 @@ class _TestResultCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 for (final line in lines) Text(line),
-                if (overview.trim().isNotEmpty) ...[
+                if (overviewText.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
-                    overview,
+                    overviewText,
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                   ),

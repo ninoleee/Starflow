@@ -7,12 +7,14 @@ class DetailTelevisionPickerOption<T> {
     required this.title,
     required this.focusId,
     this.subtitle = '',
+    this.icon,
   });
 
   final T value;
   final String title;
   final String focusId;
   final String subtitle;
+  final IconData? icon;
 }
 
 Future<T?> showDetailTelevisionPickerDialog<T>({
@@ -100,9 +102,10 @@ Future<T?> showDetailTelevisionPickerDialog<T>({
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Icon(
-                              isSelected
-                                  ? Icons.check_circle_rounded
-                                  : Icons.radio_button_unchecked_rounded,
+                              option.icon ??
+                                  (isSelected
+                                      ? Icons.check_circle_rounded
+                                      : Icons.radio_button_unchecked_rounded),
                               color: Colors.white,
                             ),
                             const SizedBox(width: 12),

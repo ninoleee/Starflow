@@ -14,7 +14,6 @@ import 'package:starflow/core/navigation/retained_async_controller.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
-import 'package:starflow/core/utils/metadata_text.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
@@ -27,6 +26,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/detail_page_providers.dart';
 import 'package:starflow/features/details/presentation/person_credits_page.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_episode_browser.dart';
+import 'package:starflow/features/details/presentation/widgets/detail_overview_section.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_hero_section.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_resource_info_section.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
@@ -3004,47 +3004,19 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   Widget _buildOverviewContent({
     required MediaDetailTarget target,
     required bool isTelevision,
-    required bool includeOverview,
   }) {
-    final episodeTitle = resolveDetailEpisodeTitleLine(
-      currentTarget: target,
-      pageTarget: widget.target,
-    );
-    final overviewText = sanitizeMetadataOverviewText(target.overview);
-    final content = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (episodeTitle != null) ...[
-          Text(
-            episodeTitle,
-            style: const TextStyle(
-              color: Color(0xFFF1F5FF),
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              height: 1.4,
-            ),
-          ),
-          if (includeOverview) const SizedBox(height: 10),
-        ],
-        if (includeOverview && overviewText.isNotEmpty)
-          Text(
-            overviewText,
-            style: const TextStyle(
-              color: Color(0xFFDCE6F8),
-              fontSize: 15,
-              height: 1.7,
-            ),
-          ),
-      ],
-    );
-
-    final isEpisodeDetail = isEpisodeDetailItemType(widget.target.itemType) ||
-        isEpisodeDetailItemType(target.itemType);
-    if (!isTelevision || !isEpisodeDetail) {
-      return content;
-    }
-    return TvFocusableAction(
-      onPressed: () {},
+    return DetailOverviewSection(
+      title: resolveDetailPrimaryTitle(
+        currentTarget: target,
+        pageTarget: widget.target,
+        emptyFallback: '剧情简介',
+      ),
+      overview: target.overview,
+      episodeTitle: resolveDetailEpisodeTitleLine(
+        currentTarget: target,
+        pageTarget: widget.target,
+      ),
+      isTelevision: isTelevision,
       focusId: buildTvFocusId(
         prefix: 'detail:overview',
         segments: [
@@ -3056,10 +3028,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           target.title,
         ],
       ),
-      borderRadius: BorderRadius.circular(14),
-      visualStyle: TvFocusVisualStyle.subtle,
-      focusScale: 1,
-      child: content,
     );
   }
 
@@ -3215,40 +3183,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                             children: [
                               if (showDeferredDetailContent && target.isSeries)
                                 _buildSeriesSection(target, seriesAsync),
-                              if (showDeferredDetailContent &&
-                                  sanitizeMetadataOverviewText(target.overview)
-                                      .isNotEmpty)
-                                DetailBlock(
-                                  title: resolveDetailPrimaryTitle(
-                                    currentTarget: target,
-                                    pageTarget: widget.target,
-                                    emptyFallback: '剧情简介',
-                                  ),
-                                  child: _buildOverviewContent(
-                                    target: target,
-                                    isTelevision: isTelevision,
-                                    includeOverview: true,
-                                  ),
-                                ),
-                              if (showDeferredDetailContent &&
-                                  sanitizeMetadataOverviewText(target.overview)
-                                      .isEmpty &&
-                                  resolveDetailEpisodeTitleLine(
-                                        currentTarget: target,
-                                        pageTarget: widget.target,
-                                      ) !=
-                                      null)
-                                DetailBlock(
-                                  title: resolveDetailPrimaryTitle(
-                                    currentTarget: target,
-                                    pageTarget: widget.target,
-                                    emptyFallback: '剧情简介',
-                                  ),
-                                  child: _buildOverviewContent(
-                                    target: target,
-                                    isTelevision: isTelevision,
-                                    includeOverview: false,
-                                  ),
+                              if (showDeferredDetailContent)
+                                _buildOverviewContent(
+                                  target: target,
+                                  isTelevision: isTelevision,
                                 ),
                               if (showDeferredDetailContent &&
                                   galleryImages.isNotEmpty)

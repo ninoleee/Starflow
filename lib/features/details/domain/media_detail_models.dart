@@ -1,3 +1,4 @@
+import 'package:starflow/core/utils/metadata_text.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
@@ -235,7 +236,7 @@ class MediaDetailTarget {
   }
 
   static bool _hasUsefulOverview(String value) {
-    final cleaned = value.trim();
+    final cleaned = sanitizeMetadataOverviewText(value);
     if (cleaned.isEmpty) {
       return false;
     }

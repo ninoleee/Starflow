@@ -12,6 +12,7 @@ import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/navigation/retained_async_value.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
+import 'package:starflow/core/utils/metadata_text.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';

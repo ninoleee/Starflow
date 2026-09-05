@@ -7,6 +7,30 @@ import 'package:http/testing.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 
 void main() {
+  test('preserves raw overview links in search fallback', () async {
+    const overview = '来源：<a href="https://example.com/watch">编号</a><br/>正文';
+    final client = TmdbMetadataClient(MockClient((request) async {
+      if (request.url.path == '/3/search/multi') {
+        return http.Response.bytes(
+            utf8.encode(jsonEncode({
+              'results': [
+                {
+                  'id': 123,
+                  'media_type': 'movie',
+                  'title': 'Test',
+                  'overview': overview,
+                  'release_date': '2026-01-01',
+                }
+              ]
+            })),
+            200);
+      }
+      return http.Response(jsonEncode({'title': 'Test'}), 200);
+    }));
+    final result =
+        await client.matchTitle(query: 'Test', readAccessToken: 'test');
+    expect(result!.overview, overview);
+  });
   group('TmdbMetadataClient', () {
     test('removes a duplicated trailing year from title search queries',
         () async {

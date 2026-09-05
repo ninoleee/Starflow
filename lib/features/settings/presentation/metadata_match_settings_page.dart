@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/utils/metadata_text.dart';
 import 'package:starflow/core/utils/network_image_headers.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/section_panel.dart';

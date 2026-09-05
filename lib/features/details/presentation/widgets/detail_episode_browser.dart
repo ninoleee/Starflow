@@ -621,7 +621,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
               child: Text(
                 summary,
-                maxLines: 6,
+                maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Color(0xFFD7E0F1),

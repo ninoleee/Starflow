@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/utils/metadata_text.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
@@ -1211,6 +1212,7 @@ class _MatchPreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final overviewText = sanitizeMetadataOverviewText(overview);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
@@ -1253,10 +1255,10 @@ class _MatchPreviewCard extends StatelessWidget {
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(line),
                   ),
-                if (overview.trim().isNotEmpty) ...[
+                if (overviewText.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Text(
-                    overview,
+                    overviewText,
                     maxLines: 4,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(

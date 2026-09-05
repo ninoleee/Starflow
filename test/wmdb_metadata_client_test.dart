@@ -7,6 +7,20 @@ import 'package:http/testing.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 
 void main() {
+  test('preserves raw overview links in provider results', () async {
+    const overview = '来源：<a href="https://example.com/watch">编号</a><br/>正文';
+    final client =
+        WmdbMetadataClient(MockClient((_) async => http.Response.bytes(
+              utf8.encode(jsonEncode({
+                'data': [
+                  {'name': 'Test', 'lang': 'Cn', 'description': overview}
+                ],
+              })),
+              200,
+            )));
+    final result = await client.matchByDoubanId(doubanId: '123');
+    expect(result!.overview, overview);
+  });
   test('removes a duplicated trailing year from title search queries',
       () async {
     final client = WmdbMetadataClient(
