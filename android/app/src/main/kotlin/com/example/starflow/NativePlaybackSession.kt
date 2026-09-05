@@ -66,6 +66,8 @@ internal class NativePlaybackSession(private val host: Host) {
     var audioOutputMode = NativeAudioOutputMode.AUTO
 
     var internalEpisodeSwitchPlayback = false
+    var nextEpisodeIsAutomatic = false
+    private var initialIntroPositionMs = 0L
 
     fun initializePlayer() {
         if (player != null) {
@@ -132,14 +134,22 @@ internal class NativePlaybackSession(private val host: Host) {
                 .takeIf { it.isNotEmpty() }
 
         val allowResume = targetObject.optBoolean("allowResume", true)
-        restoredResumePositionMs =
-            NativePlaybackResumePolicy.resolveResumePositionMs(
+        val skipPreference = host.memory.loadSeriesSkipPreference(host.target.seriesKey)
+        val startPosition =
+            NativePlaybackStartPolicy.resolve(
                 allowResume = allowResume,
-                pendingOverrideMs = pendingResumePositionOverrideMs,
+                runtimeOverrideMs = pendingResumePositionOverrideMs,
                 storedResumeMs =
                     if (allowResume) host.memory.loadResumePositionMs(host.target.playbackItemKey)
                     else 0L,
+                automaticNext = nextEpisodeIsAutomatic,
+                skipEnabled = skipPreference?.optBoolean("enabled", false) == true,
+                introDurationMs = skipPreference?.optLong("introDurationMs", 0L) ?: 0L,
             )
+        restoredResumePositionMs = startPosition.positionMs
+        initialIntroPositionMs = startPosition.introPositionMs
+        host.runtime.introSkipApplied = true
+        nextEpisodeIsAutomatic = false
         pendingResumePositionOverrideMs = null
 
         val bandwidthMeter =
@@ -263,10 +273,7 @@ internal class NativePlaybackSession(private val host: Host) {
         exoPlayer.apply {
             playWhenReady = initialPlayWhenReady
             repeatMode = Player.REPEAT_MODE_OFF
-            setMediaItem(initialMediaItem)
-            if (restoredResumePositionMs > 5_000L) {
-                seekTo(restoredResumePositionMs)
-            }
+            setMediaItem(initialMediaItem, restoredResumePositionMs)
             prepare()
         }
         NativePlaybackFormatting.logPlayback(
@@ -284,7 +291,7 @@ internal class NativePlaybackSession(private val host: Host) {
         // hide it once playback settles (see hideTelevisionControllerAfterStartup).
         host.controllerView.showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
         host.controllerView.updateControllerAutoHidePolicy()
-        if (restoredResumePositionMs > 5_000L) {
+        if (startPosition.isResume) {
             host.showToast(
                 "已从 ${NativePlaybackFormatting.formatClockDuration(restoredResumePositionMs)} 继续播放"
             )
@@ -320,6 +327,17 @@ internal class NativePlaybackSession(private val host: Host) {
     fun rebuildPlayer() {
         releasePlayer()
         initializePlayer()
+    }
+
+    fun validateInitialIntroPosition() {
+        val current = player ?: return
+        if (initialIntroPositionMs <= 0L || current.duration <= 0L) return
+        val invalidIntro = initialIntroPositionMs >= current.duration
+        initialIntroPositionMs = 0L
+        if (invalidIntro) {
+            restoredResumePositionMs = 0L
+            current.seekTo(0L)
+        }
     }
 
     private fun buildLoadControl(): DefaultLoadControl {

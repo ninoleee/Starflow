@@ -9,8 +9,10 @@ import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Timeline
 import androidx.media3.common.Tracks
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -75,6 +77,14 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
 
     override val playerListener: Player.Listener =
         object : Player.Listener {
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!playWhenReady) episodes.cancelAutomaticAdvance()
+            }
+
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+                session.validateInitialIntroPosition()
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 diagnostics.playbackPerformanceTracker.onBufferingChanged(
                     buffering = session.player?.playbackState == Player.STATE_BUFFERING,
@@ -114,11 +124,22 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                 systemSession.updatePictureInPictureParams()
                 controllerView.updateProgressMarkers()
                 if (playbackState == Player.STATE_READY) {
+                    session.validateInitialIntroPosition()
+                    val tracks = session.player?.currentTracks
+                    if (
+                        tracks?.groups?.any { it.type == C.TRACK_TYPE_AUDIO } == true &&
+                            tracks.groups.none { it.type == C.TRACK_TYPE_VIDEO }
+                    ) {
+                        episodes.onPlaybackReady()
+                        launch.cancelPlaybackLaunchTimeout()
+                        launch.reportPlaybackLaunchResult(RESULT_PLAYBACK_READY)
+                    }
                     controllerView.updateControllerAutoHidePolicy()
                     runtime.maybeApplyAutoSkip()
                 }
                 if (
                     playbackState == Player.STATE_ENDED &&
+                        session.player?.playbackState == Player.STATE_ENDED &&
                         episodes.advanceToAdjacentEpisode(forward = true, reason = "ended")
                 ) {
                     return
@@ -130,6 +151,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
             }
 
             override fun onRenderedFirstFrame() {
+                episodes.onPlaybackReady()
                 diagnostics.playbackFirstFrameRendered = true
                 controllerView.updateControllerAutoHidePolicy()
                 controllerView.hideTelevisionControllerAfterStartup()
@@ -157,6 +179,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                 )
                 runtime.resetPlaybackWatchdogProgress(newPosition.positionMs)
                 runtime.syncSkipFlagsWithCurrentPosition()
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) runtime.onUserSeek()
                 systemSession.syncPlaybackSystemSession()
             }
 
@@ -171,6 +194,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                 if (recovery.retrySmartStrmAsHlsIfNeeded(error)) {
                     return
                 }
+                if (episodes.retryPreparedAddressIfNeeded(error)) return
                 launch.handlePlayerError(error)
             }
 
@@ -402,6 +426,8 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
         externalSubtitles.subtitleSearchActive = false
         externalSubtitles.resumePlaybackAfterSubtitleSearch = false
         session.internalEpisodeSwitchPlayback = false
+        session.nextEpisodeIsAutomatic = false
+        runtime.resetForNewMedia()
     }
 
     fun onWindowFocusChanged(hasFocus: Boolean) {

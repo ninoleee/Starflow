@@ -14,10 +14,14 @@ import com.example.starflow.NativePlaybackActivity.Companion.RESULT_DATA_MESSAGE
 import com.example.starflow.NativePlaybackActivity.Companion.RESULT_DATA_REQUEST_ID
 import com.example.starflow.NativePlaybackActivity.Companion.RESULT_PLAYBACK_CANCELLED
 
-internal class NativePlaybackLaunchController(private val host: Host) {
+internal class NativePlaybackLaunchController(
+    private val host: Host,
+    private val playbackLaunchTimeoutHandler: Handler = Handler(Looper.getMainLooper()),
+) {
     interface Host {
         val session: NativePlaybackSession
         val diagnostics: NativePlaybackDiagnostics
+        val episodes: NativePlaybackEpisodeController
         val activity: Activity
     }
 
@@ -28,14 +32,11 @@ internal class NativePlaybackLaunchController(private val host: Host) {
     var launchResultDelivered = false
         private set
 
-    private val playbackLaunchTimeoutHandler = Handler(Looper.getMainLooper())
+    private var startupPending = false
 
     private val playbackLaunchTimeoutRunnable = Runnable {
-        if (!launchResultDelivered && !host.activity.isFinishing && !host.activity.isDestroyed) {
-            host.session.pendingResumePositionOverrideMs =
-                host.session.player?.currentPosition?.coerceAtLeast(0L) ?: 0L
-            host.session.releasePlayer()
-            showPlaybackFailureDialog(message = "30 秒内未显示视频画面，请检查网络或重试播放。", launchPending = true)
+        if (startupPending && !host.activity.isFinishing && !host.activity.isDestroyed) {
+            handlePlaybackFailure("30 秒内未显示视频画面，请检查网络或重试播放。")
         }
     }
 
@@ -82,7 +83,11 @@ internal class NativePlaybackLaunchController(private val host: Host) {
     }
 
     fun handlePlayerError(error: PlaybackException) {
-        val message = buildPlaybackErrorMessage(error)
+        handlePlaybackFailure(buildPlaybackErrorMessage(error))
+    }
+
+    fun handlePlaybackFailure(message: String) {
+        host.episodes.onPlaybackFailed()
         val launchPending = !launchResultDelivered
         cancelPlaybackLaunchTimeout()
         if (
@@ -92,8 +97,10 @@ internal class NativePlaybackLaunchController(private val host: Host) {
         ) {
             return
         }
-        host.session.pendingResumePositionOverrideMs =
-            host.session.player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+        if (host.session.pendingResumePositionOverrideMs == null) {
+            host.session.pendingResumePositionOverrideMs =
+                host.session.player?.currentPosition?.coerceAtLeast(0L) ?: 0L
+        }
         host.session.releasePlayer()
         showPlaybackFailureDialog(message, launchPending)
     }
@@ -140,15 +147,15 @@ internal class NativePlaybackLaunchController(private val host: Host) {
 
     fun schedulePlaybackLaunchTimeout() {
         playbackLaunchTimeoutHandler.removeCallbacks(playbackLaunchTimeoutRunnable)
-        if (!launchResultDelivered) {
-            playbackLaunchTimeoutHandler.postDelayed(
-                playbackLaunchTimeoutRunnable,
-                PLAYBACK_LAUNCH_TIMEOUT_MS,
-            )
-        }
+        startupPending = true
+        playbackLaunchTimeoutHandler.postDelayed(
+            playbackLaunchTimeoutRunnable,
+            PLAYBACK_LAUNCH_TIMEOUT_MS,
+        )
     }
 
     fun cancelPlaybackLaunchTimeout() {
+        startupPending = false
         playbackLaunchTimeoutHandler.removeCallbacks(playbackLaunchTimeoutRunnable)
     }
 

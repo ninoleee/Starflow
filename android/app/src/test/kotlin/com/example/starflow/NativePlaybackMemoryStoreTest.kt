@@ -141,4 +141,25 @@ class NativePlaybackMemoryStoreTest {
         store.saveSeriesSkipPreference(" ", "", false, 0L, 0L)
         assertTrue(writes.isEmpty())
     }
+
+    @Test
+    fun outroCompletionPreservesActualPositionAndPreventsResume() {
+        store.savePlaybackEntry(
+            "{}",
+            "episode",
+            "series",
+            60_000L,
+            100_000L,
+            true,
+            completedByAutoSkip = true,
+        )
+        val entry = JSONObject(raw!!).getJSONObject("items").getJSONObject("episode")
+        assertTrue(entry.getBoolean("completed"))
+        assertEquals(60_000L, entry.getLong("positionMs"))
+        assertEquals(0.6, entry.getDouble("progress"), 0.001)
+        assertEquals(0L, store.loadResumePositionMs("episode"))
+        assertTrue(writes.last())
+        store.savePlaybackEntry("{}", "episode", "series", 20_000L, 100_000L, true)
+        assertEquals(20_000L, store.loadResumePositionMs("episode"))
+    }
 }

@@ -14,6 +14,7 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
         val memory: NativePlaybackMemoryStore
         val recovery: NativePlaybackRecoveryController
         val target: NativePlaybackTarget
+        val episodes: NativePlaybackEpisodeController
 
         fun showToast(message: String)
 
@@ -22,11 +23,13 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
 
     var lastSavedPositionMs: Long = -1L
 
-    private val playbackWatchdogHandler = Handler(Looper.getMainLooper())
+    private val playbackWatchdogHandler by lazy { Handler(Looper.getMainLooper()) }
 
-    private val playbackRuntimeHandler = Handler(Looper.getMainLooper())
+    private val playbackRuntimeHandler by lazy { Handler(Looper.getMainLooper()) }
 
     private var playbackRuntimeActive = false
+    private var runtimeGeneration = 0L
+    private var completedByAutoSkip = false
 
     private var playbackWatchdogActive = false
 
@@ -51,11 +54,13 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
                 if (!playbackRuntimeActive) {
                     return
                 }
+                val generation = runtimeGeneration
+                host.episodes.tick()
                 maybeApplyAutoSkip()
                 persistPlaybackProgress()
                 host.diagnostics.logPlaybackRuntimeIfNeeded()
                 host.diagnostics.updateNetworkSpeedLabelIfVisible()
-                if (playbackRuntimeActive) {
+                if (playbackRuntimeActive && generation == runtimeGeneration) {
                     playbackRuntimeHandler.postDelayed(this, PLAYBACK_RUNTIME_INTERVAL_MS)
                 }
             }
@@ -79,6 +84,7 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
     }
 
     fun startPlaybackRuntimeLoop() {
+        runtimeGeneration += 1L
         playbackRuntimeHandler.removeCallbacks(playbackRuntimeRunnable)
         playbackRuntimeActive = true
         syncSkipFlagsWithCurrentPosition()
@@ -89,12 +95,49 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
     }
 
     fun stopPlaybackRuntimeLoop() {
+        runtimeGeneration += 1L
         playbackRuntimeActive = false
         playbackRuntimeHandler.removeCallbacks(playbackRuntimeRunnable)
         host.diagnostics.playbackFirstFrameRendered = false
         host.diagnostics.playbackLastRuntimeLogAtMs = 0L
         introSkipApplied = false
         outroSkipApplied = false
+    }
+
+    fun resetForNewMedia() {
+        lastSavedPositionMs = -1L
+        completedByAutoSkip = false
+        introSkipApplied = false
+        outroSkipApplied = false
+    }
+
+    fun markAutoSkipCompleted() {
+        completedByAutoSkip = true
+        persistPlaybackProgress(force = true)
+    }
+
+    fun onSkipPreferenceChanged() {
+        host.episodes.cancelAutomaticAdvance()
+        introSkipApplied = false
+        outroSkipApplied = false
+        syncSkipFlagsWithCurrentPosition()
+        maybeApplyAutoSkip()
+    }
+
+    fun onUserSeek() {
+        completedByAutoSkip = false
+        syncSkipFlagsWithCurrentPosition()
+        introSkipApplied = true
+        val current = host.session.player ?: return
+        val preference = host.memory.loadSeriesSkipPreference(host.target.seriesKey)
+        val boundary =
+            NativePlaybackSkipPolicy.endBoundaryMs(
+                current.duration,
+                preference?.optBoolean("enabled", false) == true,
+                preference?.optLong("outroDurationMs", 0L) ?: 0L,
+            )
+        if (boundary > 0L && current.currentPosition >= boundary) outroSkipApplied = true
+        host.episodes.onUserSeek()
     }
 
     fun resetPlaybackWatchdogProgress(positionMs: Long) {
@@ -116,7 +159,8 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
         if (
             !currentPlayer.playWhenReady ||
                 currentPlayer.playbackState != Player.STATE_READY ||
-                host.externalSubtitles.subtitleSearchActive
+                host.externalSubtitles.subtitleSearchActive ||
+                host.episodes.isSwitching
         ) {
             return
         }
@@ -131,7 +175,9 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
         val durationMs = currentPlayer.duration.takeIf { it > 0L } ?: 0L
         val introDurationMs = skipPreference.optLong("introDurationMs", 0L).coerceAtLeast(0L)
         if (!introSkipApplied && introDurationMs > 0L) {
-            if (positionMs >= introDurationMs) {
+            if (
+                positionMs >= introDurationMs || (durationMs > 0L && introDurationMs >= durationMs)
+            ) {
                 introSkipApplied = true
             } else {
                 introSkipApplied = true
@@ -151,11 +197,11 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
             return
         }
 
+        if (host.episodes.advanceToAdjacentEpisode(forward = true, reason = "outro")) return
         outroSkipApplied = true
-        val seekTargetMs = (durationMs - OUTRO_SKIP_END_MARGIN_MS).coerceAtLeast(0L)
-        currentPlayer.seekTo(seekTargetMs)
-        resetPlaybackWatchdogProgress(seekTargetMs)
-        host.showToast("已自动跳过片尾")
+        markAutoSkipCompleted()
+        host.session.setPlayWhenReady(false)
+        host.showToast("本集已播放完毕")
     }
 
     fun syncSkipFlagsWithCurrentPosition() {
@@ -169,16 +215,13 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
 
         val positionMs = currentPlayer.currentPosition.coerceAtLeast(0L)
         val durationMs = currentPlayer.duration.takeIf { it > 0L } ?: 0L
-        val introDurationMs = skipPreference.optLong("introDurationMs", 0L)
-        introSkipApplied = introDurationMs <= 0L || positionMs >= introDurationMs
-
         val outroDurationMs = skipPreference.optLong("outroDurationMs", 0L)
-        outroSkipApplied =
-            if (durationMs <= 0L || outroDurationMs <= 0L) {
-                false
-            } else {
-                durationMs - positionMs <= outroDurationMs
-            }
+        if (
+            durationMs <= 0L || outroDurationMs <= 0L || positionMs < durationMs - outroDurationMs
+        ) {
+            outroSkipApplied = false
+            completedByAutoSkip = false
+        }
     }
 
     private fun evaluatePlaybackWatchdog(): Boolean {
@@ -231,6 +274,7 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
             positionMs = resolvedPosition,
             durationMs = resolvedDuration,
             synchronous = force,
+            completedByAutoSkip = completedByAutoSkip,
         )
     }
 }

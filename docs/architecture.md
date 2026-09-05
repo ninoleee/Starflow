@@ -782,7 +782,10 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 - Android 原生页按组合方式拆分，不使用 Activity 继承链或依赖整个 Activity 的扩展函数：`NativePlaybackActivity` 保留 Android 生命周期转发及公开 Intent/Result 常量，`NativePlaybackCoordinator` 负责组件装配、生命周期顺序、启动参数与 Player 事件路由。每个有状态组件通过自己的 `Host` 接口声明所需依赖，不持有协调器具体类型；纯策略与数据仓库不依赖 Activity。
 - `NativePlaybackSession` 独占 Exo/带宽实例的创建、释放与原地重建入口，复用既有 renderers、load error、audio 和 buffer policy；`NativePlaybackLaunchController` 管理启动回执、30 秒超时及失败弹窗；`NativePlaybackRecoveryController` 管理 HLS/转码回退与软/硬恢复副作用。各入口保留进度与 playWhenReady 的原有语义。
-- `NativePlaybackEpisodeController` 管理选集弹窗、队列切换和异步解析请求失效；`NativeEpisodeQueue` 保留原序列化协议，`NativeEpisodeResolutionRequest` 检查解析期间当前集、播放目标和待播目标是否仍匹配。解析成功前不释放旧播放器，新 Intent/销毁递增请求序号，过期结果不更新会话。
+- `NativePlaybackEpisodeController` 管理选集、切换和下一集预解析，`NativeEpisodeTransition` 统一管理 IDLE/RESOLVING/SWITCHING/WAITING_FOR_FIRST_FRAME/FAILED 状态与请求序号；`NativeEpisodePreparationKey` 绑定完整队列、目标索引、当前播放目标、resolver 会话、当前 URL/请求头/MIME，替代旧 `NativeEpisodeResolutionRequest`。结果未被消费前不更新队列或释放旧播放器，新 Intent/销毁使请求和缓存失效；自动片尾与 ENDED 去重，手动选集优先，切换到首帧之间拒绝重复切换。
+- `NativePlaybackStartPolicy` 在 `prepare` 前决定 `setMediaItem` 的起点：显式运行期 override（包括 0）优先，自动下一集忽略旧历史并应用片头，非自动入口按 allowResume 读取历史，无历史时才用片头；allowResume=false 的显式从头播放从 0 开始。真实 timeline 时长可用后检查片头越界并回到 0，READY 不再重复执行启动片头 seek；纯音频 READY 可完成切集等待，视频等待首帧，每次初始化都具有 30 秒首帧超时保护。
+- `NativePlaybackRuntimeController` 在片尾边界直接请求切集，成功解析后、释放旧播放器前显式保存旧集 completed=true，仍保留真实 position/progress；最后一集不 seek 文件尾，保存完成后暂停。完成标记在本集后续保存中保持，手动 seek 或切换新媒体时清除。手动拖回片头不会重触发片头跳过，拖入片尾可观看片尾；修改跳过设置会重新评估规则。运行循环使用 generation 防止循环内切集重建后又重复排入旧循环。
+- 预解析复用原运行循环：只在正常播放的结束边界前 30 秒内准备紧邻的一集，每个准备键最多一次后台尝试；缓存 TTL 为 60 秒，解析超时为 30 秒。已有后台请求可提升为前台切集，后台失败不弹窗，前台失败不被后续 ENDED/片尾轮询反复触发；暂停、字幕搜索或拖离片尾后迟到结果只缓存，不自动切集。预解析地址在首帧前遇到 401/403/404/410 时，用原未解析目标刷新一次，失败走播放失败交互。`playback.performance` 记录切集请求到首帧/音频就绪的耗时；缓冲预算和单播放器释放顺序不变。
 - `NativePlaybackRemoteController` 处理按键与退出确认，`NativePlayerTvSeekPolicy` 管理方向键长按计时/重复次数；`NativePlaybackControllerView` 管理标题、焦点、控制栏显隐和 Surface 遮盖；`NativePlaybackSettingsController` 管理设置与临时选项弹窗。onStop 时各弹窗由所属组件清理，原有焦点恢复顺序不变。
 - `NativePlaybackTrackController / NativePlaybackTrackChoices / NativePlaybackTrackModels` 分别负责选轨交互、候选构建/双字幕匹配及轨道模型；`NativePlaybackSubtitleStyleController` 管理全局主/副字幕样式；`NativePlaybackExternalSubtitleController` 管理文件选择、在线搜索返回与挂载，`NativePlaybackSubtitleFiles / NativeSubtitleTiming` 分离 Android 文件访问和纯文本 SRT/VTT/ASS 时间偏移。实际双字幕渲染仍由既有 `NativeDualSubtitleController` 承担。
 - `NativePlaybackRuntimeController` 管理运行循环、watchdog 调度、自动跳过和进度采样；`NativePlaybackDiagnostics` 管理会话性能、带宽与运行日志；`NativePlaybackSystemController` 管理系统会话与画中画。`NativePlaybackMemoryStore` 独立管理 SharedPreferences 快照读写、20 条历史裁剪和剧集字幕/跳过偏好，以显式 key 接收请求并保留强制 commit/普通 apply；`NativePlaybackTarget / NativePlaybackMarkers / NativePlaybackSource / NativePlaybackFormatting` 分别提供目标信息、章节标记、源地址处理和显示格式。
@@ -820,7 +823,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 桌面端系统播放器通过临时 `.m3u` 交给系统默认视频应用
 - 重型视频不会再因启发式规则自动改变播放器路径；内置 MPV 仅在当前会话内按片源调整缓冲与解码参数
 - 内置 `MPV` 会跟随设置切换解码模式；系统播放器无法稳定回传进度，且解码方式由外部播放器自行决定，因此续播记忆只在内置 `MPV` 和 App 内原生播放器里生效
-- 自动跳过片头片尾当前只在内置 `MPV` 里生效
+- 自动跳过片头片尾支持内置 `MPV` 和 Android `ExoPlayer（原生）`；本轮提前解析与直接切集链路只修改 Android ExoPlayer。
 - 字幕偏移当前支持内置 `MPV` 与 Android 原生播放器的外挂字幕链路；iOS 原生播放器暂未提供字幕偏移
 
 播放器默认偏好目前包括：

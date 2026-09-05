@@ -121,6 +121,7 @@ internal class NativePlaybackMemoryStore(
         positionMs: Long,
         durationMs: Long,
         synchronous: Boolean,
+        completedByAutoSkip: Boolean = false,
     ) {
         if (itemKey.isBlank()) {
             if (synchronous) {
@@ -143,11 +144,12 @@ internal class NativePlaybackMemoryStore(
                 (safePosition.toDouble() / clampedDuration.toDouble()).coerceIn(0.0, 1.0)
             }
         val completed =
-            isCompleted(
-                positionMs = safePosition,
-                durationMs = clampedDuration,
-                progress = progress,
-            )
+            completedByAutoSkip ||
+                isCompleted(
+                    positionMs = safePosition,
+                    durationMs = clampedDuration,
+                    progress = progress,
+                )
 
         val snapshot = loadPlaybackSnapshot()
         val items = snapshot.optJSONObject("items") ?: JSONObject()

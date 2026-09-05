@@ -307,8 +307,7 @@ internal class NativePlaybackSettingsController(private val host: Host) {
             outroDurationMs = outroDurationMs,
         )
         host.controllerView.updateProgressMarkers()
-        host.runtime.syncSkipFlagsWithCurrentPosition()
-        host.runtime.maybeApplyAutoSkip()
+        host.runtime.onSkipPreferenceChanged()
     }
 
     private fun openPlaybackSpeedPicker() {
