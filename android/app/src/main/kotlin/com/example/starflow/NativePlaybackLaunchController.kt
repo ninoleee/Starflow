@@ -34,13 +34,42 @@ internal class NativePlaybackLaunchController(
 
     private var startupPending = false
 
+    private var startupBufferedPositionMs = 0L
+
+    private var startupBufferedPercentage = 0
+
     private val playbackLaunchTimeoutRunnable = Runnable {
         if (startupPending && !host.activity.isFinishing && !host.activity.isDestroyed) {
-            handlePlaybackFailure("30 秒内未显示视频画面，请检查网络或重试播放。")
+            // A slow source is not a dead one. While bytes keep landing, give the
+            // load another window instead of tearing down a NAS that simply needs
+            // longer than the timeout; the stall watchdog already owns the case
+            // where buffering stops moving altogether.
+            if (consumeStartupBufferProgress()) {
+                NativePlaybackFormatting.logPlayback(
+                    "native.launch.timeout.extended " +
+                        "bufferedPositionMs=$startupBufferedPositionMs " +
+                        "bufferedPercentage=$startupBufferedPercentage"
+                )
+                armPlaybackLaunchTimeout()
+            } else {
+                handlePlaybackFailure("视频画面迟迟没有出现，请检查网络或重试播放。")
+            }
         }
     }
 
     private var playbackErrorDialog: AlertDialog? = null
+
+    private fun consumeStartupBufferProgress(): Boolean {
+        val player = host.session.player ?: return false
+        val bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0L)
+        val bufferedPercentage = player.bufferedPercentage.coerceIn(0, 100)
+        val progressed =
+            bufferedPositionMs > startupBufferedPositionMs + PLAYBACK_LAUNCH_BUFFER_ADVANCE_MS ||
+                bufferedPercentage > startupBufferedPercentage
+        startupBufferedPositionMs = bufferedPositionMs
+        startupBufferedPercentage = bufferedPercentage
+        return progressed
+    }
 
     fun applyIntent(intent: Intent) {
         launchRequestId =
@@ -146,6 +175,12 @@ internal class NativePlaybackLaunchController(
     }
 
     fun schedulePlaybackLaunchTimeout() {
+        startupBufferedPositionMs = 0L
+        startupBufferedPercentage = 0
+        armPlaybackLaunchTimeout()
+    }
+
+    private fun armPlaybackLaunchTimeout() {
         playbackLaunchTimeoutHandler.removeCallbacks(playbackLaunchTimeoutRunnable)
         startupPending = true
         playbackLaunchTimeoutHandler.postDelayed(

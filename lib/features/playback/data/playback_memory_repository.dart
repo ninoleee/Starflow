@@ -82,6 +82,15 @@ class PlaybackMemoryRepository {
   final PreferencesStore? _migrationPreferences;
   final void Function()? _notifyChanged;
   Future<void>? _migrationFuture;
+  PlaybackMemorySnapshot? _cachedSnapshot;
+
+  /// Drops the in-memory snapshot so the next read goes back to storage.
+  ///
+  /// The Android native player writes the same physical key while Flutter is
+  /// backgrounded, so the cache must be dropped whenever the app resumes.
+  void invalidateSnapshotCache() {
+    _cachedSnapshot = null;
+  }
 
   Future<PlaybackProgressEntry?> loadEntryForTarget(
     PlaybackTarget target,
@@ -495,8 +504,14 @@ class PlaybackMemoryRepository {
   }
 
   Future<PlaybackMemorySnapshot> _loadSnapshot() async {
+    final cached = _cachedSnapshot;
+    if (cached != null) {
+      return cached;
+    }
     await _ensureMigrationCompleted();
-    return _loadSnapshotFrom(_preferences);
+    final snapshot = await _loadSnapshotFrom(_preferences);
+    _cachedSnapshot = snapshot;
+    return snapshot;
   }
 
   Future<void> _ensureMigrationCompleted() {
@@ -514,6 +529,7 @@ class PlaybackMemoryRepository {
     }
     final primary = await _loadSnapshotFrom(_preferences);
     final merged = _mergeSnapshots(primary, source);
+    _cachedSnapshot = null;
     await _writeSnapshot(_preferences, merged);
     await migrationPreferences.remove(_storageKey);
   }
@@ -537,6 +553,7 @@ class PlaybackMemoryRepository {
 
   Future<void> _saveSnapshot(PlaybackMemorySnapshot snapshot) async {
     await _ensureMigrationCompleted();
+    _cachedSnapshot = snapshot;
     await _writeSnapshot(_preferences, snapshot);
   }
 

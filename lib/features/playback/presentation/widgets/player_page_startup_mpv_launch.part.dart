@@ -210,6 +210,29 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     }
   }
 
+  /// Resolves the episode queue off the startup path: the embedded player does
+  /// not need it to start, only the episode controls and the next-episode
+  /// prefetch do.
+  Future<void> _resolveEpisodeQueueInBackground(
+    PlaybackTarget queueSeedTarget, {
+    required PlaybackTarget currentTarget,
+  }) async {
+    final queue = await _preparePlaybackEpisodeQueue(
+      queueSeedTarget,
+      currentTarget: currentTarget,
+    );
+    if (queue == null ||
+        !mounted ||
+        _episodeQueue != null ||
+        !identical(_resolvedTarget, currentTarget)) {
+      return;
+    }
+    setState(() {
+      _episodeQueue = queue;
+    });
+    unawaited(_syncPlaybackSystemSession(force: true));
+  }
+
   Future<PlaybackEpisodeQueue?> _resolveNativePlayableEpisodeQueue({
     PlaybackEpisodeQueue? queue,
     PlaybackTarget? resolvedTarget,
@@ -243,6 +266,9 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     return PlaybackEpisodeQueue(entries: resolvedEntries);
   }
 
+  bool _isAutomaticPlaybackQueueReason(String reason) =>
+      reason == 'outro' || reason == 'playback-completed';
+
   Future<bool> _movePlaybackQueue({
     required bool forward,
     required String reason,
@@ -255,7 +281,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     return _switchPlaybackQueueIndex(
       index: nextIndex,
       reason: reason,
-      markCurrentCompleted: reason == 'playback-completed',
+      markCurrentCompleted: _isAutomaticPlaybackQueueReason(reason),
     );
   }
 
@@ -279,17 +305,26 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       return false;
     }
     final requestedEntry = queue.entries[index];
+    final automaticNext = _isAutomaticPlaybackQueueReason(reason);
 
     _episodeQueueAdvanceInProgress = true;
     try {
-      if (requestedEntry.target.needsResolution) {
+      final preparedTarget = _takePreparedEpisodeTarget(
+        _buildPreparedEpisodeSignature(index, requestedEntry),
+      );
+      _nextEpisodePrepareAttempt = null;
+      if (preparedTarget == null && requestedEntry.target.needsResolution) {
         _showMessage(
           '正在解析 ${formatPlaybackEpisodePickerLabel(requestedEntry, index)}',
         );
       }
-      final resolvedTarget = await PlaybackTargetResolver(
-        read: _providerContainer.read,
-      ).resolve(requestedEntry.target);
+      final resolvedTarget = preparedTarget ??
+          await PlaybackTargetResolver(
+            read: _providerContainer.read,
+          ).resolve(requestedEntry.target).timeout(
+                kPlaybackEpisodeResolveTimeout,
+                onTimeout: () => throw TimeoutException('解析剧集超时，请手动重试'),
+              );
       if (resolvedTarget.streamUrl.trim().isEmpty ||
           resolvedTarget.needsResolution) {
         throw StateError('没有取得可播放地址');
@@ -333,12 +368,21 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
         _error = null;
         _introSkipApplied = false;
         _outroSkipApplied = false;
+        _playbackStartPositionApplied = false;
         _latestPosition = Duration.zero;
         _latestDuration = Duration.zero;
         _lastProgressPersistedAt = null;
         _lastPersistedPosition = Duration.zero;
       });
+      _nextEpisodeIsAutomatic = automaticNext;
       await _initialize(initialTarget: resolvedTarget);
+      if (preparedTarget != null && mounted && !_isReady && _error != null) {
+        await _retryEpisodeSwitchWithFreshAddress(
+          entry: requestedEntry,
+          index: index,
+          automaticNext: automaticNext,
+        );
+      }
       if (mounted && _isReady && _isTelevisionPlaybackDevice) {
         _showTvPlaybackChrome(autoHide: false);
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -355,6 +399,42 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       return false;
     } finally {
       _episodeQueueAdvanceInProgress = false;
+    }
+  }
+
+  /// A prepared address can expire between the prefetch and the switch, so a
+  /// permanent open failure on one is worth a single fresh resolution.
+  Future<void> _retryEpisodeSwitchWithFreshAddress({
+    required PlaybackEpisodeQueueEntry entry,
+    required int index,
+    required bool automaticNext,
+  }) async {
+    final error = _error;
+    if (!entry.target.needsResolution ||
+        error == null ||
+        classifyMpvOpenFailure(error) != MpvOpenFailureKind.permanent) {
+      return;
+    }
+    try {
+      final refreshedTarget = await PlaybackTargetResolver(
+        read: _providerContainer.read,
+      ).resolve(entry.target).timeout(kPlaybackEpisodeResolveTimeout);
+      final queue = _episodeQueue;
+      if (!mounted ||
+          queue == null ||
+          queue.currentIndex != index ||
+          refreshedTarget.streamUrl.trim().isEmpty ||
+          refreshedTarget.needsResolution) {
+        return;
+      }
+      setState(() {
+        _episodeQueue = queue.replaceCurrentTarget(refreshedTarget);
+        _error = null;
+      });
+      _nextEpisodeIsAutomatic = automaticNext;
+      await _initialize(initialTarget: refreshedTarget);
+    } catch (_) {
+      // Keep the original playback error on screen.
     }
   }
 

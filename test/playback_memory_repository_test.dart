@@ -478,6 +478,90 @@ void main() {
     expect(await repository.loadSkipPreference(episodeTarget), isNull);
   });
 
+  test('serves repeated reads from the cached snapshot', () async {
+    const target = PlaybackTarget(
+      title: '缓存测试',
+      sourceId: 'emby-main',
+      streamUrl: 'https://emby.example/cache.mkv',
+      sourceName: '客厅 Emby',
+      sourceKind: MediaSourceKind.emby,
+      itemId: 'cache-movie-1',
+      itemType: 'movie',
+    );
+    final store = _CountingPreferencesStore();
+    final repository = PlaybackMemoryRepository(preferences: store);
+
+    await repository.saveProgress(
+      target: target,
+      position: const Duration(minutes: 5),
+      duration: const Duration(hours: 2),
+    );
+    final readsAfterSave = store.reads;
+
+    await repository.loadEntryForTarget(target);
+    await repository.loadSnapshot();
+    await repository.saveProgress(
+      target: target,
+      position: const Duration(minutes: 6),
+      duration: const Duration(hours: 2),
+    );
+
+    expect(store.reads, readsAfterSave);
+    final entry = await repository.loadEntryForTarget(target);
+    expect(entry!.position, const Duration(minutes: 6));
+  });
+
+  test('re-reads storage after the snapshot cache is invalidated', () async {
+    const target = PlaybackTarget(
+      title: '失效测试',
+      sourceId: 'emby-main',
+      streamUrl: 'https://emby.example/invalidate.mkv',
+      sourceName: '客厅 Emby',
+      sourceKind: MediaSourceKind.emby,
+      itemId: 'invalidate-movie-1',
+      itemType: 'movie',
+    );
+    final store = _CountingPreferencesStore();
+    final repository = PlaybackMemoryRepository(preferences: store);
+
+    await repository.saveProgress(
+      target: target,
+      position: const Duration(minutes: 5),
+      duration: const Duration(hours: 2),
+    );
+
+    // Simulate the native player writing while Flutter was backgrounded.
+    final itemKey = buildPlaybackItemKey(target);
+    final externalSnapshot = PlaybackMemorySnapshot(
+      items: {
+        itemKey: PlaybackProgressEntry(
+          key: itemKey,
+          target: target,
+          updatedAt: DateTime.utc(2026, 9, 1, 12),
+          position: const Duration(minutes: 42),
+          duration: const Duration(hours: 2),
+          progress: 0.35,
+        ),
+      },
+    );
+    await store.setString(
+      'starflow.playback.memory.v1',
+      jsonEncode(externalSnapshot.toJson()),
+    );
+
+    expect(
+      (await repository.loadEntryForTarget(target))!.position,
+      const Duration(minutes: 5),
+    );
+
+    repository.invalidateSnapshotCache();
+
+    expect(
+      (await repository.loadEntryForTarget(target))!.position,
+      const Duration(minutes: 42),
+    );
+  });
+
   test('shared snapshot provider serves multiple playback selectors', () async {
     const target = PlaybackTarget(
       title: '共享快照',
@@ -560,6 +644,16 @@ class _CountingPlaybackMemoryRepository extends PlaybackMemoryRepository {
   Future<PlaybackMemorySnapshot> loadSnapshot() async {
     loadSnapshotCount += 1;
     return snapshot;
+  }
+}
+
+class _CountingPreferencesStore extends _MemoryPreferencesStore {
+  int reads = 0;
+
+  @override
+  Future<String?> getString(String key) {
+    reads += 1;
+    return super.getString(key);
   }
 }
 

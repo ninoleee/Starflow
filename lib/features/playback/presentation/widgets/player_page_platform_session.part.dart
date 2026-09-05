@@ -148,54 +148,29 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
       return;
     }
 
-    final title = _buildPlaybackSystemSessionTitle();
-    final subtitle = _buildPlaybackSystemSessionSubtitle();
+    final position = player.state.position;
+    final duration = player.state.duration;
+    final playing = player.state.playing;
+    final buffering = player.state.buffering;
+    final speed = player.state.rate;
+    final hasEpisodeQueue = (_episodeQueue?.entries.length ?? 0) > 1;
+    final hasPrevious = _episodeQueue?.hasPrevious ?? false;
+    final hasNext = _episodeQueue?.hasNext ?? false;
 
-    final state = PlaybackSystemSessionState(
-      title: title,
-      subtitle: subtitle,
-      position: player.state.position,
-      duration: player.state.duration,
-      playing: player.state.playing,
-      buffering: player.state.buffering,
-      speed: player.state.rate,
-      artworkCandidates: _buildPlaybackSystemSessionArtworkCandidates(),
-      canSeek: true,
-      hasEpisodeQueue: (_episodeQueue?.entries.length ?? 0) > 1,
-      hasPrevious: _episodeQueue?.hasPrevious ?? false,
-      hasNext: _episodeQueue?.hasNext ?? false,
-    );
-
+    // Decide with the cheap fields first: while playing this runs on every
+    // position event, and building title/artwork for a tick that publishes
+    // nothing is pure garbage. Every metadata change is paired with a forced
+    // sync, so nothing is lost by gating first.
     final positionChanged =
-        (state.position - _lastPlaybackSystemSessionPosition).inSeconds != 0;
-    final durationChanged =
-        state.duration != _lastPlaybackSystemSessionDuration;
-    final playingChanged = state.playing != _lastPlaybackSystemSessionPlaying;
-    final bufferingChanged =
-        state.buffering != _lastPlaybackSystemSessionBuffering;
-    final speedChanged = state.speed != _lastPlaybackSystemSessionSpeed;
-    final hasEpisodeQueueChanged = state.hasEpisodeQueue !=
-        _lastPlaybackSystemSessionHasEpisodeQueue;
-    final hasPreviousChanged =
-        state.hasPrevious != _lastPlaybackSystemSessionHasPrevious;
-    final hasNextChanged = state.hasNext != _lastPlaybackSystemSessionHasNext;
-    final titleChanged = title != _lastPlaybackSystemSessionTitle;
-    final subtitleChanged = subtitle != _lastPlaybackSystemSessionSubtitle;
-    final artworkCandidatesChanged = !listEquals(
-      state.artworkCandidates,
-      _lastPlaybackSystemSessionArtworkCandidates,
-    );
-
-    final hasNonPositionChange = durationChanged ||
-        playingChanged ||
-        bufferingChanged ||
-        speedChanged ||
-        hasEpisodeQueueChanged ||
-        hasPreviousChanged ||
-        hasNextChanged ||
-        titleChanged ||
-        subtitleChanged ||
-        artworkCandidatesChanged;
+        (position - _lastPlaybackSystemSessionPosition).inSeconds != 0;
+    final hasNonPositionChange =
+        duration != _lastPlaybackSystemSessionDuration ||
+            playing != _lastPlaybackSystemSessionPlaying ||
+            buffering != _lastPlaybackSystemSessionBuffering ||
+            speed != _lastPlaybackSystemSessionSpeed ||
+            hasEpisodeQueue != _lastPlaybackSystemSessionHasEpisodeQueue ||
+            hasPrevious != _lastPlaybackSystemSessionHasPrevious ||
+            hasNext != _lastPlaybackSystemSessionHasNext;
     final now = DateTime.now();
     if (!shouldPublishPlaybackSystemSessionUpdate(
       force: force,
@@ -208,6 +183,21 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
       return;
     }
 
+    final state = PlaybackSystemSessionState(
+      title: _buildPlaybackSystemSessionTitle(),
+      subtitle: _buildPlaybackSystemSessionSubtitle(),
+      position: position,
+      duration: duration,
+      playing: playing,
+      buffering: buffering,
+      speed: speed,
+      artworkCandidates: _buildPlaybackSystemSessionArtworkCandidates(),
+      canSeek: true,
+      hasEpisodeQueue: hasEpisodeQueue,
+      hasPrevious: hasPrevious,
+      hasNext: hasNext,
+    );
+
     _lastPlaybackSystemSessionPosition = state.position;
     _lastPlaybackSystemSessionDuration = state.duration;
     _lastPlaybackSystemSessionPlaying = state.playing;
@@ -216,9 +206,6 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     _lastPlaybackSystemSessionHasEpisodeQueue = state.hasEpisodeQueue;
     _lastPlaybackSystemSessionHasPrevious = state.hasPrevious;
     _lastPlaybackSystemSessionHasNext = state.hasNext;
-    _lastPlaybackSystemSessionTitle = state.title;
-    _lastPlaybackSystemSessionSubtitle = state.subtitle;
-    _lastPlaybackSystemSessionArtworkCandidates = state.artworkCandidates;
     _lastPlaybackSystemSessionPublishedAt = now;
 
     await PlaybackSystemSessionController.setActive(true);

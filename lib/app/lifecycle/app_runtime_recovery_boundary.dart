@@ -59,6 +59,9 @@ class _AppRuntimeRecoveryBoundaryState
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // The native player may have written playback memory while Flutter was
+      // backgrounded, so drop the cached snapshot before anyone re-reads it.
+      ref.read(playbackMemoryRepositoryProvider).invalidateSnapshotCache();
       ref.read(playbackHistoryRevisionProvider.notifier).state++;
       _scheduleResume();
       return;

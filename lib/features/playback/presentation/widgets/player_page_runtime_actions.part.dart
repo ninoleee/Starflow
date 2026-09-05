@@ -2,6 +2,19 @@
 
 part of '../player_page.dart';
 
+/// One prefetched episode address, bound to the queue slot it was resolved for.
+class _PreparedNextEpisode {
+  const _PreparedNextEpisode({
+    required this.signature,
+    required this.target,
+    required this.preparedAt,
+  });
+
+  final String signature;
+  final PlaybackTarget target;
+  final DateTime preparedAt;
+}
+
 extension _PlayerPageStateRuntimeActions on _PlayerPageState {
   Future<void> _applyStartupPlaybackPreferences(
     Player player,
@@ -362,62 +375,117 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
         );
   }
 
-  Future<void> _restorePlaybackProgress(
+  /// Decides where the media should open, before the player is created, so a
+  /// remote source never buffers from zero only to be seeked afterwards.
+  PlaybackStartPosition _resolvePlaybackStartPosition({
+    required PlaybackTarget target,
+    required PlaybackProgressEntry? resumeEntry,
+    required SeriesSkipPreference? skipPreference,
+  }) {
+    final automaticNext = _nextEpisodeIsAutomatic;
+    _nextEpisodeIsAutomatic = false;
+    return resolvePlaybackStartPosition(
+      allowResume: target.allowResume,
+      resumePosition: _resolveResumeStartPosition(
+        resumeEntry,
+        resumeEntry?.duration ?? Duration.zero,
+      ),
+      automaticNext: automaticNext,
+      skipEnabled: skipPreference != null && skipPreference.enabled,
+      introDuration: skipPreference?.introDuration ?? Duration.zero,
+    );
+  }
+
+  /// Records the applied start position and opens the auto-skip gate. Auto-skip
+  /// stays inert until this ran, so a startup position event cannot fight it.
+  void _finalizePlaybackStartPosition(
     Player player,
+    PlaybackStartPosition start,
+  ) {
+    final position = player.state.position;
+    _latestPosition = position > start.position ? position : start.position;
+    final duration = player.state.duration;
+    if (duration > Duration.zero) {
+      _latestDuration = duration;
+    }
+
+    // The real duration may still be unknown; validate the intro bound as soon
+    // as it arrives instead of blocking the open on it.
+    _pendingIntroStartValidation =
+        start.isIntroSkip ? start.position : Duration.zero;
+    _validatePendingIntroStartPosition(player, duration);
+    // Safety net for a backend that ignored the open-time start position
+    // (keyframe alignment keeps the real position close, never far behind).
+    if (start.position > Duration.zero &&
+        position + const Duration(seconds: 10) < start.position) {
+      _latestPosition = start.position;
+      unawaited(player.seek(start.position));
+    }
+    if (start.position > Duration.zero && mounted) {
+      _showMessage(
+        start.isResume
+            ? '已从 ${formatPlaybackClockDuration(start.position)} 继续播放'
+            : '已自动跳过片头',
+      );
+    }
+
+    _introSkipApplied = true;
+    _syncSkipFlagsWithCurrentPosition();
+    _playbackStartPositionApplied = true;
+  }
+
+  /// An intro longer than the episode itself would strand playback at the tail,
+  /// so fall back to the beginning once the duration is known.
+  void _validatePendingIntroStartPosition(Player player, Duration duration) {
+    final introPosition = _pendingIntroStartValidation;
+    if (introPosition <= Duration.zero || duration <= Duration.zero) {
+      return;
+    }
+    _pendingIntroStartValidation = Duration.zero;
+    if (introPosition < duration) {
+      return;
+    }
+    _latestPosition = Duration.zero;
+    unawaited(player.seek(Duration.zero));
+  }
+
+  Duration _resolveResumeStartPosition(
     PlaybackProgressEntry? resumeEntry,
-  ) async {
+    Duration duration,
+  ) {
     if (resumeEntry == null || !resumeEntry.canResume) {
-      return;
+      return Duration.zero;
     }
-
-    final resolvedDuration = await _awaitKnownDuration(player);
-    final duration = resolvedDuration > Duration.zero
-        ? resolvedDuration
-        : resumeEntry.duration;
     if (duration <= Duration.zero) {
-      return;
+      // No stored duration to clamp against; `canResume` already rejects
+      // finished and near-finished entries.
+      return resumeEntry.position > const Duration(seconds: 5)
+          ? resumeEntry.position
+          : Duration.zero;
     }
-
     final maxPosition = duration - const Duration(seconds: 3);
     final desiredPosition =
         resumeEntry.position < maxPosition ? resumeEntry.position : maxPosition;
     if (desiredPosition <= const Duration(seconds: 5)) {
-      return;
-    }
-
-    try {
-      await player.seek(desiredPosition);
-      _latestPosition = desiredPosition;
-      _latestDuration = duration;
-      if (!mounted) {
-        return;
-      }
-      _showMessage(
-        '已从 ${formatPlaybackClockDuration(desiredPosition)} 继续播放',
-      );
-    } catch (_) {
-      // Keep playback available even if resume fails.
-    }
-  }
-
-  Future<Duration> _awaitKnownDuration(Player player) async {
-    final current = player.state.duration;
-    if (current > Duration.zero) {
-      return current;
-    }
-
-    try {
-      return await player.stream.duration
-          .firstWhere((duration) => duration > Duration.zero)
-          .timeout(const Duration(seconds: 8));
-    } catch (_) {
       return Duration.zero;
     }
+    return desiredPosition;
+  }
+
+  void _handlePlaybackRuntimePosition(Player player, Duration position) {
+    if (!_playbackStartPositionApplied) {
+      return;
+    }
+    _maybeApplyAutoSkip(player, position);
+    _maybePrepareNextEpisode(player, position);
   }
 
   void _maybeApplyAutoSkip(Player player, Duration position) {
     final preference = _seriesSkipPreference;
-    if (preference == null || !preference.enabled) {
+    if (preference == null ||
+        !preference.enabled ||
+        _episodeQueueAdvanceInProgress ||
+        !player.state.playing) {
       return;
     }
 
@@ -426,7 +494,8 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
         : player.state.duration;
 
     if (!_introSkipApplied && preference.introDuration > Duration.zero) {
-      if (position >= preference.introDuration) {
+      if (position >= preference.introDuration ||
+          (duration > Duration.zero && preference.introDuration >= duration)) {
         _introSkipApplied = true;
       } else {
         _introSkipApplied = true;
@@ -443,21 +512,151 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       return;
     }
 
-    final triggerPosition = duration - preference.outroDuration;
-    if (triggerPosition <= Duration.zero) {
-      return;
-    }
-    if (position < triggerPosition) {
+    final boundary = resolvePlaybackEndBoundary(
+      duration: duration,
+      skipEnabled: true,
+      outroDuration: preference.outroDuration,
+    );
+    if (boundary >= duration || position < boundary) {
       return;
     }
 
     _outroSkipApplied = true;
-    final seekTarget = duration > const Duration(milliseconds: 400)
-        ? duration - const Duration(milliseconds: 400)
-        : duration;
-    _latestPosition = seekTarget;
-    unawaited(player.seek(seekTarget));
-    _showMessage('已自动跳过片尾');
+    unawaited(_advanceAtPlaybackEndBoundary(player, duration));
+  }
+
+  /// Switches straight into the next episode at the outro boundary instead of
+  /// seeking to the file tail and waiting for the end event.
+  Future<void> _advanceAtPlaybackEndBoundary(
+    Player player,
+    Duration duration,
+  ) async {
+    final queue = _episodeQueue;
+    if (queue != null && queue.hasCurrent && queue.hasNext) {
+      await _movePlaybackQueue(forward: true, reason: 'outro');
+      return;
+    }
+
+    _latestDuration = duration;
+    _latestPosition = duration;
+    await _persistPlaybackProgress(force: true);
+    if (!mounted || _player != player) {
+      return;
+    }
+    await player.pause();
+    if (!mounted) {
+      return;
+    }
+    _showMessage('本集已播放完毕');
+  }
+
+  void _maybePrepareNextEpisode(Player player, Duration position) {
+    if (_episodeQueueAdvanceInProgress ||
+        _nextEpisodePrepareInProgress ||
+        !player.state.playing) {
+      return;
+    }
+    final queue = _episodeQueue;
+    if (queue == null || !queue.hasCurrent || !queue.hasNext) {
+      return;
+    }
+    final duration = _latestDuration > Duration.zero
+        ? _latestDuration
+        : player.state.duration;
+    if (duration <= Duration.zero) {
+      return;
+    }
+    final preference = _seriesSkipPreference;
+    final boundary = resolvePlaybackEndBoundary(
+      duration: duration,
+      skipEnabled: preference?.enabled ?? false,
+      outroDuration: preference?.outroDuration ?? Duration.zero,
+    );
+    if (!shouldPrepareNextEpisode(position: position, boundary: boundary)) {
+      return;
+    }
+
+    final nextIndex = queue.currentIndex + 1;
+    final entry = queue.entries[nextIndex];
+    if (!entry.target.needsResolution) {
+      return;
+    }
+    final signature = _buildPreparedEpisodeSignature(nextIndex, entry);
+    if (_nextEpisodePrepareAttempt == signature) {
+      return;
+    }
+    _nextEpisodePrepareAttempt = signature;
+    unawaited(
+      _prepareNextEpisodeTarget(
+        signature: signature,
+        index: nextIndex,
+        entry: entry,
+      ),
+    );
+  }
+
+  /// Caches the adjacent episode address and headers only: no second player and
+  /// no video pre-buffering.
+  Future<void> _prepareNextEpisodeTarget({
+    required String signature,
+    required int index,
+    required PlaybackEpisodeQueueEntry entry,
+  }) async {
+    _nextEpisodePrepareInProgress = true;
+    try {
+      final resolvedTarget =
+          await PlaybackTargetResolver(read: _providerContainer.read)
+              .resolve(entry.target)
+              .timeout(kPlaybackEpisodeResolveTimeout);
+      if (!mounted ||
+          resolvedTarget.streamUrl.trim().isEmpty ||
+          resolvedTarget.needsResolution) {
+        return;
+      }
+      final queue = _episodeQueue;
+      if (queue == null ||
+          index >= queue.entries.length ||
+          _buildPreparedEpisodeSignature(index, queue.entries[index]) !=
+              signature) {
+        return;
+      }
+      _preparedNextEpisode = _PreparedNextEpisode(
+        signature: signature,
+        target: resolvedTarget,
+        preparedAt: DateTime.now(),
+      );
+    } catch (_) {
+      // A background failure stays silent: the boundary switch resolves again.
+    } finally {
+      _nextEpisodePrepareInProgress = false;
+    }
+  }
+
+  String _buildPreparedEpisodeSignature(
+    int index,
+    PlaybackEpisodeQueueEntry entry,
+  ) {
+    return '$index|${entry.playbackItemKey}|${entry.seriesKey}|'
+        '${entry.target.sourceId}|${entry.target.itemId}|'
+        '${entry.target.streamUrl}|${entry.target.actualAddress}';
+  }
+
+  PlaybackTarget? _takePreparedEpisodeTarget(String signature) {
+    final prepared = _preparedNextEpisode;
+    _preparedNextEpisode = null;
+    if (prepared == null || prepared.signature != signature) {
+      return null;
+    }
+    if (DateTime.now().difference(prepared.preparedAt) >=
+        kPlaybackPreparedEpisodeTtl) {
+      return null;
+    }
+    return prepared.target;
+  }
+
+  void _resetPreparedNextEpisode() {
+    _preparedNextEpisode = null;
+    _nextEpisodePrepareAttempt = null;
   }
 
   void _syncSkipFlagsWithCurrentPosition() {
@@ -468,15 +667,31 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       return;
     }
 
-    _introSkipApplied = preference.introDuration <= Duration.zero ||
-        _latestPosition >= preference.introDuration;
     if (_latestDuration <= Duration.zero ||
-        preference.outroDuration <= Duration.zero) {
+        preference.outroDuration <= Duration.zero ||
+        _latestPosition < _latestDuration - preference.outroDuration) {
       _outroSkipApplied = false;
+    }
+  }
+
+  /// Mirrors the native `onUserSeek` rule: a manual seek back into the body
+  /// re-arms the outro switch, a manual seek into the outro keeps it disarmed.
+  void _syncSkipFlagsAfterUserSeek(Duration position) {
+    _latestPosition = position;
+    _syncSkipFlagsWithCurrentPosition();
+    _introSkipApplied = true;
+    final preference = _seriesSkipPreference;
+    if (preference == null || !preference.enabled) {
       return;
     }
-    _outroSkipApplied =
-        (_latestDuration - _latestPosition) <= preference.outroDuration;
+    final boundary = resolvePlaybackEndBoundary(
+      duration: _latestDuration,
+      skipEnabled: true,
+      outroDuration: preference.outroDuration,
+    );
+    if (boundary > Duration.zero && position >= boundary) {
+      _outroSkipApplied = true;
+    }
   }
 
   Future<void> _syncSubtitleDelayState(Player player) async {
@@ -740,7 +955,11 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     setState(() {
       _seriesSkipPreference = nextPreference;
     });
+    _introSkipApplied = false;
+    _outroSkipApplied = false;
+    _resetPreparedNextEpisode();
     _syncSkipFlagsWithCurrentPosition();
+    _maybeApplyAutoSkip(player, _latestPosition);
   }
 
   void _showMessage(String message) {

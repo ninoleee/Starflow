@@ -142,7 +142,9 @@ extension _PlayerPageStateControls on _PlayerPageState {
         'toMs': target.inMilliseconds < 0 ? 0 : target.inMilliseconds,
       },
     );
-    await player.seek(target < Duration.zero ? Duration.zero : target);
+    final seekTarget = target < Duration.zero ? Duration.zero : target;
+    await player.seek(seekTarget);
+    _syncSkipFlagsAfterUserSeek(seekTarget);
     if (_isTelevisionPlaybackDevice) {
       _showTvPlaybackChrome();
     }
@@ -160,7 +162,9 @@ extension _PlayerPageStateControls on _PlayerPageState {
         'toMs': position.inMilliseconds < 0 ? 0 : position.inMilliseconds,
       },
     );
-    await player.seek(position < Duration.zero ? Duration.zero : position);
+    final seekTarget = position < Duration.zero ? Duration.zero : position;
+    await player.seek(seekTarget);
+    _syncSkipFlagsAfterUserSeek(seekTarget);
     if (_isTelevisionPlaybackDevice) {
       _showTvPlaybackChrome();
     }

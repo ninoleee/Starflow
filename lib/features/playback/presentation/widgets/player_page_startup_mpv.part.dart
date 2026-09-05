@@ -13,6 +13,9 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   }) async {
     _playbackStartupStartedAt = DateTime.now();
     _playbackTargetResolutionMs = 0;
+    _playbackStartPositionApplied = false;
+    _pendingIntroStartValidation = Duration.zero;
+    _resetPreparedNextEpisode();
     final startupTarget = initialTarget ?? widget.target;
     await ActivePlaybackCleanupCoordinator.cleanupAll(
       reason: 'player-page-initialize',
@@ -79,10 +82,22 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       final startupPreparation = outcome.startupPreparation;
       final resumeEntry = startupPreparation.resumeEntry;
       final skipPreference = startupPreparation.skipPreference;
-      final episodeQueue = await _preparePlaybackEpisodeQueue(
-        startupTarget,
-        currentTarget: resolvedTarget,
-      );
+      // An episode switch or a recovery restart already owns the right queue,
+      // and only the launch routes need one before the executor runs, so the
+      // embedded route resolves it in the background instead of blocking.
+      final existingQueue = _episodeQueue;
+      final reusableQueue = existingQueue != null && existingQueue.hasCurrent
+          ? existingQueue.replaceCurrentTarget(resolvedTarget)
+          : null;
+      final needsQueueBeforeLaunch =
+          outcome.routeAction != PlaybackStartupRouteAction.openEmbeddedMpv;
+      final episodeQueue = reusableQueue ??
+          (needsQueueBeforeLaunch
+              ? await _preparePlaybackEpisodeQueue(
+                  startupTarget,
+                  currentTarget: resolvedTarget,
+                )
+              : null);
       if (mounted) {
         setState(() {
           _resolvedTarget = resolvedTarget;
@@ -109,6 +124,19 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       if (!shouldOpen) {
         return;
       }
+      if (episodeQueue == null) {
+        unawaited(
+          _resolveEpisodeQueueInBackground(
+            startupTarget,
+            currentTarget: resolvedTarget,
+          ),
+        );
+      }
+      final startPosition = _resolvePlaybackStartPosition(
+        target: resolvedTarget,
+        resumeEntry: resumeEntry,
+        skipPreference: skipPreference,
+      );
       await _resolveAndroidMemoryClassIfNeeded();
       _beginMpvPerformanceSession(resolvedTarget);
       _adaptiveTopChromeController.setVisible(true);
@@ -139,6 +167,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       final playback = await _openEmbeddedPlayback(
         resolvedTarget,
         Duration(seconds: timeoutSeconds),
+        startPosition: startPosition,
       );
 
       if (!mounted) {
@@ -188,6 +217,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         duration,
       ) {
         _latestDuration = duration;
+        _validatePendingIntroStartPosition(playback.player, duration);
         if (_isTelevisionPlaybackDevice && _shouldUpdatePlaybackVisualState) {
           _updateTvPlaybackState(duration: duration);
         }
@@ -200,7 +230,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         if (_isTelevisionPlaybackDevice && _shouldUpdatePlaybackVisualState) {
           _updateTvPlaybackState(position: position);
         }
-        _maybeApplyAutoSkip(playback.player, position);
+        _handlePlaybackRuntimePosition(playback.player, position);
         unawaited(_persistPlaybackProgress());
         unawaited(_syncPlaybackSystemSession());
       });
@@ -218,17 +248,10 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         );
       }
       await _syncSubtitleDelayState(playback.player);
-      await _restorePlaybackProgress(playback.player, resumeEntry);
-      _syncSkipFlagsWithCurrentPosition();
-      await _awaitStrictPlaybackReady(
-        playback.player,
-        target: resolvedTarget,
-        timeout: Duration(seconds: timeoutSeconds),
-        stageLabel: 'post-resume',
-        progressBaseline: playback.player.state.position > _latestPosition
-            ? playback.player.state.position
-            : _latestPosition,
-      );
+      // The player already opened at the start position, so there is nothing
+      // to seek and nothing to re-confirm here; the stall watchdog started
+      // below owns everything after the open.
+      _finalizePlaybackStartPosition(playback.player, startPosition);
       if (!mounted || _player != playback.player) {
         return;
       }

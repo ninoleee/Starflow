@@ -55,15 +55,25 @@ internal class NativePlaybackControllerView(private val host: Host) {
     }
 
     fun updateControllerAutoHidePolicy() {
+        val settled = isPlaybackStartupSettled()
         // Until playback settles the surface is still black, so the chrome is the
         // only thing naming what is loading and how fast it is arriving. Hold it
         // open until then instead of letting it time out over a black screen.
         val shouldAutoHide =
-            isPlaybackStartupSettled() &&
-                (!host.isTelevisionDevice || host.session.player?.isPlaying == true)
+            settled && (!host.isTelevisionDevice || host.session.player?.isPlaying == true)
         host.playerView.setControllerShowTimeoutMs(
             if (shouldAutoHide) CONTROLLER_SHOW_TIMEOUT_MS else 0
         )
+        updateCenterControlsVisibility(settled)
+    }
+
+    // media3 centres the show_buffering spinner inside exo_content_frame, and
+    // exo_center_controls sits at the same centre in a layer painted on top of it.
+    // Transport keys do nothing before the stream starts, so drop them while it
+    // loads and let the spinner own the middle of the screen.
+    private fun updateCenterControlsVisibility(settled: Boolean) {
+        host.activity.findViewById<View?>(Media3UiR.id.exo_center_controls)?.visibility =
+            if (settled) View.VISIBLE else View.INVISIBLE
     }
 
     // STATE_READY covers sources that never render a frame (audio-only), so the

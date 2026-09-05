@@ -6,6 +6,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
   Future<_OpenedPlayback> _openWithRetry(
     PlaybackTarget resolvedTarget, {
     required Duration timeout,
+    required PlaybackStartPosition startPosition,
   }) async {
     final deadline = DateTime.now().add(timeout);
     Object? lastError;
@@ -29,6 +30,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         final opened = await _openSingleAttempt(
           resolvedTarget,
           timeout: remaining,
+          startPosition: startPosition,
         );
         _traceWindowsMpv(
           'windows-mpv.open.attempt-success',
@@ -69,6 +71,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
   Future<_OpenedPlayback> _openSingleAttempt(
     PlaybackTarget resolvedTarget, {
     required Duration timeout,
+    required PlaybackStartPosition startPosition,
   }) async {
     final bufferSizeBytes = _resolveMpvBufferSizeBytes(resolvedTarget);
     final hardwareDecodeMode = _resolveMpvHardwareDecodeMode();
@@ -143,6 +146,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         resolvedTarget,
         deadline: deadline,
         beginStartupWait: beginStartupWait,
+        startPosition: startPosition.position,
       );
       startupError = Completer<String>();
       await _awaitMpvPrePlayReady(
@@ -194,11 +198,13 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
 
   Future<_OpenedPlayback> _openEmbeddedPlayback(
     PlaybackTarget resolvedTarget,
-    Duration timeout,
-  ) async {
+    Duration timeout, {
+    required PlaybackStartPosition startPosition,
+  }) async {
     final playback = await _openWithRetry(
       resolvedTarget,
       timeout: timeout,
+      startPosition: startPosition,
     );
     await _applyStartupPlaybackPreferences(playback.player, resolvedTarget);
     await _applyStartupExternalSubtitle(playback.player, resolvedTarget);
@@ -509,8 +515,9 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     PlaybackTarget target, {
     required DateTime deadline,
     required Completer<String> Function() beginStartupWait,
+    Duration startPosition = Duration.zero,
   }) async {
-    final regularMedia = _buildRegularMpvMedia(target);
+    final regularMedia = _buildRegularMpvMedia(target, start: startPosition);
     if (!target.isIsoLike) {
       _traceWindowsMpv(
         'windows-mpv.open.dispatch',
@@ -572,7 +579,10 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         );
         await _awaitMpvMediaOpen(
           player,
-          Media(plan.mediaUri),
+          Media(
+            plan.mediaUri,
+            start: startPosition > Duration.zero ? startPosition : null,
+          ),
           timeout: _remainingMpvOpenTimeout(deadline),
           startupError: beginStartupWait(),
         );
@@ -638,7 +648,10 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     ]).timeout(timeout);
   }
 
-  Media _buildRegularMpvMedia(PlaybackTarget target) {
+  Media _buildRegularMpvMedia(
+    PlaybackTarget target, {
+    Duration start = Duration.zero,
+  }) {
     final resource = target.streamUrl.trim().isNotEmpty
         ? target.streamUrl.trim()
         : target.actualAddress.trim();
@@ -649,6 +662,10 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     return Media(
       resolvedResource,
       httpHeaders: kIsWeb || target.headers.isEmpty ? null : target.headers,
+      // mpv applies this in its on_load hook and resets it on unload, so the
+      // stream starts at the resume / intro point instead of buffering from
+      // zero and then seeking.
+      start: start > Duration.zero ? start : null,
     );
   }
 
