@@ -777,6 +777,12 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 平台差异：
 
+- Android 原生页按组合方式拆分，不使用 Activity 继承链或依赖整个 Activity 的扩展函数：`NativePlaybackActivity` 保留 Android 生命周期转发及公开 Intent/Result 常量，`NativePlaybackCoordinator` 负责组件装配、生命周期顺序、启动参数与 Player 事件路由。每个有状态组件通过自己的 `Host` 接口声明所需依赖，不持有协调器具体类型；纯策略与数据仓库不依赖 Activity。
+- `NativePlaybackSession` 独占 Exo/带宽实例的创建、释放与原地重建入口，复用既有 renderers、load error、audio 和 buffer policy；`NativePlaybackLaunchController` 管理启动回执、30 秒超时及失败弹窗；`NativePlaybackRecoveryController` 管理 HLS/转码回退与软/硬恢复副作用。各入口保留进度与 playWhenReady 的原有语义。
+- `NativePlaybackEpisodeController` 管理选集弹窗、队列切换和异步解析请求失效；`NativeEpisodeQueue` 保留原序列化协议，`NativeEpisodeResolutionRequest` 检查解析期间当前集、播放目标和待播目标是否仍匹配。解析成功前不释放旧播放器，新 Intent/销毁递增请求序号，过期结果不更新会话。
+- `NativePlaybackRemoteController` 处理按键与退出确认，`NativePlayerTvSeekPolicy` 管理方向键长按计时/重复次数；`NativePlaybackControllerView` 管理标题、焦点、控制栏显隐和 Surface 遮盖；`NativePlaybackSettingsController` 管理设置与临时选项弹窗。onStop 时各弹窗由所属组件清理，原有焦点恢复顺序不变。
+- `NativePlaybackTrackController / NativePlaybackTrackChoices / NativePlaybackTrackModels` 分别负责选轨交互、候选构建/双字幕匹配及轨道模型；`NativePlaybackSubtitleStyleController` 管理全局主/副字幕样式；`NativePlaybackExternalSubtitleController` 管理文件选择、在线搜索返回与挂载，`NativePlaybackSubtitleFiles / NativeSubtitleTiming` 分离 Android 文件访问和纯文本 SRT/VTT/ASS 时间偏移。实际双字幕渲染仍由既有 `NativeDualSubtitleController` 承担。
+- `NativePlaybackRuntimeController` 管理运行循环、watchdog 调度、自动跳过和进度采样；`NativePlaybackDiagnostics` 管理会话性能、带宽与运行日志；`NativePlaybackSystemController` 管理系统会话与画中画。`NativePlaybackMemoryStore` 独立管理 SharedPreferences 快照读写、20 条历史裁剪和剧集字幕/跳过偏好，以显式 key 接收请求并保留强制 commit/普通 apply；`NativePlaybackTarget / NativePlaybackMarkers / NativePlaybackSource / NativePlaybackFormatting` 分别提供目标信息、章节标记、源地址处理和显示格式。
 - Android 原生播放器容器页当前使用原生 `Activity + Media3/ExoPlayer` 承载播放，在 UI 中命名为 `ExoPlayer（原生）`；它会跟随设置选择 `自动 / 硬解优先 / 软解优先` 和独立的音频输出模式
 - Android 原生播放器每次轨道变化都会把音频轨的 MIME、编码标记、声道数、采样率、支持状态和选中状态写入结构化 native 日志；初始化日志同时标记 `audioOutputMode / forcePcmAudioOutput / ffmpegAudioDecoder`
 - Android 原生播放器的字幕菜单不使用 Media3 泛化轨道名称，而由 `NativeSubtitleTrackLabelPolicy` 按内置 MPV 的“标题 · 语言 · 默认/强制”顺序生成；`und / zxx` 不显示为语言，外挂字幕优先显示文件名
@@ -787,6 +793,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - MPV 缓冲预算由 `resolveMpvBufferBudget` 统一计算，并通过 Android `starflow/platform -> getMemoryClassMb` 读取 TV 应用内存等级；低内存 TV 将夸克/激进前向缓冲封顶 `96 MB`、回看封顶 `16 MB`，中高内存和非 TV 继续使用原预算。`resolveMpvRemotePlaybackTuningProfile` 还会比较启动速度与片源码率，达到 `2.5x` 且非高风险容器时进入 `fast-start`，否则保留 standard/high-risk 档
 - MPV 打开重试先由 `classifyMpvOpenFailure` 分类，只有临时网络错误才在统一总超时内重建最多 `3` 次；永久资源/权限/格式错误与未知错误不再无条件重复创建播放器。进程内 `PlaybackHostBandwidthCache` 按主机缓存速度 `10` 分钟，缓存命中后的下一集预检只读取响应状态和 Range 能力
 - 当平滑后的同主机速度低于片源码率 `0.9x` 时，MPV 不再因启动超时或 hard stall 重建同一连接，Exo watchdog 也不重建播放器；两者保留当前连接继续缓冲并给出一次提示
+- Exo 卡顿检测和恢复决策由纯 Kotlin `NativePlaybackWatchdogPolicy` 管理，包含播放/缓冲进展计时、恢复冷却、低带宽等待和软恢复次数；时钟可注入以验证边界。`NativePlaybackRuntimeController` 负责调度和前台/画中画判断，`NativePlaybackRecoveryController` 执行恢复并通过 `NativePlaybackSession` 重建；策略类不持有 Activity 或 Player。15 秒播放停滞、45 秒缓冲停滞、10 秒恢复冷却和最多两次连续软恢复的原有规则不变。
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
 - Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；`/smartstrm_fid/` 只在目标为 MP4/未知格式时执行最多 `64` 字节、约 `1.5s` 的轻量预检，以 MP4 `ftyp` 或 HLS `#EXTM3U` 文件头优先选择 MediaSource。已知 MKV 等其他容器不再产生额外 Range 探测；其他含 `#/%23` 的 SmartStrm 地址仍保留探测。预检失败或文件头不明确时继续按原格式启动；标准 `/smartstrm/` 与 `/smartstrm_*/` 路径在首次解析错误 `3003` 后仍由 `NativePlaybackHlsFallbackPolicy` 保留进度并强制切换 HLS 一次
 - Android 原生启动通过 `buildDeferredNativeEpisodeQueue` 携带当前季的完整未解析队列并保留真实 `currentIndex`，只用已解析目标替换当前条目；原生选集、上一集、下一集和播放结束自动续播统一通过 `starflow/native_playback_resolver` 回调 Flutter，按选中的单集执行 `PlaybackTargetResolver` 和必要的 SmartStrm MP4/HLS 探测。异步解析期间旧播放器不释放，成功后才更新队列条目并切换，失败或会话变化则保留当前视频

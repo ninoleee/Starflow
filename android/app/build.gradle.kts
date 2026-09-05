@@ -72,4 +72,6 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.10.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20180813")
+    testImplementation("org.mockito:mockito-core:5.14.2")
 }

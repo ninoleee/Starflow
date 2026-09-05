@@ -323,6 +323,7 @@
 - 打开播放时会展示轻量等待态
 - 打开播放前会先做一轮轻量启动准备：读取本地续播、按剧跳过规则和启动路由判定，再决定走内置 `MPV`、原生容器页还是系统播放器
 - 播放启动链当前已收口到 `PlaybackStartupCoordinator / PlaybackTargetResolver / PlaybackEngineRouter / PlaybackStartupExecutor`，方便把“目标解析 / 启动准备 / 路由判定 / 执行分支”分开测试与演进
+- Android ExoPlayer 原生页按会话、故障恢复、剧集、控制栏、遥控器、字幕和本地记忆拆分组件；Activity 只保留平台入口，组件边界见 `docs/architecture.md`。本次拆分不改变播放参数、续播存储格式或 Flutter 回调协议。
 - 播放失败最多自动重试 `3` 次
 - 可配置最大打开超时时间
 - 可配置解码模式：
@@ -904,6 +905,15 @@ C:\anaconda3\python.exe tool\generate_brand_assets.py
 ```bash
 flutter test
 ```
+
+Android 原生播放器测试独立运行，覆盖缓冲、音频、字幕选择、卡顿恢复、TV 长按、字幕偏移、章节标记、剧集队列/解析失效和播放记忆：
+
+```bash
+cd android
+./gradlew :app:testDebugUnitTest :app:compileReleaseKotlin -Pandroid-skip-build-dependency-validation=true
+```
+
+这些测试和编译不替代真机播放回归。发布前需检查启动控制栏、TV 焦点和长按、跨集字幕、后台/画中画、音频输出切换、错误重试及退出后续播；APK 仍必须走 `scripts/build_tv_apk.ps1` 及前文的 Android TV 发布规则，不直接交付测试构建产物。
 
 ## Performance Baselines
 

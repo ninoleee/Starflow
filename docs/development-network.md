@@ -138,6 +138,7 @@ Web 页面不能自行指定浏览器系统代理，因此 Web 端该页只展�
 - 新增的 `Quark` 媒体源也复用这套夸克 `Cookie + 目录列举 + 下载直链` 接口；不会引入额外的专用媒体服务器协议
 - 如果开启了“同步删除夸克目录”，并配置了监听的 `WebDAV` 目录，删除命中这些目录下的文件或文件夹时，也会复用同一套夸克目录接口，到当前保存目录里删除匹配到的影片或剧集目录
 - `ExoPlayer（原生）` 与解码/音频输出设置不引入新的网络协议，仍然复用同一条播放地址和请求头链路
+- Android 原生页组件化不新增探测、预加载或重试请求；`NativePlaybackSession` 继续使用原 HTTP 工厂和超时，`NativePlaybackEpisodeController` 继续通过既有 Flutter resolver 解析当前选中集，HLS/转码回退次数、带宽缓存生命周期及请求头不变。`org.json` JVM 实现和 Mockito 仅用于 Android 单元测试，不进入运行时依赖或 APK。
 - “从头播放 / 继续播放”的差异只由本地播放目标中的 `allowResume` 控制，并贯穿地址解析、内置 `MPV`、Android `ExoPlayer` 和 iOS `AVPlayer`；切换这两个入口不会增加预检、测速或其它网络请求
 - 切换版本/资源时可继续复用本地详情元数据缓存，但不同资源身份不会复用旧直链、鉴权 headers 或已解析媒体参数；新资源地址为空时会按自身 `itemId / preferredMediaSourceId / actualAddress` 重新解析，因此不会因为同 TMDB/IMDb/标题缓存命中而直接使用旧资源 URL
 - 剧集字幕选择只按 `seriesKey` 保存本地轨道特征；MPV、Android ExoPlayer 和 iOS AVPlayer 切集后在新一集已有轨道中重新匹配，双字幕分别匹配主、副轨道，不请求服务器查询字幕，也不复用上一集的轨道 ID。它只覆盖同一部剧，不修改全局默认、不影响其他剧或电影；外挂和在线下载字幕文件仍限定当前单集
