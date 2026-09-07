@@ -583,7 +583,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
             viewPadding.right,
             viewPadding.bottom + portraitBottomInset,
           )
-        : null;
+        : viewPadding + const EdgeInsets.only(bottom: 24);
     final bottomInset = isPortrait
         ? fullscreen
             ? portraitFullscreenBottomInset
@@ -656,7 +656,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
             viewPadding.right,
             viewPadding.bottom + portraitBottomInset,
           )
-        : null;
+        : viewPadding + const EdgeInsets.only(bottom: 24);
     final bottomInset = isPortrait ? portraitBottomInset : 0.0;
     return MaterialDesktopVideoControlsThemeData(
       automaticallyImplySkipNextButton: false,
