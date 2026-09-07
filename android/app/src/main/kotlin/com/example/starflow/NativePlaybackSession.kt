@@ -302,6 +302,7 @@ internal class NativePlaybackSession(private val host: Host) {
     }
 
     fun releasePlayer() {
+        host.controllerView.cancelPendingControllerFocus()
         host.launch.cancelPlaybackLaunchTimeout()
         val dualSubtitleWasEnabled = host.subtitles.dualSubtitleController.isEnabled
         host.subtitles.dualSubtitleController.disable()

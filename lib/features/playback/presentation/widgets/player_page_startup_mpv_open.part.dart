@@ -66,6 +66,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
             'attempt': attempt,
             'failureKind': failureKind.name,
             'willRetry': willRetry,
+            if (error is MpvOpenFailure) 'httpStatus': error.httpStatus,
           },
           error: error,
           stackTrace: stackTrace,
@@ -134,13 +135,54 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       }
     }
 
-    Completer<String>? startupError;
+    Completer<MpvOpenFailure>? startupError;
+    MpvStartupErrorGate? startupErrorGate;
+    final httpEvidence = MpvHttpFailureEvidence();
+    final bufferProgress = MpvBufferProgress();
+    Duration? previousPosition;
+    MpvStartupErrorGate createStartupErrorGate() => MpvStartupErrorGate(
+          remote: !kIsWeb && _isLikelyRemotePlaybackTarget(resolvedTarget),
+          readIdleActive: () async {
+            if (!mounted || !identical(_player, player)) return null;
+            final native = player.platform;
+            if (native == null) return null;
+            final String value =
+                await (native as dynamic).getProperty('idle-active');
+            return switch (value) {
+              'yes' => true,
+              'no' => false,
+              _ => null,
+            };
+          },
+          consumeProgress: () {
+            final state = player.state;
+            final progressed = previousPosition != null &&
+                state.position - previousPosition! >=
+                    const Duration(milliseconds: 250);
+            if (previousPosition == null || progressed) {
+              previousPosition = state.position;
+            }
+            final buffered = bufferProgress.observe(
+              buffer: state.buffer,
+              percentage: state.bufferingPercentage,
+            );
+            if (progressed || buffered) httpEvidence.clear();
+            return progressed || buffered;
+          },
+          onConfirmed: (failure) {
+            startupError ??= Completer<MpvOpenFailure>();
+            if (!startupError!.isCompleted) startupError!.complete(failure);
+          },
+        );
     var awaitingStartup = true;
+    var handedOff = false;
     var stage = 'tuning';
     final elapsed = Stopwatch()..start();
     final nativeErrors = <Map<String, Object?>>[];
     final logSubscription = player.stream.log.listen((entry) {
       if (entry.level != 'error' && entry.level != 'fatal') return;
+      httpEvidence.record(entry.prefix, entry.text);
+      if (!awaitingStartup) return;
       if (nativeErrors.length == 12) nativeErrors.removeAt(0);
       nativeErrors.add(summarizeMpvError(entry.prefix, entry.text));
     });
@@ -158,14 +200,21 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         },
       );
       if (awaitingStartup) {
-        startupError ??= Completer<String>();
-        if (!startupError!.isCompleted) startupError!.complete(normalized);
+        startupErrorGate ??= createStartupErrorGate();
+        startupErrorGate!.report(normalized,
+            httpStatus: httpEvidence.statusFor(normalized));
         return;
       }
       if (!mounted || _player != player) {
         return;
       }
-      unawaited(_handleRuntimeMpvError(player, resolvedTarget, normalized));
+      final status = httpEvidence.statusFor(normalized);
+      httpEvidence.clear();
+      unawaited(_handleRuntimeMpvError(
+        player,
+        resolvedTarget,
+        MpvOpenFailure(normalized, httpStatus: status).toString(),
+      ));
     });
 
     try {
@@ -176,10 +225,17 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       _traceWindowsMpv('windows-mpv.open.tuning-applied');
       final deadline = scope.deadline!;
       var firstOpen = true;
-      Completer<String> beginStartupWait() {
+      Completer<MpvOpenFailure> beginStartupWait() {
+        if (!firstOpen) {
+          startupErrorGate?.dispose();
+          startupErrorGate = null;
+          httpEvidence.clear();
+          bufferProgress.reset();
+          previousPosition = null;
+        }
         final completer = firstOpen
-            ? startupError ?? Completer<String>()
-            : Completer<String>();
+            ? startupError ?? Completer<MpvOpenFailure>()
+            : Completer<MpvOpenFailure>();
         firstOpen = false;
         startupError = completer;
         awaitingStartup = true;
@@ -219,7 +275,18 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       );
       ensurePlayerActive();
       awaitingStartup = false;
+      startupErrorGate?.dispose();
+      httpEvidence.clear();
       startupError = null;
+      if ((startupErrorGate?.deferredErrorCount ?? 0) > 0) {
+        appLogInfo(
+          'playback.mpv',
+          'MPV startup recovered without reopening',
+          fields: {
+            'deferredErrorCount': startupErrorGate!.deferredErrorCount,
+          },
+        );
+      }
       _traceWindowsMpv(
         'windows-mpv.open.ready',
         fields: {
@@ -230,17 +297,22 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
           'buffering': player.state.buffering,
         },
       );
+      handedOff = true;
       return _OpenedPlayback(
         player: player,
         videoController: videoController,
         errorSubscription: errorSubscription,
+        logSubscription: logSubscription,
       );
     } catch (error, stackTrace) {
+      startupErrorGate?.dispose();
       if (error is! MpvStartupCancelled && identical(_player, player)) {
         appLogWarning('playback.mpv', 'MPV startup diagnostics', fields: {
           'stage': stage,
           'elapsedMs': elapsed.elapsedMilliseconds,
           'nativeErrors': nativeErrors,
+          'errorConfirmation': startupErrorGate?.confirmation ?? 'none',
+          'deferredErrorCount': startupErrorGate?.deferredErrorCount ?? 0,
         });
       }
       _traceWindowsMpv(
@@ -259,7 +331,8 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       }
       rethrow;
     } finally {
-      await logSubscription.cancel();
+      startupErrorGate?.dispose();
+      if (!handedOff) await logSubscription.cancel();
     }
   }
 
@@ -274,7 +347,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       startPosition: startPosition,
     );
     if (!mounted || !identical(_player, playback.player)) {
-      await playback.errorSubscription.cancel();
+      await playback.cancelSubscriptions();
       throw const _PlayerOpenException('Playback startup cancelled');
     }
     final scope = _startupScope;
@@ -282,7 +355,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       await scope.wait(
           _applyStartupPlaybackPreferences(playback.player, resolvedTarget));
       if (!mounted || !identical(_player, playback.player)) {
-        await playback.errorSubscription.cancel();
+        await playback.cancelSubscriptions();
         throw const _PlayerOpenException('Playback startup cancelled');
       }
       await scope
@@ -294,7 +367,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         _detachOpeningEmbeddedPlayback(
             playback.player, playback.videoController);
       }
-      await playback.errorSubscription.cancel();
+      await playback.cancelSubscriptions();
       if (ownsPlayer) {
         await _enqueuePlayerShutdown(playback.player,
             reason: 'mpv-preferences-failed');
@@ -309,15 +382,15 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     required Duration timeout,
     required String stageLabel,
     Duration? progressBaseline,
-    Future<String>? startupError,
+    Future<MpvOpenFailure>? startupError,
     MpvStartupScope? scope,
   }) async {
     final deadline = DateTime.now().add(timeout);
     final readyCompleter = Completer<void>();
     final subscriptions = <StreamSubscription<dynamic>>[];
     DateTime? readyCandidateSince;
-    final startupFailureFuture = startupError?.then<void>((message) {
-      throw _PlayerOpenException(message);
+    final startupFailureFuture = startupError?.then<void>((failure) {
+      throw failure;
     });
     final baseline = progressBaseline ?? player.state.position;
     final watchdog = MpvStallWatchdog(
@@ -483,7 +556,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     required PlaybackTarget target,
     required Duration timeout,
     VideoController? videoController,
-    Future<String>? startupError,
+    Future<MpvOpenFailure>? startupError,
     required MpvStartupScope scope,
   }) async {
     if (!_shouldRequireMpvFirstFrame(target)) {
@@ -501,8 +574,8 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       await scope.wait(Future.any<void>([
         readinessFuture,
         if (startupError != null)
-          startupError.then<void>((message) {
-            throw _PlayerOpenException(message);
+          startupError.then<void>((failure) {
+            throw failure;
           }),
       ]).timeout(timeout));
     } finally {
@@ -619,7 +692,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     Player player,
     PlaybackTarget target, {
     required DateTime deadline,
-    required Completer<String> Function() beginStartupWait,
+    required Completer<MpvOpenFailure> Function() beginStartupWait,
     Duration startPosition = Duration.zero,
   }) async {
     final scope = _startupScope;
@@ -750,14 +823,14 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     Player player,
     Media media, {
     required Duration timeout,
-    required Completer<String> startupError,
+    required Completer<MpvOpenFailure> startupError,
   }) async {
     final scope = _startupScope;
     scope.checkActive();
     await scope.wait(Future.any<void>([
       player.open(media, play: false),
-      startupError.future.then<void>((message) {
-        throw _PlayerOpenException(message);
+      startupError.future.then<void>((failure) {
+        throw failure;
       }),
     ]).timeout(timeout));
   }

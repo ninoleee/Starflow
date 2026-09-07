@@ -392,6 +392,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
                   target: _resolvedTarget ?? widget.target,
                   speedLabel: _networkEstimate.speedLabel,
                   bufferingProgress: progressSnapshot.data,
+                  showSpinner: isTelevision,
                 ),
               );
             },
@@ -427,6 +428,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
                 child: PlayerStartupOverlay(
                   target: _resolvedTarget ?? widget.target,
                   speedLabel: _networkEstimate.speedLabel,
+                  showSpinner: isTelevision,
                 ),
               ),
             );
@@ -583,14 +585,12 @@ extension _PlayerPageStateControls on _PlayerPageState {
             viewPadding.right,
             viewPadding.bottom + portraitBottomInset,
           )
-        : viewPadding + const EdgeInsets.only(bottom: 24);
+        : viewPadding + const EdgeInsets.only(bottom: 6);
     final bottomInset = isPortrait
         ? fullscreen
             ? portraitFullscreenBottomInset
             : portraitBottomInset
-        : fullscreen
-            ? 42.0
-            : 0.0;
+        : 0.0;
     final enableVerticalGestureControls = _supportsAdaptiveVerticalGestures;
     final seekBarMargin = isPortrait
         ? EdgeInsets.only(
@@ -598,13 +598,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
             right: 16,
             bottom: bottomInset,
           )
-        : fullscreen
-            ? const EdgeInsets.only(
-                left: 16,
-                right: 16,
-                bottom: 42,
-              )
-            : EdgeInsets.zero;
+        : EdgeInsets.zero;
     return MaterialVideoControlsThemeData(
       automaticallyImplySkipNextButton: false,
       automaticallyImplySkipPreviousButton: false,
@@ -627,8 +621,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
       topButtonBar: materialTopButtonBar,
       topButtonBarMargin: EdgeInsets.fromLTRB(0, isPortrait ? 12 : 0, 16, 0),
       bottomButtonBarMargin: EdgeInsets.only(
-        left: 16,
-        right: 8,
+        left: isPortrait ? 16 : 0,
+        right: isPortrait ? 8 : 0,
         bottom: bottomInset,
       ),
       seekBarMargin: seekBarMargin,
@@ -656,7 +650,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
             viewPadding.right,
             viewPadding.bottom + portraitBottomInset,
           )
-        : viewPadding + const EdgeInsets.only(bottom: 24);
+        : viewPadding + const EdgeInsets.only(bottom: 6);
     final bottomInset = isPortrait ? portraitBottomInset : 0.0;
     return MaterialDesktopVideoControlsThemeData(
       automaticallyImplySkipNextButton: false,
@@ -664,12 +658,17 @@ extension _PlayerPageStateControls on _PlayerPageState {
       padding: controlsPadding,
       topButtonBar: desktopTopButtonBar,
       topButtonBarMargin: EdgeInsets.fromLTRB(0, isPortrait ? 12 : 0, 16, 0),
-      bottomButtonBarMargin: EdgeInsets.fromLTRB(16, 0, 16, bottomInset),
+      bottomButtonBarMargin: EdgeInsets.fromLTRB(
+        isPortrait ? 16 : 0,
+        0,
+        isPortrait ? 16 : 0,
+        bottomInset,
+      ),
       bottomButtonBar: _buildAdaptiveDesktopBottomButtonBar(),
       seekBarMargin: EdgeInsets.fromLTRB(
-        16,
+        isPortrait ? 16 : 0,
         0,
-        16,
+        isPortrait ? 16 : 0,
         bottomInset,
       ),
     );

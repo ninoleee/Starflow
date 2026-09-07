@@ -68,7 +68,6 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
-            android:background="@color/native_player_overlay_bar"
             android:paddingStart="9dp"
             android:paddingTop="5dp"
             android:paddingEnd="9dp"
@@ -121,6 +120,8 @@
             android:layout_marginStart="18dp"
             android:background="@drawable/native_player_play_pause_background"
             android:contentDescription="@string/exo_controls_play_description"
+            android:focusable="false"
+            android:focusableInTouchMode="false"
             android:scaleType="centerInside"
             android:src="@drawable/exo_styled_controls_play" />
 

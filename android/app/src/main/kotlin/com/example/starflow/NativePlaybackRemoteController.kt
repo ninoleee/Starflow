@@ -27,26 +27,15 @@ internal class NativePlaybackRemoteController(private val host: Host) {
     }
 
     private val seekPolicy = NativePlayerTvSeekPolicy()
+    private val handledPlaybackKeys = mutableMapOf<Pair<Int, Int>, Long>()
+
+    fun resetInputState() {
+        handledPlaybackKeys.clear()
+        resetTvSeekHold()
+    }
 
     fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val isConfirmKey = event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
-            event.keyCode == KeyEvent.KEYCODE_ENTER ||
-            event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER ||
-            event.keyCode == KeyEvent.KEYCODE_BUTTON_A
-        if (
-            isConfirmKey && NativePlayerTvFocusPolicy.shouldToggleFromProgress(
-                isTelevision = host.isTelevisionDevice,
-                progressFocused = host.controllerView.progressTimeBar?.hasFocus() == true,
-                overlayVisible = host.externalSubtitles.subtitleSearchActive ||
-                    host.settings.isOverlayDialogVisible(),
-            )
-        ) {
-            // Keep the time bar focused and consume the whole key press, including repeats.
-            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                if (host.session.togglePlayback()) {
-                    host.playerView.showController()
-                }
-            }
+        if (handlePlaybackKey(event)) {
             return true
         }
         if (event.action != KeyEvent.ACTION_DOWN) {
@@ -69,28 +58,13 @@ internal class NativePlaybackRemoteController(private val host: Host) {
                     !host.externalSubtitles.subtitleSearchActive &&
                         host.playerView.isControllerFullyVisible
                 ) {
-                    host.controllerView.pendingControllerFocusTarget = ControllerFocusTarget.PLAYER
-                    host.playerView.hideController()
+                    host.controllerView.hideController()
                     host.playerView.requestFocus()
                     return true
                 }
                 if (!host.externalSubtitles.subtitleSearchActive && host.isTelevisionDevice) {
                     showExitConfirmation()
                     return true
-                }
-            }
-
-            KeyEvent.KEYCODE_DPAD_CENTER,
-            KeyEvent.KEYCODE_ENTER,
-            KeyEvent.KEYCODE_NUMPAD_ENTER,
-            KeyEvent.KEYCODE_BUTTON_A -> {
-                if (host.isTelevisionDevice && !host.playerView.isControllerFullyVisible) {
-                    if (host.session.togglePlayback()) {
-                        host.controllerView.showControllerForRemoteFocus(
-                            ControllerFocusTarget.PRIMARY
-                        )
-                        return true
-                    }
                 }
             }
 
@@ -136,47 +110,6 @@ internal class NativePlaybackRemoteController(private val host: Host) {
                 }
             }
 
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
-            KeyEvent.KEYCODE_HEADSETHOOK,
-            KeyEvent.KEYCODE_SPACE -> {
-                if (host.session.togglePlayback()) {
-                    host.controllerView.showControllerForRemoteFocus(
-                        if (host.isTelevisionDevice) {
-                            ControllerFocusTarget.PLAYER
-                        } else {
-                            ControllerFocusTarget.PRIMARY
-                        }
-                    )
-                    return true
-                }
-            }
-
-            KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                if (host.session.setPlayWhenReady(true)) {
-                    host.controllerView.showControllerForRemoteFocus(
-                        if (host.isTelevisionDevice) {
-                            ControllerFocusTarget.PLAYER
-                        } else {
-                            ControllerFocusTarget.PRIMARY
-                        }
-                    )
-                    return true
-                }
-            }
-
-            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                if (host.session.setPlayWhenReady(false)) {
-                    host.controllerView.showControllerForRemoteFocus(
-                        if (host.isTelevisionDevice) {
-                            ControllerFocusTarget.PLAYER
-                        } else {
-                            ControllerFocusTarget.PRIMARY
-                        }
-                    )
-                    return true
-                }
-            }
-
             KeyEvent.KEYCODE_MENU,
             KeyEvent.KEYCODE_INFO,
             KeyEvent.KEYCODE_SETTINGS -> {
@@ -197,6 +130,59 @@ internal class NativePlaybackRemoteController(private val host: Host) {
         return false
     }
 
+    private fun handlePlaybackKey(event: KeyEvent): Boolean {
+        val isConfirmKey = event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+            event.keyCode == KeyEvent.KEYCODE_ENTER ||
+            event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER ||
+            event.keyCode == KeyEvent.KEYCODE_BUTTON_A
+        val isMediaKey = event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+            event.keyCode == KeyEvent.KEYCODE_HEADSETHOOK ||
+            event.keyCode == KeyEvent.KEYCODE_SPACE ||
+            event.keyCode == KeyEvent.KEYCODE_MEDIA_PLAY ||
+            event.keyCode == KeyEvent.KEYCODE_MEDIA_PAUSE
+        if (!isConfirmKey && !isMediaKey) return false
+
+        // Ownership lasts until key-up, even if the first press changes focus or opens chrome.
+        val key = event.deviceId to event.keyCode
+        if (handledPlaybackKeys[key] == event.downTime) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                handledPlaybackKeys.remove(key)
+            }
+            return true
+        }
+        if (event.action != KeyEvent.ACTION_DOWN) return false
+        if (
+            host.externalSubtitles.subtitleSearchActive ||
+                host.settings.isOverlayDialogVisible() ||
+                exitConfirmationDialog?.isShowing == true
+        ) {
+            return false
+        }
+        val progressFocused = host.controllerView.progressTimeBar?.hasFocus() == true
+        val progressPlaybackControl = NativePlayerTvFocusPolicy.shouldToggleFromProgress(
+            host.isTelevisionDevice, progressFocused, overlayVisible = false,
+        )
+        if (isConfirmKey && !host.isTelevisionDevice) {
+            return false
+        }
+        handledPlaybackKeys[key] = event.downTime
+        if (event.repeatCount != 0 || event.isCanceled) return true
+
+        val handled = when (event.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY -> host.session.setPlayWhenReady(true)
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> host.session.setPlayWhenReady(false)
+            else -> host.session.togglePlayback()
+        }
+        if (handled) {
+            if (progressPlaybackControl) {
+                host.playerView.showController()
+            } else {
+                host.controllerView.showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
+            }
+        }
+        return true
+    }
+
     private fun showExitConfirmation() {
         val existingDialog = exitConfirmationDialog
         if (existingDialog?.isShowing == true) {
@@ -213,12 +199,7 @@ internal class NativePlaybackRemoteController(private val host: Host) {
                 .apply {
                     setOnDismissListener {
                         exitConfirmationDialog = null
-                        if (!host.activity.isFinishing) {
-                            host.playerView.post {
-                                host.controllerView.enterImmersiveMode()
-                                host.playerView.requestFocus()
-                            }
-                        }
+                        host.controllerView.restoreControllerFocusIfNeeded(ControllerFocusTarget.PLAYER)
                     }
                     show()
                 }

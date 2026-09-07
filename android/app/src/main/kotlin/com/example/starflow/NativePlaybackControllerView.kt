@@ -2,6 +2,7 @@ package com.example.starflow
 
 import android.app.Activity
 import android.os.Build
+import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -10,7 +11,10 @@ import androidx.media3.ui.DefaultTimeBar
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.R as Media3UiR
 
-internal class NativePlaybackControllerView(private val host: Host) {
+internal class NativePlaybackControllerView(
+    private val host: Host,
+    private val now: () -> Long = SystemClock::uptimeMillis,
+) {
     interface Host {
         val remote: NativePlaybackRemoteController
         val session: NativePlaybackSession
@@ -25,6 +29,11 @@ internal class NativePlaybackControllerView(private val host: Host) {
     }
 
     var pendingControllerFocusTarget = ControllerFocusTarget.NONE
+        private set
+    private var focusRequestsAllowed = true
+    private var focusDeadlineMs = 0L
+    private val applyFocusRunnable = Runnable { applyPendingControllerFocus() }
+    private var restoreFocusRunnable: Runnable? = null
 
     var progressTimeBar: DefaultTimeBar? = null
 
@@ -90,7 +99,7 @@ internal class NativePlaybackControllerView(private val host: Host) {
         if (host.externalSubtitles.subtitleSearchActive || host.settings.isOverlayDialogVisible()) {
             return
         }
-        host.playerView.hideController()
+        hideController()
         host.playerView.requestFocus()
     }
 
@@ -114,8 +123,11 @@ internal class NativePlaybackControllerView(private val host: Host) {
                 if (visibility == View.VISIBLE) {
                     applyPendingControllerFocus()
                     updateProgressMarkers()
-                } else if (host.isTelevisionDevice && !host.settings.isOverlayDialogVisible()) {
-                    host.playerView.requestFocus()
+                } else {
+                    cancelPendingControllerFocus()
+                    if (host.isTelevisionDevice && canRequestControllerFocus()) {
+                        host.playerView.requestFocus()
+                    }
                 }
             }
         )
@@ -159,7 +171,7 @@ internal class NativePlaybackControllerView(private val host: Host) {
             configureHorizontalFocusChain(intArrayOf(R.id.native_back))
         }
         if (host.isTelevisionDevice) {
-            configureDisabledFocusability(NativePlayerTvFocusPolicy.removedBottomRightControlIds)
+            configureDisabledFocusability(NativePlayerTvFocusPolicy.nonFocusableControlIds)
             host.playerView.requestFocus()
         }
     }
@@ -231,26 +243,31 @@ internal class NativePlaybackControllerView(private val host: Host) {
     }
 
     fun showControllerForRemoteFocus(target: ControllerFocusTarget) {
+        cancelPendingControllerFocus()
+        if (!canRequestControllerFocus()) return
         pendingControllerFocusTarget = target
+        focusDeadlineMs = now() + 1_000L
         host.playerView.showController()
-        if (host.isTelevisionDevice) {
-            host.playerView.post { applyPendingControllerFocus() }
-        }
+        applyPendingControllerFocus()
     }
 
     fun applyPendingControllerFocus() {
-        if (!host.isTelevisionDevice) {
-            pendingControllerFocusTarget = ControllerFocusTarget.NONE
+        host.playerView.removeCallbacks(applyFocusRunnable)
+        if (pendingControllerFocusTarget == ControllerFocusTarget.NONE) {
             return
         }
-        if (pendingControllerFocusTarget == ControllerFocusTarget.NONE) {
+        if (
+            !host.isTelevisionDevice || !canRequestControllerFocus() ||
+                !host.playerView.isAttachedToWindow || now() >= focusDeadlineMs
+        ) {
+            cancelPendingControllerFocus()
             return
         }
         if (
             !host.playerView.isControllerFullyVisible &&
                 pendingControllerFocusTarget != ControllerFocusTarget.PLAYER
         ) {
-            host.playerView.post { applyPendingControllerFocus() }
+            host.playerView.postDelayed(applyFocusRunnable, 50L)
             return
         }
 
@@ -318,8 +335,30 @@ internal class NativePlaybackControllerView(private val host: Host) {
         if (!handled) {
             host.playerView.requestFocus()
         }
-        pendingControllerFocusTarget = ControllerFocusTarget.NONE
+        cancelPendingControllerFocus()
     }
+
+    fun cancelPendingControllerFocus() {
+        pendingControllerFocusTarget = ControllerFocusTarget.NONE
+        focusDeadlineMs = 0L
+        host.playerView.removeCallbacks(applyFocusRunnable)
+        restoreFocusRunnable?.let { host.playerView.removeCallbacks(it) }
+        restoreFocusRunnable = null
+    }
+
+    fun setFocusRequestsAllowed(allowed: Boolean) {
+        focusRequestsAllowed = allowed
+        if (!allowed) cancelPendingControllerFocus()
+    }
+
+    fun hideController() {
+        cancelPendingControllerFocus()
+        host.playerView.hideController()
+    }
+
+    private fun canRequestControllerFocus(): Boolean =
+        focusRequestsAllowed && !host.activity.isFinishing && !host.activity.isDestroyed &&
+            !host.externalSubtitles.subtitleSearchActive && !host.settings.isOverlayDialogVisible()
 
     fun requestFocusForAny(ids: IntArray): Boolean {
         ids.forEach { id ->
@@ -335,13 +374,25 @@ internal class NativePlaybackControllerView(private val host: Host) {
     }
 
     fun restoreControllerFocusIfNeeded(target: ControllerFocusTarget) {
-        if (host.activity.isFinishing || host.externalSubtitles.subtitleSearchActive) {
+        cancelPendingControllerFocus()
+        if (!focusRequestsAllowed || host.activity.isFinishing || host.activity.isDestroyed) {
             return
         }
-        host.playerView.post {
-            enterImmersiveMode()
-            showControllerForRemoteFocus(target)
+        val callback = object : Runnable {
+            override fun run() {
+                if (restoreFocusRunnable !== this) return
+                restoreFocusRunnable = null
+                if (!canRequestControllerFocus() || !host.playerView.isAttachedToWindow) return
+                enterImmersiveMode()
+                if (target == ControllerFocusTarget.PLAYER) {
+                    host.playerView.requestFocus()
+                } else {
+                    showControllerForRemoteFocus(target)
+                }
+            }
         }
+        restoreFocusRunnable = callback
+        host.playerView.post(callback)
     }
 
     fun enterImmersiveMode() {
@@ -366,7 +417,7 @@ internal class NativePlaybackControllerView(private val host: Host) {
     }
 
     fun hideVideoSurfaceForOverlay() {
-        host.playerView.hideController()
+        hideController()
         host.playerView.visibility = View.INVISIBLE
         host.playerView.videoSurfaceView?.visibility = View.INVISIBLE
     }
@@ -375,7 +426,7 @@ internal class NativePlaybackControllerView(private val host: Host) {
         host.playerView.visibility = View.VISIBLE
         host.playerView.videoSurfaceView?.visibility = View.VISIBLE
         if (host.isTelevisionDevice && host.session.player?.playWhenReady == true) {
-            host.playerView.hideController()
+            hideController()
             host.playerView.requestFocus()
         } else {
             showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)

@@ -9,27 +9,30 @@ class PlayerStartupOverlay extends StatelessWidget {
     required this.target,
     required this.speedLabel,
     this.bufferingProgress,
+    this.showSpinner = true,
   });
 
   final PlaybackTarget target;
   final String speedLabel;
   final double? bufferingProgress;
+  final bool showSpinner;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        const Center(
-          child: SizedBox(
-            width: 28,
-            height: 28,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.4,
-              color: Colors.white,
+        if (showSpinner)
+          const Center(
+            child: SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: Colors.white,
+              ),
             ),
           ),
-        ),
         Positioned(
           top: MediaQuery.paddingOf(context).top + kToolbarHeight + 12,
           right: 18,

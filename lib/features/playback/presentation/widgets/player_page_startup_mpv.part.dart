@@ -186,11 +186,12 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       );
 
       if (!_isCurrentStartup(generation)) {
-        await playback.errorSubscription.cancel();
+        await playback.cancelSubscriptions();
         return;
       }
 
       _playerErrorSubscription = playback.errorSubscription;
+      _playerLogSubscription = playback.logSubscription;
       _playerPlayingSubscription = playback.player.stream.playing.listen((
         playing,
       ) {

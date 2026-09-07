@@ -18,10 +18,11 @@ internal object NativePlayerTvFocusPolicy {
         overlayVisible: Boolean,
     ): Boolean = isTelevision && progressFocused && !overlayVisible
 
-    val focusableControlIds: IntArray = intArrayOf(Media3UiR.id.exo_play_pause)
-    val primaryFocusOrder: IntArray = intArrayOf(Media3UiR.id.exo_play_pause)
-    val removedBottomRightControlIds: IntArray =
+    val focusableControlIds: IntArray = intArrayOf(Media3UiR.id.exo_progress)
+    val primaryFocusOrder: IntArray = intArrayOf(Media3UiR.id.exo_progress)
+    val nonFocusableControlIds: IntArray =
         intArrayOf(
+            Media3UiR.id.exo_play_pause,
             Media3UiR.id.exo_subtitle,
             R.id.native_audio_track_button,
             R.id.native_playback_settings,

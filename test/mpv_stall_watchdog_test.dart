@@ -3,6 +3,80 @@ import 'package:starflow/features/playback/presentation/widgets/mpv_stall_watchd
 
 void main() {
   group('MpvStallWatchdog', () {
+    test('growing buffer prevents recovery while playback is waiting', () {
+      final watchdog = MpvStallWatchdog();
+      final base = DateTime(2026, 9, 7);
+      for (var i = 0; i <= 8; i++) {
+        final result = watchdog.evaluate(
+          _snapshot(buffer: Duration(seconds: i * 2)),
+          now: base.add(Duration(seconds: i * 5)),
+        );
+        expect(result.triggered, isFalse);
+      }
+      final stalled = watchdog.evaluate(
+        _snapshot(buffer: const Duration(seconds: 16)),
+        now: base.add(const Duration(seconds: 52)),
+      );
+      expect(stalled.level, MpvStallRecoveryLevel.hard);
+      expect(stalled.triggered, isTrue);
+    });
+
+    test('percentage growth prevents recovery but repeated values do not', () {
+      final watchdog = MpvStallWatchdog();
+      final base = DateTime(2026, 9, 7);
+      watchdog.evaluate(_snapshot(bufferingPercentage: 10), now: base);
+      expect(
+          watchdog
+              .evaluate(_snapshot(bufferingPercentage: 20),
+                  now: base.add(const Duration(seconds: 12)))
+              .triggered,
+          isFalse);
+      watchdog.evaluate(_snapshot(bufferingPercentage: 19),
+          now: base.add(const Duration(seconds: 18)));
+      expect(
+          watchdog
+              .evaluate(_snapshot(bufferingPercentage: 20),
+                  now: base.add(const Duration(seconds: 24)))
+              .level,
+          MpvStallRecoveryLevel.hard);
+    });
+
+    test(
+        'sub-threshold position ticks accumulate and backward seek resets buffer',
+        () {
+      final watchdog = MpvStallWatchdog();
+      final base = DateTime(2026, 9, 7);
+      for (var i = 0; i < 50; i++) {
+        expect(
+            watchdog
+                .evaluate(
+                    _snapshot(
+                        position: Duration(milliseconds: 8000 + i * 100),
+                        buffer: const Duration(seconds: 60)),
+                    now: base.add(Duration(milliseconds: i * 500)))
+                .triggered,
+            isFalse);
+      }
+      expect(
+          watchdog
+              .evaluate(
+                  _snapshot(
+                      position: const Duration(seconds: 2),
+                      buffer: const Duration(seconds: 3)),
+                  now: base.add(const Duration(seconds: 26)))
+              .triggered,
+          isFalse);
+      expect(
+          watchdog
+              .evaluate(
+                  _snapshot(
+                      position: const Duration(seconds: 2),
+                      buffer: const Duration(seconds: 4)),
+                  now: base.add(const Duration(seconds: 38)))
+              .triggered,
+          isFalse);
+    });
+
     test('triggers soft then hard recovery when buffering stalls', () {
       final watchdog = MpvStallWatchdog(
         config: const MpvStallWatchdogConfig(
@@ -155,6 +229,7 @@ MpvPlaybackSnapshot _snapshot({
   bool playing = true,
   bool buffering = true,
   double bufferingPercentage = 56.0,
+  Duration buffer = Duration.zero,
 }) {
   return MpvPlaybackSnapshot(
     position: position,
@@ -162,5 +237,6 @@ MpvPlaybackSnapshot _snapshot({
     playing: playing,
     buffering: buffering,
     bufferingPercentage: bufferingPercentage,
+    buffer: buffer,
   );
 }

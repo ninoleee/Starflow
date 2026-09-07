@@ -24,6 +24,7 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
 import 'package:starflow/features/playback/application/mpv_startup_scope.dart';
+import 'package:starflow/features/playback/application/mpv_buffer_progress.dart';
 import 'package:starflow/features/playback/application/playback_subtitle_session_preference.dart';
 import 'package:starflow/features/playback/application/native_playback_episode_queue_policy.dart';
 import 'package:starflow/features/playback/application/native_playback_media_type.dart';
@@ -136,6 +137,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Player? _player;
   VideoController? _videoController;
   StreamSubscription<String>? _playerErrorSubscription;
+  StreamSubscription<PlayerLog>? _playerLogSubscription;
   StreamSubscription<bool>? _playerPlayingSubscription;
   StreamSubscription<bool>? _playerCompletedSubscription;
   StreamSubscription<Duration>? _playerPositionSubscription;
@@ -411,6 +413,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   Future<void> _cancelPlayerSubscriptions() async {
     final errorSubscription = _playerErrorSubscription;
+    final logSubscription = _playerLogSubscription;
     final playingSubscription = _playerPlayingSubscription;
     final completedSubscription = _playerCompletedSubscription;
     final positionSubscription = _playerPositionSubscription;
@@ -422,6 +425,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         _playerBufferingPercentageSubscription;
 
     _playerErrorSubscription = null;
+    _playerLogSubscription = null;
     _playerPlayingSubscription = null;
     _playerCompletedSubscription = null;
     _playerPositionSubscription = null;
@@ -432,6 +436,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _playerBufferingPercentageSubscription = null;
 
     await errorSubscription?.cancel();
+    await logSubscription?.cancel();
     await playingSubscription?.cancel();
     await completedSubscription?.cancel();
     await positionSubscription?.cancel();
@@ -1061,11 +1066,18 @@ class _OpenedPlayback {
     required this.player,
     required this.videoController,
     required this.errorSubscription,
+    required this.logSubscription,
   });
 
   final Player player;
   final VideoController videoController;
   final StreamSubscription<String> errorSubscription;
+  final StreamSubscription<PlayerLog> logSubscription;
+
+  Future<void> cancelSubscriptions() async {
+    await errorSubscription.cancel();
+    await logSubscription.cancel();
+  }
 }
 
 enum _MpvIsoDiscKind {

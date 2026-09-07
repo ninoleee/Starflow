@@ -738,7 +738,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
   - 在线字幕搜索
   - Android 原生音轨/字幕选择、播放中音频输出切换、外挂字幕加载与外挂字幕偏移
   - Android 原生播放设置弹窗一级只保留本剧跳过片头片尾、音轨、字幕和选择剧集；播放速度、音频输出、主字幕大小、主/副字幕位置、副字幕大小、在线查找字幕、加载外部字幕和字幕偏移全部收进列表最下方的“更多”二级弹窗
-  - Android TV 原生控制层只让播放/暂停参与遥控器焦点；右下角字幕、音轨和更多三个按钮仍保留显示与点击，但不再进入方向键焦点链，字幕/音轨/设置改用菜单键、字幕键等电视快捷键打开，避免底部右侧控件抢焦点
+  - Android TV 原生控制层只让进度条参与遥控器焦点；播放/暂停及右下角字幕、音轨和更多按钮仍保留显示与点击，但不进入方向键焦点链。确定键由原生遥控器处理层直接切换播放状态，字幕/音轨/设置改用菜单键、字幕键等电视快捷键打开
   - Android 原生播放器的主字幕大小可在“更多”里按 `20–78号` 调整，主/副位置和副字幕大小按百分比调整；改完立即重新套用 `NativeSubtitleStylePolicy / NativeDualSubtitleController`，并通过原生播放回调调用 Flutter `SettingsController` 的字幕样式窄保存入口。设置页、MPV 与 ExoPlayer 因而共用同一份全局值，不再保留原生会话临时覆盖
   - Android 原生音轨与字幕轨选择使用单选即应用的轻量弹窗；点选轨道或“关闭”会立即更新 Media3 `TrackSelectionParameters` 并关闭弹窗，不保留额外的确定步骤
 - Android `NativePlaybackActivity` 使用 `Theme.AppCompat.NoActionBar` 派生的全屏黑色主题；音轨、字幕轨与音频输出都使用原生单选对话框，选中即应用，不依赖额外确定按钮
@@ -812,13 +812,18 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android 原生播放器的跨集字幕恢复由 `NativeSubtitleSessionPreferencePolicy` 匹配新的 `TrackSelectionOverride`；双字幕恢复成功后再重新配置 `NativeDualSubtitleController` 的主/副路由，不保存上一集的 Media3 group 或 override 实例
 - 非 Web 内置 MPV 使用原生 `sid / secondary-sid` 选择两条分离的内封文本轨，同时向 libmpv 写入 `sub-pos / secondary-sub-pos / secondary-sub-scale`；由于当前 `libass=false`，画面上的主/副字幕由 Starflow 自定义 Flutter 叠层分别渲染，保证窗口态与全屏态都使用独立位置和字号。跨集时由 `PlaybackSubtitleSessionPreference` 分别匹配新的 `sid / secondary-sid`。图片字幕和临时外挂字幕不进入特殊模式。播放设置一级通过“更多”打开二级页，二级页同时提供字幕布局、后台播放、手势、卡顿恢复和性能调优开关
 - 非 Web MPV 控制层左上角以返回按钮作为第一个控件，不保留人为前置间距；其右侧网速标签使用轻量轮询读取 libmpv `cache-speed`，展示当前缓存下层 I/O 读取速度。桌面 / 手机 Adaptive 控制层和 TV chrome 复用同一排列与网速组件
-- 非 TV MPV 的 Material / MaterialDesktop Adaptive 控制层在横屏时使用系统 `viewPadding` 加 `24` 个逻辑像素的底部留白，让进度条与底栏整体上移；普通和全屏主题复用同一规则，竖屏边距及 TV chrome 不变。
+- 非 TV MPV 的 Material / MaterialDesktop Adaptive 控制层在横屏普通模式与全屏模式统一使用系统 `viewPadding` 加 `6` 个逻辑像素的底部间距；横屏底栏和进度条的额外 margin 均为 `0`，不再叠加全屏专用底部留白。竖屏边距及 TV chrome 不变。
+- 视频控制层创建后，非 TV MPV 的 `PlayerStartupOverlay` 通过 `showSpinner: false` 保留启动/缓冲指标但不重复绘制圆圈，缓冲圆圈由 Adaptive 控制层负责；播放器创建前及 TV 保留应用叠层圆圈。
 - MPV 缓冲预算由 `resolveMpvBufferBudget` 统一计算，并通过 Android `starflow/platform -> getMemoryClassMb` 读取 TV 应用内存等级；低内存 TV 将夸克/激进前向缓冲封顶 `96 MB`、回看封顶 `16 MB`，中高内存和非 TV 继续使用原预算。`resolveMpvRemotePlaybackTuningProfile` 还会比较启动速度与片源码率，达到 `2.5x` 且非高风险容器时进入 `fast-start`，否则保留 standard/high-risk 档
 - MPV 打开重试先由 `classifyMpvOpenFailure` 分类，只有临时网络错误才在统一总超时内重建最多 `3` 次；永久资源/权限/格式错误与未知错误不再无条件重复创建播放器。进程内 `PlaybackHostBandwidthCache` 按主机缓存实际播放速度 `10` 分钟，首次播放与切集都只读缓存，不额外发起 Range 预检或测速
 - 启动编排通过 `_startupGeneration` 在退出或替换会话后使旧异步任务失效，并在解析、打开和重试边界校验；打开失败只清理仍由当前打开链持有的播放器，已 detach 的实例交给退出/替换路径释放。单次打开从开流到首帧、稳定播放共用启动错误信号，不在中间重置；TCP `ffurl_read` 读取失败纳入有限临时网络重试。
 - MPV 的 `_initialize` 在地址解析和本地准备后直接进入 `_openEmbeddedPlayback / _openWithRetry`，移除 `_prepareStartupDiagnostics`、预检拦截、预检 Range 风险状态和预检测速统计。`resolveMpvRemotePlaybackTuningProfile` 的可选 `estimatedMegabitsPerSecond` 来自同主机缓存；缺失时按片源元数据选标准/高风险档，后续经本地 `cache-speed` 更新缓存。`PlaybackRemotePreflight` 仅继续供原生 ExoPlayer 的 SmartStrm 格式探测使用。`playback.startup / playback.mpv` 记录直接打开、启动异常与重试决定，不依赖静音的旧 trace helper
 - 当平滑后的同主机速度低于片源码率 `0.9x` 时，MPV 运行期 hard stall 与 Exo watchdog 保留当前连接继续缓冲并提示；MPV 已失败并释放的开流不受该历史速度门槛限制，仍按错误分类有限重试。
-- `MpvStartupScope` 统一启动等待的取消信号和截止时间，覆盖调参、开流、首帧、稳定播放、偏好应用及退避；首帧元数据订阅在取消/错误/超时后释放。取消等待不取消底层原生操作，释放仍串行。启动阶段的所有 error 事件只交给启动流程，ISO 换候选时才重置错误信号。单次打开订阅原生 log，最多保留 12 条白名单摘要，失败写结构化本地日志并解除订阅，不保存原始文本。`buildMpvRecoveryTarget` 保留当前集身份并启用续播，两个运行期重建入口统一使用它；恢复成功需要实际进度前进。
+- `MpvStartupScope` 统一启动等待的取消信号和截止时间，覆盖调参、开流、首帧、稳定播放、偏好应用及退避；首帧元数据订阅在取消/错误/超时后释放。取消等待不取消底层原生操作，释放仍串行。启动阶段的 error 事件只交给启动流程，ISO 换候选重置错误信号及 HTTP/缓冲证据。单次打开最多保留 12 条原生错误白名单摘要，失败写结构化本地日志；成功后原生 log 订阅随 `_OpenedPlayback` 移交给页面以继续识别运行期 HTTP 错误，与 error 订阅一并在失败/退出/替换时释放。`buildMpvRecoveryTarget` 保留当前集身份并启用续播，恢复成功需要实际进度前进。
+- `MpvStartupErrorGate` 处理 media_kit 从原生日志转发的启动错误：非 Web 远程临时错误每 `250ms` 查询本地 `idle-active`，连续两次为真或错误后连续 `15s` 无播放/缓冲进展时完成 `MpvOpenFailure` 信号。每次属性查询最多 `250ms`，连续六次不可用则失败；持续进展仍受共享启动截止时间限制。永久/未知及本地/Web 错误即时处理。成功、失败、退出和 ISO 换候选均清理 gate；日志保留白名单摘要、延后错误数和确认方式。
+- `mpv_tuning_policy.dart` 提供 HTTP 重连参数、状态解析和 typed `MpvOpenFailure` 分类。HTTP/HTTPS 的 `stream-lavf-o` 与 `demuxer-lavf-o` 均设置连接失败及 `408/425/429/5xx` 的有限重连，通过 `demuxer-lavf-propagate-opts=yes` 传入 HLS 子请求；状态列表采用 mpv `%15%` 长度引用，不能用反斜杠转义逗号。FFmpeg 6 的 `reconnect_delay_max=7` 对连续连接失败形成 `0/1/3/7s` 退避，正常 EOF 和不可 seek 响应重放均关闭；应用层仍最多三次创建及原总超时。
+- `MpvHttpFailureEvidence` 只在内存中短暂关联 FFmpeg/stream/lavf 的真实 HTTP 状态和通用网络错误，证据最多有效 `1s`，已知不同 URL 不关联，进展及换候选后清除；不写出 URL/鉴权信息。HTTP 状态优先参与启动与运行期永久/临时分类，下一集预解析地址只在 `401/403/404/410` 时刷新一次。
+- `MpvBufferProgress` 以缓冲位置累计增加 `1s` 或百分比增加 `1` 个百分点记录高水位，避免往复抖动无限保活；`MpvStallWatchdog` 同时观察实际播放与缓冲进展，后退 seek 清理高水位，细小播放步进累计判定。启用 HTTP 重连的片源采用 `15s / 30s` 软/硬停滞阈值，给底层有限退避留出时间。远程运行期自恢复窗口为 `15s`，合并期间的临时错误并暂停另一条 watchdog 恢复链；窗口结束仍有近期缓冲进展且 watchdog 启用时交回监测，不记为恢复成功、不消耗主动恢复次数；永久错误可立即中止等待。
 - Exo 卡顿检测和恢复决策由纯 Kotlin `NativePlaybackWatchdogPolicy` 管理，包含播放/缓冲进展计时、恢复冷却、低带宽等待和软恢复次数；时钟可注入以验证边界。`NativePlaybackRuntimeController` 负责调度和前台/画中画判断，`NativePlaybackRecoveryController` 执行恢复并通过 `NativePlaybackSession` 重建；策略类不持有 Activity 或 Player。15 秒播放停滞、45 秒缓冲停滞、10 秒恢复冷却和最多两次连续软恢复的原有规则不变。
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
 - Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；`/smartstrm_fid/` 只在目标为 MP4/未知格式时执行最多 `64` 字节、约 `1.5s` 的轻量预检，以 MP4 `ftyp` 或 HLS `#EXTM3U` 文件头优先选择 MediaSource。已知 MKV 等其他容器不再产生额外 Range 探测；其他含 `#/%23` 的 SmartStrm 地址仍保留探测。预检失败或文件头不明确时继续按原格式启动；标准 `/smartstrm/` 与 `/smartstrm_*/` 路径在首次解析错误 `3003` 后仍由 `NativePlaybackHlsFallbackPolicy` 保留进度并强制切换 HLS 一次
@@ -835,9 +840,12 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 系统媒体会话发布先用位置、时长、播放/缓冲状态和队列边界这些便宜字段判断是否需要发布，命中后才构建标题、副标题和封面候选；所有会改变这些元数据的路径都会带 `force` 触发一次同步
 - Android / iOS 播放记忆仓库使用带 `reload()` 的 legacy SharedPreferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v1`；首次读取会按 `updatedAt` 合并并迁移旧异步存储快照，返回前台时递增播放历史 revision 使首页和详情页重新读取
 - Android 原生播放器每 `10s` 记录一次位置、时长、缓冲位置、缓冲比例、播放态、首帧状态与视频尺寸；位置不连续事件单独记录旧/新位置和 Media3 原因码
-- Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
-- Exo 手机 / TV 布局的 `exo_play_pause` 直接放在 `exo_bottom_bar` 左侧、播放时间前面，时间行预留按钮宽度及间距，使用 48dp 按钮及圆形焦点/按压背景，并随底栏收起；TV 不再创建中央控制组，遥控器主焦点仍使用原按钮 ID。控制栏隐藏时确定键切换播放状态后请求 `PRIMARY`，保证后续确定键落在播放/暂停按钮。手机中央控制组仅保留快退/快进，播放/暂停加入底栏横向焦点链。
+- Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 的 `native_network_speed` 不设置独立背景，直接使用所在顶栏的背景，保留原文字样式和间距。手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
+- Exo 手机 / TV 布局的 `exo_play_pause` 直接放在 `exo_bottom_bar` 左侧、播放时间前面，时间行预留按钮宽度及间距，使用 48dp 按钮及无描边的圆形半透明背景，并随底栏收起。TV 在 XML 和运行时均禁用该按钮焦点，保留状态显示及点击；`PRIMARY` 改为 `exo_progress`，不可聚焦时回退播放器容器。手机中央控制组仅保留快退/快进，播放/暂停仍加入底栏横向焦点链并保留焦点高亮。
 - `NativePlaybackRemoteController` 在 TV 进度条持焦且无字幕搜索/设置弹窗时接管确定键：仅首次 `ACTION_DOWN` 调用 `togglePlayback`，消费重复按下和抬起事件，刷新控制栏显示但不转移进度条焦点。左右方向键仍由既有 TV seek 策略处理。
+- 播放相关按键以 `deviceId + keyCode + downTime` 跟踪一次按压，统一消费已接管按键的重复和抬起事件；TV 确定键不再依赖播放按钮焦点或调用按钮点击，隐藏/显示控制栏、播放器容器和进度条上的确定键均直接调用会话播放/暂停，字幕搜索、设置和退出弹窗不接管。媒体播放/暂停、播放、暂停和空格键也仅执行首次按下；新按压不受遗漏抬起事件阻塞，暂停页面、窗口失焦和新播放请求清理按键状态。
+- `NativePlaybackControllerView` 用可移除的单个回调等待控制栏完整显示，每 `50ms` 检查，单次请求最长 `1s`，重复请求替换旧目标。主动/自动隐藏取消等待和弹窗关闭后的恢复回调；暂停、停止、销毁期间禁止新焦点请求，恢复页面后重新允许，窗口失焦和播放器释放取消旧请求。回调执行前检查页面存活、视图挂载及字幕搜索/设置弹窗，避免无界投递及迟到抢焦点。
+- `NativePlaybackCoordinator.onRenderedFirstFrame` 仅在当前会话首次首帧回调执行启动收栏，seek 后的重复首帧回调不收栏；`onIsPlayingChanged(false)` 仅在明确暂停且控制栏未完整显示时请求主焦点，不把缓冲当作暂停抢焦点。
 - Android 原生播放器的 `NativePlaybackLoadErrorPolicy` 取代统一 `8` 次加载重试：`400/401/403/404/405/410/416` 立即停止，`408/425/429/5xx`、超时和连接类异常最多退避重试 `6` 次，间隔从 `500ms` 增长并封顶 `8s`
 - `NativePlaybackHostBandwidthCache` 在当前原生 Activity 内按主机保留 `10` 分钟带宽；`NativePlaybackBufferPolicy` 用带宽/片源码率的 `2.5x / 1.25x` 阈值选择 fast/balanced/constrained 启动与二次缓冲参数，但目标缓存字节仍由内存等级和重片源档位约束
 - Flutter MPV 与 Android Exo 分别通过 `PlaybackPerformanceTracker / NativePlaybackPerformanceTracker` 汇总同一组会话指标，并统一写入 `playback.performance`：首帧、缓冲次数与累计时长、恢复次数、速度 min/avg/max、片源码率及比值、解码器/硬解、掉帧、音频欠载和缓冲预算。首帧记录一次，会话切集、失败或退出时记录一次摘要

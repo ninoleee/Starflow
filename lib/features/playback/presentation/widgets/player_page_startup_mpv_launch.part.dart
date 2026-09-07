@@ -403,7 +403,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
   }
 
   /// A prepared address can expire between the prefetch and the switch, so a
-  /// permanent open failure on one is worth a single fresh resolution.
+  /// confirmed expired-address status is worth a single fresh resolution.
   Future<void> _retryEpisodeSwitchWithFreshAddress({
     required PlaybackEpisodeQueueEntry entry,
     required int index,
@@ -412,7 +412,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     final error = _error;
     if (!entry.target.needsResolution ||
         error == null ||
-        classifyMpvOpenFailure(error) != MpvOpenFailureKind.permanent) {
+        !isMpvPreparedAddressRefreshable(error)) {
       return;
     }
     try {

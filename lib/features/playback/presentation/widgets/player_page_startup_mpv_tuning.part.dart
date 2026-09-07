@@ -225,6 +225,12 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     }
 
     final remotePlayback = _isLikelyRemotePlaybackTarget(target);
+    final reconnectOptions = resolveMpvHttpReconnectOptions(target);
+    if (reconnectOptions != null) {
+      await _setMpvOption(player, 'stream-lavf-o', reconnectOptions);
+      await _setMpvOption(player, 'demuxer-lavf-o', reconnectOptions);
+      await _setMpvOption(player, 'demuxer-lavf-propagate-opts', 'yes');
+    }
     final heavyPlayback = _isHeavyPlaybackTarget(target);
     final aggressiveTuning = _shouldUseAggressiveMpvTuning(target);
     final leanPlayback = _preferLeanPlaybackRendering;

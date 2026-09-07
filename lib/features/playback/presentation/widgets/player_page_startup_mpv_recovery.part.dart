@@ -2,6 +2,8 @@
 
 part of '../player_page.dart';
 
+enum _MpvRuntimeRecoveryResult { recovered, buffering, failed }
+
 extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
   Future<void> _handleRuntimeMpvError(
     Player player,
@@ -11,6 +13,8 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     if (!mounted || _player != player) {
       return;
     }
+    final fatal = _isFatalRuntimeMpvError(message);
+    if (_runtimeMpvErrorRecoveryInProgress && !fatal) return;
     final lowerMessage = message.toLowerCase();
     final now = DateTime.now();
     if (_lastRuntimeMpvErrorAt != null &&
@@ -22,15 +26,13 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     }
     _lastRuntimeMpvErrorAt = now;
 
-    final shouldEscalateImmediately = _isFatalRuntimeMpvError(message) ||
+    final shouldEscalateImmediately = fatal ||
         (_runtimeMpvErrorBurstCount > 1 &&
             !_isRecoverableRuntimeMpvError(
               target: target,
               lowerMessage: lowerMessage,
             )) ||
-        _runtimeMpvErrorBurstCount > _kMaxTransientRuntimeMpvErrorBurst ||
-        _runtimeMpvErrorRecoveryAttempts >=
-            _kMaxRuntimeMpvErrorRecoveryAttempts;
+        _runtimeMpvErrorBurstCount > _kMaxTransientRuntimeMpvErrorBurst;
     if (shouldEscalateImmediately) {
       if (!mounted || _player != player) {
         return;
@@ -45,8 +47,6 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     }
 
     _runtimeMpvErrorRecoveryInProgress = true;
-    _runtimeMpvErrorRecoveryAttempts += 1;
-    _mpvPerformanceTracker?.recordRecovery();
     _showMessage('连接波动，正在尝试恢复播放…');
     final baselinePosition = player.state.position;
 
@@ -55,12 +55,20 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
         player,
         baselinePosition: baselinePosition,
       );
-      if (recoveredWithoutAction) {
+      if (recoveredWithoutAction == _MpvRuntimeRecoveryResult.recovered) {
         _markRuntimeMpvErrorRecovered();
         return;
       }
+      if (recoveredWithoutAction == _MpvRuntimeRecoveryResult.buffering) return;
 
-      if (!mounted || _player != player) return;
+      if (!mounted || _player != player || _error != null) return;
+      if (_runtimeMpvErrorRecoveryAttempts >=
+          _kMaxRuntimeMpvErrorRecoveryAttempts) {
+        setState(() => _error = message);
+        return;
+      }
+      _runtimeMpvErrorRecoveryAttempts += 1;
+      _mpvPerformanceTracker?.recordRecovery();
       await _attemptSoftRuntimeMpvErrorRecovery(
         player,
         position: baselinePosition,
@@ -69,10 +77,13 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
         player,
         baselinePosition: baselinePosition,
       );
-      if (recoveredAfterSoft) {
+      if (recoveredAfterSoft == _MpvRuntimeRecoveryResult.recovered) {
         _markRuntimeMpvErrorRecovered();
         return;
       }
+      if (recoveredAfterSoft == _MpvRuntimeRecoveryResult.buffering) return;
+
+      if (!mounted || _player != player || _error != null) return;
 
       if (_isLikelyRemotePlaybackTarget(target)) {
         await _attemptRuntimeMpvReinitializeRecovery(
@@ -95,18 +106,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
   }
 
   bool _isFatalRuntimeMpvError(String message) {
-    final lower = message.toLowerCase();
-    const fatalFragments = <String>[
-      'protocol not found',
-      'no such file',
-      'file not found',
-      'permission denied',
-      'invalid argument',
-      'unsupported',
-      'unrecognized file format',
-      'no video or audio streams selected',
-    ];
-    return fatalFragments.any(lower.contains);
+    return classifyMpvOpenFailure(message) == MpvOpenFailureKind.permanent;
   }
 
   bool _isRecoverableRuntimeMpvError({
@@ -134,25 +134,49 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
         _latestPosition >= const Duration(seconds: 2);
   }
 
-  Future<bool> _awaitRuntimeMpvErrorRecoveryWindow(
+  Future<_MpvRuntimeRecoveryResult> _awaitRuntimeMpvErrorRecoveryWindow(
     Player player, {
     required Duration baselinePosition,
   }) async {
-    final deadline = DateTime.now().add(_kRuntimeMpvErrorConfirmWindow);
+    final remote =
+        _isLikelyRemotePlaybackTarget(_resolvedTarget ?? widget.target);
+    final deadline = DateTime.now().add(
+      remote ? const Duration(seconds: 15) : _kRuntimeMpvErrorConfirmWindow,
+    );
+    final progress = MpvBufferProgress();
+    progress.observe(
+      buffer: player.state.buffer,
+      percentage: player.state.bufferingPercentage,
+    );
+    DateTime? lastBufferProgressAt;
     while (DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 250));
-      if (!mounted || _player != player) {
-        return false;
+      if (!mounted || _player != player || _error != null) {
+        return _MpvRuntimeRecoveryResult.failed;
       }
       final state = player.state;
+      if (progress.observe(
+        buffer: state.buffer,
+        percentage: state.bufferingPercentage,
+      )) {
+        lastBufferProgressAt = DateTime.now();
+      }
       final progressed = state.position - baselinePosition >=
           const Duration(milliseconds: 800);
       final healthy = state.playing && !state.buffering && progressed;
       if (healthy) {
-        return true;
+        return _MpvRuntimeRecoveryResult.recovered;
       }
     }
-    return false;
+    // Continued buffering is not playback success. Leave this connection to
+    // the watchdog, which now also tracks buffer progress, without seeking it.
+    if (lastBufferProgressAt != null &&
+        _mpvStallAutoRecoveryEnabled &&
+        DateTime.now().difference(lastBufferProgressAt) <=
+            _kRuntimeMpvErrorConfirmWindow) {
+      return _MpvRuntimeRecoveryResult.buffering;
+    }
+    return _MpvRuntimeRecoveryResult.failed;
   }
 
   Future<void> _attemptSoftRuntimeMpvErrorRecovery(
@@ -231,6 +255,14 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     PlaybackTarget target, {
     required bool startupPhase,
   }) {
+    if (resolveMpvHttpReconnectOptions(target) != null) {
+      return MpvStallWatchdogConfig(
+        minBufferingBeforeCheck: const Duration(seconds: 3),
+        softRecoverAfter: const Duration(seconds: 15),
+        hardRecoverAfter: const Duration(seconds: 30),
+        requirePlaying: !startupPhase,
+      );
+    }
     final quarkPlayback = isLikelyQuarkPlaybackTarget(target);
     final remotePlayback = _isLikelyRemotePlaybackTarget(target);
     if (quarkPlayback) {
@@ -344,6 +376,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
         !_isReady ||
         _error != null ||
         _player != player ||
+        _runtimeMpvErrorRecoveryInProgress ||
         _mpvStallRecoveryInProgress) {
       return;
     }

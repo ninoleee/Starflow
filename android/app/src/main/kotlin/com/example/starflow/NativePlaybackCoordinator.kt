@@ -102,9 +102,13 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                         !externalSubtitles.subtitleSearchActive &&
                         !settings.isOverlayDialogVisible()
                 ) {
-                    if (!isPlaying) {
+                    if (
+                        !isPlaying &&
+                            session.player?.playWhenReady == false &&
+                            !playerView.isControllerFullyVisible
+                    ) {
                         controllerView.showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
-                    } else if (!playerView.isControllerFullyVisible) {
+                    } else if (isPlaying && !playerView.isControllerFullyVisible) {
                         playerView.requestFocus()
                     }
                 }
@@ -151,10 +155,13 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
             }
 
             override fun onRenderedFirstFrame() {
+                val isStartupFirstFrame = !diagnostics.playbackFirstFrameRendered
                 episodes.onPlaybackReady()
                 diagnostics.playbackFirstFrameRendered = true
                 controllerView.updateControllerAutoHidePolicy()
-                controllerView.hideTelevisionControllerAfterStartup()
+                if (isStartupFirstFrame) {
+                    controllerView.hideTelevisionControllerAfterStartup()
+                }
                 val firstFrameMs = diagnostics.playbackPerformanceTracker.onFirstFrame()
                 if (firstFrameMs >= 0L) {
                     NativeAppLogger.info(
@@ -280,6 +287,8 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onNewIntent(newIntent: Intent) {
+        remote.resetInputState()
+        controllerView.cancelPendingControllerFocus()
         launch.reportPlaybackLaunchResult(
             resultCode = RESULT_PLAYBACK_CANCELLED,
             message = "播放请求已被新的影片替换",
@@ -302,6 +311,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onResume() {
+        controllerView.setFocusRequestsAllowed(true)
         controllerView.enterImmersiveMode()
         controllerView.restoreVideoSurfaceIfNeeded()
         playerView.onResume()
@@ -311,7 +321,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                 session.player?.isPlaying == true &&
                 !externalSubtitles.subtitleSearchActive
         ) {
-            playerView.hideController()
+            controllerView.hideController()
             playerView.requestFocus()
         }
         if (
@@ -324,6 +334,8 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onPause() {
+        remote.resetInputState()
+        controllerView.setFocusRequestsAllowed(false)
         if (externalSubtitles.subtitleSearchActive) {
             controllerView.hideVideoSurfaceForOverlay()
         }
@@ -332,6 +344,8 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onStop() {
+        remote.resetInputState()
+        controllerView.setFocusRequestsAllowed(false)
         remote.dismissExitConfirmation()
         settings.dismissSettingsDialog()
         episodes.dismissDialog()
@@ -343,6 +357,8 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onDestroy() {
+        remote.resetInputState()
+        controllerView.setFocusRequestsAllowed(false)
         episodes.invalidateResolution()
         launch.reportPlaybackLaunchResult(
             resultCode = RESULT_PLAYBACK_CANCELLED,
@@ -431,6 +447,10 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onWindowFocusChanged(hasFocus: Boolean) {
+        if (!hasFocus) {
+            remote.resetInputState()
+            controllerView.cancelPendingControllerFocus()
+        }
         if (hasFocus) {
             controllerView.enterImmersiveMode()
         }
@@ -442,10 +462,10 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
 
     fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         if (isInPictureInPictureMode) {
-            playerView.hideController()
+            controllerView.hideController()
         } else if (!externalSubtitles.subtitleSearchActive) {
             if (isTelevisionDevice && session.player?.isPlaying == true) {
-                playerView.hideController()
+                controllerView.hideController()
                 playerView.requestFocus()
             } else {
                 controllerView.showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)

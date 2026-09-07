@@ -74,6 +74,44 @@ MpvBufferBudget resolveMpvBufferBudget({
 
 enum MpvOpenFailureKind { transientNetwork, permanent, unknown }
 
+class MpvOpenFailure implements Exception {
+  const MpvOpenFailure(this.message, {this.httpStatus});
+
+  final String message;
+  final int? httpStatus;
+
+  @override
+  String toString() =>
+      httpStatus == null ? message : 'HTTP error $httpStatus: $message';
+}
+
+int? mpvHttpErrorStatus(String message) {
+  // A media filename or signed URL must not be mistaken for an HTTP status.
+  final text = message.replaceAll(RegExp(r'https?://\S+'), '');
+  final match = RegExp(
+    r'\b(?:http(?:\s+error|/\d(?:\.\d)?)?|status\s+code)\s*[:=]?\s*([45]\d{2})\b',
+    caseSensitive: false,
+  ).firstMatch(text);
+  return int.tryParse(match?.group(1) ?? '');
+}
+
+/// FFmpeg 6 uses delays 0, 1, 3, 7, then stops when the next delay exceeds 7.
+/// Do not restart non-seekable bodies from byte zero or reconnect normal EOF.
+String? resolveMpvHttpReconnectOptions(PlaybackTarget target) {
+  if (!const {'http', 'https'}.contains(playbackUrlScheme(target.streamUrl))) {
+    return null;
+  }
+  // mpv key/value lists use length quoting, not backslash-escaped commas.
+  return r'reconnect=1,reconnect_on_network_error=1,'
+      r'reconnect_on_http_error=%15%408,425,429,5xx,'
+      r'reconnect_delay_max=7,reconnect_streamed=0,reconnect_at_eof=0';
+}
+
+bool isMpvPreparedAddressRefreshable(Object error) =>
+    const {401, 403, 404, 410}.contains(error is MpvOpenFailure
+        ? error.httpStatus ?? mpvHttpErrorStatus(error.message)
+        : mpvHttpErrorStatus('$error'));
+
 bool shouldRetryMpvOpenFailure({
   required Object error,
   required bool remote,
@@ -108,10 +146,9 @@ MpvOpenFailureKind classifyMpvOpenFailure(Object error) {
     return MpvOpenFailureKind.transientNetwork;
   }
   final message = '$error'.trim().toLowerCase();
-  final statusMatch = RegExp(
-    r'(?:http(?:\s+error)?|status\s+code)\s*[:=]?\s*(\d{3})',
-  ).firstMatch(message);
-  final statusCode = int.tryParse(statusMatch?.group(1) ?? '');
+  final statusCode = error is MpvOpenFailure
+      ? error.httpStatus ?? mpvHttpErrorStatus(message)
+      : mpvHttpErrorStatus(message);
   if (statusCode != null) {
     if (statusCode == 408 ||
         statusCode == 425 ||

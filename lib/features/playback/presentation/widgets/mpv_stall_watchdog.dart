@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:media_kit/media_kit.dart';
+import 'package:starflow/features/playback/application/mpv_buffer_progress.dart';
 
 enum MpvStallRecoveryLevel { none, soft, hard }
 
@@ -11,6 +12,7 @@ class MpvPlaybackSnapshot {
     required this.playing,
     required this.buffering,
     required this.bufferingPercentage,
+    this.buffer = Duration.zero,
   });
 
   factory MpvPlaybackSnapshot.fromPlayer(Player player) {
@@ -21,6 +23,7 @@ class MpvPlaybackSnapshot {
       playing: state.playing,
       buffering: state.buffering,
       bufferingPercentage: state.bufferingPercentage,
+      buffer: state.buffer,
     );
   }
 
@@ -29,6 +32,7 @@ class MpvPlaybackSnapshot {
   final bool playing;
   final bool buffering;
   final double bufferingPercentage;
+  final Duration buffer;
 }
 
 class MpvStallWatchdogConfig {
@@ -98,12 +102,15 @@ class MpvStallWatchdog {
   final DateTime Function() _clock;
 
   Duration? _lastPosition;
+  final _bufferProgress = MpvBufferProgress();
   DateTime? _bufferingStartedAt;
   DateTime? _lastProgressAt;
   bool _softTriggered = false;
   bool _hardTriggered = false;
 
   void reset() {
+    _lastPosition = null;
+    _bufferProgress.reset();
     _bufferingStartedAt = null;
     _lastProgressAt = null;
     _softTriggered = false;
@@ -116,12 +123,20 @@ class MpvStallWatchdog {
   }) {
     final current = now ?? _clock();
 
-    if (_didProgress(snapshot.position)) {
+    final movedBack = _lastPosition != null &&
+        snapshot.position < _lastPosition! - const Duration(seconds: 1);
+    if (movedBack) reset();
+    final progressed = _didProgress(snapshot.position);
+    final buffered = _bufferProgress.observe(
+      buffer: snapshot.buffer,
+      percentage: snapshot.bufferingPercentage,
+    );
+    if (progressed || buffered) {
       _lastProgressAt = current;
       _softTriggered = false;
       _hardTriggered = false;
     }
-    _lastPosition = snapshot.position;
+    if (_lastPosition == null || progressed) _lastPosition = snapshot.position;
 
     if (_isNearEnd(snapshot)) {
       reset();

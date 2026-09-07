@@ -15,19 +15,19 @@ class NativePlayerTvFocusPolicyTest {
     }
 
     @Test
-    fun `default remote focus targets play pause`() {
+    fun `default remote focus targets progress`() {
         assertTrue(
             NativePlayerTvFocusPolicy.primaryFocusOrder.contentEquals(
-                intArrayOf(Media3UiR.id.exo_play_pause),
+                intArrayOf(Media3UiR.id.exo_progress),
             ),
         )
     }
 
     @Test
-    fun `keeps only play pause focusable on television`() {
+    fun `keeps only progress focusable on television`() {
         assertTrue(
             NativePlayerTvFocusPolicy.focusableControlIds.contentEquals(
-                intArrayOf(Media3UiR.id.exo_play_pause),
+                intArrayOf(Media3UiR.id.exo_progress),
             ),
         )
         assertFalse(
@@ -48,19 +48,22 @@ class NativePlayerTvFocusPolicyTest {
     }
 
     @Test
-    fun `excludes the three right bottom controls`() {
+    fun `excludes play pause and the three right bottom controls`() {
         assertTrue(
-            NativePlayerTvFocusPolicy.removedBottomRightControlIds.contains(
+            NativePlayerTvFocusPolicy.nonFocusableControlIds.contains(Media3UiR.id.exo_play_pause),
+        )
+        assertTrue(
+            NativePlayerTvFocusPolicy.nonFocusableControlIds.contains(
                 Media3UiR.id.exo_subtitle,
             ),
         )
         assertTrue(
-            NativePlayerTvFocusPolicy.removedBottomRightControlIds.contains(
+            NativePlayerTvFocusPolicy.nonFocusableControlIds.contains(
                 R.id.native_audio_track_button,
             ),
         )
         assertTrue(
-            NativePlayerTvFocusPolicy.removedBottomRightControlIds.contains(
+            NativePlayerTvFocusPolicy.nonFocusableControlIds.contains(
                 R.id.native_playback_settings,
             ),
         )
