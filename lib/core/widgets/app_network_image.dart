@@ -293,15 +293,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   }) {
     final loadIdentity = _buildRasterLoadIdentity(candidate);
     _ensureTvRasterLoadIdentity(loadIdentity);
-    if (_tvRasterLoadSettled) {
-      return _buildResolvedRasterCandidate(
-        context,
-        candidate: candidate,
-        candidates: candidates,
-        candidateIndex: candidateIndex,
-      );
-    }
-
+    // Preserve the wrapper after settlement so rebuilds retain the decoded image.
     final request = _tvRasterLoadRequest ??= _tvRasterImageLoadGate.request();
     return FutureBuilder<_TvRasterImageLoadPermit>(
       future: request.future,
@@ -317,9 +309,8 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         if (permit == null) {
           return _buildLoading(context);
         }
-        if (permit.isReleased) {
+        if (_tvRasterLoadSettled || permit.isReleased) {
           _tvRasterLoadSettled = true;
-          _tvRasterLoadRequest = null;
           return _buildResolvedRasterCandidate(
             context,
             candidate: candidate,
@@ -472,7 +463,6 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     _tvRasterLoadPermitTimeout = null;
     _tvRasterLoadPermit?.release();
     _tvRasterLoadPermit = null;
-    _tvRasterLoadRequest = null;
   }
 
   void _resetTvRasterLoadThrottle() {

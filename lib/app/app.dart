@@ -5,6 +5,7 @@ import 'package:starflow/app/router/app_router.dart';
 import 'package:starflow/app/theme/app_theme.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/application/playback_runtime_priority_binding.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
 
 final TvSafeDirectionalFocusAction _tvSafeDirectionalFocusAction =
     TvSafeDirectionalFocusAction();
@@ -15,12 +16,16 @@ class StarflowApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(playbackRuntimePriorityBindingProvider);
+    final accent = ref.watch(
+      appSettingsProvider.select((settings) => settings.appAccent),
+    );
+    final theme = AppTheme.dark(accent: accent);
     return AppRuntimeRecoveryBoundary(
       child: MaterialApp.router(
         title: 'Starflow',
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.darkTheme,
-        darkTheme: AppTheme.darkTheme,
+        theme: theme,
+        darkTheme: theme,
         themeMode: ThemeMode.dark,
         routerConfig: ref.watch(appRouterProvider),
         builder: (context, child) => Actions(

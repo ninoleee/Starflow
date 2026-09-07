@@ -1,14 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/features/settings/application/settings_controller.dart';
 
-final _appPageBackgroundReduceDecorationsProvider = Provider<bool>((ref) {
-  return ref.watch(appSettingsProvider.select(
-    (settings) => settings.performanceReduceDecorationsEnabled,
-  ));
-});
-
-class AppPageBackground extends ConsumerWidget {
+/// Neutral page background without decorative glow layers.
+class AppPageBackground extends StatelessWidget {
   const AppPageBackground({
     super.key,
     required this.child,
@@ -17,107 +10,15 @@ class AppPageBackground extends ConsumerWidget {
 
   final Widget child;
   final EdgeInsets contentPadding;
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final reduceDecorationsEnabled =
-        ref.watch(_appPageBackgroundReduceDecorationsProvider);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            scheme.surfaceContainerLow,
-            scheme.surface,
-            scheme.surfaceContainerHigh,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (!reduceDecorationsEnabled) const _BackgroundGlows(),
-          Padding(
-            padding: contentPadding,
-            child: child,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GlowBlob extends StatelessWidget {
-  const _GlowBlob({
-    required this.alignment,
-    required this.offset,
-    required this.size,
-    required this.colors,
-  });
-
-  final Alignment alignment;
-  final Offset offset;
-  final double size;
-  final List<Color> colors;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: alignment,
-      child: Transform.translate(
-        offset: offset,
-        child: Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: RadialGradient(colors: colors),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BackgroundGlows extends StatelessWidget {
-  const _BackgroundGlows();
-
-  @override
-  Widget build(BuildContext context) {
-    return const IgnorePointer(
-      child: RepaintBoundary(
-        child: Stack(
-          children: [
-            _GlowBlob(
-              alignment: Alignment.topLeft,
-              offset: Offset(-36, -44),
-              size: 220,
-              colors: [
-                Color(0x40215FEE),
-                Color(0x00215FEE),
-              ],
-            ),
-            _GlowBlob(
-              alignment: Alignment.topRight,
-              offset: Offset(42, -24),
-              size: 196,
-              colors: [
-                Color(0x2617B26A),
-                Color(0x0017B26A),
-              ],
-            ),
-            _GlowBlob(
-              alignment: Alignment.bottomCenter,
-              offset: Offset(0, 84),
-              size: 260,
-              colors: [
-                Color(0x18F59E0B),
-                Color(0x00F59E0B),
-              ],
-            ),
-          ],
-        ),
+    return ColoredBox(
+      color: scheme.surface,
+      child: Padding(
+        padding: contentPadding,
+        child: child,
       ),
     );
   }

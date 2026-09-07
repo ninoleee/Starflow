@@ -8,12 +8,18 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     required Duration timeout,
     required PlaybackStartPosition startPosition,
   }) async {
+    final generation = _startupGeneration;
+    final scope = _startupScope;
     final deadline = DateTime.now().add(timeout);
+    scope.deadline = deadline;
     Object? lastError;
 
     for (var attempt = 1;
         attempt <= _PlayerPageState._maxPlaybackAttempts;
         attempt++) {
+      if (!_isCurrentStartup(generation)) {
+        throw const _PlayerOpenException('Playback startup cancelled');
+      }
       final remaining = deadline.difference(DateTime.now());
       if (remaining <= Duration.zero) {
         break;
@@ -30,6 +36,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         final opened = await _openSingleAttempt(
           resolvedTarget,
           timeout: remaining,
+          scope: scope,
           startPosition: startPosition,
         );
         _traceWindowsMpv(
@@ -38,27 +45,46 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         );
         return opened;
       } catch (error, stackTrace) {
+        if (!_isCurrentStartup(generation)) {
+          rethrow;
+        }
         lastError = error;
         final failureKind = classifyMpvOpenFailure(error);
-        final shouldRetry = _isLikelyRemotePlaybackTarget(resolvedTarget) &&
-            failureKind == MpvOpenFailureKind.transientNetwork &&
-            !_isBandwidthBelowSourceBitrate(resolvedTarget);
+        final backoff = Duration(milliseconds: 650 * attempt);
+        final willRetry = shouldRetryMpvOpenFailure(
+          error: error,
+          remote: _isLikelyRemotePlaybackTarget(resolvedTarget),
+          attempt: attempt,
+          maxAttempts: _PlayerPageState._maxPlaybackAttempts,
+          remaining: deadline.difference(DateTime.now()),
+          backoff: backoff,
+        );
+        appLogWarning(
+          'playback.mpv',
+          'MPV open attempt failed',
+          fields: <String, Object?>{
+            'attempt': attempt,
+            'failureKind': failureKind.name,
+            'willRetry': willRetry,
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
         _traceWindowsMpv(
           'windows-mpv.open.attempt-failed',
           fields: {
             'attempt': attempt,
             'failureKind': failureKind.name,
-            'willRetry': shouldRetry,
+            'willRetry': willRetry,
           },
           error: error,
           stackTrace: stackTrace,
         );
-        if (attempt >= _PlayerPageState._maxPlaybackAttempts || !shouldRetry) {
+        if (!willRetry) {
           break;
         }
         _mpvPerformanceTracker?.recordRecovery();
-        final backoff = Duration(milliseconds: 650 * attempt);
-        await Future<void>.delayed(backoff);
+        await scope.wait(Future<void>.delayed(backoff));
       }
     }
 
@@ -71,6 +97,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
   Future<_OpenedPlayback> _openSingleAttempt(
     PlaybackTarget resolvedTarget, {
     required Duration timeout,
+    required MpvStartupScope scope,
     required PlaybackStartPosition startPosition,
   }) async {
     final bufferSizeBytes = _resolveMpvBufferSizeBytes(resolvedTarget);
@@ -101,8 +128,22 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       },
     );
     _attachOpeningEmbeddedPlayback(player, videoController);
+    void ensurePlayerActive() {
+      if (!mounted || !identical(_player, player)) {
+        throw const _PlayerOpenException('Playback startup cancelled');
+      }
+    }
+
     Completer<String>? startupError;
-    var awaitingStartup = false;
+    var awaitingStartup = true;
+    var stage = 'tuning';
+    final elapsed = Stopwatch()..start();
+    final nativeErrors = <Map<String, Object?>>[];
+    final logSubscription = player.stream.log.listen((entry) {
+      if (entry.level != 'error' && entry.level != 'fatal') return;
+      if (nativeErrors.length == 12) nativeErrors.removeAt(0);
+      nativeErrors.add(summarizeMpvError(entry.prefix, entry.text));
+    });
     late final StreamSubscription<String> errorSubscription;
     errorSubscription = player.stream.error.listen((message) {
       final normalized = message.trim();
@@ -116,11 +157,9 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
           'message': normalized,
         },
       );
-      final pendingStartupError = startupError;
-      if (awaitingStartup &&
-          pendingStartupError != null &&
-          !pendingStartupError.isCompleted) {
-        pendingStartupError.complete(normalized);
+      if (awaitingStartup) {
+        startupError ??= Completer<String>();
+        if (!startupError!.isCompleted) startupError!.complete(normalized);
         return;
       }
       if (!mounted || _player != player) {
@@ -130,34 +169,45 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     });
 
     try {
-      await _applyMpvNetworkProxy(player, resolvedTarget);
-      await _applyMpvPerformanceTuning(player, resolvedTarget);
+      await scope.wait(_applyMpvNetworkProxy(player, resolvedTarget));
+      ensurePlayerActive();
+      await scope.wait(_applyMpvPerformanceTuning(player, resolvedTarget));
+      ensurePlayerActive();
       _traceWindowsMpv('windows-mpv.open.tuning-applied');
-      final deadline = DateTime.now().add(timeout);
+      final deadline = scope.deadline!;
+      var firstOpen = true;
       Completer<String> beginStartupWait() {
-        final completer = Completer<String>();
+        final completer = firstOpen
+            ? startupError ?? Completer<String>()
+            : Completer<String>();
+        firstOpen = false;
         startupError = completer;
         awaitingStartup = true;
         return completer;
       }
 
-      await _openResolvedTargetWithMpv(
+      stage = 'open';
+      await scope.wait(_openResolvedTargetWithMpv(
         player,
         resolvedTarget,
         deadline: deadline,
         beginStartupWait: beginStartupWait,
         startPosition: startPosition.position,
-      );
-      startupError = Completer<String>();
+      ));
+      ensurePlayerActive();
+      stage = 'first-frame';
       await _awaitMpvPrePlayReady(
         player,
         target: resolvedTarget,
         videoController: videoController,
         timeout: _remainingMpvOpenTimeout(deadline),
         startupError: startupError!.future,
+        scope: scope,
       );
+      ensurePlayerActive();
       _markMpvFirstFrame();
-      await player.play().timeout(_remainingMpvOpenTimeout(deadline));
+      stage = 'stable-playback';
+      await scope.wait(player.play());
       await _awaitStrictPlaybackReady(
         player,
         target: resolvedTarget,
@@ -165,7 +215,9 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         startupError: startupError!.future,
         stageLabel: 'open-attempt',
         progressBaseline: player.state.position,
+        scope: scope,
       );
+      ensurePlayerActive();
       awaitingStartup = false;
       startupError = null;
       _traceWindowsMpv(
@@ -184,15 +236,30 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         errorSubscription: errorSubscription,
       );
     } catch (error, stackTrace) {
+      if (error is! MpvStartupCancelled && identical(_player, player)) {
+        appLogWarning('playback.mpv', 'MPV startup diagnostics', fields: {
+          'stage': stage,
+          'elapsedMs': elapsed.elapsedMilliseconds,
+          'nativeErrors': nativeErrors,
+        });
+      }
       _traceWindowsMpv(
         'windows-mpv.open.failed',
         error: error,
         stackTrace: stackTrace,
       );
-      _detachOpeningEmbeddedPlayback(player, videoController);
+      // Once detached, the exit/replacement path owns this player's shutdown.
+      final ownsPlayer = identical(_player, player);
+      if (ownsPlayer) {
+        _detachOpeningEmbeddedPlayback(player, videoController);
+      }
       await errorSubscription.cancel();
-      await player.dispose();
+      if (ownsPlayer) {
+        await _enqueuePlayerShutdown(player, reason: 'mpv-open-failed');
+      }
       rethrow;
+    } finally {
+      await logSubscription.cancel();
     }
   }
 
@@ -206,9 +273,34 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       timeout: timeout,
       startPosition: startPosition,
     );
-    await _applyStartupPlaybackPreferences(playback.player, resolvedTarget);
-    await _applyStartupExternalSubtitle(playback.player, resolvedTarget);
-    return playback;
+    if (!mounted || !identical(_player, playback.player)) {
+      await playback.errorSubscription.cancel();
+      throw const _PlayerOpenException('Playback startup cancelled');
+    }
+    final scope = _startupScope;
+    try {
+      await scope.wait(
+          _applyStartupPlaybackPreferences(playback.player, resolvedTarget));
+      if (!mounted || !identical(_player, playback.player)) {
+        await playback.errorSubscription.cancel();
+        throw const _PlayerOpenException('Playback startup cancelled');
+      }
+      await scope
+          .wait(_applyStartupExternalSubtitle(playback.player, resolvedTarget));
+      return playback;
+    } catch (_) {
+      final ownsPlayer = identical(_player, playback.player);
+      if (ownsPlayer) {
+        _detachOpeningEmbeddedPlayback(
+            playback.player, playback.videoController);
+      }
+      await playback.errorSubscription.cancel();
+      if (ownsPlayer) {
+        await _enqueuePlayerShutdown(playback.player,
+            reason: 'mpv-preferences-failed');
+      }
+      rethrow;
+    }
   }
 
   Future<void> _awaitStrictPlaybackReady(
@@ -218,6 +310,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     required String stageLabel,
     Duration? progressBaseline,
     Future<String>? startupError,
+    MpvStartupScope? scope,
   }) async {
     final deadline = DateTime.now().add(timeout);
     final readyCompleter = Completer<void>();
@@ -264,6 +357,9 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
 
     try {
       while (!readyCompleter.isCompleted) {
+        if (!mounted || !identical(_player, player)) {
+          throw const _PlayerOpenException('Playback startup cancelled');
+        }
         final remaining = deadline.difference(DateTime.now());
         if (remaining <= Duration.zero) {
           throw TimeoutException('播放器打开后长时间没有开始播放');
@@ -278,7 +374,8 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         if (startupFailureFuture != null) {
           waiters.add(startupFailureFuture);
         }
-        await Future.any(waiters);
+        final wait = Future.any(waiters);
+        await (scope == null ? wait : scope.wait(wait));
         if (readyCompleter.isCompleted) {
           break;
         }
@@ -387,25 +484,30 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     required Duration timeout,
     VideoController? videoController,
     Future<String>? startupError,
+    required MpvStartupScope scope,
   }) async {
     if (!_shouldRequireMpvFirstFrame(target)) {
       return;
     }
-    final waiters = <Future<void>>[_awaitMpvVisualMetadataReady(player)];
+    final metadataScope = MpvStartupScope();
+    final waiters = <Future<void>>[
+      _awaitMpvVisualMetadataReady(player, metadataScope),
+    ];
     if (videoController != null) {
       waiters.add(_awaitMpvFirstFrameReady(videoController));
     }
     final readinessFuture = Future.wait<void>(waiters);
-    if (startupError == null) {
-      await readinessFuture.timeout(timeout);
-      return;
+    try {
+      await scope.wait(Future.any<void>([
+        readinessFuture,
+        if (startupError != null)
+          startupError.then<void>((message) {
+            throw _PlayerOpenException(message);
+          }),
+      ]).timeout(timeout));
+    } finally {
+      metadataScope.cancel();
     }
-    await Future.any<void>([
-      readinessFuture,
-      startupError.then<void>((message) {
-        throw _PlayerOpenException(message);
-      }),
-    ]).timeout(timeout);
   }
 
   Future<void> _awaitMpvFirstFrameReady(
@@ -414,7 +516,10 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     await videoController.waitUntilFirstFrameRendered;
   }
 
-  Future<void> _awaitMpvVisualMetadataReady(Player player) async {
+  Future<void> _awaitMpvVisualMetadataReady(
+    Player player,
+    MpvStartupScope scope,
+  ) async {
     if (_hasMpvVisualMetadataReady(player)) {
       return;
     }
@@ -437,7 +542,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     evaluate();
 
     try {
-      await completer.future;
+      await scope.wait(completer.future);
     } finally {
       for (final subscription in subscriptions) {
         await subscription.cancel();
@@ -517,6 +622,8 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     required Completer<String> Function() beginStartupWait,
     Duration startPosition = Duration.zero,
   }) async {
+    final scope = _startupScope;
+    scope.checkActive();
     final regularMedia = _buildRegularMpvMedia(target, start: startPosition);
     if (!target.isIsoLike) {
       _traceWindowsMpv(
@@ -563,8 +670,10 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
 
     Object? lastError;
     for (final plan in isoPlans) {
+      scope.checkActive();
       try {
         await _applyMpvIsoOpenPlan(player, target, plan);
+        scope.checkActive();
         _traceWindowsMpv(
           'windows-mpv.open.dispatch',
           fields: {
@@ -588,6 +697,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         );
         return;
       } catch (error, stackTrace) {
+        scope.checkActive();
         lastError = error;
         _traceWindowsMpv(
           'windows-mpv.iso.open-attempt-failed',
@@ -614,7 +724,9 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       },
     );
     try {
+      scope.checkActive();
       await _resetMpvIsoOpenState(player);
+      scope.checkActive();
       await _awaitMpvMediaOpen(
         player,
         regularMedia,
@@ -640,12 +752,14 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     required Duration timeout,
     required Completer<String> startupError,
   }) async {
-    await Future.any<void>([
+    final scope = _startupScope;
+    scope.checkActive();
+    await scope.wait(Future.any<void>([
       player.open(media, play: false),
       startupError.future.then<void>((message) {
         throw _PlayerOpenException(message);
       }),
-    ]).timeout(timeout);
+    ]).timeout(timeout));
   }
 
   Media _buildRegularMpvMedia(

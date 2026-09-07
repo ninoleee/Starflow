@@ -12,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = ROOT / "build" / "brand_assets"
-APP_ICON_SVG = ROOT / "assets" / "branding" / "starflow_icon_master.svg"
+LOGO_SOURCE = ROOT / "assets" / "branding" / "starflow_logo_source.png"
 TV_BANNER_HTML = ROOT / "docs" / "starflow_tv_banner.html"
 
 APP_ICON_VIEWPORT = (1024, 1024)
@@ -343,14 +343,7 @@ def create_app_icon_master(output_path: Path) -> None:
 
 
 def create_launch_logo(output_path: Path, size: tuple[int, int]) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    image = Image.new("RGBA", size, (0, 0, 0, 0))
-    draw_logo_glyph(
-        image,
-        (0.0, 0.0, float(size[0]), float(size[1])),
-    )
-    image.save(output_path)
-    print(f"Generated {output_path.relative_to(ROOT)}")
+    resize_image(LOGO_SOURCE, output_path, size)
 
 
 SVG_NAMESPACE = "{http://www.w3.org/2000/svg}"
@@ -801,6 +794,7 @@ def find_edge() -> Path:
             return edge
 
     candidates = [
+        Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
         Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
         Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
     ]
@@ -858,6 +852,11 @@ def resize_image(source: Path, destination: Path, size: tuple[int, int]) -> None
     destination.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(source) as image:
         rendered = image.convert("RGBA").resize(size, Image.Resampling.LANCZOS)
+        # Apple app icons must not carry an alpha channel.
+        if "ios/Runner/Assets.xcassets/AppIcon" in destination.as_posix():
+            opaque = Image.new("RGB", size, "white")
+            opaque.paste(rendered, mask=rendered.getchannel("A"))
+            rendered = opaque
         rendered.save(destination)
     print(f"Generated {destination.relative_to(ROOT)}")
 
@@ -896,12 +895,9 @@ def main() -> int:
     app_icon_master = BUILD_DIR / "starflow_app_icon_master.png"
     tv_banner_master = BUILD_DIR / "starflow_tv_banner_master.png"
 
-    render_app_icon_from_svg(
-        APP_ICON_SVG,
-        app_icon_capture,
-        APP_ICON_MASTER_SIZE,
-    )
+    copy_png(LOGO_SOURCE, app_icon_capture)
     copy_png(app_icon_capture, app_icon_master)
+    copy_png(LOGO_SOURCE, ROOT / "assets/branding/starflow_logo_primary.png")
 
     render_file(
         edge_path=edge_path,

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
@@ -28,12 +29,32 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
   }
 
   final repository = ref.read(mediaRepositoryProvider);
-  final children = await repository.fetchChildren(
-    sourceId: request.sourceId,
-    parentId: request.itemId,
-    sectionId: request.sectionId,
-    sectionName: request.sectionName,
-  );
+  Future<PlaybackTarget?> loadLastPlayedTarget() async {
+    try {
+      final snapshot = await ref.read(playbackMemorySnapshotProvider.future);
+      return snapshot
+          .series[buildSeriesKeyForMetadata(
+        sourceId: request.sourceId,
+        itemId: request.itemId,
+        title: '',
+        year: 0,
+      )]
+          ?.target;
+    } catch (_) {
+      // History is optional; a storage failure must not block browsing.
+      return null;
+    }
+  }
+
+  final (lastPlayedTarget, children) = await (
+    loadLastPlayedTarget(),
+    repository.fetchChildren(
+      sourceId: request.sourceId,
+      parentId: request.itemId,
+      sectionId: request.sectionId,
+      sectionName: request.sectionName,
+    ),
+  ).wait;
 
   final seasons = children.where(_isSeasonItem).toList(growable: false);
   if (seasons.isEmpty) {
@@ -42,6 +63,7 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
       return null;
     }
     return DetailSeriesBrowserState(
+      lastPlayedTarget: lastPlayedTarget,
       groups: [
         DetailEpisodeGroup(
           id: 'all',
@@ -53,7 +75,12 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
     );
   }
 
-  final firstSeason = seasons.first;
+  final preferredSeasonIndex = seasons.indexWhere((season) =>
+      lastPlayedTarget?.seasonNumber != null &&
+      season.seasonNumber == lastPlayedTarget!.seasonNumber);
+  final initialSeasonIndex =
+      preferredSeasonIndex < 0 ? 0 : preferredSeasonIndex;
+  final firstSeason = seasons[initialSeasonIndex];
   List<MediaItem> firstSeasonEpisodes = const <MediaItem>[];
   var firstSeasonPreloaded = false;
   try {
@@ -75,7 +102,7 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
   final groups = <DetailEpisodeGroup>[];
   for (var index = 0; index < seasons.length; index++) {
     final season = seasons[index];
-    final preloadEpisodes = index == 0
+    final preloadEpisodes = index == initialSeasonIndex
         ? sortEpisodesForDetailBrowser(firstSeasonEpisodes)
         : const <MediaItem>[];
     groups.add(
@@ -84,11 +111,18 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
         title: season.title,
         seasonNumber: season.seasonNumber,
         episodes: preloadEpisodes,
-        episodesLoaded: index == 0 ? firstSeasonPreloaded : false,
+        episodesLoaded:
+            index == initialSeasonIndex ? firstSeasonPreloaded : false,
       ),
     );
   }
-  return groups.isEmpty ? null : DetailSeriesBrowserState(groups: groups);
+  return groups.isEmpty
+      ? null
+      : DetailSeriesBrowserState(
+          groups: groups,
+          initialGroupId: firstSeason.id,
+          lastPlayedTarget: lastPlayedTarget,
+        );
 });
 
 class DetailSeriesBrowserRequest {
@@ -116,7 +150,7 @@ class DetailSeriesBrowserRequest {
   final String sectionName;
   final bool isSeries;
 
-  String get _cacheKey => '$sourceId|$itemId|$sectionId|$sectionName|$isSeries';
+  String get _cacheKey => '$sourceId|$itemId|$sectionId|$isSeries';
 
   @override
   bool operator ==(Object other) {
@@ -187,9 +221,15 @@ class _DetailSeasonEpisodesRequest {
 }
 
 class DetailSeriesBrowserState {
-  const DetailSeriesBrowserState({required this.groups});
+  const DetailSeriesBrowserState({
+    required this.groups,
+    this.initialGroupId = '',
+    this.lastPlayedTarget,
+  });
 
   final List<DetailEpisodeGroup> groups;
+  final String initialGroupId;
+  final PlaybackTarget? lastPlayedTarget;
 }
 
 class DetailEpisodeGroup {
@@ -261,6 +301,23 @@ DetailEpisodeGroup resolveSelectedEpisodeGroup({
   return selectedGroup;
 }
 
+int findLastPlayedEpisodeIndex(
+    List<MediaItem> episodes, PlaybackTarget? target) {
+  if (target == null) return -1;
+  final targetKey = buildPlaybackItemKey(target);
+  final exact = targetKey.isEmpty
+      ? -1
+      : episodes.indexWhere((episode) =>
+          buildPlaybackItemKey(PlaybackTarget.fromMediaItem(episode)) ==
+          targetKey);
+  if (exact >= 0) return exact;
+  if (target.seasonNumber == null || target.episodeNumber == null) return -1;
+  return episodes.indexWhere((episode) =>
+      episode.sourceId == target.sourceId &&
+      episode.seasonNumber == target.seasonNumber &&
+      episode.episodeNumber == target.episodeNumber);
+}
+
 class DetailEpisodeBrowser extends ConsumerStatefulWidget {
   const DetailEpisodeBrowser({
     super.key,
@@ -268,12 +325,14 @@ class DetailEpisodeBrowser extends ConsumerStatefulWidget {
     required this.groups,
     required this.selectedGroupId,
     required this.onSeasonSelected,
+    this.lastPlayedTarget,
   });
 
   final MediaDetailTarget seriesTarget;
   final List<DetailEpisodeGroup> groups;
   final String selectedGroupId;
   final ValueChanged<String> onSeasonSelected;
+  final PlaybackTarget? lastPlayedTarget;
 
   @override
   ConsumerState<DetailEpisodeBrowser> createState() =>
@@ -283,6 +342,17 @@ class DetailEpisodeBrowser extends ConsumerStatefulWidget {
 class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
   static const double _episodeCardWidth = 292;
   static const double _episodeCardSpacing = 14;
+  final Map<_DetailSeasonEpisodesRequest, DetailEpisodeGroup> _loadedGroups =
+      {};
+  final FocusNode _lastPlayedFocusNode =
+      FocusNode(debugLabel: 'detail-last-played');
+  bool _initialPositionApplied = false;
+
+  @override
+  void dispose() {
+    _lastPlayedFocusNode.dispose();
+    super.dispose();
+  }
 
   String _episodeFocusId(MediaItem episode, int index) {
     final episodeSeed = episode.id.isNotEmpty
@@ -301,12 +371,16 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
       target: widget.seriesTarget,
       group: selectedGroup,
     );
+    final cached = _loadedGroups[request];
+    if (cached != null) return AsyncData(cached);
     final episodesAsync = ref.watch(detailSeasonEpisodesProvider(request));
     return episodesAsync.whenData(
-      (episodes) => selectedGroup.copyWith(
-        episodes: episodes,
-        episodesLoaded: true,
-      ),
+      (episodes) {
+        final resolved =
+            selectedGroup.copyWith(episodes: episodes, episodesLoaded: true);
+        _loadedGroups[request] = resolved;
+        return resolved;
+      },
     );
   }
 
@@ -319,12 +393,14 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
     final selectedGroupAsync = _selectedGroupAsync(selectedGroup);
 
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (widget.groups.length > 1) ...[
           SizedBox(
             height: 52,
             child: DesktopHorizontalPager(
+              initialScrollOffset: widget.groups.indexOf(selectedGroup) * 120.0,
               builder: (context, controller) => ListView.separated(
                 controller: controller,
                 scrollDirection: Axis.horizontal,
@@ -340,6 +416,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                     focusId: 'detail:season:${group.id}',
                     autofocus: false,
                     onTap: () {
+                      _initialPositionApplied = true;
                       if (widget.selectedGroupId != group.id) {
                         widget.onSeasonSelected(group.id);
                       }
@@ -354,6 +431,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
         SizedBox(
           height: 292,
           child: selectedGroupAsync.when(
+            skipLoadingOnReload: true,
             data: (resolvedGroup) {
               final episodes = resolvedGroup.episodes;
               if (episodes.isEmpty) {
@@ -361,14 +439,27 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                   child: Text(
                     '当前分组暂无剧集',
                     style: TextStyle(
-                      color: Color(0xFF90A0BD),
+                      color: AppColors.foregroundMuted,
                       fontSize: 14,
                     ),
                   ),
                 );
               }
+              final lastPlayedIndex = findLastPlayedEpisodeIndex(
+                episodes,
+                widget.lastPlayedTarget,
+              );
+              final restorePosition =
+                  !_initialPositionApplied && lastPlayedIndex >= 0;
+              if (restorePosition) {
+                _initialPositionApplied = true;
+              }
               return DesktopHorizontalPager(
                 key: ValueKey<String>('detail-episodes:${resolvedGroup.id}'),
+                initialScrollOffset: restorePosition
+                    ? lastPlayedIndex *
+                        (_episodeCardWidth + _episodeCardSpacing)
+                    : 0,
                 builder: (context, controller) => ListView.separated(
                   controller: controller,
                   scrollDirection: Axis.horizontal,
@@ -384,9 +475,13 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                       width: _episodeCardWidth,
                       child: _DetailEpisodeCard(
                         item: episode,
+                        lastPlayed: index == lastPlayedIndex,
                         seriesTarget: widget.seriesTarget,
                         focusId: _episodeFocusId(episode, index),
                         autofocus: false,
+                        focusNode: index == lastPlayedIndex
+                            ? _lastPlayedFocusNode
+                            : null,
                       ),
                     );
                   },
@@ -400,7 +495,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
               child: Text(
                 '加载剧集失败：$error',
                 style: const TextStyle(
-                  color: Color(0xFF90A0BD),
+                  color: AppColors.foregroundMuted,
                   fontSize: 14,
                 ),
               ),
@@ -444,20 +539,21 @@ class _DetailEpisodeCard extends ConsumerWidget {
     required this.item,
     required this.seriesTarget,
     this.focusId,
+    this.lastPlayed = false,
     this.autofocus = false,
+    this.focusNode,
   });
 
   final MediaItem item;
   final MediaDetailTarget seriesTarget;
   final String? focusId;
+  final bool lastPlayed;
   final bool autofocus;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final playbackEntry =
-        ref.watch(playbackEntryForMediaItemProvider(item)).value;
-    final badgeText = _episodeBadgeText(item, playbackEntry);
     final summary = _episodeSummary(
       item,
       seriesTarget: seriesTarget,
@@ -473,6 +569,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
     }
 
     Future<void> openPlaybackTarget() async {
+      if (activePlaybackLaunchInProgress.value) return;
       final playbackTarget = itemToEpisodePlaybackTarget(
         item,
         seriesTarget: seriesTarget,
@@ -483,20 +580,23 @@ class _DetailEpisodeCard extends ConsumerWidget {
         );
         return;
       }
-      await ActivePlaybackCleanupCoordinator.cleanupAll(
-        reason: 'open-new-playback',
-      );
-      if (!context.mounted) {
-        return;
+      activePlaybackLaunchInProgress.value = true;
+      try {
+        await ActivePlaybackCleanupCoordinator.cleanupAll(
+          reason: 'open-new-playback',
+        );
+        if (!context.mounted) return;
+        await context.pushNamed(
+          'player',
+          extra: playbackTarget,
+        );
+      } finally {
+        activePlaybackLaunchInProgress.value = false;
       }
-      context.pushNamed(
-        'player',
-        extra: playbackTarget,
-      );
     }
 
     final effectiveFocusId = focusId?.trim() ?? '';
-    final borderRadius = BorderRadius.circular(24);
+    final borderRadius = BorderRadius.circular(AppRadii.lg);
     final titleStyle = TextStyle(
       color: Colors.white,
       fontSize: 16,
@@ -525,7 +625,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
         children: [
           ClipRRect(
             borderRadius: const BorderRadius.vertical(
-              top: Radius.circular(24),
+              top: Radius.circular(AppRadii.lg),
             ),
             child: AspectRatio(
               aspectRatio: 16 / 9,
@@ -572,18 +672,33 @@ class _DetailEpisodeCard extends ConsumerWidget {
                         ),
                         decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.46),
-                          borderRadius: BorderRadius.circular(999),
+                          borderRadius: BorderRadius.circular(AppRadii.pill),
                         ),
-                        child: Text(
-                          badgeText,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                        child: Consumer(builder: (context, ref, _) {
+                          final repository =
+                              ref.read(playbackMemoryRepositoryProvider);
+                          final target = PlaybackTarget.fromMediaItem(item);
+                          final badgeText = ref.watch(
+                              playbackMemorySnapshotProvider.select((value) {
+                            final snapshot = value.value;
+                            return _episodeBadgeText(
+                                item,
+                                snapshot == null
+                                    ? null
+                                    : repository.entryForTargetFromSnapshot(
+                                        snapshot, target));
+                          }));
+                          return Text(
+                            badgeText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          );
+                        }),
                       ),
                     ),
                   ),
@@ -598,7 +713,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
                         ),
                         decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.54),
-                          borderRadius: BorderRadius.circular(999),
+                          borderRadius: BorderRadius.circular(AppRadii.pill),
                         ),
                         child: Text(
                           fileSizeText,
@@ -619,41 +734,76 @@ class _DetailEpisodeCard extends ConsumerWidget {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-              child: Text(
-                summary,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFFD7E0F1),
-                  fontSize: 13,
-                  height: 1.45,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (lastPlayed) ...[
+                    const Row(
+                      children: [
+                        Icon(Icons.history_rounded,
+                            size: 16, color: AppColors.foreground),
+                        SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            'Last Played',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.foreground,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                  Flexible(
+                    child: Text(
+                      summary,
+                      maxLines: lastPlayed ? 2 : 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.foreground,
+                        fontSize: 13,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
         ],
       ),
     );
-    final actionChild = RepaintBoundary(
-      child: isTelevision
-          ? GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => unawaited(openPlaybackTarget()),
-              onLongPress: onOpenDetail,
-              onSecondaryTap: onOpenDetail,
-              child: cardChild,
-            )
-          : cardChild,
-    );
-    return TvFocusableAction(
-      onPressed: () => unawaited(openPlaybackTarget()),
-      onContextAction: onOpenDetail,
-      focusId: effectiveFocusId.isEmpty ? null : effectiveFocusId,
-      autofocus: autofocus,
-      borderRadius: borderRadius,
-      visualStyle: TvFocusVisualStyle.subtle,
-      focusScale: isTelevision ? 1.035 : 1.0,
-      child: actionChild,
+    return ValueListenableBuilder<bool>(
+      valueListenable: activePlaybackLaunchInProgress,
+      builder: (context, opening, _) {
+        final actionChild = RepaintBoundary(
+          child: isTelevision
+              ? GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: opening ? null : () => unawaited(openPlaybackTarget()),
+                  onLongPress: onOpenDetail,
+                  onSecondaryTap: onOpenDetail,
+                  child: cardChild,
+                )
+              : cardChild,
+        );
+        return TvFocusableAction(
+          onPressed: opening ? null : () => unawaited(openPlaybackTarget()),
+          onContextAction: onOpenDetail,
+          focusId: effectiveFocusId.isEmpty ? null : effectiveFocusId,
+          autofocus: autofocus,
+          focusNode: focusNode,
+          borderRadius: borderRadius,
+          visualStyle: TvFocusVisualStyle.subtle,
+          focusScale: isTelevision ? 1.035 : 1.0,
+          child: actionChild,
+        );
+      },
     );
   }
 
@@ -748,7 +898,8 @@ class _DetailEpisodeArtwork extends StatelessWidget {
             constraints,
           );
           return ClipRRect(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(AppRadii.lg)),
             child: AppNetworkImage(
               primaryArtwork.url,
               headers: primaryArtwork.headers,
@@ -810,11 +961,11 @@ class _DetailEpisodeArtworkFallback extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: const BoxDecoration(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.lg)),
         gradient: LinearGradient(
           colors: [
-            Color(0xFF24324B),
-            Color(0xFF101B2E),
+            AppColors.neutral5,
+            AppColors.neutral2,
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,

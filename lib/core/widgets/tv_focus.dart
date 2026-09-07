@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
@@ -102,6 +103,8 @@ String describeTvFocusNode(FocusNode? node) {
   return debugLabel.isNotEmpty ? debugLabel : node.runtimeType.toString();
 }
 
+final _tvBoundaryDirectionalFocusAction = TvSafeDirectionalFocusAction();
+
 bool handleTvDirectionalFocusBoundary(
   BuildContext context,
   TraversalDirection direction, {
@@ -112,7 +115,11 @@ bool handleTvDirectionalFocusBoundary(
     return false;
   }
 
-  final moved = primaryFocus.focusInDirection(direction);
+  final moved = _tvBoundaryDirectionalFocusAction._runTraversal(
+    primaryFocus,
+    direction,
+    () => primaryFocus.focusInDirection(direction),
+  );
   if (moved) {
     return true;
   }
@@ -154,8 +161,21 @@ class TvSafeDirectionalFocusAction extends Action<DirectionalFocusIntent> {
     if (primaryFocus == null) {
       return null;
     }
+    _runTraversal(
+      primaryFocus,
+      intent.direction,
+      () => primaryFocus.focusInDirection(intent.direction),
+    );
+    return null;
+  }
+
+  bool _runTraversal(
+    FocusNode primaryFocus,
+    TraversalDirection direction,
+    bool Function() traverse,
+  ) {
     try {
-      primaryFocus.focusInDirection(intent.direction);
+      return traverse();
     } on StateError catch (error) {
       if (!error.message.toString().contains('RenderBox was not laid out')) {
         rethrow;
@@ -169,13 +189,15 @@ class TvSafeDirectionalFocusAction extends Action<DirectionalFocusIntent> {
           now.difference(lastWarningAt) >= warningInterval) {
         _lastWarningAt = now;
         _onIgnoredUnlaidOutCandidate(
-          intent.direction,
+          direction,
           primaryFocus,
           error,
         );
       }
+      // Consume the failed traversal so callers do not interpret it as an
+      // actual page edge and move focus to the sidebar.
+      return true;
     }
-    return null;
   }
 }
 
@@ -199,21 +221,18 @@ void _logIgnoredUnlaidOutDirectionalCandidate(
 
 class TvSafeDirectionalFocusTraversalPolicy
     extends ReadingOrderTraversalPolicy {
+  final _directionalAction = TvSafeDirectionalFocusAction();
+
   @override
   bool inDirection(
     FocusNode currentNode,
     TraversalDirection direction,
   ) {
-    try {
-      return super.inDirection(currentNode, direction);
-    } on StateError catch (error) {
-      if (!error.message.toString().contains('RenderBox was not laid out')) {
-        rethrow;
-      }
-      // A dynamically inserted TV focus target can exist for one frame before
-      // layout assigns its size. Ignore that key press and keep focus stable.
-      return false;
-    }
+    return _directionalAction._runTraversal(
+      currentNode,
+      direction,
+      () => super.inDirection(currentNode, direction),
+    );
   }
 }
 
@@ -572,6 +591,40 @@ class TvContextMenuIntent extends Intent {
   const TvContextMenuIntent();
 }
 
+class TvDialogOption extends StatelessWidget {
+  const TvDialogOption({
+    super.key,
+    required this.isTelevision,
+    required this.onPressed,
+    required this.child,
+    this.autofocus = false,
+  });
+
+  final bool isTelevision;
+  final VoidCallback? onPressed;
+  final Widget child;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isTelevision) {
+      return SimpleDialogOption(onPressed: onPressed, child: child);
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      child: TvFocusableAction(
+        autofocus: autofocus,
+        onPressed: onPressed,
+        visualStyle: TvFocusVisualStyle.subtle,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 class TvFocusableAction extends ConsumerStatefulWidget {
   const TvFocusableAction({
     super.key,
@@ -582,7 +635,7 @@ class TvFocusableAction extends ConsumerStatefulWidget {
     this.autofocus = false,
     this.focusNode,
     this.focusId,
-    this.borderRadius = const BorderRadius.all(Radius.circular(20)),
+    this.borderRadius = const BorderRadius.all(Radius.circular(AppRadii.md)),
     this.visualStyle = TvFocusVisualStyle.prominent,
     this.focusScale = 1.0,
   });
@@ -763,28 +816,27 @@ _StarflowButtonPalette _starflowButtonPalette(
   required bool enabled,
 }) {
   final isDark = theme.brightness == Brightness.dark;
+  final actions = AppActionColors.of(theme);
   final palette = switch (variant) {
     StarflowButtonVariant.primary => _StarflowButtonPalette(
-        backgroundColor: isDark
-            ? Colors.white.withValues(alpha: 0.10)
-            : theme.colorScheme.primary.withValues(alpha: 0.10),
-        foregroundColor: isDark ? Colors.white : theme.colorScheme.primary,
-        borderColor: isDark
-            ? Colors.white.withValues(alpha: 0.26)
-            : theme.colorScheme.primary.withValues(alpha: 0.24),
+        backgroundColor: actions.primary,
+        foregroundColor: actions.onPrimary,
+        borderColor: actions.primary,
       ),
     StarflowButtonVariant.secondary => _StarflowButtonPalette(
         backgroundColor: isDark
             ? Colors.white.withValues(alpha: 0.06)
             : theme.colorScheme.onSurface.withValues(alpha: 0.04),
-        foregroundColor: isDark ? Colors.white : theme.colorScheme.onSurface,
+        foregroundColor:
+            isDark ? AppColors.foregroundBody : theme.colorScheme.onSurface,
         borderColor: isDark
             ? Colors.white.withValues(alpha: 0.16)
             : theme.colorScheme.outlineVariant,
       ),
     StarflowButtonVariant.ghost => _StarflowButtonPalette(
         backgroundColor: Colors.transparent,
-        foregroundColor: isDark ? Colors.white : theme.colorScheme.primary,
+        foregroundColor:
+            isDark ? AppColors.foregroundBody : theme.colorScheme.primary,
         borderColor: isDark
             ? Colors.white.withValues(alpha: 0.12)
             : theme.colorScheme.primary.withValues(alpha: 0.12),
@@ -849,7 +901,7 @@ class StarflowButton extends StatelessWidget {
       variant: variant,
       enabled: onPressed != null && !loading,
     );
-    final radius = BorderRadius.circular(compact ? 16 : 18);
+    final radius = BorderRadius.circular(AppRadii.pill);
     final button = DecoratedBox(
       decoration: BoxDecoration(
         color: palette.backgroundColor,
@@ -951,7 +1003,7 @@ class StarflowIconButton extends StatelessWidget {
       variant: variant,
       enabled: onPressed != null,
     );
-    final radius = BorderRadius.circular(14);
+    final radius = BorderRadius.circular(AppRadii.pill);
     final child = _TvOutlinedFocusableAction(
       onPressed: onPressed,
       autofocus: autofocus,
@@ -1079,16 +1131,16 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final enabled = widget.onPressed != null;
-    final accentColor = widget.accentColor ?? colorScheme.primary;
-    final backgroundColor = _focused
-        ? colorScheme.primaryContainer
-        : widget.selected
-            ? accentColor.withValues(alpha: 0.18)
+    final accentColor = widget.accentColor ?? AppActionColors.of(theme).primary;
+    final backgroundColor = widget.selected
+        ? accentColor.withValues(alpha: 0.18)
+        : _focused
+            ? colorScheme.primaryContainer
             : colorScheme.surfaceContainerHighest.withValues(alpha: 0.58);
-    final foregroundColor = _focused
-        ? colorScheme.onPrimaryContainer
-        : widget.selected
-            ? accentColor
+    final foregroundColor = widget.selected
+        ? accentColor
+        : _focused
+            ? colorScheme.onPrimaryContainer
             : colorScheme.onSurfaceVariant.withValues(alpha: 0.82);
     final borderColor = _focused
         ? (theme.brightness == Brightness.dark
@@ -1107,7 +1159,7 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
     final effectiveIcon = widget.selected && widget.showSelectedCheckmark
         ? Icons.check_circle_rounded
         : widget.icon;
-    final radius = BorderRadius.circular(999);
+    final radius = BorderRadius.circular(AppRadii.pill);
     final chip = TvFocusableAction(
       onPressed: widget.onPressed,
       onFocused: widget.onFocused,
@@ -1135,9 +1187,9 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
             boxShadow: _focused
                 ? [
                     BoxShadow(
-                      color: colorScheme.primary.withValues(alpha: 0.38),
-                      blurRadius: 20,
-                      spreadRadius: 2,
+                      color: colorScheme.primary.withValues(alpha: 0.22),
+                      blurRadius: 11,
+                      spreadRadius: 1,
                     ),
                   ]
                 : null,
@@ -1216,7 +1268,7 @@ class StarflowSelectionTile extends StatelessWidget {
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadii.pill),
       borderWidth: 1.8,
       child: Opacity(
         opacity: onPressed == null ? 0.5 : 1,
@@ -1225,7 +1277,7 @@ class StarflowSelectionTile extends StatelessWidget {
             color: isDark
                 ? Colors.white.withValues(alpha: 0.04)
                 : theme.colorScheme.onSurface.withValues(alpha: 0.035),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(AppRadii.pill),
             border: Border.all(
               color: isDark
                   ? Colors.white.withValues(alpha: 0.12)
@@ -1306,7 +1358,7 @@ class StarflowToggleTile extends StatelessWidget {
         value ? Icons.toggle_on_rounded : Icons.toggle_off_outlined,
         size: 28,
         color: value
-            ? Theme.of(context).colorScheme.primary
+            ? AppActionColors.of(Theme.of(context)).primary
             : Theme.of(context).colorScheme.onSurfaceVariant,
       ),
     );
@@ -1350,7 +1402,9 @@ class StarflowCheckboxTile extends StatelessWidget {
       trailing: Icon(
         value ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
         size: 22,
-        color: value ? scheme.primary : scheme.onSurfaceVariant,
+        color: value
+            ? AppActionColors.of(Theme.of(context)).primary
+            : scheme.onSurfaceVariant,
       ),
     );
   }
@@ -1362,6 +1416,7 @@ class TvAdaptiveButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onPressed,
+    this.iconColor,
     this.variant = TvButtonVariant.filled,
     this.compact = false,
     this.autofocus = false,
@@ -1374,6 +1429,7 @@ class TvAdaptiveButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onPressed;
   final TvButtonVariant variant;
+  final Color? iconColor;
   final bool compact;
   final bool autofocus;
   final FocusNode? focusNode;
@@ -1392,6 +1448,7 @@ class TvAdaptiveButton extends StatelessWidget {
       icon: icon,
       onPressed: onPressed,
       variant: mappedVariant,
+      iconColor: iconColor,
       compact: compact,
       autofocus: autofocus,
       focusNode: focusNode,
@@ -1521,7 +1578,9 @@ Widget wrapTelevisionDialogBackHandling({
 
   void handleDismiss() {
     if (_hasFocusedTvDialogNode(inputFocusNodes)) {
-      FocusManager.instance.primaryFocus?.unfocus();
+      if (!_focusFirstAvailableTvDialogNode(actionFocusNodes)) {
+        FocusManager.instance.primaryFocus?.unfocus();
+      }
       return;
     }
     if (_hasFocusedTvDialogNode(contentFocusNodes)) {
@@ -1567,7 +1626,7 @@ bool _hasFocusedTvDialogNode(Iterable<FocusNode> nodes) {
 
 bool _focusFirstAvailableTvDialogNode(Iterable<FocusNode> nodes) {
   for (final node in nodes) {
-    if (node.canRequestFocus) {
+    if (node.context != null && node.canRequestFocus) {
       requestTvFocus(node);
       return true;
     }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
@@ -170,7 +171,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
     Widget buildPosterFrame() {
       final posterFrame = RepaintBoundary(
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadii.sm),
           child: Stack(
             fit: StackFit.expand,
             children: [
@@ -223,7 +224,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
                 IgnorePointer(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(AppRadii.sm),
                       border: Border.all(
                         color: Colors.white,
                         width: 2.4,
@@ -296,7 +297,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
     }
 
     return InkWell(
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(AppRadii.sm),
       onTap: widget.onTap,
       onLongPress: widget.onContextAction,
       onSecondaryTap: widget.onContextAction,
@@ -309,7 +310,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadii.sm),
         ),
       ),
     );
@@ -369,7 +370,7 @@ class _TelevisionPosterAction extends StatelessWidget {
           focusNode: focusNode,
           autofocus: autofocus,
           child: InkWell(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadii.sm),
             onTap: onPressed,
             onLongPress: onContextAction,
             onSecondaryTap: onContextAction,
@@ -395,7 +396,7 @@ class _PosterImageBadge extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.68),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadii.pill),
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.12),
         ),

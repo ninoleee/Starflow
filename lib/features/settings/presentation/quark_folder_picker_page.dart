@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
@@ -22,6 +23,7 @@ class QuarkFolderPickerPage extends ConsumerStatefulWidget {
 }
 
 class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
+  final _selectFocusNode = FocusNode(debugLabel: 'quark-folder-select');
   late List<QuarkDirectoryEntry> _breadcrumbs;
   bool _isLoading = true;
   String? _errorMessage;
@@ -46,6 +48,7 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
       _isLoading = true;
       _errorMessage = null;
     });
+    _scheduleFocusRecovery();
 
     try {
       final current = _breadcrumbs.last;
@@ -78,8 +81,37 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
         setState(() {
           _isLoading = false;
         });
+        _scheduleFocusRecovery();
       }
     }
+  }
+
+  void _scheduleFocusRecovery() {
+    if (!(ref.read(isTelevisionProvider).value ?? false)) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          ModalRoute.of(context)?.isCurrent == false ||
+          _selectFocusNode.context == null ||
+          !_selectFocusNode.canRequestFocus) {
+        return;
+      }
+      final current = FocusManager.instance.primaryFocus;
+      if (current != null &&
+          current is! FocusScopeNode &&
+          current.context != null &&
+          current.canRequestFocus) {
+        return;
+      }
+      requestTvFocus(_selectFocusNode);
+    });
+  }
+
+  @override
+  void dispose() {
+    _selectFocusNode.dispose();
+    super.dispose();
   }
 
   void _selectCurrent() {
@@ -106,6 +138,8 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
       onBack: () => Navigator.of(context).pop(),
       trailing: SettingsToolbarButton(
         label: '选择',
+        autofocus: true,
+        focusNode: _selectFocusNode,
         icon: Icons.check_rounded,
         onPressed: _selectCurrent,
       ),
@@ -145,7 +179,6 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
               padding: const EdgeInsets.only(bottom: 8),
               child: StarflowSelectionTile(
                 leading: const Icon(Icons.folder_outlined),
-                autofocus: indexedEntry.$1 == 0,
                 focusId: 'quark-folder:${indexedEntry.$2.fid}',
                 title: indexedEntry.$2.name,
                 subtitle: indexedEntry.$2.path,

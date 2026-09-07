@@ -30,15 +30,58 @@ final playbackMemorySnapshotProvider = FutureProvider<PlaybackMemorySnapshot>((
   return ref.read(playbackMemoryRepositoryProvider).loadSnapshot();
 });
 
+@immutable
+class PlaybackResumeDetailLookup {
+  const PlaybackResumeDetailLookup(this.target);
+
+  final MediaDetailTarget target;
+
+  @override
+  bool operator ==(Object other) {
+    return other is PlaybackResumeDetailLookup &&
+        playbackResumeDetailLookupKey(target) ==
+            playbackResumeDetailLookupKey(other.target);
+  }
+
+  @override
+  int get hashCode => playbackResumeDetailLookupKey(target).hashCode;
+}
+
+String playbackResumeDetailLookupKey(MediaDetailTarget target) {
+  final normalizedItemType = target.itemType.trim().toLowerCase();
+  if (normalizedItemType == 'series') {
+    return 'series:${buildSeriesKeyForMetadata(
+      sourceId: target.sourceId,
+      itemId: target.itemId,
+      title: target.title,
+      year: target.year,
+    )}';
+  }
+
+  final playbackTarget = target.playbackTarget;
+  if (playbackTarget != null) {
+    return 'playable:${buildPlaybackItemKey(playbackTarget)}';
+  }
+
+  return [
+    'detail',
+    target.sourceId.trim(),
+    target.itemId.trim(),
+    _normalizePlaybackText(target.resourcePath),
+    _normalizePlaybackText(target.title),
+    target.year,
+  ].join('|');
+}
+
 final playbackResumeForDetailTargetProvider =
-    FutureProvider.family<PlaybackProgressEntry?, MediaDetailTarget>((
+    FutureProvider.family<PlaybackProgressEntry?, PlaybackResumeDetailLookup>((
   ref,
-  target,
+  lookup,
 ) async {
   final snapshot = await ref.watch(playbackMemorySnapshotProvider.future);
   return ref
       .read(playbackMemoryRepositoryProvider)
-      .resumeEntryForDetailTargetFromSnapshot(snapshot, target);
+      .resumeEntryForDetailTargetFromSnapshot(snapshot, lookup.target);
 });
 
 final playbackEntryForMediaItemProvider =

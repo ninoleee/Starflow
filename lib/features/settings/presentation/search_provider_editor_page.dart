@@ -341,6 +341,7 @@ class _SearchProviderEditorPageState
         actions: [
           StarflowButton(
             label: '取消',
+            autofocus: true,
             onPressed: () => Navigator.of(ctx).pop(false),
             variant: StarflowButtonVariant.ghost,
             compact: true,

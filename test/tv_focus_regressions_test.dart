@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -358,7 +360,6 @@ void main() {
       ],
       homeStartupAutoRefreshEnabled: false,
     );
-
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -537,6 +538,161 @@ void main() {
       ),
     );
     expect(firstTile.autofocus, isFalse);
+  });
+
+  testWidgets('home navigation reset moves focus back to a visible Hero',
+      (tester) async {
+    final settings = SeedData.defaultSettings.copyWith(
+      homeModules: const [
+        HomeModuleConfig(
+          id: HomeModuleConfig.heroModuleId,
+          type: HomeModuleType.hero,
+          title: 'Hero',
+          enabled: true,
+        ),
+        HomeModuleConfig(
+          id: 'first-module',
+          type: HomeModuleType.recentPlayback,
+          title: '最近播放',
+          enabled: true,
+        ),
+      ],
+      homeStartupAutoRefreshEnabled: false,
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(settings),
+          homeResolvedSectionsProvider.overrideWith(
+            (ref) => const HomeResolvedSectionsState(
+              sections: [_singleHeroSection, _firstContentSection],
+            ),
+          ),
+          homeSectionProvider.overrideWith((ref, moduleId) async {
+            return moduleId == 'first-module' ? _firstContentSection : null;
+          }),
+        ],
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final hero = tester.widget<TvFocusableAction>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TvFocusableAction &&
+            widget.focusId == 'home:hero:hero-item-1',
+      ),
+    );
+    final recentFinder = find.byWidgetPredicate(
+      (widget) =>
+          widget is MediaPosterTile &&
+          widget.focusId == 'home:section:first-module:item:First Content',
+    );
+    expect(recentFinder, findsOneWidget);
+    final recent = tester.widget<MediaPosterTile>(recentFinder);
+    expect(hero.focusNode?.hasPrimaryFocus, isTrue);
+
+    recent.focusNode!.requestFocus();
+    await tester.pump();
+    expect(recent.focusNode?.hasPrimaryFocus, isTrue);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(HomePage)),
+    );
+    container.read(homeNavigationResetRevisionProvider.notifier).state += 1;
+    await tester.pumpAndSettle();
+
+    expect(hero.focusNode?.hasPrimaryFocus, isTrue);
+    expect(recent.focusNode?.hasFocus, isFalse);
+  });
+
+  testWidgets('home waits for a pending Hero instead of focusing recent',
+      (tester) async {
+    final resolvedStateProvider = StateProvider<HomeResolvedSectionsState>(
+      (ref) => const HomeResolvedSectionsState(
+        sections: [_firstContentSection],
+        hasPendingSections: true,
+      ),
+    );
+    final heroCompleter = Completer<HomeSectionViewModel?>();
+    final settings = SeedData.defaultSettings.copyWith(
+      homeModules: const [
+        HomeModuleConfig(
+          id: HomeModuleConfig.heroModuleId,
+          type: HomeModuleType.hero,
+          title: 'Hero',
+          enabled: true,
+        ),
+        HomeModuleConfig(
+          id: 'first-module',
+          type: HomeModuleType.recentPlayback,
+          title: '最近播放',
+          enabled: true,
+        ),
+      ],
+      homeHeroSourceModuleId: 'hero-source',
+      homeStartupAutoRefreshEnabled: false,
+    );
+    tester.view.physicalSize = const Size(1280, 1800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(settings),
+          homeResolvedSectionsProvider.overrideWith(
+            (ref) => ref.watch(resolvedStateProvider),
+          ),
+          homeSectionProvider.overrideWith((ref, moduleId) {
+            if (moduleId == 'hero-source') {
+              return heroCompleter.future;
+            }
+            if (moduleId == 'first-module') {
+              return Future<HomeSectionViewModel?>.value(_firstContentSection);
+            }
+            return Future<HomeSectionViewModel?>.value();
+          }),
+        ],
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final recent = tester.widget<MediaPosterTile>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is MediaPosterTile &&
+            widget.focusId == 'home:section:first-module:item:First Content',
+      ),
+    );
+    expect(recent.focusNode?.hasPrimaryFocus, isFalse);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(HomePage)),
+    );
+    container.read(resolvedStateProvider.notifier).state =
+        const HomeResolvedSectionsState(
+      sections: [_singleHeroSection, _firstContentSection],
+    );
+    heroCompleter.complete(_singleHeroSection);
+    await tester.pumpAndSettle();
+
+    final hero = tester.widget<TvFocusableAction>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TvFocusableAction &&
+            widget.focusId == 'home:hero:hero-item-1',
+      ),
+    );
+    expect(hero.focusNode?.hasPrimaryFocus, isTrue);
+    expect(recent.focusNode?.hasFocus, isFalse);
   });
 
   testWidgets('Home recovers when the focused poster is removed',

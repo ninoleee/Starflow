@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
@@ -293,10 +294,10 @@ class DetailResourceInfoSection extends StatelessWidget {
               child: DropdownButton<PlaybackEngine>(
                 value: effectiveEngine,
                 isExpanded: true,
-                dropdownColor: const Color(0xFF142235),
+                dropdownColor: AppColors.neutral3,
                 iconEnabledColor: Colors.white70,
                 style: const TextStyle(
-                  color: Color(0xFFDCE6F8),
+                  color: AppColors.foreground,
                   fontSize: 14,
                   height: 1.35,
                 ),
@@ -419,7 +420,7 @@ class _DetailLinkedFactRow extends StatelessWidget {
           child: Text(
             label,
             style: const TextStyle(
-              color: Color(0xFF8FA0BD),
+              color: AppColors.foregroundMuted,
               fontSize: 13,
               fontWeight: FontWeight.w700,
             ),
@@ -433,7 +434,7 @@ class _DetailLinkedFactRow extends StatelessWidget {
                 ? TvFocusableAction(
                     onPressed: onPressed,
                     focusId: focusId,
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(AppRadii.sm),
                     visualStyle: TvFocusVisualStyle.subtle,
                     focusScale: kTvButtonFocusScale,
                     child: action,
@@ -466,7 +467,7 @@ class _DetailLinkedFactAction extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
       style: TextButton.styleFrom(
-        foregroundColor: const Color(0xFFE6EDFD),
+        foregroundColor: AppColors.foreground,
         padding: EdgeInsets.zero,
         minimumSize: const Size(0, 30),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -586,7 +587,7 @@ class DetailPlayableVariantSelector extends StatelessWidget {
           Text(
             subtitle,
             style: const TextStyle(
-              color: Color(0xFF9DB0CF),
+              color: AppColors.foregroundMuted,
               fontSize: 13,
               height: 1.45,
             ),
@@ -636,10 +637,10 @@ class _DetailLibraryMatchSelectionControl extends StatelessWidget {
       child: DropdownButton<int>(
         value: selectedIndex,
         isExpanded: true,
-        dropdownColor: const Color(0xFF142235),
+        dropdownColor: AppColors.neutral3,
         iconEnabledColor: Colors.white70,
         style: const TextStyle(
-          color: Color(0xFFDCE6F8),
+          color: AppColors.foreground,
           fontSize: 14,
           height: 1.35,
         ),
@@ -735,14 +736,14 @@ class _DetailTelevisionSelectionTile extends StatelessWidget {
     return TvFocusableAction(
       onPressed: onPressed,
       focusId: focusId,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadii.md),
       visualStyle: TvFocusVisualStyle.subtle,
       child: Opacity(
         opacity: onPressed == null ? 0.5 : 1,
         child: Container(
           decoration: BoxDecoration(
             color: theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(AppRadii.md),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           child: Row(

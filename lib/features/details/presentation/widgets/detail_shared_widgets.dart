@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -47,7 +48,7 @@ class InfoLabel extends StatelessWidget {
     return Text(
       text,
       style: const TextStyle(
-        color: Color(0xFF8FA0BD),
+        color: AppColors.foregroundMuted,
         fontSize: 12,
         fontWeight: FontWeight.w700,
       ),
@@ -89,7 +90,7 @@ class PersonRail extends StatelessWidget {
             onPressed: () => onPersonTap(person),
             focusId: '$focusScopePrefix:${person.name}',
             autofocus: false,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(AppRadii.md),
             child: SizedBox(
               width: 86,
               child: Column(
@@ -133,7 +134,7 @@ class _PersonAvatar extends StatelessWidget {
       height: 74,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: const Color(0xFF162233),
+        color: AppColors.neutral4,
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.08),
         ),
@@ -203,7 +204,7 @@ class PlatformRail extends StatelessWidget {
             focusId: 'detail:company:${platform.name}',
             visualStyle: TvFocusVisualStyle.prominent,
             focusScale: 1.03,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(AppRadii.sm),
             child: _PlatformLogo(platform: platform),
           );
         },
@@ -240,7 +241,7 @@ class _PlatformLogo extends StatelessWidget {
               Color(0xFFECEFF4),
             ],
           ),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(AppRadii.sm),
           border: Border.all(
             color: Colors.white.withValues(alpha: 0.82),
           ),
@@ -303,7 +304,7 @@ class FactRow extends StatelessWidget {
           child: Text(
             label,
             style: const TextStyle(
-              color: Color(0xFF8FA0BD),
+              color: AppColors.foregroundMuted,
               fontSize: 13,
               fontWeight: FontWeight.w700,
             ),
@@ -315,7 +316,7 @@ class FactRow extends StatelessWidget {
               ? SelectableText(
                   value,
                   style: const TextStyle(
-                    color: Color(0xFFE6EDFD),
+                    color: AppColors.foreground,
                     fontSize: 14,
                     height: 1.5,
                   ),
@@ -323,7 +324,7 @@ class FactRow extends StatelessWidget {
               : Text(
                   value,
                   style: const TextStyle(
-                    color: Color(0xFFE6EDFD),
+                    color: AppColors.foreground,
                     fontSize: 14,
                     height: 1.5,
                   ),
@@ -635,12 +636,12 @@ class DetailImageGallery extends StatelessWidget {
               vertical: 24,
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(AppRadii.lg),
               child: AspectRatio(
                 aspectRatio: 16 / 9,
                 child: DecoratedBox(
                   decoration: const BoxDecoration(
-                    color: Color(0xFF07121F),
+                    color: AppColors.neutral1,
                   ),
                   child: AppNetworkImage(
                     image.url,
@@ -649,7 +650,7 @@ class DetailImageGallery extends StatelessWidget {
                     fit: BoxFit.contain,
                     throttleOnTelevision: false,
                     errorBuilder: (context, error, stackTrace) {
-                      return const ColoredBox(color: Color(0xFF0D192A));
+                      return const ColoredBox(color: AppColors.neutral3);
                     },
                   ),
                 ),
@@ -676,11 +677,11 @@ class DetailImageGallery extends StatelessWidget {
             return TvFocusableAction(
               onPressed: () => openPreview(image),
               focusId: '$focusIdPrefix:$index',
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(AppRadii.md),
               visualStyle: TvFocusVisualStyle.subtle,
               focusScale: kTvButtonFocusScale,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(AppRadii.md),
                 child: AspectRatio(
                   aspectRatio: 16 / 9,
                   child: SizedBox(
@@ -694,7 +695,7 @@ class DetailImageGallery extends StatelessWidget {
                       fit: BoxFit.cover,
                       throttleOnTelevision: false,
                       errorBuilder: (context, error, stackTrace) {
-                        return const ColoredBox(color: Color(0xFF0D192A));
+                        return const ColoredBox(color: AppColors.neutral3);
                       },
                     ),
                   ),

@@ -1,6 +1,11 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 typedef ActivePlaybackCleanupCallback = Future<void> Function(String reason);
+
+final ValueNotifier<bool> activePlaybackLaunchInProgress =
+    ValueNotifier<bool>(false);
 
 class ActivePlaybackCleanupCoordinator {
   ActivePlaybackCleanupCoordinator._();

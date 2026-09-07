@@ -12,6 +12,12 @@ internal enum class ControllerFocusTarget {
 }
 
 internal object NativePlayerTvFocusPolicy {
+    fun shouldToggleFromProgress(
+        isTelevision: Boolean,
+        progressFocused: Boolean,
+        overlayVisible: Boolean,
+    ): Boolean = isTelevision && progressFocused && !overlayVisible
+
     val focusableControlIds: IntArray = intArrayOf(Media3UiR.id.exo_play_pause)
     val primaryFocusOrder: IntArray = intArrayOf(Media3UiR.id.exo_play_pause)
     val removedBottomRightControlIds: IntArray =

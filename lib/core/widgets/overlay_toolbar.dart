@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 
 const double _kOverlayToolbarBackButtonWidth = 64;
@@ -38,7 +39,7 @@ class OverlayToolbar extends ConsumerWidget {
               if (showBackButton)
                 TvFocusableAction(
                   onPressed: backAction,
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(AppRadii.pill),
                   visualStyle: TvFocusVisualStyle.subtle,
                   child: SizedBox(
                     width: _kOverlayToolbarBackButtonWidth,

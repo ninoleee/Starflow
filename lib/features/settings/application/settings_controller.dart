@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/features/settings/domain/app_accent.dart';
 import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/network_proxy_config.dart';
@@ -534,6 +535,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(
       current.copyWith(homeNavigationSingleTapCleanupEnabled: enabled),
     );
+  }
+
+  Future<void> setAppAccent(AppAccent accent) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(current.copyWith(appAccent: accent));
   }
 
   Future<void> setSimplifiedVisualEffectsEnabled(bool enabled) async {

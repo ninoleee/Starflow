@@ -79,22 +79,6 @@
             android:visibility="gone" />
     </LinearLayout>
 
-    <LinearLayout
-        android:id="@id/exo_center_controls"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:background="@android:color/transparent"
-        android:clipToPadding="false"
-        android:gravity="center"
-        android:layoutDirection="ltr"
-        android:padding="20dp">
-
-        <ImageButton
-            android:id="@id/exo_play_pause"
-            style="@style/ExoStyledControls.Button.Center.PlayPause" />
-    </LinearLayout>
-
     <androidx.media3.ui.DefaultTimeBar
         android:id="@id/exo_progress"
         style="@style/ExoStyledControls.TimeBar"
@@ -126,8 +110,23 @@
         android:background="@color/native_player_overlay_bar"
         android:layoutDirection="ltr">
 
+        <ImageButton
+            android:id="@id/exo_play_pause"
+            style="@style/ExoStyledControls.Button.Bottom"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="center_vertical|start"
+            android:layout_marginLeft="0dp"
+            android:layout_marginRight="0dp"
+            android:layout_marginStart="18dp"
+            android:background="@drawable/native_player_play_pause_background"
+            android:contentDescription="@string/exo_controls_play_description"
+            android:scaleType="centerInside"
+            android:src="@drawable/exo_styled_controls_play" />
+
         <LinearLayout
             android:id="@id/exo_time"
+            android:layout_marginStart="56dp"
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
             android:layout_gravity="center_vertical|start"

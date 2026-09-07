@@ -150,6 +150,16 @@ void main() {
 
     test('classifies only transient network failures for open retry', () {
       expect(
+        classifyMpvOpenFailure(
+          Exception('tcp: ffurl_read returned 0xdfb9b0bb'),
+        ),
+        MpvOpenFailureKind.transientNetwork,
+      );
+      expect(
+        classifyMpvOpenFailure(Exception('[Player] has been disposed')),
+        MpvOpenFailureKind.unknown,
+      );
+      expect(
         classifyMpvOpenFailure(TimeoutException('network timeout')),
         MpvOpenFailureKind.transientNetwork,
       );
@@ -167,8 +177,29 @@ void main() {
       );
     });
 
-    test('uses fast-start profile when throughput comfortably beats bitrate',
-        () {
+    test('uses standard buffering without a cached bandwidth estimate', () {
+      const target = PlaybackTarget(
+        title: 'Cold MP4',
+        sourceId: 'nas-main',
+        streamUrl: 'https://media.example.com/movie.mp4',
+        sourceName: 'NAS',
+        sourceKind: MediaSourceKind.nas,
+        container: 'mp4',
+        bitrate: 10000000,
+      );
+
+      final profile = resolveMpvRemotePlaybackTuningProfile(
+        target: target,
+        aggressiveTuning: false,
+        heavyPlayback: false,
+      );
+
+      expect(profile?.name, 'buffered-standard');
+      expect(profile?.networkTimeoutSeconds, '24');
+      expect(profile?.cachePauseInitial, 'yes');
+    });
+
+    test('uses fast-start profile when cached throughput beats bitrate', () {
       const target = PlaybackTarget(
         title: 'Fast MP4',
         sourceId: 'nas-main',
@@ -183,7 +214,7 @@ void main() {
         target: target,
         aggressiveTuning: false,
         heavyPlayback: false,
-        preflightEstimatedMegabitsPerSecond: 30,
+        estimatedMegabitsPerSecond: 30,
       );
 
       expect(profile?.name, 'fast-start');

@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
@@ -51,6 +52,7 @@ void main() {
     await tester.pump();
 
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'search-query');
+    expect(find.byType(OverlayToolbar), findsOneWidget);
   });
 
   testWidgets('detail search route push requests TV focus on query input',
@@ -352,6 +354,38 @@ void main() {
     expect(find.text('待验证电影'), findsOneWidget);
   });
 
+  for (final isTelevision in [false, true]) {
+    testWidgets('search page hides favorites entry (TV: $isTelevision)',
+        (tester) async {
+      SharedPreferences.setMockInitialValues(const {});
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isTelevisionProvider.overrideWith((ref) => isTelevision),
+            appSettingsProvider.overrideWithValue(
+              const AppSettings(
+                mediaSources: <MediaSourceConfig>[],
+                searchProviders: <SearchProviderConfig>[],
+                doubanAccount: DoubanAccountConfig(enabled: false),
+                homeModules: <HomeModuleConfig>[],
+              ),
+            ),
+          ],
+          child: const MaterialApp(home: SearchPage()),
+        ),
+      );
+
+      await tester.pump();
+
+      expect(find.byTooltip('查看收藏'), findsNothing);
+      expect(find.byType(OverlayToolbar), findsNothing);
+      expect(find.text('收藏'), findsNothing);
+      expect(find.byIcon(Icons.favorite_rounded), findsNothing);
+      expect(find.byIcon(Icons.search_rounded), findsOneWidget);
+    });
+  }
+
   testWidgets('standalone favorites page hides search controls and tabs',
       (tester) async {
     SharedPreferences.setMockInitialValues(const {});
@@ -378,6 +412,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('收藏'), findsOneWidget);
+    expect(find.byType(OverlayToolbar), findsNothing);
     expect(find.byType(TextField), findsNothing);
     expect(find.text('搜索'), findsNothing);
     expect(find.text('全部'), findsNothing);

@@ -8,6 +8,8 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
+import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -51,6 +53,11 @@ void main() {
   testWidgets('renders media detail content', (WidgetTester tester) async {
     await tester.pumpWidget(
       ProviderScope(
+        overrides: [
+          playbackMemorySnapshotProvider.overrideWith(
+            (ref) async => const PlaybackMemorySnapshot(),
+          ),
+        ],
         child: MaterialApp(
           home: MediaDetailPage(
             target: const MediaDetailTarget(

@@ -4,7 +4,7 @@ import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
-  test('preflight speed estimate strengthens remote buffering without reroute',
+  test('cached speed estimate strengthens remote buffering without reroute',
       () {
     const target = PlaybackTarget(
       title: 'Quark Remote',
@@ -23,7 +23,7 @@ void main() {
       target: target,
       aggressiveTuning: false,
       heavyPlayback: true,
-      preflightEstimatedMegabitsPerSecond: 5.2,
+      estimatedMegabitsPerSecond: 5.2,
     );
 
     expect(profile, isNotNull);

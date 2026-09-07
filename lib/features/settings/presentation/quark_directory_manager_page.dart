@@ -197,6 +197,7 @@ class _QuarkDirectoryManagerPageState
                   StarflowButton(
                     label: '取消',
                     focusNode: cancelFocusNode,
+                    autofocus: true,
                     onPressed: () => Navigator.of(dialogContext).pop(false),
                     variant: StarflowButtonVariant.ghost,
                     compact: true,

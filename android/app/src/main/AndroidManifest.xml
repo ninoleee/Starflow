@@ -11,7 +11,7 @@
         android:required="false" />
 
     <application
-        android:label="starflow"
+        android:label="Starflow"
         android:name=".StarflowApplication"
         android:icon="@drawable/icon_preview_sharp"
         android:banner="@drawable/tv_banner_hd"

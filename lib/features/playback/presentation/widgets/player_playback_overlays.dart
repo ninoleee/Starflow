@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 
@@ -55,7 +56,7 @@ class PlayerStartupOverlay extends StatelessWidget {
                       child: LinearProgressIndicator(
                         minHeight: 2.5,
                         value: progress,
-                        color: Colors.white,
+                        color: AppActionColors.of(Theme.of(context)).primary,
                         backgroundColor: Colors.white.withValues(alpha: 0.16),
                       ),
                     ),
@@ -112,8 +113,8 @@ class TvPlaybackProgressBar extends StatelessWidget {
             FractionallySizedBox(
               alignment: Alignment.centerLeft,
               widthFactor: playedProgress.clamp(0.0, 1.0),
-              child: const ColoredBox(
-                color: Colors.white,
+              child: ColoredBox(
+                color: AppActionColors.of(Theme.of(context)).primary,
               ),
             ),
           ],

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 class StarflowLogo extends StatefulWidget {
   const StarflowLogo({
@@ -148,8 +147,8 @@ class _StarflowLogoState extends State<StarflowLogo>
                                     ? widget.iconSize * 0.11
                                     : 0,
                               ),
-                              child: SvgPicture.asset(
-                                'assets/branding/starflow_logo_primary.svg',
+                              child: Image.asset(
+                                'assets/branding/starflow_logo_primary.png',
                                 fit: BoxFit.contain,
                               ),
                             ),

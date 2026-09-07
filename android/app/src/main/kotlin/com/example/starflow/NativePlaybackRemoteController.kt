@@ -29,6 +29,26 @@ internal class NativePlaybackRemoteController(private val host: Host) {
     private val seekPolicy = NativePlayerTvSeekPolicy()
 
     fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val isConfirmKey = event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+            event.keyCode == KeyEvent.KEYCODE_ENTER ||
+            event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER ||
+            event.keyCode == KeyEvent.KEYCODE_BUTTON_A
+        if (
+            isConfirmKey && NativePlayerTvFocusPolicy.shouldToggleFromProgress(
+                isTelevision = host.isTelevisionDevice,
+                progressFocused = host.controllerView.progressTimeBar?.hasFocus() == true,
+                overlayVisible = host.externalSubtitles.subtitleSearchActive ||
+                    host.settings.isOverlayDialogVisible(),
+            )
+        ) {
+            // Keep the time bar focused and consume the whole key press, including repeats.
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                if (host.session.togglePlayback()) {
+                    host.playerView.showController()
+                }
+            }
+            return true
+        }
         if (event.action != KeyEvent.ACTION_DOWN) {
             if (
                 host.isTelevisionDevice &&
@@ -67,7 +87,7 @@ internal class NativePlaybackRemoteController(private val host: Host) {
                 if (host.isTelevisionDevice && !host.playerView.isControllerFullyVisible) {
                     if (host.session.togglePlayback()) {
                         host.controllerView.showControllerForRemoteFocus(
-                            ControllerFocusTarget.PLAYER
+                            ControllerFocusTarget.PRIMARY
                         )
                         return true
                     }

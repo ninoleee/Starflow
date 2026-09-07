@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
@@ -10,6 +11,9 @@ class InterfaceSettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsPerformanceSliceProvider);
+    final accent = ref.watch(
+      appSettingsProvider.select((settings) => settings.appAccent),
+    );
     final homeNavigationSingleTapCleanupEnabled = ref.watch(
       appSettingsProvider.select(
         (settings) => settings.homeNavigationSingleTapCleanupEnabled,
@@ -22,6 +26,47 @@ class InterfaceSettingsPage extends ConsumerWidget {
       onBack: () => Navigator.of(context).pop(),
       children: [
         Text('界面效果', style: theme.textTheme.headlineSmall),
+        const SettingsSectionTitle(label: '外观'),
+        SettingsSelectionTile(
+          title: '强调色',
+          value: accent.label,
+          leading: _AccentSwatch(accent: accent),
+          focusId: 'interface:accent',
+          onPressed: () async {
+            final selected = await showDialog<AppAccent>(
+              context: context,
+              builder: (context) => SimpleDialog(
+                title: const Text('强调色'),
+                children: [
+                  SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final option in AppAccent.values)
+                          SettingsSelectionTile(
+                            title: option.label,
+                            value: '',
+                            leading: _AccentSwatch(accent: option),
+                            trailing: option == accent
+                                ? Icon(Icons.check_rounded,
+                                    color: AppActionColors.of(Theme.of(context))
+                                        .primary)
+                                : const SizedBox(width: 24),
+                            autofocus: option == accent,
+                            focusId: 'interface:accent:${option.name}',
+                            onPressed: () => Navigator.of(context).pop(option),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+            if (selected != null && selected != accent) {
+              await controller.setAppAccent(selected);
+            }
+          },
+        ),
         const SettingsSectionTitle(label: '界面'),
         ...buildSettingsTileGroup([
           SettingsToggleTile(
@@ -76,6 +121,23 @@ class InterfaceSettingsPage extends ConsumerWidget {
           onChanged: controller.setHomeNavigationSingleTapCleanupEnabled,
         ),
       ],
+    );
+  }
+}
+
+class _AccentSwatch extends StatelessWidget {
+  const _AccentSwatch({required this.accent});
+
+  final AppAccent accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: 24,
+      child: DecoratedBox(
+        decoration:
+            BoxDecoration(color: accent.primary, shape: BoxShape.circle),
+      ),
     );
   }
 }

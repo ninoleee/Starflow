@@ -375,6 +375,28 @@ void primeHomeModules(Ref ref) {
   ref.read(homePageControllerProvider).primeModulesWithReader(ref.read);
 }
 
+Future<void> waitForHomeModules(
+  Ref ref, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final modules = ref.read(homeEnabledModulesProvider);
+  // Observe every module concurrently, including failures, before leaving startup.
+  final loads = modules.map((module) async {
+    try {
+      await ref.read(homeSectionProvider(module.id).future);
+    } catch (error, stackTrace) {
+      appLogWarning(
+        'app.bootstrap',
+        'Home module startup load failed',
+        fields: <String, Object?>{'moduleId': module.id},
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }).toList(growable: false);
+  await Future.wait(loads).timeout(timeout);
+}
+
 void primeHomeModulesFromWidget(WidgetRef ref) {
   ref.read(homePageControllerProvider).primeModulesWithReader(ref.read);
 }

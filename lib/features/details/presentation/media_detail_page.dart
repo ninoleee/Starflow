@@ -6,6 +6,7 @@ export 'package:starflow/features/details/presentation/detail_page_providers.dar
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
@@ -1269,6 +1270,11 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   final Set<ScaffoldFeatureController<SnackBar, SnackBarClosedReason>>
       _quarkSaveProgressSnackBars = {};
   bool _showDeferredDetailContent = false;
+  bool _detailEnrichmentReady = false;
+  bool _seriesSourceReady = false;
+  MediaDetailTarget? _retainedTargetSeed;
+  DetailSeriesBrowserRequest? _retainedSeriesRequest;
+  DetailSeriesBrowserRequest? _selectedSeasonRequest;
   bool _deferredDetailContentScheduled = false;
   List<SearchResult> _favoriteSearchResults = const <SearchResult>[];
   _LibraryMatchTaskController? _activeLibraryMatchController;
@@ -1315,6 +1321,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _selectedSeasonIdNotifier.value = '';
       _isRefreshingMetadata = false;
       _showDeferredDetailContent = false;
+      _detailEnrichmentReady = false;
+      _seriesSourceReady = false;
+      _retainedTargetSeed = null;
       _deferredDetailContentScheduled = false;
       _pageController.resetForTargetChange();
       _retainedTargetAsync.clear();
@@ -1869,6 +1878,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             .whenComplete(foregroundLease.release)
             .catchError(
           (Object error, StackTrace stackTrace) {
+            if (_isSessionActive(sessionId) && !_detailEnrichmentReady) {
+              setState(() {
+                _detailEnrichmentReady = true;
+                _seriesSourceReady = true;
+              });
+            }
             detailResourceSwitchTrace(
               'startup.error',
               fields: <String, Object?>{
@@ -1938,6 +1953,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         (settings) => settings.detailAutoLibraryMatchEnabled,
       ),
     );
+    // Browsing needs restored source identity, not online metadata.
+    if (!_seriesSourceReady) {
+      setState(() => _seriesSourceReady = true);
+    }
     final runtimePlan = buildDetailStartupPlan(
       isPageVisible: isPageVisible,
       backgroundWorkSuspended: ref.read(backgroundEnrichmentSuspendedProvider),
@@ -1964,17 +1983,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       currentTarget = _manualOverrideTarget ?? currentTarget;
     }
 
-    if (runtimePlan.shouldWarmEnrichedTarget) {
-      unawaited(ref.read(enrichedDetailTargetProvider(currentTarget).future));
-    }
-    if (runtimePlan.shouldWarmSeriesBrowser && !isTelevision) {
-      unawaited(
-        ref.read(
-          detailSeriesBrowserProvider(
-            DetailSeriesBrowserRequest.fromTarget(currentTarget),
-          ).future,
-        ),
-      );
+    // Restore and refresh before subscribing to enrichment, so startup does
+    // not race a second resolver against the cache being restored.
+    if (!_detailEnrichmentReady) {
+      setState(() => _detailEnrichmentReady = true);
     }
 
     if (!runtimePlan.shouldAttemptAutoLibraryMatch) {
@@ -2880,50 +2892,57 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     MediaDetailTarget target,
     AsyncValue<DetailSeriesBrowserState?> seriesAsync,
   ) {
-    return seriesAsync.when(
-      data: (browser) {
-        if (browser == null || browser.groups.isEmpty) {
-          return const SizedBox.shrink();
-        }
-        return ValueListenableBuilder<String>(
-          valueListenable: _selectedSeasonIdNotifier,
-          builder: (context, selectedSeasonId, _) {
-            final selectedGroup = resolveSelectedEpisodeGroup(
-              groups: browser.groups,
-              selectedGroupId: selectedSeasonId,
-            );
-            return DetailBlock(
-              title: '剧集',
-              child: DetailEpisodeBrowser(
+    if (seriesAsync.hasValue &&
+        (seriesAsync.value == null || seriesAsync.value!.groups.isEmpty)) {
+      return const SizedBox.shrink();
+    }
+    return DetailBlock(
+      title: '剧集',
+      child: seriesAsync.when(
+        skipLoadingOnReload: true,
+        data: (browser) {
+          if (browser == null || browser.groups.isEmpty) {
+            return const SizedBox.shrink();
+          }
+          return ValueListenableBuilder<String>(
+            valueListenable: _selectedSeasonIdNotifier,
+            builder: (context, selectedSeasonId, _) {
+              final selectedGroup = resolveSelectedEpisodeGroup(
+                groups: browser.groups,
+                selectedGroupId: selectedSeasonId.isEmpty ||
+                        _selectedSeasonRequest !=
+                            DetailSeriesBrowserRequest.fromTarget(target)
+                    ? browser.initialGroupId
+                    : selectedSeasonId,
+              );
+              return DetailEpisodeBrowser(
+                key: ValueKey(DetailSeriesBrowserRequest.fromTarget(target)),
                 seriesTarget: target,
                 groups: browser.groups,
+                lastPlayedTarget: browser.lastPlayedTarget,
                 selectedGroupId: selectedGroup.id,
                 onSeasonSelected: (groupId) {
+                  _selectedSeasonRequest =
+                      DetailSeriesBrowserRequest.fromTarget(target);
                   if (_selectedSeasonIdNotifier.value == groupId) {
                     return;
                   }
                   _selectedSeasonIdNotifier.value = groupId;
                 },
-              ),
-            );
-          },
-        );
-      },
-      loading: () => const DetailBlock(
-        title: '剧集',
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 12),
+              );
+            },
+          );
+        },
+        loading: () => const SizedBox(
+          height: 360,
           child: Center(
             child: CircularProgressIndicator(color: Colors.white),
           ),
         ),
-      ),
-      error: (error, stackTrace) => DetailBlock(
-        title: '剧集',
-        child: Text(
+        error: (error, stackTrace) => Text(
           '加载剧集失败：$error',
           style: const TextStyle(
-            color: Color(0xFF90A0BD),
+            color: AppColors.foregroundMuted,
             fontSize: 14,
           ),
         ),
@@ -3054,7 +3073,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       child: TvPageFocusScope(
         isTelevision: isTelevision,
         child: Scaffold(
-          backgroundColor: const Color(0xFF030914),
+          backgroundColor: AppColors.neutral0,
           body: Stack(
             fit: StackFit.expand,
             children: [
@@ -3062,9 +3081,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      Color(0xFF07121F),
-                      Color(0xFF08101A),
-                      Color(0xFF030914),
+                      AppColors.neutral1,
+                      AppColors.neutral1,
+                      AppColors.neutral0,
                     ],
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
@@ -3075,7 +3094,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                       _pageController.manualOverrideTargetListenable,
                   builder: (context, manualOverrideTarget, _) {
                     final seedTarget = manualOverrideTarget ?? widget.target;
-                    final watchedTargetAsync = pageRenderingEnabled
+                    if (!identical(_retainedTargetSeed, seedTarget)) {
+                      _retainedTargetSeed = seedTarget;
+                      _retainedTargetAsync.clear();
+                    }
+                    final watchedTargetAsync = pageRenderingEnabled &&
+                            _detailEnrichmentReady
                         ? ref.watch(enrichedDetailTargetProvider(seedTarget))
                         : null;
                     final targetAsync = _retainedTargetAsync.resolve(
@@ -3083,34 +3107,22 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                       fallbackValue: AsyncValue.data(seedTarget),
                     );
                     final target = targetAsync.value ?? seedTarget;
-                    if (!target.isSeries) {
+                    final seriesRequest = target.isSeries
+                        ? DetailSeriesBrowserRequest.fromTarget(target)
+                        : null;
+                    if (_retainedSeriesRequest != seriesRequest) {
+                      _retainedSeriesRequest = seriesRequest;
                       _retainedSeriesAsync.clear();
                     }
-                    final showDeferredDetailContent = pageRenderingEnabled &&
-                        (!isTelevision || _showDeferredDetailContent);
+                    // Keep mounted content when a player route covers details.
+                    // TickerMode controls background work, not content lifetime.
+                    final showDeferredDetailContent =
+                        !isTelevision || _showDeferredDetailContent;
                     if (isTelevision &&
                         pageRenderingEnabled &&
                         !_showDeferredDetailContent) {
                       _scheduleDeferredDetailContent();
                     }
-                    final watchedSeriesAsync = target.isSeries &&
-                            isPageVisible &&
-                            showDeferredDetailContent
-                        ? ref.watch(
-                            detailSeriesBrowserProvider(
-                              DetailSeriesBrowserRequest.fromTarget(target),
-                            ),
-                          )
-                        : null;
-                    final seriesAsync = target.isSeries
-                        ? _retainedSeriesAsync.resolve(
-                            activeValue: watchedSeriesAsync,
-                            fallbackValue:
-                                const AsyncLoading<DetailSeriesBrowserState?>(),
-                          )
-                        : const AsyncData<DetailSeriesBrowserState?>(
-                            null,
-                          );
                     final favoriteOnlineResourceMatch = ref
                         .read(detailOnlineResourceUpdateServiceProvider)
                         .resolveFavoriteMatch(
@@ -3182,7 +3194,26 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               if (showDeferredDetailContent && target.isSeries)
-                                _buildSeriesSection(target, seriesAsync),
+                                Consumer(
+                                  builder: (context, seriesRef, _) {
+                                    final watchedSeriesAsync =
+                                        _seriesSourceReady &&
+                                                pageRenderingEnabled &&
+                                                isPageVisible
+                                            ? seriesRef.watch(
+                                                detailSeriesBrowserProvider(
+                                                    seriesRequest!))
+                                            : null;
+                                    final seriesAsync =
+                                        _retainedSeriesAsync.resolve(
+                                      activeValue: watchedSeriesAsync,
+                                      fallbackValue: const AsyncLoading<
+                                          DetailSeriesBrowserState?>(),
+                                    );
+                                    return _buildSeriesSection(
+                                        target, seriesAsync);
+                                  },
+                                ),
                               if (showDeferredDetailContent)
                                 _buildOverviewContent(
                                   target: target,

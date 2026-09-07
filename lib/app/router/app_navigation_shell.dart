@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/app/router/home_navigation_tap_coordinator.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/platform/application_exit.dart';
@@ -28,7 +29,7 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 const _kBottomNavShellRadius = 34.0;
-const _kBottomNavItemRadius = 24.0;
+const _kBottomNavItemRadius = AppRadii.pill;
 
 final _navigationTranslucentEffectsProvider = Provider<bool>((ref) {
   return ref.watch(appSettingsProvider.select(
@@ -395,7 +396,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell>
                     border: Border.all(
                       color: Colors.white.withValues(alpha: 0.12),
                     ),
-                    color: const Color(0xE1141F30),
+                    color: AppColors.neutral3.withValues(alpha: 0.95),
                   ),
                   child: _FloatingNavigationBar(
                     items: visibleNavigationItems,
@@ -497,13 +498,23 @@ class _TelevisionNavigationShellState
     (index) => FocusNode(debugLabel: 'tv-nav-$index'),
   );
   bool _isExitDialogVisible = false;
-  bool _isSidebarVisible = true;
+  late bool _isSidebarVisible;
+
+  @override
+  void initState() {
+    super.initState();
+    _isSidebarVisible = !widget.autoHideNavigationBarEnabled;
+  }
 
   @override
   void didUpdateWidget(covariant _TelevisionNavigationShell oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.focusRecoveryRevision != widget.focusRecoveryRevision) {
       _scheduleFocusRecoveryIfMissing();
+    }
+    if (oldWidget.currentIndex != widget.currentIndex &&
+        widget.autoHideNavigationBarEnabled) {
+      _setSidebarVisible(false);
     }
     if (!widget.autoHideNavigationBarEnabled) {
       _setSidebarVisible(true);
@@ -711,22 +722,29 @@ class _TelevisionNavigationShellState
     // A focused navigation destination must never be laid out at zero width.
     // Keeping this invariant in the build itself also repairs a stale
     // visibility state left by a focus transition during an animation.
-    final sidebarVisible = !widget.autoHideNavigationBarEnabled ||
-        _isSidebarVisible ||
-        _isSidebarFocused;
+    final sidebarVisible =
+        !widget.autoHideNavigationBarEnabled || _isSidebarVisible;
     final sidebarAnimationDuration =
         widget.navigationAnimationEnabled && !widget.staticNavigationEnabled
             ? const Duration(milliseconds: 180)
             : Duration.zero;
+    final sidebarRadius =
+        widget.autoHideNavigationBarEnabled ? AppRadii.lg : 0.0;
+    final sidebarColor = widget.autoHideNavigationBarEnabled
+        ? AppColors.neutral3.withValues(
+            alpha: widget.translucentEffectsEnabled ? 0.46 : 0.78,
+          )
+        : Theme.of(context).colorScheme.surface;
     final sidebar = ClipRRect(
-      borderRadius: BorderRadius.circular(28),
-      child: widget.translucentEffectsEnabled
+      borderRadius: BorderRadius.circular(sidebarRadius),
+      child: widget.autoHideNavigationBarEnabled &&
+              widget.translucentEffectsEnabled
           ? BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 26, sigmaY: 26),
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(28),
-                  color: const Color(0x160F1724),
+                  borderRadius: BorderRadius.circular(sidebarRadius),
+                  color: sidebarColor,
                 ),
                 child: _TelevisionSidebarContent(
                   items: widget.items,
@@ -738,8 +756,8 @@ class _TelevisionNavigationShellState
             )
           : DecoratedBox(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(28),
-                color: const Color(0xCC101926),
+                borderRadius: BorderRadius.circular(sidebarRadius),
+                color: sidebarColor,
               ),
               child: _TelevisionSidebarContent(
                 items: widget.items,
@@ -755,11 +773,17 @@ class _TelevisionNavigationShellState
       onFocusChange: _handleSidebarFocusChanged,
       child: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 10, 8),
+          padding: EdgeInsets.zero,
           child: sidebar,
         ),
       ),
     );
+    final sidebarWithBoundary = widget.autoHideNavigationBarEnabled
+        ? _TelevisionSidebarFocusBoundary(
+            focusNodes: _destinationFocusNodes,
+            child: sidebarSlot,
+          )
+        : sidebarSlot;
 
     return TvMenuButtonScope(
       onMenuButtonPressed: _focusCurrentDestination,
@@ -771,51 +795,56 @@ class _TelevisionNavigationShellState
           }
           unawaited(_handleRootBackNavigation());
         },
-        child: Row(
-          children: [
-            widget.navigationAnimationEnabled
-                ? TweenAnimationBuilder<double>(
-                    tween: Tween<double>(
-                      begin: sidebarVisible ? 1 : 0,
-                      end: sidebarVisible ? 1 : 0,
+        child: !widget.autoHideNavigationBarEnabled
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ColoredBox(
+                    color: Theme.of(context).colorScheme.surface,
+                    child: sidebarSlot,
+                  ),
+                  Expanded(
+                    child: _TelevisionContentFocusBoundary(
+                      focusSidebar: _focusCurrentDestination,
+                      isSidebarFocused: () => _isSidebarFocused,
+                      child: widget.child,
                     ),
-                    duration: sidebarAnimationDuration,
-                    curve: Curves.easeOutCubic,
-                    builder: (context, value, child) {
-                      return ClipRect(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          widthFactor: value,
-                          child: Opacity(
-                            opacity: value <= 0.001 ? 0 : value,
-                            child: child,
+                  ),
+                ],
+              )
+            : Stack(
+                children: [
+                  Positioned.fill(
+                    child: _TelevisionContentFocusBoundary(
+                      focusSidebar: _focusCurrentDestination,
+                      isSidebarFocused: () => _isSidebarFocused,
+                      child: widget.child,
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    child: AnimatedSlide(
+                      offset: sidebarVisible ? Offset.zero : const Offset(-1, 0),
+                      duration: sidebarAnimationDuration,
+                      curve: Curves.easeOutCubic,
+                      child: AnimatedOpacity(
+                        opacity: sidebarVisible ? 1 : 0,
+                        duration: sidebarAnimationDuration,
+                        curve: Curves.easeOutCubic,
+                        child: ExcludeFocus(
+                          excluding: !sidebarVisible,
+                          child: IgnorePointer(
+                            ignoring: !sidebarVisible,
+                            child: sidebarWithBoundary,
                           ),
                         ),
-                      );
-                    },
-                    child: ExcludeFocus(
-                      excluding: !sidebarVisible,
-                      child: IgnorePointer(
-                        ignoring: !sidebarVisible,
-                        child: sidebarSlot,
                       ),
                     ),
-                  )
-                : (sidebarVisible
-                    ? IgnorePointer(
-                        ignoring: false,
-                        child: sidebarSlot,
-                      )
-                    : const SizedBox.shrink()),
-            Expanded(
-              child: _TelevisionContentFocusBoundary(
-                focusSidebar: _focusCurrentDestination,
-                isSidebarFocused: () => _isSidebarFocused,
-                child: widget.child,
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -857,6 +886,62 @@ class _TelevisionContentFocusBoundary extends StatelessWidget {
   }
 }
 
+class _TelevisionSidebarFocusBoundary extends StatelessWidget {
+  const _TelevisionSidebarFocusBoundary({
+    required this.focusNodes,
+    required this.child,
+  });
+
+  final List<FocusNode> focusNodes;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        DirectionalFocusIntent: CallbackAction<DirectionalFocusIntent>(
+          onInvoke: (intent) {
+            final primaryFocus = FocusManager.instance.primaryFocus;
+            if (primaryFocus == null) {
+              return null;
+            }
+
+            if (intent.direction == TraversalDirection.up ||
+                intent.direction == TraversalDirection.down) {
+              final currentIndex = focusNodes.indexWhere(
+                (node) => node.hasFocus || node.hasPrimaryFocus,
+              );
+              if (currentIndex < 0) {
+                return null;
+              }
+              final nextIndex =
+                  intent.direction == TraversalDirection.up
+                      ? currentIndex - 1
+                      : currentIndex + 1;
+              if (nextIndex < 0 || nextIndex >= focusNodes.length) {
+                return null;
+              }
+              requestTvFocus(focusNodes[nextIndex]);
+              return null;
+            }
+
+            // Horizontal movement is intentionally left to the shell's normal
+            // traversal so right can enter the content page and left stays
+            // bounded by the edge fallback.
+            handleTvDirectionalFocusBoundary(
+              context,
+              intent.direction,
+              onMoveLeftOut: () {},
+            );
+            return null;
+          },
+        ),
+      },
+      child: child,
+    );
+  }
+}
+
 class _TelevisionSidebarContent extends StatelessWidget {
   const _TelevisionSidebarContent({
     required this.items,
@@ -873,7 +958,7 @@ class _TelevisionSidebarContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 82,
+      width: 48,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -895,7 +980,7 @@ class _TelevisionSidebarContent extends StatelessWidget {
   }
 }
 
-class _TelevisionNavigationDestination extends StatelessWidget {
+class _TelevisionNavigationDestination extends StatefulWidget {
   const _TelevisionNavigationDestination({
     required this.item,
     required this.selected,
@@ -911,32 +996,163 @@ class _TelevisionNavigationDestination extends StatelessWidget {
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) {
-    final foregroundColor = selected ? Colors.white : const Color(0xD9E8F7FF);
-    final backgroundColor =
-        selected ? Colors.white.withValues(alpha: 0.10) : Colors.transparent;
+  State<_TelevisionNavigationDestination> createState() =>
+      _TelevisionNavigationDestinationState();
+}
 
-    return TvFocusableAction(
-      focusNode: focusNode,
-      autofocus: autofocus,
-      onPressed: onPressed,
-      borderRadius: BorderRadius.circular(18),
+class _TelevisionNavigationDestinationState
+    extends State<_TelevisionNavigationDestination> {
+  final LayerLink _layerLink = LayerLink();
+  final OverlayPortalController _overlayController = OverlayPortalController();
+  bool _focused = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focused = widget.focusNode.hasFocus;
+    widget.focusNode.addListener(_handleFocusChange);
+  }
+
+  @override
+  void didUpdateWidget(covariant _TelevisionNavigationDestination oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode) {
+      oldWidget.focusNode.removeListener(_handleFocusChange);
+      widget.focusNode.addListener(_handleFocusChange);
+      _focused = widget.focusNode.hasFocus;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.removeListener(_handleFocusChange);
+    if (_overlayController.isShowing) {
+      _overlayController.hide();
+    }
+    super.dispose();
+  }
+
+  void _handleFocusChange() {
+    final focused = widget.focusNode.hasFocus;
+    if (_focused == focused) {
+      return;
+    }
+    setState(() {
+      _focused = focused;
+    });
+    if (focused) {
+      _overlayController.show();
+    } else if (_overlayController.isShowing) {
+      _overlayController.hide();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColors = AppActionColors.of(Theme.of(context));
+    final accent = accentColors.primary;
+    final foregroundColor = widget.selected
+        ? accent
+        : AppColors.foregroundMuted.withValues(alpha: 0.76);
+    final backgroundColor =
+        widget.selected ? accent.withValues(alpha: 0.08) : Colors.transparent;
+
+    final button = TvFocusableAction(
+      focusNode: widget.focusNode,
+      autofocus: widget.autofocus,
+      onPressed: widget.onPressed,
+      borderRadius: BorderRadius.circular(AppRadii.pill),
+      visualStyle: TvFocusVisualStyle.subtle,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: backgroundColor,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(AppRadii.pill),
         ),
         child: SizedBox(
-          width: 56,
-          height: 56,
+          width: 44,
+          height: 44,
           child: Center(
             child: Icon(
-              selected ? item.selectedIcon : item.icon,
+              widget.selected ? widget.item.selectedIcon : widget.item.icon,
               color: foregroundColor,
               size: 24,
             ),
           ),
         ),
+      ),
+    );
+
+    return OverlayPortal(
+      controller: _overlayController,
+      overlayChildBuilder: (context) {
+        if (!_focused) {
+          return const SizedBox.shrink();
+        }
+        // Non-positioned overlay children receive full-screen tight constraints.
+        // Let the follower measure the label so its anchor is the text's center.
+        return Positioned(
+          left: 0,
+          top: 0,
+          child: CompositedTransformFollower(
+            link: _layerLink,
+            showWhenUnlinked: false,
+            targetAnchor: Alignment.centerRight,
+            followerAnchor: Alignment.centerLeft,
+            offset: const Offset(2, 0),
+            child: IgnorePointer(
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(begin: 0, end: 1),
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                builder: (context, value, child) {
+                  return Opacity(
+                    opacity: value,
+                    child: Transform.scale(
+                      scale: 0.92 + (0.08 * value),
+                      alignment: Alignment.centerLeft,
+                      child: child,
+                    ),
+                  );
+                },
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.92),
+                    borderRadius: BorderRadius.circular(AppRadii.pill),
+                    boxShadow: [
+                      BoxShadow(
+                        color: accent.withValues(alpha: 0.18),
+                        blurRadius: 9,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                    ),
+                    child: SizedBox(
+                      height: 42,
+                      child: Center(
+                        child: Text(
+                          widget.item.label,
+                          style: TextStyle(
+                            color: accentColors.onPrimary,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      child: CompositedTransformTarget(
+        link: _layerLink,
+        child: button,
       ),
     );
   }
@@ -992,7 +1208,8 @@ class _FloatingNavigationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foregroundColor = selected ? Colors.white : const Color(0xA8FFFFFF);
+    final accent = AppActionColors.of(Theme.of(context)).primary;
+    final foregroundColor = selected ? accent : AppColors.foregroundMuted;
     final buttonChild = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
       child: staticNavigationEnabled
@@ -1000,7 +1217,7 @@ class _FloatingNavigationButton extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
                 color: selected
-                    ? Colors.white.withValues(alpha: 0.05)
+                    ? accent.withValues(alpha: 0.14)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(_kBottomNavItemRadius),
               ),
@@ -1021,7 +1238,7 @@ class _FloatingNavigationButton extends StatelessWidget {
                       color: foregroundColor,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: 0.1,
+                      letterSpacing: 0,
                     ),
                   ),
                 ],
@@ -1033,7 +1250,7 @@ class _FloatingNavigationButton extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
                 color: selected
-                    ? Colors.white.withValues(alpha: 0.05)
+                    ? accent.withValues(alpha: 0.14)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(_kBottomNavItemRadius),
               ),
@@ -1054,7 +1271,7 @@ class _FloatingNavigationButton extends StatelessWidget {
                       color: foregroundColor,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: 0.1,
+                      letterSpacing: 0,
                     ),
                   ),
                 ],

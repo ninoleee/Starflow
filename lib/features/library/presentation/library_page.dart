@@ -10,7 +10,6 @@ import 'package:starflow/core/navigation/retained_async_value.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
-import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_rating_prefetch_coordinator.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -383,14 +382,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     _deferPrefetchForForegroundInteraction(reason: 'library.content-loading');
   }
 
-  void _handleBack() {
-    if (context.canPop()) {
-      context.pop();
-      return;
-    }
-    context.goNamed('home');
-  }
-
   @override
   Widget build(BuildContext context) {
     final mediaSources = ref.watch(libraryMediaSourcesSettingsSliceProvider);
@@ -466,14 +457,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
                   displayAsync: displayAsync,
                 ),
               ),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: OverlayToolbar(
-                  onBack: _handleBack,
-                ),
-              ),
             ],
           ),
         ),
@@ -507,7 +490,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       controller: _scrollController,
       padding: EdgeInsets.zero,
       children: [
-        const SizedBox(height: kToolbarHeight),
+        const SizedBox(height: 16),
         _buildFilterChips(
           isTelevision: false,
           filters: availableFilters,
@@ -550,7 +533,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
       controller: _scrollController,
       clipBehavior: Clip.none,
       slivers: [
-        const SliverToBoxAdapter(child: SizedBox(height: kToolbarHeight)),
+        const SliverToBoxAdapter(child: SizedBox(height: 16)),
         SliverToBoxAdapter(
           child: _buildFilterChips(
             isTelevision: true,

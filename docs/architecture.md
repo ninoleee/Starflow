@@ -2,6 +2,8 @@
 
 这份文档描述的是仓库当前已经落地的实现，而不是早期规划稿。
 
+普通文字由 `AppColors.foreground / foregroundBody / foregroundMuted` 提供标题、正文、辅助三档亮度；`AppTheme` 和普通 `secondary / ghost` 按钮复用该层级。强调色按钮前景仍由 `AppAccent.onPrimary` 决定，TV 焦点框统一保持纯白，不随强调色或选中状态改变；普通叠层与轻量 painter 共用规则。
+
 ## 1. 总体定位
 
 Starflow 不是单一播放器，而是一个面向个人影音库的统一入口，把这些能力放进同一个 App：
@@ -87,14 +89,24 @@ lib/
 - 通用组件
 - 网络图片请求头和调试工具
 - `TV` 焦点组件、菜单键动作和页面边界处理
+- 详情季标签不设置固定或最小宽度，由文字、选中图标和对称内边距决定宽度，避免短标签右侧留空；季选择区域维持 `52dp` 高度。
+- 详情页的延迟内容一旦显示，不再使用 `TickerMode` 控制其挂载寿命；播放器覆盖期间保留剧集组件和滚动状态，剧集 provider 的监听仍由页面可见性与 `TickerMode` 共同限制。
+- `DetailHeroSection` 监听 `playbackMemorySnapshotProvider`，使用仓库的同步快照查询计算续播入口，避免目标解析改变查询键时重新进入异步 loading。“从头播放”只依赖播放目标存在，不以快照 readiness 控制挂载；readiness 仅控制自动首焦点，避免记录晚到前先抢焦点。操作行由稳定 key 的 `KeyedSubtree` 包装，补充续播位置文字时不重建按钮子树。剧集区域将 `DetailBlock` 放在异步分支外，保留加载到完成期间标题的 Element 和布局位置。
+- 详情启动将 `_seriesSourceReady` 与 `_detailEnrichmentReady` 分开：本地缓存和版本恢复后允许剧集读取，在线元数据刷新结束后再订阅 enrichment，保留解析防重约束。剧集 provider 在区域内的 `Consumer` 监听，卡片角标通过 `select` 订阅最终显示文字；无关快照更新不会重建图片。季列表和可选历史查询使用 record `.wait` 并行，历史失败回退默认季。单季列表高度为 `292dp`，多季另加 `68dp` 季选择条空间；错误态按内容高度显示，无可用分组仍隐藏。
 - `TV` 主要页面和弹窗的普通方向键使用 Flutter 默认寻焦，不再声明 `OrderedTraversalPolicy / NumericFocusOrder`；文本编辑弹窗仅在输入框局部把上下键映射为前后焦点，选择弹窗只在首帧请求一次初始焦点，不安排延迟补焦点
 - `TV` 焦点视觉态已经收敛到 `ValueNotifier + ValueListenableBuilder` 局部更新，并补了 `TvFocusVisualStyle.none`
 - `TV` 页面级焦点边界、页头回顶锚点和统一的上下方向焦点兜底
 - `TV` 页面级焦点壳与方向动作面板，便于首页、搜索、媒体库、详情、设置等页共用同一套焦点边界
 - `TvPageFocusScope` 安装 `TvSafeDirectionalFocusTraversalPolicy`：方向寻焦读取候选节点坐标时若遇到动态刷新产生的暂时未布局 `RenderBox`，忽略当前按键并保持原焦点；其他异常仍继续抛出
+- 安全寻焦策略、页面边界和侧栏横向移动复用 `TvSafeDirectionalFocusAction` 的异常处理；未布局中断返回已处理，阻止页面边界将它当成正常寻焦到头。`wrapTelevisionDialogBackHandling` 在退出输入状态时优先聚焦已挂载且可请求的操作节点，避免只留下焦点域；未挂载按钮不会被选作返回目标
+- `TvDialogOption` 在 TV 复用轻量高亮与确认键映射，普通端仍为 `SimpleDialogOption`；播放器字幕/音轨/倍速/循环与配置路径选项由首项申请焦点。来源多选优先“全部”或首项，无选项时聚焦取消；字幕偏移、片头片尾和删除/覆盖确认框也有明确首焦点。夸克目录页由常驻“选择”按钮持有首焦点，不依赖异步子目录存在
 - `StarflowApp` 仅覆盖默认 `DirectionalFocusIntent` Action，补齐页面级策略覆盖不到的路由/Overlay 焦点：只捕获 `RenderBox was not laid out` 并忽略当次按键，不做下一帧重试、候选过滤或顺序改写；警告按 Action 实例做 `5s` 限频
+- App 外观由 `app/theme/app_colors.dart` 的固定近中性色阶与 `AppRadii`（12/18/28/999）控制；共享控件、首页和详情组件复用这些 token。`AppAccent` 是无 Flutter 依赖的设置枚举，`appAccent` 持久化为 bone/teal/indigo/coral/amber/rose/lime/violet，旧配置或未知值回退 teal。`StarflowApp` 只监听该字段重建主题；`ColorScheme` 保持中性，`AppActionColors` ThemeExtension 显式提供交互强调色：主行动、导航选中态、开关开启态、勾选/单选、筛选与排序选中项、线路选中标记、已收藏图标、进度/滑块和输入框聚焦描边。共享 `StarflowChipButton` 在聚焦时保留选中颜色，TV 外侧焦点框统一保持纯白；错误语义色、禁用弱化与中性背景不变。`surfaceTint` 固定透明，页面背景不绘制彩色光晕
+- 详情 Hero 的“继续播放 / 从头播放”继续使用与普通操作按钮相同的 `secondary` 中性样式，不读取 `AppActionColors`；详情线路选择使用淡强调色底、边框与选中图标；当前播放剧集使用中性白色选中样式。详情上次播放剧集由 `findLastPlayedEpisodeIndex` 匹配，在卡片简介区显示中性历史图标和“Last Played”文字，无匹配时不显示；不增加强调色边框，不改变卡片尺寸、滚动恢复或焦点行为。播放器显式绘制的已播放进度段同样读取 `AppActionColors`，缓冲段与未播放轨道保持中性
 - 首页在重新变为活动页以及 `hasPendingSections` 从 `true` 变为 `false` 时各安排一次下一帧检查；仅在主焦点为空、落在 `FocusScopeNode`、已卸载或不可请求时调用现有侧栏恢复入口，已有可操作焦点时不做任何处理
 - TV 主壳处理返回键时先以 `UnfocusDisposition.scope` 清理当前焦点及作用域历史，再聚焦当前页面对应的侧栏入口；仅当该入口已经持有主焦点时，再次返回才进入退出确认
+- TV 主壳根据自动隐藏设置切换布局：关闭自动隐藏时使用 `Row`，菜单常驻并让内容区从左侧 `48dp` 后开始，面板颜色跟随主题 `surface`；开启自动隐藏时使用 `Stack`，内容区通过 `Positioned.fill` 保持全宽，侧栏作为 `Positioned` 浮层只做 `AnimatedSlide + AnimatedOpacity`，显隐不改变内容区布局，避免首页与媒体库网格重排。自动隐藏面板在启用透明磨砂时使用 `BackdropFilter`，关闭特效时使用半透明纯色。菜单栏仍为垂直居中的图标窄栏：栏宽 `48dp`、按钮 `44×44dp`、四周外边距为 `0`，图标保持 `24dp`。按钮统一 `18dp` 圆角；常驻 `Row` 面板保持直角，自动隐藏 `Stack` 面板使用 `28dp` 圆角。未选中项和聚焦描边均做了弱化，降低内容浏览时的视觉存在感
+- TV 菜单聚焦标签通过 `OverlayPortal` 和 `CompositedTransformFollower` 跟随按钮；浮层根部用仅指定 `left/top` 的 `Positioned` 解除 Overlay 全屏紧约束，标签以自身尺寸和按钮垂直居中、文字水平间隔 `12dp`，不参与页面布局。标签使用半透明强调色胶囊背景、文字使用对应强调色的对比色，无描边，不接收指针事件，失焦或目标卸载后不显示；两种 TV 菜单布局均有标签尺寸、锚点和卸载回归测试
 - 焦点诊断统一写入 `tv.focus-recovery`：首页实际缺焦恢复为 `info`，返回清理为 `trace`，未布局候选为限频 `warning`；正常寻焦与普通方向键不写日志
 - WebDAV STRM 文本解析在返回播放 URL 前把裸 `#` 替换为 `%23`；已编码地址保持不变，避免文件名中的集号被 URI fragment 规则截断
 - `TV` 焦点进入长列表项时，会尽量把目标控件维持在视口中线附近，并驱动页面一起滚动
@@ -125,12 +137,12 @@ lib/
 
 - `tool/generate_brand_assets.py` 会生成 Android、iOS、macOS、Web、Windows 的外部 App Icon
 - 同一脚本也会同步生成启动页所用的 `assets/branding/starflow_launch_logo.png` 与 iOS `LaunchImage.imageset`
-  这条链路输出的是透明底主图案，不复用外部 app icon 的方形底板
+  这条链路使用最新的无白边满版彩色 PNG 原图，保留完整构图
 - 同一脚本也会同步生成 Android 启动页使用的 `android/app/src/main/res/drawable-nodpi/launch_logo.png`
 - 同一脚本也负责生成 Android TV Banner
-- 外部 App Icon 当前以 `assets/branding/starflow_icon_master.svg` 为设计源
-- 脚本会先从矢量母版直接生成 `build/brand_assets/app_icon_raw_capture.png`
-- 脚本会直接程序化生成统一分发母版 `build/brand_assets/starflow_app_icon_master.png`
+- 所有品牌 Logo 当前以 `assets/branding/starflow_logo_source.png` 为设计源，应用内通过 `Image.asset` 加载生成的 `starflow_logo_primary.png`
+- 脚本会先从 PNG 原图直接生成 `build/brand_assets/app_icon_raw_capture.png`
+- 脚本会生成统一分发母版 `build/brand_assets/starflow_app_icon_master.png`；旧 Swift 入口转发到同一脚本
 - 最后再缩放分发到各平台资源目录
 
 ### `scripts`
@@ -181,8 +193,8 @@ lib/
 - 元数据调度器在前台交互结束后按可配置静默期恢复；首页、媒体库和集合页只在进入“内容加载中”状态时申请一次静默期，避免 widget rebuild 持续推迟后台任务
 - 单击导航栏首页会触发统一软恢复边界：页面 revision 终止旧的 Hero/评分预取会话，媒体刷新协调器取消后台 NAS/WebDAV/Emby 刷新，首页与元数据调度器只清除自身的批次/静默等待并继续 drain；活动任务、前台 lease 和并发计数不会被强制归零
 - `TV` 退出确认框使用短生命周期的元数据前台 lease，只在对话框显示期间阻止新的后台预取；取消后以零延迟释放，真正确认退出仍走播放器与系统会话清理，不复用导航软恢复
-- 首页重新 active 或模块 ID 顺序变化时会在下一帧校验焦点所属路由；编辑器等已退出路由遗留的 FocusNode 不视为有效首页焦点，优先请求 Hero 下方首个模块，失败才回侧栏
-- 首页按 `sectionId + resourceId` 为每张海报、轮播卡和 view-all 入口保留稳定 FocusNode，并给纵向模块与横向资源列表提供 key 到新索引的映射；标题或来源元数据补全和重排因此不会替换焦点节点。Hero 另跟踪来源 section，切换来源不会误继承同名资源的旧页码。首焦点只授予首个实际有卡片的 section，连续空 section 会通过渐进滚动定位，全部为空时才使用“编辑首页”兜底
+- 首页重新 active 或模块 ID 顺序变化时会在下一帧校验焦点所属路由；编辑器等已退出路由遗留的 FocusNode 不视为有效首页焦点。Hero 已可用时优先恢复到当前 Hero 卡；`homeNavigationResetRevision` 明确变化时即使当前停在普通模块，也会回到 Hero，但普通模块晚加载或内容变化不会抢焦点
+- 首页按 `sectionId + resourceId` 为每张海报、轮播卡和 view-all 入口保留稳定 FocusNode，并给纵向模块与横向资源列表提供 key 到新索引的映射；标题或来源元数据补全和重排因此不会替换焦点节点。Hero 另跟踪来源 section，切换来源不会误继承同名资源的旧页码。焦点恢复优先选择已可见的 Hero；Hero 来源仍处于 pending 时保留 Hero slot 等待，不先把普通模块作为首焦点，Hero 到齐后才聚焦当前卡。Hero 未启用或为空时继续按首个实际有卡片的 section 定位，连续空 section 通过渐进滚动定位，全部为空时才使用“编辑首页”兜底
 - 首页额外跟踪 section/item/view-all 的可聚焦拓扑；刷新移除当前聚焦目标时，下一帧只在焦点确实失效的情况下恢复到仍存在的首卡或其它有效内容。Hero 按资源 ID 同步页码和焦点，边界翻页按钮失效时退回当前 Hero 卡，普通列表更新不抢焦点
 - 首页编辑器按模块 ID 保留开关焦点，并在来源异步变化、模块重排/删除、移动按钮到达边界及 sheet/dialog 关闭后校验当前路由焦点；只有原目标失效时才请求同模块或首个有效目标
 - Android / TV 真正确认退出时，Flutter 先清理播放会话、媒体通知、画中画和后台播放，再通过 `starflow/platform` 进入原生退出窗口。`MainActivity` 持续跟踪按下的遥控器键并吞掉退出后的尾部事件；确认键已经抬起时等待 `120ms`，仍按住时等到全部按键抬起，未收到抬起事件则以 `2s` 超时兜底，再枚举 `ActivityManager.appTasks` 移除本应用全部 task。退出请求后的 `5s` launcher guard 会拒绝按键穿透或电视启动器自动恢复造成的 `MAIN / LAUNCHER / LEANBACK_LAUNCHER` 重启，桥接不可用时才回退 `SystemNavigator.pop()`
@@ -596,6 +608,10 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 ## 9. 搜索与入库联动
 
+普通端与 TV 端搜索页均不再提供切换到收藏视图的入口；独立收藏路由继续复用 `SearchPage(favoritesOnly: true)`，搜索结果条目的收藏与取消收藏操作保持不变。
+
+搜索、收藏和媒体库一级页面不渲染返回工具栏，也不保留工具栏高度的顶部占位；`SearchPage` 仅在 `showBackButton: true` 时显示返回工具栏，供 `/detail-search` 二级路由使用。媒体库分区等二级页面的返回入口保持不变。
+
 搜索页会并发组合这些来源：
 
 - 本地媒体源
@@ -797,8 +813,11 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 非 Web 内置 MPV 使用原生 `sid / secondary-sid` 选择两条分离的内封文本轨，同时向 libmpv 写入 `sub-pos / secondary-sub-pos / secondary-sub-scale`；由于当前 `libass=false`，画面上的主/副字幕由 Starflow 自定义 Flutter 叠层分别渲染，保证窗口态与全屏态都使用独立位置和字号。跨集时由 `PlaybackSubtitleSessionPreference` 分别匹配新的 `sid / secondary-sid`。图片字幕和临时外挂字幕不进入特殊模式。播放设置一级通过“更多”打开二级页，二级页同时提供字幕布局、后台播放、手势、卡顿恢复和性能调优开关
 - 非 Web MPV 控制层左上角以返回按钮作为第一个控件，不保留人为前置间距；其右侧网速标签使用轻量轮询读取 libmpv `cache-speed`，展示当前缓存下层 I/O 读取速度。桌面 / 手机 Adaptive 控制层和 TV chrome 复用同一排列与网速组件
 - MPV 缓冲预算由 `resolveMpvBufferBudget` 统一计算，并通过 Android `starflow/platform -> getMemoryClassMb` 读取 TV 应用内存等级；低内存 TV 将夸克/激进前向缓冲封顶 `96 MB`、回看封顶 `16 MB`，中高内存和非 TV 继续使用原预算。`resolveMpvRemotePlaybackTuningProfile` 还会比较启动速度与片源码率，达到 `2.5x` 且非高风险容器时进入 `fast-start`，否则保留 standard/high-risk 档
-- MPV 打开重试先由 `classifyMpvOpenFailure` 分类，只有临时网络错误才在统一总超时内重建最多 `3` 次；永久资源/权限/格式错误与未知错误不再无条件重复创建播放器。进程内 `PlaybackHostBandwidthCache` 按主机缓存速度 `10` 分钟，缓存命中后的下一集预检只读取响应状态和 Range 能力
-- 当平滑后的同主机速度低于片源码率 `0.9x` 时，MPV 不再因启动超时或 hard stall 重建同一连接，Exo watchdog 也不重建播放器；两者保留当前连接继续缓冲并给出一次提示
+- MPV 打开重试先由 `classifyMpvOpenFailure` 分类，只有临时网络错误才在统一总超时内重建最多 `3` 次；永久资源/权限/格式错误与未知错误不再无条件重复创建播放器。进程内 `PlaybackHostBandwidthCache` 按主机缓存实际播放速度 `10` 分钟，首次播放与切集都只读缓存，不额外发起 Range 预检或测速
+- 启动编排通过 `_startupGeneration` 在退出或替换会话后使旧异步任务失效，并在解析、打开和重试边界校验；打开失败只清理仍由当前打开链持有的播放器，已 detach 的实例交给退出/替换路径释放。单次打开从开流到首帧、稳定播放共用启动错误信号，不在中间重置；TCP `ffurl_read` 读取失败纳入有限临时网络重试。
+- MPV 的 `_initialize` 在地址解析和本地准备后直接进入 `_openEmbeddedPlayback / _openWithRetry`，移除 `_prepareStartupDiagnostics`、预检拦截、预检 Range 风险状态和预检测速统计。`resolveMpvRemotePlaybackTuningProfile` 的可选 `estimatedMegabitsPerSecond` 来自同主机缓存；缺失时按片源元数据选标准/高风险档，后续经本地 `cache-speed` 更新缓存。`PlaybackRemotePreflight` 仅继续供原生 ExoPlayer 的 SmartStrm 格式探测使用。`playback.startup / playback.mpv` 记录直接打开、启动异常与重试决定，不依赖静音的旧 trace helper
+- 当平滑后的同主机速度低于片源码率 `0.9x` 时，MPV 运行期 hard stall 与 Exo watchdog 保留当前连接继续缓冲并提示；MPV 已失败并释放的开流不受该历史速度门槛限制，仍按错误分类有限重试。
+- `MpvStartupScope` 统一启动等待的取消信号和截止时间，覆盖调参、开流、首帧、稳定播放、偏好应用及退避；首帧元数据订阅在取消/错误/超时后释放。取消等待不取消底层原生操作，释放仍串行。启动阶段的所有 error 事件只交给启动流程，ISO 换候选时才重置错误信号。单次打开订阅原生 log，最多保留 12 条白名单摘要，失败写结构化本地日志并解除订阅，不保存原始文本。`buildMpvRecoveryTarget` 保留当前集身份并启用续播，两个运行期重建入口统一使用它；恢复成功需要实际进度前进。
 - Exo 卡顿检测和恢复决策由纯 Kotlin `NativePlaybackWatchdogPolicy` 管理，包含播放/缓冲进展计时、恢复冷却、低带宽等待和软恢复次数；时钟可注入以验证边界。`NativePlaybackRuntimeController` 负责调度和前台/画中画判断，`NativePlaybackRecoveryController` 执行恢复并通过 `NativePlaybackSession` 重建；策略类不持有 Activity 或 Player。15 秒播放停滞、45 秒缓冲停滞、10 秒恢复冷却和最多两次连续软恢复的原有规则不变。
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
 - Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；`/smartstrm_fid/` 只在目标为 MP4/未知格式时执行最多 `64` 字节、约 `1.5s` 的轻量预检，以 MP4 `ftyp` 或 HLS `#EXTM3U` 文件头优先选择 MediaSource。已知 MKV 等其他容器不再产生额外 Range 探测；其他含 `#/%23` 的 SmartStrm 地址仍保留探测。预检失败或文件头不明确时继续按原格式启动；标准 `/smartstrm/` 与 `/smartstrm_*/` 路径在首次解析错误 `3003` 后仍由 `NativePlaybackHlsFallbackPolicy` 保留进度并强制切换 HLS 一次
@@ -816,6 +835,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - Android / iOS 播放记忆仓库使用带 `reload()` 的 legacy SharedPreferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v1`；首次读取会按 `updatedAt` 合并并迁移旧异步存储快照，返回前台时递增播放历史 revision 使首页和详情页重新读取
 - Android 原生播放器每 `10s` 记录一次位置、时长、缓冲位置、缓冲比例、播放态、首帧状态与视频尺寸；位置不连续事件单独记录旧/新位置和 Media3 原因码
 - Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
+- Exo 手机 / TV 布局的 `exo_play_pause` 直接放在 `exo_bottom_bar` 左侧、播放时间前面，时间行预留按钮宽度及间距，使用 48dp 按钮及圆形焦点/按压背景，并随底栏收起；TV 不再创建中央控制组，遥控器主焦点仍使用原按钮 ID。控制栏隐藏时确定键切换播放状态后请求 `PRIMARY`，保证后续确定键落在播放/暂停按钮。手机中央控制组仅保留快退/快进，播放/暂停加入底栏横向焦点链。
+- `NativePlaybackRemoteController` 在 TV 进度条持焦且无字幕搜索/设置弹窗时接管确定键：仅首次 `ACTION_DOWN` 调用 `togglePlayback`，消费重复按下和抬起事件，刷新控制栏显示但不转移进度条焦点。左右方向键仍由既有 TV seek 策略处理。
 - Android 原生播放器的 `NativePlaybackLoadErrorPolicy` 取代统一 `8` 次加载重试：`400/401/403/404/405/410/416` 立即停止，`408/425/429/5xx`、超时和连接类异常最多退避重试 `6` 次，间隔从 `500ms` 增长并封顶 `8s`
 - `NativePlaybackHostBandwidthCache` 在当前原生 Activity 内按主机保留 `10` 分钟带宽；`NativePlaybackBufferPolicy` 用带宽/片源码率的 `2.5x / 1.25x` 阈值选择 fast/balanced/constrained 启动与二次缓冲参数，但目标缓存字节仍由内存等级和重片源档位约束
 - Flutter MPV 与 Android Exo 分别通过 `PlaybackPerformanceTracker / NativePlaybackPerformanceTracker` 汇总同一组会话指标，并统一写入 `playback.performance`：首帧、缓冲次数与累计时长、恢复次数、速度 min/avg/max、片源码率及比值、解码器/硬解、掉帧、音频欠载和缓冲预算。首帧记录一次，会话切集、失败或退出时记录一次摘要
@@ -823,7 +844,11 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - iOS 原生播放器容器页当前使用原生 `AVPlayerViewController` 全屏承载播放，不退出 App；它会复用同一份续播记忆，并补了在线字幕搜索入口，但解码走系统链路，当前不提供软硬解切换或字幕偏移
 - iOS 原生播放器切集前从 `currentMediaSelection` 读取当前系统字幕选择，下一集的 legible group 可用后按语言与显示名称恢复；没有匹配项时回退全局自动字幕策略
 - 详情页“从头播放”从当前选择生成 `allowResume=false` 的目标，“继续播放”从历史记录恢复具体目标并设置 `allowResume=true`；该字段在播放地址解析后保持不变，内置 `MPV`、Android `ExoPlayer` 和 iOS `AVPlayer` 都以它作为是否读取历史进度的唯一入口语义
-- 有续播目标时 Hero 操作顺序固定为“继续播放 / 从头播放”，继续播放使用主按钮和 TV 首焦点；播放版本仍限定在单集详情页，系列页的剧集卡片不新增版本弹窗
+- 有续播目标时 Hero 操作顺序固定为“继续播放 / 从头播放”，继续播放作为 Hero 的默认 TV 焦点，并在操作区上方明确展示“上次播放：第 X 季 · 第 Y 集 · mm:ss”；系列详情加载出历史剧集后只滚动到该集，不把焦点从继续播放移走。播放版本仍限定在单集详情页，系列页的剧集卡片不新增版本弹窗
+- Hero 续播查询按 `PlaybackResumeDetailLookup` 的播放身份复用；初次历史查询完成（或失败）后才挂载播放操作及其默认焦点。操作使用稳定 key，`DetailHeroContent` 维护共用启动锁，覆盖旧会话清理和播放器路由存活期，异常或返回后解除。
+- 详情页初始化在恢复缓存、版本选择及按需刷新完成前不订阅 `enrichedDetailTargetProvider`，避免首帧补全与缓存恢复并行竞争；恢复失败时仍放行补全。种子目标改变时清理详情保留态，新目标立即生效，同一种子重载继续保留已有展示；系列保留态仅在系列请求身份变化时清理。
+- 系列保留态单独按 `DetailSeriesBrowserRequest` 隔离，不随元数据对象变化清空；请求身份包含源、系列和分区 ID，不包含分区显示名。初始化读取共享播放历史，预载历史季而非固定第一季，浏览器保存已加载季；剧集匹配优先播放身份，再在同源内按季集编号回退。首次水平定位使远端卡片被构建并滚动可见，但不请求焦点；手动切季取消待执行的初始定位，元数据重建不再次滚动。卡片进度同步派生自共享快照，避免每卡异步查询闪动。
+- 详情页播放入口统一通过 `activePlaybackLaunchInProgress` 协调，Hero 按钮和剧集卡片共享同一启动锁，禁止清理旧会话或路由期间再次发起播放。详情页从播放器返回后保留系列浏览器的季选择、滚动位置和已加载季。
 - iOS 的播放会话桥接由 `ios/Runner/PlaybackSystemSessionBridge.swift` 承担，`AppDelegate` 会把它绑定到 Flutter channel，用于原生播放会话、遥控器命令和 AirPlay 入口
 - Android 系统播放器优先调用原生 `ACTION_VIEW`，并显式标记 `video/*`
 - 桌面端系统播放器通过临时 `.m3u` 交给系统默认视频应用
@@ -1045,7 +1070,7 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 - Android 会识别 `TV` 设备
 - TV 模式切换为左侧窄栏磨砂菜单和焦点式交互
-- 左侧菜单是否自动隐藏由设置控制；开启后会由菜单自身的焦点范围直接同步显隐，而不是监听全局焦点后延迟推断；隐藏中的菜单会被排除出寻焦树，已聚焦菜单则不会压缩成零宽布局
+- 左侧菜单是否自动隐藏由设置控制；开启后启动进入页面和切换分支都会先把菜单隐藏，页面 autofocus 成功后焦点自然落到内容区。焦点离开菜单时同样由菜单焦点范围直接同步显隐，而不是监听全局焦点后延迟推断；隐藏中的菜单会被排除出寻焦树，已聚焦菜单则不会压缩成零宽布局
 - 设置首页及部分设置子页会优先使用更适合遥控器操作的可聚焦按钮与入口
 - Android 主清单显式声明了 `INTERNET`、`ACCESS_NETWORK_STATE` 和明文流量支持，保证 TV 端能访问局域网与在线元数据资源
 - Android 当前实际最低兼容版本固定为 `API 23 / Android 6.0`
@@ -1067,11 +1092,19 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 平台外部图标资源当前也统一走同一条导出链路：
 
+- `BootstrapController` 在原有首页预热/刷新调度后调用 `waitForHomeModules`，并发等待所有已启用模块的 `homeSectionProvider.future`（包括缓存整理）；各模块失败独立处理，5 秒超时由启动阶段降级逻辑放行。此等待仅用于启动，不改变首页手动刷新行为，也不等待海报解码或全库扫描
+
+- 各平台应用显示名称、Web 安装名称及桌面窗口标题统一为 `Starflow`；平台包标识保持不变，macOS 产品名称与 Xcode scheme、测试宿主路径同步为 `Starflow.app`
+
+- 原生启动背景由 Android `launch_background.xml`、Android 12+ `LaunchTheme.windowSplashScreenBackground` 和 iOS `LaunchScreen.storyboard` 管理，均与 Flutter `BootstrapPage` 保持 `#121212` 一致；Flutter 启动字标使用白色与浅灰色，不再使用蓝色渐变背景
+- 原生启动页只保留背景：Android 的 layer-list 不加载位图，Android 12+ 显式使用 `transparent_splash_icon`，iOS storyboard 移除 LaunchImage 视图及其约束。Flutter 初始化、Logo、字标和动画保持不变；导出链保留的原生启动图片当前不参与展示
+
 - Android、iOS、macOS、Web、Windows 的外部 App Icon 都由 `tool/generate_brand_assets.py` 生成
 - Android TV Banner 也由同一脚本生成
-- 启动页首帧图标、Android 启动页主图与 iOS 原生 LaunchImage 也由同一脚本同步生成，且当前只保留主图案本身
-- Android 启动器小图标与 TV 横幅里的小方形 Logo 复用同一份 `assets/branding/starflow_icon_master.svg`
-- 小尺寸外部图标当前不再做额外锐化，避免星星边缘出现暗边
+- 启动页首帧图标、Android 启动页主图与 iOS 原生 LaunchImage 也由同一脚本同步生成，保留原图完整构图
+- Android 启动器小图标与 TV 横幅里的 Logo 复用同一份 `assets/branding/starflow_logo_source.png`
+- 小尺寸外部图标采用 Lanczos 缩放，不额外锐化；iOS App Icon 使用无透明通道的 RGB
+- 旧版品牌文件和生成脚本保存在 `backups/branding/2026-09-07-before-logo-replacement.zip`，不参与运行时资源打包
 - 当前约定以 `build/brand_assets/starflow_app_icon_master.png` 作为统一母版，再缩放到各平台资源，避免手工替换时出现偏移或不对称
 
 ## 14. 测试覆盖

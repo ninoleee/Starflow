@@ -140,12 +140,13 @@ internal class NativePlaybackControllerView(private val host: Host) {
 
         if (!host.isTelevisionDevice) {
             configureHorizontalFocusChain(
-                intArrayOf(Media3UiR.id.exo_rew, Media3UiR.id.exo_play_pause, Media3UiR.id.exo_ffwd)
+                intArrayOf(Media3UiR.id.exo_rew, Media3UiR.id.exo_ffwd)
             )
         }
         if (!host.isTelevisionDevice) {
             val settingsControlIds =
                 intArrayOf(
+                    Media3UiR.id.exo_play_pause,
                     Media3UiR.id.exo_subtitle,
                     R.id.native_online_subtitle_search,
                     R.id.native_external_subtitle,

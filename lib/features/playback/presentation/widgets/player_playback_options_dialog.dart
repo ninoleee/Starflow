@@ -306,7 +306,9 @@ class _PlaybackOptionsDialogBodyState
           title: const Text('播放速度'),
           children: [
             for (final rate in _kPlaybackRatePresets)
-              SimpleDialogOption(
+              TvDialogOption(
+                isTelevision: widget.isTelevision,
+                autofocus: rate == _kPlaybackRatePresets.first,
                 onPressed: () => Navigator.of(dialogContext).pop(rate),
                 child: Text(
                   (rate - _viewState.rate).abs() < 0.01
@@ -332,7 +334,9 @@ class _PlaybackOptionsDialogBodyState
           title: const Text('循环播放'),
           children: [
             for (final mode in PlaylistMode.values)
-              SimpleDialogOption(
+              TvDialogOption(
+                isTelevision: widget.isTelevision,
+                autofocus: mode == PlaylistMode.values.first,
                 onPressed: () => Navigator.of(dialogContext).pop(mode),
                 child: Text(
                   mode == _viewState.playlistMode

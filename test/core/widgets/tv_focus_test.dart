@@ -10,6 +10,89 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  testWidgets('unlaid-out page candidate does not trigger the left boundary',
+      (tester) async {
+    final current = FocusNode();
+    final candidate = _UnlaidOutFocusNode();
+    addTearDown(current.dispose);
+    addTearDown(candidate.dispose);
+    var menuRequests = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TvPageFocusScope(
+          isTelevision: true,
+          onMoveLeftOut: () => menuRequests += 1,
+          child: Row(
+            children: [
+              Focus(
+                focusNode: candidate,
+                child: const SizedBox(width: 20, height: 20),
+              ),
+              Focus(
+                focusNode: current,
+                child: const SizedBox(width: 20, height: 20),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    current.requestFocus();
+    await tester.pump();
+    candidate.unlaidOut = true;
+
+    Actions.invoke(
+      current.context!,
+      const DirectionalFocusIntent(TraversalDirection.left),
+    );
+    await tester.pump();
+    expect(menuRequests, 0);
+    expect(current.hasPrimaryFocus, isTrue);
+
+    candidate.unlaidOut = false;
+    Actions.invoke(
+      current.context!,
+      const DirectionalFocusIntent(TraversalDirection.left),
+    );
+    await tester.pump();
+    expect(candidate.hasPrimaryFocus, isTrue);
+  });
+
+  testWidgets('page boundary protects nested default traversal groups',
+      (tester) async {
+    final current = _ThrowingDirectionalFocusNode(
+      StateError('RenderBox was not laid out: nested candidate'),
+    );
+    addTearDown(current.dispose);
+    var menuRequests = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TvPageFocusScope(
+          isTelevision: true,
+          onMoveLeftOut: () => menuRequests += 1,
+          child: FocusTraversalGroup(
+            child: Focus(
+              focusNode: current,
+              child: const SizedBox(width: 20, height: 20),
+            ),
+          ),
+        ),
+      ),
+    );
+    current.requestFocus();
+    await tester.pump();
+
+    expect(
+      () => Actions.invoke(
+        current.context!,
+        const DirectionalFocusIntent(TraversalDirection.left),
+      ),
+      returnsNormally,
+    );
+    expect(menuRequests, 0);
+    expect(current.hasPrimaryFocus, isTrue);
+  });
+
   testWidgets('TV page scope installs the safe traversal policy',
       (tester) async {
     await tester.pumpWidget(
@@ -198,5 +281,17 @@ class _ThrowingDirectionalFocusNode extends FocusNode {
   @override
   bool focusInDirection(TraversalDirection direction) {
     throw error;
+  }
+}
+
+class _UnlaidOutFocusNode extends FocusNode {
+  bool unlaidOut = false;
+
+  @override
+  Rect get rect {
+    if (unlaidOut) {
+      throw StateError('RenderBox was not laid out: test candidate');
+    }
+    return super.rect;
   }
 }

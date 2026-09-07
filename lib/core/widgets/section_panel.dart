@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -37,7 +38,7 @@ class SectionPanel extends ConsumerWidget {
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(AppRadii.md),
         border: Border.all(
           color: theme.colorScheme.outlineVariant.withValues(alpha: 0.92),
         ),

@@ -54,17 +54,10 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
     final reduceMotionEnabled = ref.watch(_bootstrapReduceMotionProvider);
 
     return Scaffold(
+      backgroundColor: const Color(0xFF121212),
       body: DecoratedBox(
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Color(0xFF010206),
-              Color(0xFF071327),
-              Color(0xFF0D2856),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+          color: Color(0xFF121212),
         ),
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -221,7 +214,7 @@ class _BootstrapLogoMarkState extends State<_BootstrapLogoMark>
                 fontSize: widget.wordmarkSize,
                 fontWeight: FontWeight.w800,
                 letterSpacing: -widget.wordmarkSize * 0.03,
-                color: Color(0xFF101A2C),
+                color: Colors.white,
               ),
             ),
             Text(
@@ -230,7 +223,7 @@ class _BootstrapLogoMarkState extends State<_BootstrapLogoMark>
                 fontSize: widget.wordmarkSize,
                 fontWeight: FontWeight.w400,
                 letterSpacing: -widget.wordmarkSize * 0.04,
-                color: Color(0xFF101A2C).withValues(alpha: 0.54),
+                color: Colors.white.withValues(alpha: 0.64),
               ),
             ),
           ],

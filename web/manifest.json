@@ -1,6 +1,6 @@
 {
-    "name": "starflow",
-    "short_name": "starflow",
+    "name": "Starflow",
+    "short_name": "Starflow",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

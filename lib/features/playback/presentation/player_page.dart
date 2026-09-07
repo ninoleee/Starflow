@@ -23,13 +23,13 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
+import 'package:starflow/features/playback/application/mpv_startup_scope.dart';
 import 'package:starflow/features/playback/application/playback_subtitle_session_preference.dart';
 import 'package:starflow/features/playback/application/native_playback_episode_queue_policy.dart';
 import 'package:starflow/features/playback/application/native_playback_media_type.dart';
 import 'package:starflow/features/playback/application/playback_episode_queue_resolver.dart';
 import 'package:starflow/features/playback/application/playback_performance_tracker.dart';
 import 'package:starflow/features/playback/application/playback_remote_preflight.dart';
-import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
@@ -125,6 +125,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   static const _kSubtitleDelaySteps = <double>[-2, -1, -0.5, 0, 0.5, 1, 2];
   static const _kProgressPersistInterval = Duration(seconds: 10);
   static Future<void> _playerShutdownQueue = Future<void>.value();
+  int _startupGeneration = 0;
+  MpvStartupScope _startupScope = MpvStartupScope();
+
+  bool _isCurrentStartup(int generation) =>
+      mounted && generation == _startupGeneration;
   static final PlaybackHostBandwidthCache _hostBandwidthCache =
       PlaybackHostBandwidthCache();
 
@@ -182,7 +187,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   );
   final PlaybackRemotePreflight _playbackRemotePreflight =
       PlaybackRemotePreflight();
-  PlaybackRemotePreflightResult? _lastRemotePreflight;
   LogicalKeyboardKey? _tvSeekHoldKey;
   DateTime? _tvSeekHoldStartedAt;
   int _tvSeekHoldRepeatCount = 0;
@@ -365,6 +369,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Player? _detachActivePlayerState({
     bool clearStallRecoveryFlag = true,
   }) {
+    _startupGeneration++;
+    _startupScope.cancel();
     _stopMpvPerformanceSampling();
     final player = _player;
     _player = null;

@@ -106,7 +106,7 @@ extension _HomeHeroDisplayModeLayoutX on HomeHeroDisplayMode {
 
   double get cardBorderRadius => switch (this) {
         HomeHeroDisplayMode.borderless => 0,
-        HomeHeroDisplayMode.normal => 30,
+        HomeHeroDisplayMode.normal => AppRadii.lg,
       };
 
   bool get showShadow => this != HomeHeroDisplayMode.borderless;
@@ -727,12 +727,39 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
       return;
     }
     final node = _focusNodeForItem(widget.items[_currentPageIndex].id);
-    if (!node.canRequestFocus) {
+    if (node.context == null || !node.canRequestFocus) {
       return;
     }
     requestTvFocus(
       node,
+      scope: FocusScope.of(node.context!),
     );
+  }
+
+  bool isCurrentCardFocusNode(FocusNode focusNode) {
+    if (widget.items.isEmpty) {
+      return false;
+    }
+    return identical(
+      focusNode,
+      _focusNodeForItem(widget.items[_currentPageIndex].id),
+    );
+  }
+
+  bool requestCurrentCardFocus() {
+    if (widget.items.isEmpty) {
+      return false;
+    }
+    final node = _focusNodeForItem(widget.items[_currentPageIndex].id);
+    final focusContext = node.context;
+    if (focusContext == null || !node.canRequestFocus) {
+      return false;
+    }
+    requestTvFocus(
+      node,
+      scope: FocusScope.of(focusContext),
+    );
+    return true;
   }
 
   @override
@@ -878,7 +905,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
                       color: isActive
                           ? Colors.white
                           : Colors.white.withValues(alpha: 0.34),
-                      borderRadius: BorderRadius.circular(999),
+                      borderRadius: BorderRadius.circular(AppRadii.pill),
                     ),
                   );
                 }),
@@ -958,7 +985,7 @@ class _HeroPagerButton extends StatelessWidget {
         onPressed: enabled ? onPressed : null,
         focusNode: focusNode,
         focusId: focusId,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadii.pill),
         visualStyle: TvFocusVisualStyle.subtle,
         onFocused: onFocused,
         child: child,
@@ -1033,7 +1060,7 @@ class _FeaturedHeroCard extends StatelessWidget {
             ? Colors.white.withValues(
                 alpha: translucentEffectsEnabled ? 0.04 : 0.02,
               )
-            : const Color(0xFF0B1628),
+            : AppColors.neutral2,
         boxShadow: !simplifyVisualEffects && displayMode.showShadow
             ? [
                 BoxShadow(
@@ -1058,9 +1085,9 @@ class _FeaturedHeroCard extends StatelessWidget {
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               colors: [
-                                Colors.white.withValues(alpha: 0.08),
-                                const Color(0xFF0A1628).withValues(alpha: 0.22),
-                                const Color(0xFF07111E).withValues(alpha: 0.32),
+                                Colors.white.withValues(alpha: 0.06),
+                                Colors.black.withValues(alpha: 0.22),
+                                Colors.black.withValues(alpha: 0.32),
                               ],
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
@@ -1073,8 +1100,8 @@ class _FeaturedHeroCard extends StatelessWidget {
                           gradient: LinearGradient(
                             colors: [
                               Colors.white.withValues(alpha: 0.03),
-                              const Color(0xFF0A1628).withValues(alpha: 0.14),
-                              const Color(0xFF07111E).withValues(alpha: 0.24),
+                              Colors.black.withValues(alpha: 0.14),
+                              Colors.black.withValues(alpha: 0.24),
                             ],
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
@@ -1111,7 +1138,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                     Text(
                       item.metadata,
                       style: const TextStyle(
-                        color: Color(0xFFDCE7FF),
+                        color: AppColors.foreground,
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
@@ -1133,7 +1160,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: const Color(0xFFE4ECFF),
+                          color: AppColors.foreground,
                           fontSize: 15,
                           height: 1.45,
                           shadows: simplifyVisualEffects

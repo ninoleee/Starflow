@@ -231,14 +231,11 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     final requestedQualityPreset = _playbackMpvQualityPreset;
     final qualityPreset = _resolveEffectiveMpvQualityPreset(target);
     final bufferSizeBytes = _resolveMpvBufferSizeBytes(target);
-    final highRiskContainer = isHighRiskRemotePlaybackContainer(target) ||
-        _remotePreflightIndicatesRangeRisk;
     final remoteProfile = resolveMpvRemotePlaybackTuningProfile(
       target: target,
       aggressiveTuning: aggressiveTuning,
       heavyPlayback: heavyPlayback,
-      preflightEstimatedMegabitsPerSecond: _networkEstimateMegabitsPerSecond,
-      highRiskContainerOverride: highRiskContainer,
+      estimatedMegabitsPerSecond: _networkEstimateMegabitsPerSecond,
     );
     final backBufferBytes = _resolveMpvBackBufferSizeBytes(
       target,
@@ -332,9 +329,8 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
         'memoryClassMb': _androidMemoryClassMb ?? 0,
         'memoryCapApplied': _resolveMpvBufferBudget(target).memoryCapApplied,
         'quarkTuning': isLikelyQuarkPlaybackTarget(target),
-        'preflightEstimatedMbps':
+        'cachedEstimatedMbps':
             _networkEstimateMegabitsPerSecond?.toStringAsFixed(2) ?? '',
-        'rangeRisk': _remotePreflightIndicatesRangeRisk,
         'remoteProfile': remoteProfile?.name ?? '',
         'skipLoopFilter': shouldSkipLoopFilter ? 'nonref' : 'none',
       },
@@ -346,12 +342,5 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     required int bufferSizeBytes,
   }) {
     return _resolveMpvBufferBudget(target).backBytes;
-  }
-
-  bool get _remotePreflightIndicatesRangeRisk {
-    final preflight = _lastRemotePreflight;
-    return preflight != null &&
-        preflight.attempted &&
-        !preflight.supportsByteRange;
   }
 }

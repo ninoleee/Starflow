@@ -619,7 +619,9 @@ void main() {
     );
 
     final resume = await container.read(
-      playbackResumeForDetailTargetProvider(detailTarget).future,
+      playbackResumeForDetailTargetProvider(
+        PlaybackResumeDetailLookup(detailTarget),
+      ).future,
     );
     final entry = await container.read(
       playbackEntryForMediaItemProvider(mediaItem).future,
@@ -630,6 +632,72 @@ void main() {
     expect(resume, isNotNull);
     expect(entry, isNotNull);
     expect(recent, hasLength(1));
+    expect(repository.loadSnapshotCount, 1);
+  });
+
+  test('resume detail lookup ignores metadata-only target changes', () async {
+    const target = PlaybackTarget(
+      title: '共享快照',
+      sourceId: 'nas-main',
+      streamUrl: 'https://nas.example.com/shared.mkv',
+      sourceName: '家庭 NAS',
+      sourceKind: MediaSourceKind.nas,
+      itemId: 'shared-1',
+      itemType: 'movie',
+    );
+    const detailTarget = MediaDetailTarget(
+      title: '共享快照',
+      posterUrl: '',
+      overview: '',
+      playbackTarget: target,
+      sourceId: 'nas-main',
+      itemId: 'shared-1',
+      itemType: 'movie',
+    );
+    final itemKey = buildPlaybackItemKey(target);
+    final snapshot = PlaybackMemorySnapshot(
+      items: {
+        itemKey: PlaybackProgressEntry(
+          key: itemKey,
+          target: target,
+          updatedAt: DateTime.utc(2026, 8, 29, 12),
+          position: const Duration(minutes: 17, seconds: 24),
+          duration: const Duration(hours: 2),
+          progress: 0.145,
+        ),
+      },
+    );
+    final repository = _CountingPlaybackMemoryRepository(snapshot);
+    final container = ProviderContainer(
+      overrides: [
+        playbackMemoryRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final initial = PlaybackResumeDetailLookup(detailTarget);
+    final enriched = PlaybackResumeDetailLookup(
+      detailTarget.copyWith(
+        posterUrl: 'https://images.example.com/poster.jpg',
+        overview: '补充后的简介',
+        ratingLabels: const ['豆瓣 8.8'],
+      ),
+    );
+
+    expect(initial, enriched);
+    expect(initial.hashCode, enriched.hashCode);
+
+    final initialEntry = await container.read(
+      playbackResumeForDetailTargetProvider(initial).future,
+    );
+    final enrichedEntry = await container.read(
+      playbackResumeForDetailTargetProvider(enriched).future,
+    );
+
+    expect(initialEntry, isNotNull);
+    expect(initialEntry!.target.itemId, 'shared-1');
+    expect(enrichedEntry, isNotNull);
+    expect(enrichedEntry!.target.itemId, 'shared-1');
     expect(repository.loadSnapshotCount, 1);
   });
 }

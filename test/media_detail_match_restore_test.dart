@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +14,8 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_external_episode_variant_service.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
+import 'package:starflow/features/details/presentation/widgets/detail_hero_section.dart';
+import 'package:starflow/features/details/presentation/widgets/detail_episode_browser.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
@@ -34,6 +38,121 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+  });
+
+  testWidgets('failed enrichment refresh retains resolved actions and series',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 1800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const seed = MediaDetailTarget(
+      title: 'Series', posterUrl: '', overview: '',
+    );
+    final resolved = seed.copyWith(
+      sourceId: 'emby', itemId: 'series', itemType: 'series',
+      playbackTarget: const PlaybackTarget(
+        title: 'Episode', sourceId: 'emby', itemId: 'episode',
+        streamUrl: 'https://example.com/episode', sourceName: 'Emby',
+        sourceKind: MediaSourceKind.emby,
+      ),
+    );
+    var fail = false;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        isTelevisionProvider.overrideWith((ref) => true),
+        appSettingsProvider.overrideWithValue(AppSettings.fromJson({
+          'mediaSources': const [], 'searchProviders': const [],
+          'homeModules': const [], 'tmdbMetadataMatchEnabled': false,
+          'wmdbMetadataMatchEnabled': false, 'imdbRatingMatchEnabled': false,
+          'detailAutoLibraryMatchEnabled': false,
+        })),
+        localStorageCacheRepositoryProvider.overrideWithValue(
+          _FakeRestoreCacheRepository(cachedState: null),
+        ),
+        enrichedDetailTargetProvider.overrideWith((ref, target) async {
+          if (fail) throw StateError('metadata offline');
+          return resolved;
+        }),
+        detailSeriesBrowserProvider.overrideWith((ref, request) async =>
+          const DetailSeriesBrowserState(groups: [DetailEpisodeGroup(
+            id: 'all', title: 'Episodes', seasonNumber: null, episodes: [],
+          )])),
+      ],
+      child: const MaterialApp(home: MediaDetailPage(target: seed)),
+    ));
+    for (var frame = 0; frame < 10; frame++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    final button = tester.element(find.text('从头播放'));
+    final browser = tester.element(find.byType(DetailEpisodeBrowser));
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(MediaDetailPage)),
+    );
+    fail = true;
+    container.invalidate(enrichedDetailTargetProvider(seed));
+    for (var frame = 0; frame < 5; frame++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.element(find.text('从头播放')), same(button));
+      expect(tester.element(find.byType(DetailEpisodeBrowser)), same(browser));
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('series heading stays mounted across initial loading',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 1800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final browser = Completer<DetailSeriesBrowserState?>();
+    const target = MediaDetailTarget(
+      title: 'Series',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'emby',
+      itemId: 'series',
+      itemType: 'series',
+    );
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        isTelevisionProvider.overrideWith((ref) => true),
+        appSettingsProvider.overrideWithValue(AppSettings.fromJson({
+          'mediaSources': const [],
+          'searchProviders': const [],
+          'homeModules': const [],
+          'tmdbMetadataMatchEnabled': false,
+          'wmdbMetadataMatchEnabled': false,
+          'imdbRatingMatchEnabled': false,
+          'detailAutoLibraryMatchEnabled': false,
+        })),
+        localStorageCacheRepositoryProvider.overrideWithValue(
+          _FakeRestoreCacheRepository(cachedState: null),
+        ),
+        enrichedDetailTargetProvider.overrideWith((ref, target) => target),
+        detailSeriesBrowserProvider
+            .overrideWith((ref, request) => browser.future),
+      ],
+      child: const MaterialApp(home: MediaDetailPage(target: target)),
+    ));
+    for (var frame = 0; frame < 10; frame++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    final heading = tester.element(find.text('剧集'));
+    final position = tester.getTopLeft(find.text('剧集'));
+    final hero = tester.widget(find.byType(DetailHeroSection));
+    browser.complete(const DetailSeriesBrowserState(groups: [
+      DetailEpisodeGroup(
+        id: 'all',
+        title: 'Episodes',
+        seasonNumber: null,
+        episodes: [],
+      ),
+    ]));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(DetailEpisodeBrowser), findsOneWidget);
+    expect(tester.element(find.text('剧集')), same(heading));
+    expect(tester.getTopLeft(find.text('剧集')), position);
+    expect(tester.widget(find.byType(DetailHeroSection)), same(hero));
+    expect(tester.getSize(find.byType(DetailEpisodeBrowser)).height, 292);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('detail page restores cached multiple library match choices',
@@ -784,6 +903,8 @@ void main() {
         selectedIndex: 0,
       ),
     );
+    final pendingVariant = Completer<MediaDetailTarget>();
+    final enrichedTargets = <MediaDetailTarget>[];
 
     await tester.pumpWidget(
       ProviderScope(
@@ -798,6 +919,12 @@ void main() {
           nasMediaIndexerProvider.overrideWithValue(indexer),
           detailExternalEpisodeVariantServiceProvider
               .overrideWithValue(service),
+          enrichedDetailTargetProvider.overrideWith((ref, target) {
+            enrichedTargets.add(target);
+            return target.itemId == 'episode-b'
+                ? pendingVariant.future
+                : Future.value(target);
+          }),
         ],
         child: const MaterialApp(
           home: MediaDetailPage(target: choiceA),
@@ -805,6 +932,7 @@ void main() {
       ),
     );
 
+    expect(enrichedTargets, isEmpty);
     await tester.pump();
     await tester.pumpAndSettle();
     final variantSelector = find.byWidgetPredicate((widget) =>
@@ -835,11 +963,21 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
+    expect(pendingVariant.isCompleted, isFalse);
+    expect(
+      tester
+          .widget<DetailHeroSection>(find.byType(DetailHeroSection))
+          .target
+          .playbackTarget
+          ?.itemId,
+      'episode-b',
+    );
     expect(cacheRepository.lastSavedState?.selectedLibraryMatchIndex, 1);
     expect(
       cacheRepository.lastSavedState?.target.itemId,
       'episode-b',
     );
+    pendingVariant.complete(choiceB);
     await tester.pump(const Duration(milliseconds: 250));
     await tester.pumpAndSettle();
   });
@@ -1529,6 +1667,8 @@ void main() {
 
     expect(find.text('外挂字幕'), findsNothing);
     expect(find.textContaining('Planet Earth II S01E01'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
   });
 
   testWidgets(
@@ -1713,6 +1853,8 @@ void main() {
     expect(mediaRepository.fetchCollectionsCallCount, 0);
     expect(mediaRepository.fetchLibraryCallCount, 0);
     expect(find.text('匹配资源库'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
   });
 
   testWidgets('episode overview is focusable and hero focus scrolls to top',
@@ -1792,6 +1934,8 @@ void main() {
     await tester.pump();
 
     expect(controller.offset, controller.position.minScrollExtent);
+    await tester.pump(const Duration(milliseconds: 250));
+    await tester.pumpAndSettle();
   });
 }
 

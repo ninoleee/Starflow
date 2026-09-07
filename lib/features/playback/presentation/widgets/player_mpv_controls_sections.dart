@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 
 const Key kPlayerMpvLeanActionsSectionKey =
     Key('player-mpv-controls:actions:lean');
@@ -200,7 +201,8 @@ class PlayerMpvSeekSection extends StatelessWidget {
             data: SliderTheme.of(context).copyWith(
               trackHeight: 4,
               inactiveTrackColor: Colors.transparent,
-              activeTrackColor: Colors.white,
+              activeTrackColor: AppActionColors.of(Theme.of(context)).primary,
+              thumbColor: AppActionColors.of(Theme.of(context)).primary,
               overlayShape: SliderComponentShape.noOverlay,
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
             ),

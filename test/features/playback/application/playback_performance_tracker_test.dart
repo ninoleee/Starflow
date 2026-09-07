@@ -49,8 +49,17 @@ void main() {
       sourceKind: MediaSourceKind.nas,
     );
 
+    expect(cache.resolve(first), isNull);
     cache.record(first, 2500000);
     expect(cache.resolve(second), 2500000);
+    const otherHost = PlaybackTarget(
+      title: 'Other Host',
+      sourceId: 'nas-main',
+      streamUrl: 'https://other.example.com/episode-1.mkv',
+      sourceName: 'NAS',
+      sourceKind: MediaSourceKind.nas,
+    );
+    expect(cache.resolve(otherHost), isNull);
     now = now.add(const Duration(minutes: 11));
     expect(cache.resolve(second), isNull);
   });

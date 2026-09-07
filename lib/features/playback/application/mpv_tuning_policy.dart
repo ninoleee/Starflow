@@ -74,6 +74,35 @@ MpvBufferBudget resolveMpvBufferBudget({
 
 enum MpvOpenFailureKind { transientNetwork, permanent, unknown }
 
+bool shouldRetryMpvOpenFailure({
+  required Object error,
+  required bool remote,
+  required int attempt,
+  required int maxAttempts,
+  required Duration remaining,
+  required Duration backoff,
+}) =>
+    remote &&
+    classifyMpvOpenFailure(error) == MpvOpenFailureKind.transientNetwork &&
+    attempt < maxAttempts &&
+    remaining > backoff;
+
+PlaybackTarget buildMpvRecoveryTarget(PlaybackTarget currentTarget) {
+  final refresh = currentTarget.sourceKind == MediaSourceKind.quark ||
+      currentTarget.sourceKind == MediaSourceKind.emby ||
+      (currentTarget.sourceKind == MediaSourceKind.nas &&
+          [currentTarget.streamUrl, currentTarget.actualAddress].any(
+            (url) => (Uri.tryParse(url)?.path ?? url)
+                .toLowerCase()
+                .endsWith('.strm'),
+          ));
+  return currentTarget.copyWith(
+    allowResume: true,
+    streamUrl: refresh ? '' : currentTarget.streamUrl,
+    headers: refresh ? const <String, String>{} : currentTarget.headers,
+  );
+}
+
 MpvOpenFailureKind classifyMpvOpenFailure(Object error) {
   if (error is TimeoutException) {
     return MpvOpenFailureKind.transientNetwork;
@@ -116,6 +145,7 @@ MpvOpenFailureKind classifyMpvOpenFailure(Object error) {
     'temporarily unavailable',
     'i/o error',
     'reset by peer',
+    'tcp: ffurl_read returned',
     'failed to open',
   ];
   if (transientFragments.any(message.contains)) {
@@ -245,7 +275,7 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
   required PlaybackTarget target,
   required bool aggressiveTuning,
   required bool heavyPlayback,
-  double? preflightEstimatedMegabitsPerSecond,
+  double? estimatedMegabitsPerSecond,
   bool? highRiskContainerOverride,
 }) {
   final _ = aggressiveTuning;
@@ -253,7 +283,7 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
       ? target.actualAddress
       : target.streamUrl;
   final scheme = playbackUrlScheme(transportUrl);
-  final measuredSpeedMbps = preflightEstimatedMegabitsPerSecond;
+  final measuredSpeedMbps = estimatedMegabitsPerSecond;
   final bitrateMbps =
       (target.bitrate ?? 0) > 0 ? (target.bitrate! / 1000000) : null;
   final throughputToBitrateRatio = measuredSpeedMbps != null &&

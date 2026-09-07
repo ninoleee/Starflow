@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:starflow/app/shell_layout.dart';
@@ -109,7 +110,7 @@ class _SettingsVersionFooter extends StatelessWidget {
                   focusId: 'settings-footer:version',
                   onPressed: () {},
                   visualStyle: TvFocusVisualStyle.subtle,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadii.sm),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -156,12 +157,16 @@ class SettingsToolbarButton extends StatelessWidget {
     required this.onPressed,
     this.icon,
     this.loading = false,
+    this.autofocus = false,
+    this.focusNode,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
   final bool loading;
+  final bool autofocus;
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -172,6 +177,8 @@ class SettingsToolbarButton extends StatelessWidget {
         icon: icon,
         onPressed: onPressed,
         loading: loading,
+        autofocus: autofocus,
+        focusNode: focusNode,
         variant: StarflowButtonVariant.ghost,
       ),
     );
@@ -284,7 +291,7 @@ class SettingsStepperTile extends ConsumerWidget {
     final theme = Theme.of(context);
     return Material(
       color: theme.colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadii.md),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
@@ -318,7 +325,7 @@ class SettingsStepperTile extends ConsumerWidget {
             DecoratedBox(
               decoration: BoxDecoration(
                 color: theme.colorScheme.surface,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(AppRadii.sm),
                 border: Border.all(color: theme.colorScheme.outlineVariant),
               ),
               child: ConstrainedBox(
@@ -385,7 +392,7 @@ class _SettingsStepperButton extends StatelessWidget {
         style: OutlinedButton.styleFrom(
           padding: EdgeInsets.zero,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(AppRadii.sm),
           ),
         ),
         child: Icon(icon, size: 18),
@@ -515,7 +522,7 @@ class SettingsInfoCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadii.md),
         border: Border.all(
           color: colorScheme.outlineVariant.withValues(alpha: 0.4),
         ),
@@ -638,7 +645,7 @@ Future<T?> showSettingsOptionDialog<T>({
                         labelBuilder(options[index]),
                       ],
                     ),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(AppRadii.sm),
                     visualStyle: TvFocusVisualStyle.subtle,
                     focusScale: kTvButtonFocusScale,
                     child: Padding(
@@ -711,6 +718,7 @@ Future<Set<T>?> showSettingsCheckboxSelectionDialog<T>({
                   children: [
                     if (showAllOption)
                       StarflowCheckboxTile(
+                        autofocus: true,
                         title: allLabel!,
                         subtitle: allSubtitle,
                         value: draft.isEmpty,
@@ -735,6 +743,12 @@ Future<Set<T>?> showSettingsCheckboxSelectionDialog<T>({
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
                           child: StarflowCheckboxTile(
+                            autofocus: !showAllOption &&
+                                index == 0 &&
+                                identical(
+                                  option,
+                                  visibleSections.first.options.first,
+                                ),
                             title: option.title,
                             subtitle: option.subtitle,
                             value: draft.contains(option.value),
@@ -757,6 +771,7 @@ Future<Set<T>?> showSettingsCheckboxSelectionDialog<T>({
             actions: [
               StarflowButton(
                 label: cancelLabel,
+                autofocus: !showAllOption && visibleSections.isEmpty,
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 variant: StarflowButtonVariant.ghost,
                 compact: true,

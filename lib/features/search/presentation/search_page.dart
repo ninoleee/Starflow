@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
@@ -330,22 +331,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
     );
-  }
-
-  void _toggleFavoriteResultsView() {
-    if (widget.favoritesOnly) {
-      return;
-    }
-    if (!_showFavoriteResults) {
-      _cancelSearchTasks();
-    }
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _showFavoriteResults = !_showFavoriteResults;
-    });
-    _scrollToTop();
   }
 
   Future<void> _toggleFavoriteResult(SearchResult result) async {
@@ -774,7 +759,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _scheduleInitialTelevisionFocus();
     }
     final networkStorage = ref.watch(_searchPageNetworkStorageProvider);
-    final headerTopInset = kToolbarHeight;
+    final headerTopInset = widget.showBackButton ? kToolbarHeight : 16.0;
     final enabledProviders =
         ref.watch(_searchPageVisibleSearchProvidersProvider);
     final localSources = ref.watch(_searchPageVisibleLocalSourcesProvider);
@@ -834,9 +819,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                       focusNode: _queryFocusNode,
                                       onEditQuery: _openTelevisionQueryDialog,
                                       onSearch: _performSearch,
-                                      onToggleFavorites:
-                                          _toggleFavoriteResultsView,
-                                      showFavoriteResults: _showFavoriteResults,
                                     )
                                   : Row(
                                       children: [
@@ -857,18 +839,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                           icon: Icons.search_rounded,
                                           tooltip: '搜索',
                                           onPressed: _performSearch,
-                                          variant: StarflowButtonVariant.ghost,
-                                          size: 40,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        StarflowIconButton(
-                                          icon: _showFavoriteResults
-                                              ? Icons.manage_search_rounded
-                                              : Icons.favorite_rounded,
-                                          tooltip: _showFavoriteResults
-                                              ? '返回搜索结果'
-                                              : '查看收藏',
-                                          onPressed: _toggleFavoriteResultsView,
                                           variant: StarflowButtonVariant.ghost,
                                           size: 40,
                                         ),
@@ -1070,14 +1040,15 @@ class _SearchPageState extends ConsumerState<SearchPage>
                   ],
                 ),
               ),
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: OverlayToolbar(
-                  onBack: _handleBack,
+              if (widget.showBackButton)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: OverlayToolbar(
+                    onBack: _handleBack,
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -1744,6 +1715,9 @@ class _SearchResultCard extends ConsumerWidget {
                     child: StarflowIconButton(
                       size: 32,
                       tooltip: isFavorite ? '取消收藏' : '收藏',
+                      iconColor: isFavorite
+                          ? AppActionColors.of(Theme.of(context)).primary
+                          : null,
                       variant: StarflowButtonVariant.ghost,
                       onPressed: onToggleFavorite,
                       icon: isFavorite
@@ -1832,6 +1806,9 @@ class _SearchResultCard extends ConsumerWidget {
                     children: [
                       TvAdaptiveButton(
                         label: isFavorite ? '取消收藏' : '收藏',
+                        iconColor: isFavorite
+                            ? AppActionColors.of(Theme.of(context)).primary
+                            : null,
                         icon: isFavorite
                             ? Icons.favorite_rounded
                             : Icons.favorite_border_rounded,
@@ -2072,16 +2049,12 @@ class _TelevisionSearchInput extends StatelessWidget {
     this.focusNode,
     required this.onEditQuery,
     required this.onSearch,
-    required this.onToggleFavorites,
-    required this.showFavoriteResults,
   });
 
   final String query;
   final FocusNode? focusNode;
   final VoidCallback onEditQuery;
   final VoidCallback onSearch;
-  final VoidCallback onToggleFavorites;
-  final bool showFavoriteResults;
 
   @override
   Widget build(BuildContext context) {
@@ -2131,16 +2104,6 @@ class _TelevisionSearchInput extends StatelessWidget {
           icon: Icons.search_rounded,
           onPressed: onSearch,
           focusId: 'search:query-submit',
-        ),
-        const SizedBox(width: 12),
-        TvAdaptiveButton(
-          label: showFavoriteResults ? '搜索结果' : '收藏',
-          icon: showFavoriteResults
-              ? Icons.manage_search_rounded
-              : Icons.favorite_rounded,
-          onPressed: onToggleFavorites,
-          focusId: 'search:favorites-toggle',
-          variant: TvButtonVariant.outlined,
         ),
       ],
     );

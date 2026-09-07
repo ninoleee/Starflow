@@ -9,13 +9,6 @@ extension _PlayerPageStatePerformance on _PlayerPageState {
       ..onBufferingChanged(true);
   }
 
-  void _recordMpvPreflightBandwidth(int? bytesPerSecond) {
-    if (bytesPerSecond == null || bytesPerSecond <= 0) {
-      return;
-    }
-    _mpvPerformanceTracker?.recordNetworkBytesPerSecond(bytesPerSecond);
-  }
-
   void _markMpvFirstFrame() {
     final tracker = _mpvPerformanceTracker;
     if (tracker == null) {

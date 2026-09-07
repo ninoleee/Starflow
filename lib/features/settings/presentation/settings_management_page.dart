@@ -355,6 +355,7 @@ class _SettingsManagementPageState
               actions: [
                 StarflowButton(
                   label: '取消',
+                  autofocus: true,
                   onPressed: () => Navigator.of(context).pop(false),
                   variant: StarflowButtonVariant.ghost,
                   compact: true,
@@ -609,12 +610,15 @@ class _PathEditor extends ConsumerWidget {
         return SimpleDialog(
           title: Text(label),
           children: [
-            SimpleDialogOption(
+            TvDialogOption(
+              isTelevision: isTelevision,
+              autofocus: true,
               onPressed: () =>
                   Navigator.of(context).pop(_PathEditorAction.pick),
               child: Text(actionLabel),
             ),
-            SimpleDialogOption(
+            TvDialogOption(
+              isTelevision: isTelevision,
               onPressed: () =>
                   Navigator.of(context).pop(_PathEditorAction.manualEdit),
               child: const Text('手动填写'),

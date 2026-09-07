@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 
 class DetailTelevisionPickerOption<T> {
@@ -74,6 +75,7 @@ Future<T?> showDetailTelevisionPickerDialog<T>({
                 itemBuilder: (context, index) {
                   final option = options[index];
                   final isSelected = option.value == selectedValue;
+                  final accent = AppActionColors.of(Theme.of(context)).primary;
                   return TvFocusableAction(
                     focusNode: optionFocusNodes[index],
                     focusId: option.focusId,
@@ -84,12 +86,12 @@ Future<T?> showDetailTelevisionPickerDialog<T>({
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         color: isSelected
-                            ? Colors.white.withValues(alpha: 0.14)
+                            ? accent.withValues(alpha: 0.14)
                             : Colors.white.withValues(alpha: 0.06),
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
                           color: isSelected
-                              ? Colors.white.withValues(alpha: 0.4)
+                              ? accent.withValues(alpha: 0.78)
                               : Colors.white.withValues(alpha: 0.08),
                         ),
                       ),
@@ -106,7 +108,7 @@ Future<T?> showDetailTelevisionPickerDialog<T>({
                                   (isSelected
                                       ? Icons.check_circle_rounded
                                       : Icons.radio_button_unchecked_rounded),
-                              color: Colors.white,
+                              color: isSelected ? accent : Colors.white,
                             ),
                             const SizedBox(width: 12),
                             Expanded(

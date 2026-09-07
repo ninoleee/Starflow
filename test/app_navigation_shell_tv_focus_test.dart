@@ -17,33 +17,7 @@ void main() {
   testWidgets(
     'TV sidebar restores focus after auto hide and remains traversable',
     (tester) async {
-      final router = GoRouter(
-        initialLocation: '/home',
-        routes: [
-          StatefulShellRoute.indexedStack(
-            builder: (context, state, navigationShell) {
-              return AppNavigationShell(navigationShell: navigationShell);
-            },
-            branches: [
-              for (final path in const [
-                'home',
-                'search',
-                'favorites',
-                'library',
-                'settings',
-              ])
-                StatefulShellBranch(
-                  routes: [
-                    GoRoute(
-                      path: '/$path',
-                      builder: (context, state) => _TestPage(id: path),
-                    ),
-                  ],
-                ),
-            ],
-          ),
-        ],
-      );
+      final router = _buildRouter();
       addTearDown(router.dispose);
 
       await tester.pumpWidget(
@@ -62,8 +36,11 @@ void main() {
 
       final homeNavigationNode = _navigationNode(tester, 0);
       final searchNavigationNode = _navigationNode(tester, 1);
-      homeNavigationNode.requestFocus();
-      await tester.pump();
+      final menuScope = tester.widget<TvMenuButtonScope>(
+        find.byType(TvMenuButtonScope),
+      );
+      menuScope.onMenuButtonPressed();
+      await tester.pumpAndSettle();
       expect(homeNavigationNode.hasPrimaryFocus, isTrue);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
@@ -79,6 +56,24 @@ void main() {
             .any((widget) => widget.excluding),
         isTrue,
       );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pumpAndSettle();
+      expect(homeNavigationNode.hasPrimaryFocus, isTrue);
+      expect(_contentNode(tester, 'home').hasFocus, isFalse);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      expect(_contentNode(tester, 'home').hasPrimaryFocus, isTrue);
+
+      // With the Stack sidebar hidden, vertical traversal must stay inside the
+      // content page and must not jump back to the excluded menu items.
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(_contentNode(tester, 'home').hasPrimaryFocus, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      expect(_contentNode(tester, 'home').hasPrimaryFocus, isTrue);
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
@@ -131,6 +126,207 @@ void main() {
       );
     },
   );
+
+  testWidgets('TV permanent sidebar keeps the page offset in Row layout', (
+    tester,
+  ) async {
+    final router = _buildRouter();
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(
+            _settings.copyWith(autoHideNavigationBarEnabled: false),
+          ),
+        ],
+        child: MaterialApp.router(
+          theme: ThemeData.dark(),
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final content = _contentNode(tester, 'home');
+    expect(tester.getTopLeft(find.byKey(const ValueKey('page-home'))).dx, 48);
+
+    _navigationNode(tester, 0).requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(content.hasPrimaryFocus, isTrue);
+    expect(
+      tester
+          .widgetList<ExcludeFocus>(find.byType(ExcludeFocus))
+          .any((widget) => widget.excluding),
+      isFalse,
+    );
+  });
+
+  testWidgets('TV auto-hide starts and reselects with the sidebar hidden', (
+    tester,
+  ) async {
+    final router = _buildRouter();
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(_settings),
+        ],
+        child: MaterialApp.router(
+          theme: ThemeData.dark(),
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widgetList<ExcludeFocus>(find.byType(ExcludeFocus))
+          .any((widget) => widget.excluding),
+      isTrue,
+    );
+    expect(_contentNode(tester, 'home').hasPrimaryFocus, isTrue);
+
+    final menuScope = tester.widget<TvMenuButtonScope>(
+      find.byType(TvMenuButtonScope),
+    );
+    menuScope.onMenuButtonPressed();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+
+    expect(_contentNode(tester, 'search').hasPrimaryFocus, isTrue);
+    expect(
+      tester
+          .widgetList<ExcludeFocus>(find.byType(ExcludeFocus))
+          .any((widget) => widget.excluding),
+      isTrue,
+    );
+  });
+
+  for (final autoHide in [true, false]) {
+    for (final size in [const Size(960, 540), const Size(1280, 720)]) {
+      testWidgets(
+        'TV focus labels stay beside their buttons '
+        '(autoHide: $autoHide, size: $size)',
+        (tester) async {
+          tester.view.physicalSize = size;
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.reset);
+          final router = _buildRouter();
+          addTearDown(router.dispose);
+
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                isTelevisionProvider.overrideWith((ref) => true),
+                appSettingsProvider.overrideWithValue(
+                  _settings.copyWith(autoHideNavigationBarEnabled: autoHide),
+                ),
+              ],
+              child: MaterialApp.router(
+                theme: ThemeData.dark(),
+                routerConfig: router,
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          tester
+              .widget<TvMenuButtonScope>(find.byType(TvMenuButtonScope))
+              .onMenuButtonPressed();
+          await tester.pumpAndSettle();
+          final pageRect = tester.getRect(
+            find.byKey(const ValueKey('page-home')),
+          );
+          expect(pageRect.left, autoHide ? 0 : 48);
+
+          final navigationActions = find.byWidgetPredicate(
+            (widget) =>
+                widget is TvFocusableAction &&
+                (widget.focusNode?.debugLabel?.startsWith('tv-nav-') ?? false),
+          );
+          for (var index = 0;
+              index < navigationActions.evaluate().length;
+              index++) {
+            final action = navigationActions.at(index);
+            tester.widget<TvFocusableAction>(action).focusNode!.requestFocus();
+            await tester.pumpAndSettle();
+
+            final follower = find.byType(CompositedTransformFollower);
+            expect(follower, findsOneWidget);
+            final label = find.descendant(
+              of: follower,
+              matching: find.byType(Text),
+            );
+            expect(label, findsOneWidget);
+            final labelRect = tester.getRect(label);
+            final buttonRect = tester.getRect(action);
+            expect(labelRect.width, lessThan(150));
+            expect(labelRect.height, lessThan(44));
+            expect(labelRect.left - buttonRect.right, closeTo(12, 0.01));
+            expect(labelRect.center.dy, closeTo(buttonRect.center.dy, 0.01));
+            expect(
+              tester.getRect(find.byKey(const ValueKey('page-home'))),
+              pageRect,
+            );
+          }
+
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+          await tester.pumpAndSettle();
+          expect(_contentNode(tester, 'home').hasPrimaryFocus, isTrue);
+          expect(find.byType(CompositedTransformFollower), findsNothing);
+
+          // Also unmount while a label is visible to check portal cleanup.
+          await tester.binding.handlePopRoute();
+          await tester.pumpAndSettle();
+          expect(_navigationNode(tester, 0).hasPrimaryFocus, isTrue);
+          expect(find.byType(CompositedTransformFollower), findsOneWidget);
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pumpAndSettle();
+          expect(find.byType(CompositedTransformFollower), findsNothing);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+}
+
+GoRouter _buildRouter() {
+  return GoRouter(
+    initialLocation: '/home',
+    routes: [
+      StatefulShellRoute.indexedStack(
+        builder: (context, state, navigationShell) {
+          return AppNavigationShell(navigationShell: navigationShell);
+        },
+        branches: [
+          for (final path in const [
+            'home',
+            'search',
+            'favorites',
+            'library',
+            'settings',
+          ])
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/$path',
+                  builder: (context, state) => _TestPage(id: path),
+                ),
+              ],
+            ),
+        ],
+      ),
+    ],
+  );
 }
 
 FocusNode _navigationNode(WidgetTester tester, int index) {
@@ -179,11 +375,13 @@ class _TestPageState extends State<_TestPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: ValueKey('page-${widget.id}'),
       body: Align(
         alignment: Alignment.centerLeft,
         child: TvFocusableAction(
           focusNode: _focusNode,
           focusId: 'content:${widget.id}',
+          autofocus: true,
           onPressed: () {},
           child: const SizedBox(width: 180, height: 80),
         ),

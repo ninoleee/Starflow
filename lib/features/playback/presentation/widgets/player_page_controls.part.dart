@@ -1310,14 +1310,17 @@ extension _PlayerPageStateControls on _PlayerPageState {
         return SimpleDialog(
           title: const Text('字幕选择'),
           children: [
-            SimpleDialogOption(
+            TvDialogOption(
+              isTelevision: _isTelevisionPlaybackDevice,
+              autofocus: true,
               onPressed: () => Navigator.of(dialogContext).pop(
                 _MpvSubtitleSelectionMode.globalDefault,
               ),
               child: const Text('使用全局默认'),
             ),
             if (!kIsWeb)
-              SimpleDialogOption(
+              TvDialogOption(
+                isTelevision: _isTelevisionPlaybackDevice,
                 onPressed: () => Navigator.of(dialogContext).pop(
                   _MpvSubtitleSelectionMode.dual,
                 ),
@@ -1326,7 +1329,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
                 ),
               ),
             for (final track in tracks.where((track) => track.id != 'auto'))
-              SimpleDialogOption(
+              TvDialogOption(
+                isTelevision: _isTelevisionPlaybackDevice,
                 onPressed: () => Navigator.of(dialogContext).pop(track),
                 child: Text(
                   track == current
@@ -1471,7 +1475,9 @@ extension _PlayerPageStateControls on _PlayerPageState {
         title: Text(title),
         children: [
           for (final track in tracks)
-            SimpleDialogOption(
+            TvDialogOption(
+              isTelevision: _isTelevisionPlaybackDevice,
+              autofocus: track == tracks.first,
               onPressed: () => Navigator.of(dialogContext).pop(track),
               child: Text(formatPlaybackSubtitleTrackLabel(track)),
             ),
@@ -1518,7 +1524,9 @@ extension _PlayerPageStateControls on _PlayerPageState {
           title: const Text('音轨选择'),
           children: [
             for (final track in tracks)
-              SimpleDialogOption(
+              TvDialogOption(
+                isTelevision: _isTelevisionPlaybackDevice,
+                autofocus: track == tracks.first,
                 onPressed: () => Navigator.of(dialogContext).pop(track),
                 child: Text(
                   track == current

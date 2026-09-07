@@ -108,6 +108,7 @@ class BootstrapController extends Notifier<BootstrapState> {
         } else {
           primeHomeModules(ref);
         }
+        await waitForHomeModules(ref);
       },
       nonBlockingErrorSubtitle: '媒体源响应偏慢，先进入应用，资源会继续在后台补齐。',
       stageDelay: const Duration(milliseconds: 30),

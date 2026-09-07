@@ -31,10 +31,14 @@ Future<void> showPlaybackSubtitleDelayDialog({
                     for (final step in steps)
                       StarflowButton(
                         label: _buildSubtitleDelayStepLabel(step),
+                        autofocus: step == steps.first,
                         onPressed: () async {
                           final nextDelay =
                               step == 0 ? 0.0 : currentDelay + step;
                           final appliedDelay = await onApplyDelay(nextDelay);
+                          if (!context.mounted) {
+                            return;
+                          }
                           setDialogState(() {
                             currentDelay = appliedDelay;
                           });
@@ -49,6 +53,7 @@ Future<void> showPlaybackSubtitleDelayDialog({
             actions: [
               StarflowButton(
                 label: '关闭',
+                autofocus: steps.isEmpty,
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 variant: StarflowButtonVariant.ghost,
                 compact: true,
@@ -89,6 +94,7 @@ Future<SeriesSkipPreference?> showPlaybackSeriesSkipDialog({
               children: [
                 StarflowToggleTile(
                   title: '自动跳过',
+                  autofocus: true,
                   subtitle: target.resolvedSeriesTitle.isEmpty
                       ? '只对当前绑定的剧集生效'
                       : '只对《${target.resolvedSeriesTitle}》生效',

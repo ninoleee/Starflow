@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 
 class AppTheme {
   static const String _webFontFamily = 'system-ui';
@@ -12,56 +13,55 @@ class AppTheme {
     'sans-serif',
   ];
 
-  static ThemeData get lightTheme {
+  static ThemeData get darkTheme => dark();
+
+  static ThemeData dark({AppAccent accent = AppAccent.teal}) {
     const colorScheme = ColorScheme(
-      brightness: Brightness.light,
-      primary: Color(0xFF1C57D5),
-      onPrimary: Colors.white,
-      primaryContainer: Color(0xFFDCE7FF),
-      onPrimaryContainer: Color(0xFF0E2455),
-      secondary: Color(0xFF0E7490),
-      onSecondary: Colors.white,
-      secondaryContainer: Color(0xFFD7F0F7),
-      onSecondaryContainer: Color(0xFF082E3A),
-      tertiary: Color(0xFFB7791F),
-      onTertiary: Colors.white,
-      tertiaryContainer: Color(0xFFFBE7C2),
-      onTertiaryContainer: Color(0xFF4B2E05),
-      error: Color(0xFFBA1A1A),
-      onError: Colors.white,
-      errorContainer: Color(0xFFFFDAD6),
-      onErrorContainer: Color(0xFF410002),
-      surface: Color(0xFFFFFCFF),
-      onSurface: Color(0xFF111827),
-      surfaceContainerHighest: Color(0xFFE9EEF7),
-      onSurfaceVariant: Color(0xFF5C667A),
-      outline: Color(0xFFD5DEED),
-      outlineVariant: Color(0xFFE6EBF5),
-      shadow: Color(0x1A0D1B2A),
-      scrim: Color(0x660B1120),
-      inverseSurface: Color(0xFF0C1627),
-      onInverseSurface: Color(0xFFF5F8FF),
-      inversePrimary: Color(0xFFB5CBFF),
-      surfaceTint: Color(0xFF1C57D5),
+      brightness: Brightness.dark,
+      primary: AppColors.foreground,
+      onPrimary: AppColors.neutral1,
+      primaryContainer: AppColors.neutral5,
+      onPrimaryContainer: AppColors.foreground,
+      secondary: AppColors.foregroundMuted,
+      onSecondary: AppColors.neutral1,
+      secondaryContainer: AppColors.neutral4,
+      onSecondaryContainer: AppColors.foreground,
+      tertiary: AppColors.foregroundMuted,
+      onTertiary: AppColors.neutral1,
+      tertiaryContainer: AppColors.neutral4,
+      onTertiaryContainer: AppColors.foreground,
+      error: AppColors.danger,
+      onError: AppColors.onDanger,
+      errorContainer: AppColors.dangerContainer,
+      onErrorContainer: AppColors.onDangerContainer,
+      surface: AppColors.neutral1,
+      onSurface: AppColors.foreground,
+      surfaceContainerLowest: AppColors.neutral0,
+      surfaceContainerLow: AppColors.neutral2,
+      surfaceContainer: AppColors.neutral3,
+      surfaceContainerHigh: AppColors.neutral4,
+      surfaceContainerHighest: AppColors.neutral5,
+      onSurfaceVariant: AppColors.foregroundMuted,
+      outline: AppColors.outline,
+      outlineVariant: AppColors.outlineSoft,
+      shadow: Color(0xFF000000),
+      scrim: AppColors.scrim,
+      inverseSurface: AppColors.foreground,
+      onInverseSurface: AppColors.neutral3,
+      inversePrimary: AppColors.neutral3,
+      // M3 默认会把 primary 按高度叠到表面上，中性方案里这层会让卡片泛色。
+      surfaceTint: Colors.transparent,
     );
     return _buildTheme(
       colorScheme,
-      scaffoldBackgroundOverride: const Color(0xFFF2F5FB),
+      AppActionColors(primary: accent.primary, onPrimary: accent.onPrimary),
     );
-  }
-
-  static ThemeData get darkTheme {
-    final colorScheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF1C57D5),
-      brightness: Brightness.dark,
-    );
-    return _buildTheme(colorScheme);
   }
 
   static ThemeData _buildTheme(
-    ColorScheme colorScheme, {
-    Color? scaffoldBackgroundOverride,
-  }) {
+    ColorScheme colorScheme,
+    AppActionColors actions,
+  ) {
     final baseTextTheme = _applyAppFonts(
       ThemeData(
         useMaterial3: true,
@@ -69,16 +69,12 @@ class AppTheme {
       ).textTheme,
     );
 
-    final navUnselectedIcon = colorScheme.brightness == Brightness.dark
-        ? colorScheme.onSurfaceVariant
-        : const Color(0xFFBDD2FF);
-
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
+      extensions: [actions],
       fontFamily: kIsWeb ? _webFontFamily : null,
-      scaffoldBackgroundColor:
-          scaffoldBackgroundOverride ?? colorScheme.surface,
+      scaffoldBackgroundColor: colorScheme.surface,
       splashFactory: InkSparkle.splashFactory,
       textTheme: baseTextTheme.copyWith(
         headlineSmall: baseTextTheme.headlineSmall?.copyWith(
@@ -102,15 +98,25 @@ class AppTheme {
           color: colorScheme.onSurface,
         ),
         bodyLarge: baseTextTheme.bodyLarge?.copyWith(
-          color: colorScheme.onSurface,
+          color: AppColors.foregroundBody,
           height: 1.5,
         ),
         bodyMedium: baseTextTheme.bodyMedium?.copyWith(
-          color: colorScheme.onSurfaceVariant,
+          color: AppColors.foregroundBody,
           height: 1.45,
         ),
         labelLarge: baseTextTheme.labelLarge?.copyWith(
+          color: AppColors.foregroundBody,
           fontWeight: FontWeight.w700,
+        ),
+        bodySmall: baseTextTheme.bodySmall?.copyWith(
+          color: AppColors.foregroundMuted,
+        ),
+        labelMedium: baseTextTheme.labelMedium?.copyWith(
+          color: AppColors.foregroundMuted,
+        ),
+        labelSmall: baseTextTheme.labelSmall?.copyWith(
+          color: AppColors.foregroundMuted,
         ),
       ),
       appBarTheme: AppBarTheme(
@@ -126,67 +132,62 @@ class AppTheme {
         ),
       ),
       cardTheme: CardThemeData(
-        color: colorScheme.surface,
+        color: colorScheme.surfaceContainer,
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
         margin: EdgeInsets.zero,
-      ),
-      navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: colorScheme.surface,
-        indicatorColor: colorScheme.primaryContainer,
-        height: 72,
-        iconTheme: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return const IconThemeData(color: Colors.white);
-          }
-          return IconThemeData(color: navUnselectedIcon);
-        }),
-        labelTextStyle: WidgetStateProperty.resolveWith((states) {
-          return TextStyle(
-            fontWeight: FontWeight.w700,
-            color: states.contains(WidgetState.selected)
-                ? Colors.white
-                : navUnselectedIcon,
-          );
-        }),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          backgroundColor: colorScheme.primary,
-          foregroundColor: colorScheme.onPrimary,
+          backgroundColor: actions.primary,
+          foregroundColor: actions.onPrimary,
           elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(AppRadii.md),
           ),
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: colorScheme.onSurface,
+          foregroundColor: AppColors.foregroundBody,
           side: BorderSide(color: colorScheme.outline),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(AppRadii.md),
           ),
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: colorScheme.primary,
+          foregroundColor: AppColors.foregroundBody,
           textStyle: const TextStyle(fontWeight: FontWeight.w700),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(AppRadii.sm),
           ),
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: colorScheme.surfaceContainerHighest,
-        selectedColor: colorScheme.primaryContainer,
+        backgroundColor: colorScheme.surfaceContainerHigh,
+        selectedColor: actions.primary.withValues(alpha: 0.18),
+        secondarySelectedColor: actions.primary.withValues(alpha: 0.18),
+        checkmarkColor: actions.primary,
+        labelStyle: TextStyle(
+          color: colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w700,
+        ),
+        secondaryLabelStyle: TextStyle(
+          color: actions.primary,
+          fontWeight: FontWeight.w700,
+        ),
         side: BorderSide.none,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.pill),
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -197,82 +198,86 @@ class AppTheme {
           vertical: 16,
         ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(AppRadii.md),
           borderSide: BorderSide(color: colorScheme.outlineVariant),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(AppRadii.md),
           borderSide: BorderSide(color: colorScheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(AppRadii.md),
           borderSide: BorderSide(
-            color: colorScheme.primary.withValues(alpha: 0.72),
+            color: actions.primary,
             width: 1.4,
           ),
         ),
         hintStyle: TextStyle(
-          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.9),
+          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
         ),
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: colorScheme.surface,
+        backgroundColor: colorScheme.surfaceContainerHigh,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(28),
-        ),
-      ),
-      segmentedButtonTheme: SegmentedButtonThemeData(
-        style: ButtonStyle(
-          backgroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return colorScheme.primaryContainer;
-            }
-            return colorScheme.surfaceContainerHighest;
-          }),
-          foregroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return colorScheme.onPrimaryContainer;
-            }
-            return colorScheme.onSurfaceVariant;
-          }),
-          textStyle: WidgetStateProperty.all(
-            const TextStyle(fontWeight: FontWeight.w700),
-          ),
-          shape: WidgetStateProperty.all(
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          ),
-          side: WidgetStateProperty.all(
-            BorderSide(color: colorScheme.outlineVariant),
-          ),
+          borderRadius: BorderRadius.circular(AppRadii.lg),
         ),
       ),
       switchTheme: SwitchThemeData(
         trackOutlineColor: WidgetStateProperty.all(Colors.transparent),
         thumbColor: WidgetStateProperty.resolveWith((states) {
-          if (states.contains(WidgetState.selected)) {
-            return colorScheme.onPrimary;
+          if (states.contains(WidgetState.disabled)) {
+            return colorScheme.onSurface.withValues(alpha: 0.38);
           }
-          return colorScheme.outline;
+          if (states.contains(WidgetState.selected)) {
+            return actions.onPrimary;
+          }
+          return colorScheme.onSurfaceVariant;
         }),
         trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) {
+            return colorScheme.onSurface.withValues(alpha: 0.12);
+          }
           if (states.contains(WidgetState.selected)) {
-            return colorScheme.primary;
+            return actions.primary;
           }
           return colorScheme.surfaceContainerHighest;
         }),
       ),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: actions.primary,
+        thumbColor: actions.primary,
+        overlayColor: actions.primary.withValues(alpha: 0.12),
+        inactiveTrackColor: colorScheme.surfaceContainerHighest,
+      ),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) return null;
+          return states.contains(WidgetState.selected) ? actions.primary : null;
+        }),
+        checkColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.disabled)
+              ? null
+              : actions.onPrimary;
+        }),
+      ),
+      radioTheme: RadioThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) return null;
+          return states.contains(WidgetState.selected) ? actions.primary : null;
+        }),
+      ),
       progressIndicatorTheme: ProgressIndicatorThemeData(
-        color: colorScheme.primary,
-        linearTrackColor: colorScheme.primaryContainer.withValues(alpha: 0.5),
-        circularTrackColor: colorScheme.primaryContainer.withValues(alpha: 0.4),
+        color: actions.primary,
+        linearTrackColor: colorScheme.surfaceContainerHighest,
+        circularTrackColor: colorScheme.surfaceContainerHighest,
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: colorScheme.inverseSurface,
-        contentTextStyle: TextStyle(color: colorScheme.onInverseSurface),
+        backgroundColor: colorScheme.surfaceContainerHighest,
+        contentTextStyle: TextStyle(color: colorScheme.onSurface),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(AppRadii.md),
         ),
       ),
     );

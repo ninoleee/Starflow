@@ -279,7 +279,7 @@ class _HomePosterTile extends StatelessWidget {
       posterHeaders: primaryArtwork?.headers ?? const {},
       posterFallbackSources: artworkSources.skip(1).toList(growable: false),
       titleColor: Colors.white,
-      subtitleColor: const Color(0xFF98A7C2),
+      subtitleColor: AppColors.foregroundMuted,
       onTap: () {
         context.pushNamed(
           'detail',
@@ -348,8 +348,8 @@ class _HomeShellForegroundMask extends StatelessWidget {
         gradient: LinearGradient(
           colors: [
             Colors.black.withValues(alpha: 0.08),
-            const Color(0x7A07111D),
-            const Color(0x52030914),
+            const Color(0x7A0E0E10),
+            const Color(0x5208080A),
             Colors.transparent,
           ],
           begin: Alignment.topCenter,
@@ -495,7 +495,7 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
     }
 
     return DecoratedBox(
-      decoration: const BoxDecoration(color: Color(0xFF030914)),
+      decoration: const BoxDecoration(color: AppColors.neutral0),
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -505,9 +505,9 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    const Color(0xFF07111D).withValues(alpha: 0.32),
-                    const Color(0xFF07111D).withValues(alpha: 0.64),
-                    const Color(0xFF030914).withValues(alpha: 0.82),
+                    AppColors.neutral1.withValues(alpha: 0.32),
+                    AppColors.neutral1.withValues(alpha: 0.64),
+                    AppColors.neutral0.withValues(alpha: 0.82),
                   ],
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
@@ -553,8 +553,8 @@ class _HomeHeroPlaceholder extends StatelessWidget {
             borderRadius: borderRadius,
             gradient: LinearGradient(
               colors: [
-                const Color(0xFF142235),
-                const Color(0xFF0C1626),
+                AppColors.neutral3,
+                AppColors.neutral2,
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -595,8 +595,8 @@ class _HomeSectionLoading extends StatelessWidget {
           ? Container(
               height: 184,
               decoration: BoxDecoration(
-                color: const Color(0xFF0B1631).withValues(alpha: 0.56),
-                borderRadius: BorderRadius.circular(18),
+                color: AppColors.neutral2.withValues(alpha: 0.56),
+                borderRadius: BorderRadius.circular(AppRadii.md),
               ),
               child: const Center(
                 child: SizedBox(
@@ -659,8 +659,8 @@ class _PosterPlaceholderCard extends StatelessWidget {
                 Container(
                   height: width / imageAspectRatio,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF112036).withValues(alpha: 0.72),
-                    borderRadius: BorderRadius.circular(22),
+                    color: AppColors.neutral4.withValues(alpha: 0.72),
+                    borderRadius: BorderRadius.circular(AppRadii.md),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -669,7 +669,7 @@ class _PosterPlaceholderCard extends StatelessWidget {
                   width: 118,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(AppRadii.pill),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -678,7 +678,7 @@ class _PosterPlaceholderCard extends StatelessWidget {
                   width: 44,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(AppRadii.pill),
                   ),
                 ),
               ],
@@ -706,8 +706,8 @@ class _PosterPlaceholderCard extends StatelessWidget {
                   width: double.infinity,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: const Color(0xFF112036).withValues(alpha: 0.72),
-                      borderRadius: BorderRadius.circular(22),
+                      color: AppColors.neutral4.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(AppRadii.md),
                     ),
                   ),
                 ),
@@ -725,7 +725,8 @@ class _PosterPlaceholderCard extends StatelessWidget {
                             width: 118,
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.14),
-                              borderRadius: BorderRadius.circular(999),
+                              borderRadius:
+                                  BorderRadius.circular(AppRadii.pill),
                             ),
                           ),
                           const SizedBox(height: 6),
@@ -734,7 +735,8 @@ class _PosterPlaceholderCard extends StatelessWidget {
                             width: 44,
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(999),
+                              borderRadius:
+                                  BorderRadius.circular(AppRadii.pill),
                             ),
                           ),
                         ],
@@ -846,14 +848,14 @@ class _HomeSectionViewAllTile extends ConsumerWidget {
         onPressed: onTap,
         focusNode: focusNode,
         focusId: focusId,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadii.md),
         visualStyle: TvFocusVisualStyle.floating,
         child: content,
       );
     }
 
     return InkWell(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadii.md),
       onTap: onTap,
       child: content,
     );
@@ -931,8 +933,11 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
       return SizedBox(
         height: 184 + _kHomeCarouselFocusOverflowPadding,
         child: ListView.separated(
-          padding: const EdgeInsets.only(
-            top: _kHomeCarouselFocusOverflowPadding,
+          padding: const EdgeInsets.fromLTRB(
+            12,
+            _kHomeCarouselFocusOverflowPadding,
+            12,
+            0,
           ),
           clipBehavior: Clip.none,
           scrollDirection: Axis.horizontal,
@@ -1017,14 +1022,14 @@ class _HomeCarouselTile extends StatelessWidget {
         onPressed: () {
           context.pushNamed('detail', extra: item.detailTarget);
         },
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadii.md),
         visualStyle: TvFocusVisualStyle.none,
         focusScale: 1.06,
         child: _HomeCarouselCard(item: item),
       );
     }
     return InkWell(
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(AppRadii.md),
       onTap: () {
         context.pushNamed('detail', extra: item.detailTarget);
       },
@@ -1055,8 +1060,8 @@ class _HomeCarouselCard extends StatelessWidget {
         );
         return Container(
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            color: const Color(0xFF0B1631),
+            borderRadius: BorderRadius.circular(AppRadii.md),
+            color: AppColors.neutral2,
           ),
           clipBehavior: Clip.antiAlias,
           child: Stack(
@@ -1103,7 +1108,7 @@ class _HomeCarouselCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: Color(0xFFE5EDFF),
+                        color: AppColors.foreground,
                         height: 1.45,
                       ),
                     ),
@@ -1150,7 +1155,7 @@ class _HomeEditButton extends ConsumerWidget {
                   icon: const Icon(Icons.tune_rounded, size: 14),
                   label: const Text('编辑首页'),
                   style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF8FA0BD),
+                    foregroundColor: AppColors.foregroundMuted,
                     textStyle:
                         Theme.of(context).textTheme.labelMedium?.copyWith(
                               fontWeight: FontWeight.w700,
@@ -1295,7 +1300,7 @@ class _SectionEmptyState extends StatelessWidget {
       child: Text(
         message,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: const Color(0xFF90A0BD),
+              color: AppColors.foregroundMuted,
             ),
       ),
     );

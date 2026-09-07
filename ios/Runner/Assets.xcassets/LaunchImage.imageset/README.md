@@ -1,16 +1,18 @@
 # iOS 启动图资源
 
+当前原生 `LaunchScreen.storyboard` 仅显示 `#121212` 背景，不再引用本目录的图片；Logo 只在 Flutter 启动首屏展示。以下图片仍由导出脚本同步保留，替换它们不会改变当前原生启动页。
+
 这个目录只用于 `iOS` 启动图资源管理，本身不参与应用内页面逻辑。
 
 补充说明：
 
-- 这份说明已按 `2026-08-27` 的仓库状态同步
+- 品牌资源已按 `2026-09-07` 的新 Logo 同步
 - 这里的启动图资源不等同于外部 App Icon
 - 启动页首帧当前与 `assets/branding/starflow_launch_logo.png` 保持同源
-  这张图是透明底主图案，不带外部 app icon 的圆角方形底板
+  这张图来自 `assets/branding/starflow_logo_source.png`，使用无白边满版彩色原图，保留完整构图
 - `tool/generate_brand_assets.py` 会同步更新这里的 `LaunchImage.png / @2x / @3x`
 - 外部 App Icon 当前同样由仓库根目录下的 `tool/generate_brand_assets.py` 统一生成
-- 外部 App Icon 当前以 `assets/branding/starflow_icon_master.svg` 为统一矢量源
+- 外部 App Icon 当前同样以 `assets/branding/starflow_logo_source.png` 为统一源；iOS App Icon 导出为无透明通道的 RGB
 - 这个目录通常不需要单独维护；应用内详情页、搜索页、播放器等展示改动也不会影响这里
 - 首页缓存批量化、settings slice、retained async、播放启动链拆分和空库后台重建都不会影响这里的启动图资源
 - 最近新增的 `TV` 详情页显式方向焦点链、MuMu 连接脚本和 iOS 原生播放会话桥接说明，也都不影响这里的启动图资源

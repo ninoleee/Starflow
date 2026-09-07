@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/navigation/page_activity_mixin.dart';
@@ -184,6 +185,8 @@ class _HomePageState extends ConsumerState<HomePage>
   bool _missingFocusRecoveryScheduled = false;
   int _missingFocusRecoveryVersion = 0;
   bool _hasPendingSections = false;
+  bool _hasHeroSlot = false;
+  bool _hasHeroContent = false;
   List<String> _observedEnabledModuleIds = const <String>[];
   bool _didObserveEnabledModuleIds = false;
   List<String> _observedFocusableSectionIds = const <String>[];
@@ -283,11 +286,27 @@ class _HomePageState extends ConsumerState<HomePage>
       return;
     }
     var primaryFocus = FocusManager.instance.primaryFocus;
+    if (_isFocusedHeroCard(primaryFocus)) {
+      _ensureFocusNodeVisible(primaryFocus!);
+      return;
+    }
+    if (reason == 'navigation-reset' && _requestHeroFocus()) {
+      return;
+    }
     if (_isFirstHomeTarget(primaryFocus)) {
       _ensureFocusNodeVisible(primaryFocus!);
       return;
     }
     if (_hasActionableHomeFocus(primaryFocus)) {
+      return;
+    }
+    if (_requestHeroFocus()) {
+      return;
+    }
+    // Keep startup stable while the Hero slot is still waiting for its first
+    // section. Focusing the first regular module here would cause the
+    // recent-playback-then-Hero jump the user sees when the Hero arrives.
+    if (_hasHeroSlot && !_hasHeroContent) {
       return;
     }
     if (_requestFirstHomeContentFocus()) {
@@ -425,6 +444,15 @@ class _HomePageState extends ConsumerState<HomePage>
         _homeEditFocusNode.context != null &&
         _homeEditFocusNode.canRequestFocus &&
         identical(focus, _homeEditFocusNode);
+  }
+
+  bool _isFocusedHeroCard(FocusNode? focus) {
+    return focus != null &&
+        (_featuredHeroKey.currentState?.isCurrentCardFocusNode(focus) ?? false);
+  }
+
+  bool _requestHeroFocus() {
+    return _featuredHeroKey.currentState?.requestCurrentCardFocus() ?? false;
   }
 
   void _ensureFocusNodeVisible(FocusNode focusNode) {
@@ -727,6 +755,8 @@ class _HomePageState extends ConsumerState<HomePage>
         '';
     final hasHeroListSlot =
         heroEnabled && (featuredItems.isNotEmpty || hasPendingSections);
+    _hasHeroSlot = hasHeroListSlot;
+    _hasHeroContent = heroEnabled && featuredItems.isNotEmpty;
     final moduleListOffset = hasHeroListSlot ? 1 : 0;
     final listItemCount = moduleListOffset + visibleModules.length + 2;
     const heroListKey = ValueKey<String>('home:list:hero');
@@ -745,8 +775,8 @@ class _HomePageState extends ConsumerState<HomePage>
     };
 
     final content = RefreshIndicator(
-      color: Colors.white,
-      backgroundColor: const Color(0xFF102033),
+      color: AppActionColors.of(Theme.of(context)).primary,
+      backgroundColor: AppColors.neutral3,
       onRefresh: () => refreshHomeModules(ref, allowNetworkProbe: true),
       child: ListView.builder(
         controller: _scrollController,

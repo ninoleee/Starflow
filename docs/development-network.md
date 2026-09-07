@@ -2,6 +2,8 @@
 
 仓库已经内置了一些面向国内网络环境和本地代理的辅助方案，主要集中在 `scripts/` 和 Android Gradle 初始化配置里。
 
+TV 图片在释放加载并发许可后仍保留同一个队列包装层和已完成的 future，避免父组件刷新时重新挂载图片、短暂显示空白；不改变并发上限、许可释放、失败重试或缓存策略。
+
 ## 0. 2026-08 文档同步
 
 截至 `2026-08-27`，这轮架构/性能优化里和“请求行为”最相关的补充点是：
@@ -26,7 +28,7 @@
 - 进入播放器时会更早切到“播放优先”模式；从网络侧看，首页 Hero 补数、详情页自动补全和隐藏页图片加载会更快被压住
 - `MPV` 的远程流调优和 `ISO` 设备源判断已经收口到本地策略层；重型视频不再自动切换播放器或降级质量预设
 - Android（含 TV）与 iOS 的内置 `MPV` 构建会下载 media-kit 上游 full 原生库并校验 SHA-256，以补齐 `MLP / TrueHD` 解码器；这是构建期依赖下载，运行期播放不新增网络请求
-- HTTP / HTTPS 远程播放启动只执行一次 Range 预检；授权、临时链接、状态码、Range 能力、速度估算及后续超时 / 缓冲调节复用同一份结果，不再并行发起额外测速请求
+- 内置 MPV 在完成地址解析后直接打开 HTTP / HTTPS 远程媒体，不再发送独立的启动 Range 预检或测速请求；重定向、授权、临时链接、HTTP 状态和 Range 读取由实际播放器连接处理，不再存在额外的 `4s` 预检拦截。正式打开超时与有限重试预算不变，`playback.startup / playback.mpv` 在本地记录启动及失败重试决定，不向远端上报
 - Android ExoPlayer 启动 `/smartstrm_fid/` 时会用一次 `Range: bytes=0-63` 请求区分标准 MP4 文件头与 HLS 清单，最多等待约 `1.5s`；判断不出时不阻塞原格式启动。`/smartstrm/` 与 `/smartstrm_*/` 地址遇到 Media3 容器解析错误 `3003` 时，仍会保留当前进度、显式改按 HLS 并自动重试一次；普通 MP4、内置 MPV 和外部播放器不进入该探测或兜底
 - 旧的 trace helper 保持静音；应用生命周期、首页、媒体库、详情、刷新调度和网络故障统一写入可配置的结构化本地日志
 - `NasMediaIndexer` 当前已经拆成 `refresh_flow / storage_access / indexing / grouping / refresh_support` 多段 `part` 文件；这次拆分只是在本地把刷新编排、索引计算、分组和缓存访问解耦，不新增任何新的网络协议或请求源
@@ -144,6 +146,9 @@ Web 页面不能自行指定浏览器系统代理，因此 Web 端该页只展�
 - 内置 MPV 使用同一套边界与窗口规则：预解析走 Flutter `PlaybackTargetResolver`，只缓存地址和请求头，不创建第二个 `Player`，缓存 60 秒、解析超时 30 秒、每个准备键一次；命中后切集不再重复解析，未命中回落到即时解析。
 - 预解析失败保持安静；切集可复用在途请求，30 秒解析超时后旧响应不再生效。自动切集失败不会因 ENDED 或片尾轮询持续重试，用户仍可手动重试。预解析地址在下一集首帧前返回 401/403/404/410 时，最多用原目标重新解析一次；其他错误保留现有播放器处理路径。准备的鉴权头只随对应集播放，不记录到新增日志，也不复用为当前集请求头。
 - “从头播放 / 继续播放”的差异只由本地播放目标中的 `allowResume` 控制，并贯穿地址解析、内置 `MPV`、Android `ExoPlayer` 和 iOS `AVPlayer`；切换这两个入口不会增加预检、测速或其它网络请求
+- 详情页初始化先恢复本地详情和版本选择，再按需刷新并订阅详情补全；不再在缓存恢复前由首帧并行启动另一轮补全。续播按钮只等待本地播放历史，不等待元数据网络请求；两个入口共用启动锁，连续点击不会重复发起播放器跳转。
+- 系列浏览读取本地历史后优先请求历史所在季的剧集，不为定位额外遍历所有季；没有匹配季时预载第一季。其他季按选择加载，已加载结果在当前浏览器实例中复用，元数据及分区显示名更新不重新请求同一系列。
+- 详情页内所有播放入口共享启动锁，连续确认不会产生多个播放器请求；从播放器返回只更新本地进度，不触发新的系列季加载或重新定位。
 - 切换版本/资源时可继续复用本地详情元数据缓存，但不同资源身份不会复用旧直链、鉴权 headers 或已解析媒体参数；新资源地址为空时会按自身 `itemId / preferredMediaSourceId / actualAddress` 重新解析，因此不会因为同 TMDB/IMDb/标题缓存命中而直接使用旧资源 URL
 - 剧集字幕选择只按 `seriesKey` 保存本地轨道特征；MPV、Android ExoPlayer 和 iOS AVPlayer 切集后在新一集已有轨道中重新匹配，双字幕分别匹配主、副轨道，不请求服务器查询字幕，也不复用上一集的轨道 ID。它只覆盖同一部剧，不修改全局默认、不影响其他剧或电影；外挂和在线下载字幕文件仍限定当前单集
 - 主/副字幕样式是本地全局设置；设置页、MPV 和 Android ExoPlayer 修改时只更新同一份 `AppSettings` 并立即排队持久化，不新增服务端请求。副字幕大小默认值为主字幕的 `50%`；旧版未标记的 `75%` 默认值一次性迁到 `50%`，迁移后用户主动选择 `75%` 会保留
@@ -151,8 +156,10 @@ Web 页面不能自行指定浏览器系统代理，因此 Web 端该页只展�
 - 非 `TV` 内嵌 `MPV` 改为 Starflow 自己的轻量播放叠层，也只是本地播放器 UI 收敛；控制首层只保留返回 / 播放 / 进度 / 全屏 / 更多，播放设置一级再以“更多”进入字幕布局和 MPV 参数二级页。字幕、音轨、外挂字幕、在线字幕、字幕偏移、后台播放和 MPV 运行参数仍然复用现有播放链路，不新增新的服务端接口
 - Exo 右上角网速来自 Media3 当前会话已有传输事件；MPV 顶栏以左上角返回按钮起始，右侧网速来自本地 libmpv `cache-speed` 属性。两者都不额外发起测速或网络请求；控制栏隐藏只隐藏标签，MPV 的属性读取也只发生在本地进程
 - Android Exo 在播放器内切换远程剧集时会完全关闭旧媒体连接并为新地址创建独立会话；已知 MKV 的 `/smartstrm_fid/` 新集不再先发 64 字节格式探测，避免额外请求与新播放连接争用。低内存 TV 切集后会先积累约 `6s` 才播放，卡顿后积累约 `12s` 再恢复，目标缓存为 `48 MB`；首次打开仍沿用较快的 `32 MB / 1.5s / 4s` 档
-- Exo 与 MPV 会把同主机实测速度在进程内保留 `10` 分钟用于下一集调参，不写入配置或磁盘。MPV 缓存命中后仍发起极小 Range 请求检查鉴权、状态和 Range 能力，但不重复读取默认 `16 KB` 测速样本；Exo 直接复用同一原生 Activity 的 Media3 带宽样本
+- Exo 与 MPV 会把同主机实测速度在进程内保留 `10` 分钟用于下一集调参，不写入配置或磁盘。MPV 启动只读该缓存，命中与否都不额外发送 Range 请求；缓存缺失时按片源元数据调参，播放后从本地 `cache-speed` 更新缓存，历史缓存不计入新会话的实测速率统计。Exo 直接复用同一原生 Activity 的 Media3 带宽样本
 - MPV 仅对临时网络失败重试；Exo 的 Media3 加载策略也只对超时、连接类、`408/425/429/5xx` 做有限退避。鉴权、文件不存在、永久 HTTP 状态和格式/解码错误不会因新策略产生额外请求
+- MPV 将 `tcp: ffurl_read returned` 归入临时网络读取失败，沿用最多三次尝试（含首次）和统一总超时；退出或替换会话后旧启动任务失效，不再继续重试，也不把取消误记为启动故障。不新增预检或测速请求。
+- MPV 已失败并释放的开流仍可有限重试，历史低速缓存只用于运行期缓冲保护，不阻止断连重试。调参、开流、首帧、稳定播放及退避共享截止时间，退出取消等待但不强行中断原生释放。恢复重新解析当前集而非最初打开的集；原生错误摘要仅记录白名单组件、类别和 HTTP 状态，最多 12 条，不记录 URL、Cookie、token 或鉴权头，不新增诊断网络请求。
 - 同主机速度使用最近样本的轻量平滑值；低于片源码率 `0.9x` 时，MPV/Exo 都保留当前连接继续缓冲，不再重复释放并重建播放器；提示不新增测速请求
 - `playback.performance` 只在地址解析、首帧等启动关键边界与会话结束记录本地统计，不触发测速或远端上报；MPV 会在释放前以每项最多 `250ms` 读取本地 libmpv 解码器、掉帧和缓存速度属性，Exo 直接消费现有 Analytics/BandwidthMeter 事件
 - 内置 `MPV` 主动退出时会先立即关闭播放页，再在后台保存进度并完成 `pause -> stop -> dispose`；下一次打开前仍串行等待上一实例释放，关闭后台播放和打开新片源也复用同一套本地清理流程，不新增网络请求
@@ -403,6 +410,8 @@ Emby 来源刷新时，每个媒体分区也会作为 maintenance 任务进入�
 
 ## 9. 品牌资源导出
 
+原生启动页当前只显示 `#121212` 背景，不引用生成的 Android `launch_logo.png` 或 iOS `LaunchImage`。脚本继续生成这些资源以保持导出链完整；Flutter 启动首屏仍使用 `assets/branding/starflow_launch_logo.png` 展示 Logo。
+
 当前品牌资源导出不走 Flutter 构建流程：
 
 ```powershell
@@ -412,27 +421,28 @@ C:\anaconda3\python.exe tool\generate_brand_assets.py
 这条命令依赖：
 
 - 本机可用的 Microsoft Edge
-- `C:\anaconda3\python.exe`
+- 安装 Pillow 的 Python 3（Windows 示例使用 `C:\anaconda3\python.exe`；macOS 可用 `python3`）
 - `Pillow`
 
 当前脚本会优先使用：
 
-- `assets/branding/starflow_icon_master.svg` 程序化生成外部 App Icon 统一母版
-- `build/brand_assets/app_icon_raw_capture.png` 保存从矢量母版直接导出的高倍基准图
+- `assets/branding/starflow_logo_source.png` 生成所有品牌 Logo 的统一母版
+- `build/brand_assets/app_icon_raw_capture.png` 保存原尺寸 PNG 基准图
 - `assets/branding/starflow_launch_logo.png` 作为启动页首帧图标输出目标
-  当前输出为透明底主图案，不复用外部 app icon 方形底板
+  当前使用最新的无白边满版彩色原图，保留完整构图
 - `android/app/src/main/res/drawable-nodpi/launch_logo.png` 作为 Android 启动页主图输出目标
 - `docs/starflow_tv_banner.html` 生成 TV Banner
 - `build/brand_assets/starflow_app_icon_master.png` 作为各平台分发缩放前的统一母版
 
 补充说明：
 
-- 这条链路主要依赖本地文件与本机浏览器，不依赖在线元数据服务
-- 外部 App Icon 已不再依赖 HTML 截图，当前以 `svg` 母版程序化导出
-- Android 启动器小图标与 TV 横幅里的小方形 Logo 共用同一份矢量源
-- 小尺寸图标不再额外锐化，避免星星周边出现黑色描边
+- 图标缩放仅依赖本地 PNG 与 Pillow；TV Banner 使用本机浏览器，HTML 中的 Google Fonts 字体可能需要联网，不依赖在线元数据服务
+- 外部 App Icon 不依赖 HTML 截图，直接从 PNG 母版导出
+- Android 启动器小图标与 TV 横幅里的 Logo 共用同一份 PNG 原图
+- 小尺寸图标采用 Lanczos 缩放，不额外锐化；iOS App Icon 导出为 RGB
 - TV Banner 仍然依赖本机 Microsoft Edge 无头渲染 `docs/starflow_tv_banner.html`
-- Android 启动页主图与 iOS LaunchImage 当前都只保留主图案本身，不再显示方形底板
+- Android 启动页主图与 iOS LaunchImage 保留原图完整构图，不自动抠图或裁边
+- macOS 自动查找 Microsoft Edge，也可用 `EDGE_PATH` 指定浏览器；旧 Swift 入口转发到 Python 脚本，可用 `PYTHON` 指定解释器
 - 如果后续换了外部 Logo 设计，只需要重新执行一次脚本，不要手工逐个平台替换
 - 当“详情页自动匹配本地资源”关闭时，进入详情页不会自动触发本地资源匹配，只能手动点击“重新匹配资源”
 - 如果详情页已经恢复到已匹配资源，重新进入时也不会再次自动匹配本地资源

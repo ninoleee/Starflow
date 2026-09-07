@@ -5,6 +5,7 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
+import 'package:starflow/features/settings/domain/app_accent.dart';
 
 enum HomeModuleType {
   hero,
@@ -944,8 +945,8 @@ class NetworkStorageConfig {
       refreshMediaSourceIds:
           refreshMediaSourceIds ?? this.refreshMediaSourceIds,
       refreshDelaySeconds: refreshDelaySeconds ?? this.refreshDelaySeconds,
-      quarkSanitizeSavedNamesEnabled: quarkSanitizeSavedNamesEnabled ??
-          this.quarkSanitizeSavedNamesEnabled,
+      quarkSanitizeSavedNamesEnabled:
+          quarkSanitizeSavedNamesEnabled ?? this.quarkSanitizeSavedNamesEnabled,
       quarkSanitizedNameCharacters:
           quarkSanitizedNameCharacters ?? this.quarkSanitizedNameCharacters,
     );
@@ -1116,6 +1117,7 @@ class AppSettings {
     this.homeStartupAutoRefreshEmbyEnabled,
     this.homeNavigationSingleTapCleanupEnabled = true,
     this.translucentEffectsEnabled = true,
+    this.appAccent = AppAccent.teal,
     this.autoHideNavigationBarEnabled = true,
     this.navigationDestinationIds = kDefaultNavigationDestinationIds,
     this.performanceReduceDecorationsEnabled = false,
@@ -1197,6 +1199,7 @@ class AppSettings {
   final bool? homeStartupAutoRefreshEmbyEnabled;
   final bool homeNavigationSingleTapCleanupEnabled;
   final bool translucentEffectsEnabled;
+  final AppAccent appAccent;
   final bool autoHideNavigationBarEnabled;
   final List<String> navigationDestinationIds;
   final bool performanceReduceDecorationsEnabled;
@@ -1269,6 +1272,7 @@ class AppSettings {
     bool? homeStartupAutoRefreshEmbyEnabled,
     bool? homeNavigationSingleTapCleanupEnabled,
     bool? translucentEffectsEnabled,
+    AppAccent? appAccent,
     bool? autoHideNavigationBarEnabled,
     List<String>? navigationDestinationIds,
     bool? performanceReduceDecorationsEnabled,
@@ -1351,6 +1355,7 @@ class AppSettings {
               this.homeNavigationSingleTapCleanupEnabled,
       translucentEffectsEnabled:
           translucentEffectsEnabled ?? this.translucentEffectsEnabled,
+      appAccent: appAccent ?? this.appAccent,
       autoHideNavigationBarEnabled:
           autoHideNavigationBarEnabled ?? this.autoHideNavigationBarEnabled,
       navigationDestinationIds:
@@ -1508,6 +1513,7 @@ class AppSettings {
       'homeNavigationSingleTapCleanupEnabled':
           homeNavigationSingleTapCleanupEnabled,
       'translucentEffectsEnabled': translucentEffectsEnabled,
+      'appAccent': appAccent.name,
       'autoHideNavigationBarEnabled': autoHideNavigationBarEnabled,
       'navigationDestinationIds': navigationDestinationIds,
       'performanceReduceDecorationsEnabled':
@@ -1635,6 +1641,7 @@ class AppSettings {
           json['homeNavigationSingleTapCleanupEnabled'] as bool? ?? true,
       translucentEffectsEnabled:
           json['translucentEffectsEnabled'] as bool? ?? true,
+      appAccent: AppAccent.fromJson(json['appAccent']),
       autoHideNavigationBarEnabled:
           json['autoHideNavigationBarEnabled'] as bool? ?? true,
       navigationDestinationIds: json.containsKey('navigationDestinationIds')

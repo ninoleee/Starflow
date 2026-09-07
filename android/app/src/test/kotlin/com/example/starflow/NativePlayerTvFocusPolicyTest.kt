@@ -7,6 +7,23 @@ import org.junit.Test
 
 class NativePlayerTvFocusPolicyTest {
     @Test
+    fun `progress confirmation toggles only on television without overlays`() {
+        assertTrue(NativePlayerTvFocusPolicy.shouldToggleFromProgress(true, true, false))
+        assertFalse(NativePlayerTvFocusPolicy.shouldToggleFromProgress(false, true, false))
+        assertFalse(NativePlayerTvFocusPolicy.shouldToggleFromProgress(true, false, false))
+        assertFalse(NativePlayerTvFocusPolicy.shouldToggleFromProgress(true, true, true))
+    }
+
+    @Test
+    fun `default remote focus targets play pause`() {
+        assertTrue(
+            NativePlayerTvFocusPolicy.primaryFocusOrder.contentEquals(
+                intArrayOf(Media3UiR.id.exo_play_pause),
+            ),
+        )
+    }
+
+    @Test
     fun `keeps only play pause focusable on television`() {
         assertTrue(
             NativePlayerTvFocusPolicy.focusableControlIds.contentEquals(

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
@@ -11,6 +12,7 @@ import 'package:starflow/features/playback/application/active_playback_cleanup.d
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 
 class DetailHeroSection extends ConsumerWidget {
   const DetailHeroSection({
@@ -87,10 +89,21 @@ class DetailHeroSection extends ConsumerWidget {
             ],
             stops: const [0, 0.5, 1],
           );
-    final resumeEntry =
-        ref.watch(playbackResumeForDetailTargetProvider(target)).value;
+    final snapshotAsync = ref.watch(playbackMemorySnapshotProvider);
+    final snapshot = snapshotAsync.value;
+    final resumeEntry = snapshot == null
+        ? null
+        : ref
+            .read(playbackMemoryRepositoryProvider)
+            .resumeEntryForDetailTargetFromSnapshot(snapshot, target);
+    final playbackActionsReady =
+        snapshotAsync.hasValue || snapshotAsync.hasError;
     final startPlaybackTarget = resolveStartPlaybackTarget(target);
     final resumePlaybackTarget = resolveResumePlaybackTarget(
+      target,
+      resumeEntry,
+    );
+    final resumePositionLabel = buildDetailHeroResumePositionLabel(
       target,
       resumeEntry,
     );
@@ -151,7 +164,7 @@ class DetailHeroSection extends ConsumerWidget {
                 onPressed: () {},
                 focusNode: artworkFocusNode,
                 focusId: 'detail:hero:artwork',
-                autofocus: !hasHeroAction,
+                autofocus: playbackActionsReady && !hasHeroAction,
                 borderRadius: BorderRadius.zero,
                 visualStyle: TvFocusVisualStyle.none,
                 focusScale: 1.015,
@@ -175,6 +188,8 @@ class DetailHeroSection extends ConsumerWidget {
                     isTelevision: isTelevision,
                     startPlaybackTarget: startPlaybackTarget,
                     resumePlaybackTarget: resumePlaybackTarget,
+                    resumePositionLabel: resumePositionLabel,
+                    playbackActionsReady: playbackActionsReady,
                     artworkFocusNode: artworkFocusNode,
                     playFocusNode: playFocusNode,
                     onHeroFocused: onHeroFocused,
@@ -202,7 +217,7 @@ class DetailHeroSection extends ConsumerWidget {
   }
 }
 
-class DetailHeroContent extends StatelessWidget {
+class DetailHeroContent extends StatefulWidget {
   const DetailHeroContent({
     super.key,
     required this.target,
@@ -212,6 +227,8 @@ class DetailHeroContent extends StatelessWidget {
     required this.isTelevision,
     required this.startPlaybackTarget,
     required this.resumePlaybackTarget,
+    this.resumePositionLabel = '',
+    this.playbackActionsReady = true,
     this.artworkFocusNode,
     this.playFocusNode,
     this.onHeroFocused,
@@ -224,12 +241,48 @@ class DetailHeroContent extends StatelessWidget {
   final bool isTelevision;
   final PlaybackTarget? startPlaybackTarget;
   final PlaybackTarget? resumePlaybackTarget;
+  final String resumePositionLabel;
+  final bool playbackActionsReady;
   final FocusNode? artworkFocusNode;
   final FocusNode? playFocusNode;
   final VoidCallback? onHeroFocused;
 
   @override
+  State<DetailHeroContent> createState() => _DetailHeroContentState();
+}
+
+class _DetailHeroContentState extends State<DetailHeroContent> {
+  bool get _openingPlayback => activePlaybackLaunchInProgress.value;
+
+  @override
+  void initState() {
+    super.initState();
+    activePlaybackLaunchInProgress.addListener(_handlePlaybackLaunchChanged);
+  }
+
+  @override
+  void dispose() {
+    activePlaybackLaunchInProgress.removeListener(_handlePlaybackLaunchChanged);
+    super.dispose();
+  }
+
+  void _handlePlaybackLaunchChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final target = widget.target;
+    final metadata = widget.metadata;
+    final peopleLine = widget.peopleLine;
+    final simplifyVisualEffects = widget.simplifyVisualEffects;
+    final isTelevision = widget.isTelevision;
+    final startPlaybackTarget = widget.startPlaybackTarget;
+    final resumePlaybackTarget = widget.resumePlaybackTarget;
+    final resumePositionLabel = widget.resumePositionLabel;
+    final artworkFocusNode = widget.artworkFocusNode;
+    final playFocusNode = widget.playFocusNode;
+    final onHeroFocused = widget.onHeroFocused;
     final hasLogo = target.logoUrl.trim().isNotEmpty;
     final primaryTitle = resolveDetailPrimaryTitle(
       currentTarget: target,
@@ -256,16 +309,19 @@ class DetailHeroContent extends StatelessWidget {
     }
 
     Future<void> openPlaybackTarget(PlaybackTarget playbackTarget) async {
-      await ActivePlaybackCleanupCoordinator.cleanupAll(
-        reason: 'open-new-playback',
-      );
-      if (!context.mounted) {
+      if (_openingPlayback) {
         return;
       }
-      context.pushNamed(
-        'player',
-        extra: playbackTarget,
-      );
+      activePlaybackLaunchInProgress.value = true;
+      try {
+        await ActivePlaybackCleanupCoordinator.cleanupAll(
+          reason: 'open-new-playback',
+        );
+        if (!context.mounted) return;
+        await context.pushNamed('player', extra: playbackTarget);
+      } finally {
+        activePlaybackLaunchInProgress.value = false;
+      }
     }
 
     Widget buildPlaybackButton({
@@ -275,23 +331,19 @@ class DetailHeroContent extends StatelessWidget {
       required String focusId,
       FocusNode? focusNode,
       bool autofocus = false,
-      TvButtonVariant televisionVariant = TvButtonVariant.filled,
     }) {
-      final variant = switch (televisionVariant) {
-        TvButtonVariant.filled => StarflowButtonVariant.primary,
-        TvButtonVariant.outlined => StarflowButtonVariant.secondary,
-        TvButtonVariant.text => StarflowButtonVariant.ghost,
-      };
       return StarflowButton(
+        key: ValueKey(focusId),
         label: label,
         icon: icon,
-        variant: variant,
+        variant: StarflowButtonVariant.secondary,
         focusNode: focusNode,
         focusId: focusId,
         onFocused: onHeroFocused,
         autofocus: autofocus,
         focusScale: isTelevision ? 1.06 : 1.0,
-        onPressed: () => openPlaybackTarget(playbackTarget),
+        onPressed:
+            _openingPlayback ? null : () => openPlaybackTarget(playbackTarget),
       );
     }
 
@@ -300,7 +352,7 @@ class DetailHeroContent extends StatelessWidget {
         buildPlaybackButton(
           label: '继续播放',
           icon: Icons.history_rounded,
-          playbackTarget: resumePlaybackTarget!,
+          playbackTarget: resumePlaybackTarget,
           focusNode: playFocusNode,
           focusId: 'detail:hero:play:resume',
           autofocus: true,
@@ -309,13 +361,10 @@ class DetailHeroContent extends StatelessWidget {
         buildPlaybackButton(
           label: '从头播放',
           icon: Icons.play_arrow_rounded,
-          playbackTarget: startPlaybackTarget!,
+          playbackTarget: startPlaybackTarget,
           focusNode: resumePlaybackTarget == null ? playFocusNode : null,
           focusId: 'detail:hero:play:start',
-          autofocus: resumePlaybackTarget == null,
-          televisionVariant: resumePlaybackTarget == null
-              ? TvButtonVariant.filled
-              : TvButtonVariant.outlined,
+          autofocus: widget.playbackActionsReady && resumePlaybackTarget == null,
         ),
     ];
 
@@ -332,7 +381,7 @@ class DetailHeroContent extends StatelessWidget {
           height: 1.04,
         );
     final episodeTitleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
-          color: const Color(0xFFE7EEFF),
+          color: AppColors.foreground,
           fontWeight: FontWeight.w600,
           fontSize: simplifyVisualEffects ? 16 : 18,
           height: 1.25,
@@ -359,7 +408,7 @@ class DetailHeroContent extends StatelessWidget {
                         color: Colors.white.withValues(
                           alpha: simplifyVisualEffects ? 0.08 : 0.12,
                         ),
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: BorderRadius.circular(AppRadii.pill),
                         border: Border.all(
                           color: Colors.white.withValues(
                             alpha: simplifyVisualEffects ? 0.05 : 0.08,
@@ -431,7 +480,7 @@ class DetailHeroContent extends StatelessWidget {
                         color: Colors.white.withValues(
                           alpha: simplifyVisualEffects ? 0.08 : 0.12,
                         ),
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: BorderRadius.circular(AppRadii.pill),
                         border: Border.all(
                           color: Colors.white.withValues(
                             alpha: simplifyVisualEffects ? 0.05 : 0.08,
@@ -462,7 +511,7 @@ class DetailHeroContent extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: const Color(0xFFD7E2F8),
+                color: AppColors.foreground,
                 fontSize: simplifyVisualEffects ? 13 : 14,
                 height: 1.45,
               ),
@@ -473,15 +522,32 @@ class DetailHeroContent extends StatelessWidget {
                 ? (simplifyVisualEffects ? 18 : 24)
                 : (simplifyVisualEffects ? 16 : 20),
           ),
+          if (resumePositionLabel.trim().isNotEmpty) ...[
+            Text(
+              resumePositionLabel,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppColors.foregroundMuted,
+                fontSize: simplifyVisualEffects ? 13 : 14,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+              ),
+            ),
+            SizedBox(height: simplifyVisualEffects ? 10 : 12),
+          ],
           if (playbackActions.isNotEmpty)
-            wrapTelevisionDirectionalHandling(
-              onDirection: (direction) {
-                if (direction == TraversalDirection.up) {
-                  return requestDetailFocus([artworkFocusNode]);
-                }
-                return false;
-              },
-              child: actionRow,
+            KeyedSubtree(
+              key: const ValueKey('detail:hero:playback-actions'),
+              child: wrapTelevisionDirectionalHandling(
+                onDirection: (direction) {
+                  if (direction == TraversalDirection.up) {
+                    return requestDetailFocus([artworkFocusNode]);
+                  }
+                  return false;
+                },
+                child: actionRow,
+              ),
             ),
         ],
       ),
@@ -519,7 +585,7 @@ class DetailBackdropImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (imageUrl.trim().isEmpty) {
-      return const ColoredBox(color: Color(0xFF0A1423));
+      return const ColoredBox(color: AppColors.neutral1);
     }
 
     return LayoutBuilder(
@@ -539,7 +605,7 @@ class DetailBackdropImage extends StatelessWidget {
           alignment: Alignment.topCenter,
           throttleOnTelevision: false,
           errorBuilder: (context, error, stackTrace) {
-            return const ColoredBox(color: Color(0xFF0A1423));
+            return const ColoredBox(color: AppColors.neutral1);
           },
         );
       },
@@ -626,6 +692,28 @@ PlaybackTarget? resolveResumePlaybackTarget(
     externalSubtitleFilePath: targetSubtitle.externalSubtitleFilePath,
     externalSubtitleDisplayName: targetSubtitle.externalSubtitleDisplayName,
   );
+}
+
+String buildDetailHeroResumePositionLabel(
+  MediaDetailTarget target,
+  PlaybackProgressEntry? resumeEntry,
+) {
+  if (resumeEntry == null || !resumeEntry.canResume) {
+    return '';
+  }
+  final resumeTarget = resumeEntry.target;
+  final parts = <String>[
+    if (resumeTarget.seasonNumber != null && resumeTarget.seasonNumber! > 0)
+      '第 ${resumeTarget.seasonNumber} 季',
+    if (resumeTarget.episodeNumber != null && resumeTarget.episodeNumber! > 0)
+      '第 ${resumeTarget.episodeNumber} 集',
+    if (resumeEntry.position > Duration.zero)
+      formatPlaybackClockDuration(resumeEntry.position),
+  ];
+  if (parts.isEmpty) {
+    return '';
+  }
+  return '上次播放：${parts.join(' · ')}';
 }
 
 PlaybackTarget _attachDetailArtworkToPlaybackTarget(

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/features/settings/domain/app_accent.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -9,6 +10,24 @@ import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  test('accent changes are saved by the existing settings repository',
+      () async {
+    final repository = _OutOfOrderSettingsRepository(SeedData.defaultSettings);
+    final container = ProviderContainer(
+      overrides: [
+        appSettingsRepositoryProvider.overrideWithValue(repository),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container.read(settingsControllerProvider.future);
+    final controller = container.read(settingsControllerProvider.notifier);
+    for (final accent in AppAccent.values) {
+      await controller.setAppAccent(accent);
+      expect(repository.settings.appAccent, accent);
+      expect(container.read(appSettingsProvider).appAccent, accent);
+    }
+  });
+
   test('rapid setting changes persist in user action order', () async {
     final repository = _OutOfOrderSettingsRepository(
       SeedData.defaultSettings.copyWith(

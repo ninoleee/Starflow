@@ -773,6 +773,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         actions: [
           StarflowButton(
             label: '取消',
+            autofocus: true,
             onPressed: () => Navigator.of(ctx).pop(false),
             variant: StarflowButtonVariant.ghost,
             compact: true,

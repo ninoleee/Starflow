@@ -12,6 +12,7 @@ class DesktopHorizontalPager extends StatefulWidget {
     this.rightInset = 10,
     this.buttonSize = 50,
     this.iconSize = 28,
+    this.initialScrollOffset = 0,
   });
 
   final Widget Function(BuildContext context, ScrollController controller)
@@ -23,6 +24,7 @@ class DesktopHorizontalPager extends StatefulWidget {
   final double rightInset;
   final double buttonSize;
   final double iconSize;
+  final double initialScrollOffset;
 
   @override
   State<DesktopHorizontalPager> createState() => _DesktopHorizontalPagerState();
@@ -55,14 +57,15 @@ class _DesktopHorizontalPagerState extends State<DesktopHorizontalPager> {
   @override
   void initState() {
     super.initState();
-    _buttonVisibilityNotifier =
-        ValueNotifier<_DesktopPagerButtonVisibility>(
+    _buttonVisibilityNotifier = ValueNotifier<_DesktopPagerButtonVisibility>(
       const _DesktopPagerButtonVisibility(
         canScrollBackward: false,
         canScrollForward: false,
       ),
     );
-    _controller = ScrollController()..addListener(_handleScrollMetricsChanged);
+    _controller =
+        ScrollController(initialScrollOffset: widget.initialScrollOffset)
+          ..addListener(_handleScrollMetricsChanged);
     _scheduleButtonVisibilityUpdate();
   }
 

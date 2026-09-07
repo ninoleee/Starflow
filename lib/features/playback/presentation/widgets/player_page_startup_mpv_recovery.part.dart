@@ -60,6 +60,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
         return;
       }
 
+      if (!mounted || _player != player) return;
       await _attemptSoftRuntimeMpvErrorRecovery(
         player,
         position: baselinePosition,
@@ -146,9 +147,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
       final state = player.state;
       final progressed = state.position - baselinePosition >=
           const Duration(milliseconds: 800);
-      final healthy = state.playing &&
-          !state.buffering &&
-          (progressed || _hasStrictPlaybackMetadata(player));
+      final healthy = state.playing && !state.buffering && progressed;
       if (healthy) {
         return true;
       }
@@ -193,6 +192,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     }
     final detachedPlayer =
         _detachActivePlayerState(clearStallRecoveryFlag: false);
+    final generation = _startupGeneration;
     if (mounted) {
       setState(() {
         _error = null;
@@ -206,7 +206,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
       persistProgress: true,
       teardownPlatformState: true,
     );
-    if (!mounted) {
+    if (!_isCurrentStartup(generation)) {
       return;
     }
     await _initialize(
@@ -218,22 +218,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
   }
 
   PlaybackTarget _buildRuntimeMpvRecoveryTarget(PlaybackTarget target) {
-    final baseTarget =
-        widget.target.itemId.trim().isNotEmpty ? widget.target : target;
-    final streamUrl = baseTarget.streamUrl.trim().toLowerCase();
-    final actualAddress = baseTarget.actualAddress.trim().toLowerCase();
-    final needsFreshResolution = baseTarget.sourceKind ==
-            MediaSourceKind.quark ||
-        baseTarget.sourceKind == MediaSourceKind.emby ||
-        (baseTarget.sourceKind == MediaSourceKind.nas &&
-            (streamUrl.endsWith('.strm') || actualAddress.endsWith('.strm')));
-    if (!needsFreshResolution) {
-      return baseTarget;
-    }
-    return baseTarget.copyWith(
-      streamUrl: '',
-      headers: const <String, String>{},
-    );
+    return buildMpvRecoveryTarget(target);
   }
 
   void _markRuntimeMpvErrorRecovered() {
@@ -420,6 +405,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
       final detachedPlayer = _detachActivePlayerState(
         clearStallRecoveryFlag: false,
       );
+      final generation = _startupGeneration;
       if (mounted) {
         setState(() {
           _error = null;
@@ -433,10 +419,10 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
         persistProgress: true,
         teardownPlatformState: true,
       );
-      if (!mounted) {
+      if (!_isCurrentStartup(generation)) {
         return;
       }
-      await _initialize();
+      await _initialize(initialTarget: _buildRuntimeMpvRecoveryTarget(target));
     } catch (error, stackTrace) {
       _traceWindowsMpv(
         'windows-mpv.stall.recover-hard-failed',
