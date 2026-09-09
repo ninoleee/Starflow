@@ -248,6 +248,7 @@ internal class NativePlaybackEpisodeController(
         val reason = destination.reason
         val nextEntry = destination.entry
         val isAddressRetry = reason == "prepared-address-retry"
+        if (!isAddressRetry) host.launch.resetStartupDeadline()
         if (reason == "outro") host.runtime.markAutoSkipCompleted()
         else host.runtime.persistPlaybackProgress(force = true)
         host.diagnostics.finishPlaybackPerformanceSession("episode-switch")

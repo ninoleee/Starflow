@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:media_kit/media_kit.dart';
 import 'package:starflow/features/playback/application/mpv_buffer_progress.dart';
+import 'package:starflow/features/playback/application/playback_policy_values.dart';
 
 enum MpvStallRecoveryLevel { none, soft, hard }
 
@@ -40,7 +41,8 @@ class MpvStallWatchdogConfig {
     this.minBufferingBeforeCheck = const Duration(seconds: 2),
     this.softRecoverAfter = const Duration(seconds: 6),
     this.hardRecoverAfter = const Duration(seconds: 12),
-    this.progressDeltaThreshold = const Duration(milliseconds: 250),
+    this.progressDeltaThreshold =
+        const Duration(milliseconds: PlaybackPolicyValues.positionAdvanceMs),
     this.endOfStreamTolerance = const Duration(seconds: 1),
     this.requirePlaying = true,
   });
@@ -124,7 +126,10 @@ class MpvStallWatchdog {
     final current = now ?? _clock();
 
     final movedBack = _lastPosition != null &&
-        snapshot.position < _lastPosition! - const Duration(seconds: 1);
+        snapshot.position <
+            _lastPosition! -
+                const Duration(
+                    milliseconds: PlaybackPolicyValues.backwardSeekMs);
     if (movedBack) reset();
     final progressed = _didProgress(snapshot.position);
     final buffered = _bufferProgress.observe(

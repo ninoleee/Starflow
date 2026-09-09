@@ -14,6 +14,7 @@ internal class NativePlaybackWatchdogPolicy(
     private var lastProgressAtMs = 0L
     private var lastBufferedPositionMs = 0L
     private var lastBufferedPercentage = 0
+    private val bufferProgress = PlaybackBufferProgress()
     private var lastBufferActivityAtMs = 0L
     private var recoveries = 0
     private var lastRecoveryAtMs = 0L
@@ -27,6 +28,8 @@ internal class NativePlaybackWatchdogPolicy(
         lastPositionMs = positionMs.coerceAtLeast(0L)
         lastProgressAtMs = now()
         if (bufferedPositionMs != null && bufferedPercentage != null) {
+            bufferProgress.reset()
+            bufferProgress.observe(bufferedPositionMs, bufferedPercentage)
             lastBufferedPositionMs = bufferedPositionMs
             lastBufferedPercentage = bufferedPercentage.coerceIn(0, 100)
             lastBufferActivityAtMs = now()
@@ -50,14 +53,14 @@ internal class NativePlaybackWatchdogPolicy(
         val bufferedPosition = bufferedPositionMs.coerceAtLeast(position)
         val percentage = bufferedPercentage.coerceIn(0, 100)
         if (
-            bufferedPosition > lastBufferedPositionMs + BUFFER_ADVANCE_THRESHOLD_MS ||
-                percentage > lastBufferedPercentage
+            bufferProgress.observe(bufferedPosition, percentage)
         ) {
             lastBufferedPositionMs = bufferedPosition
             lastBufferedPercentage = percentage
             lastBufferActivityAtMs = timeMs
         }
-        if (position > lastPositionMs + 500L || position < lastPositionMs - 1_000L) {
+        if (position >= lastPositionMs + PlaybackPolicyValues.positionAdvanceMs ||
+            position < lastPositionMs - PlaybackPolicyValues.backwardSeekMs) {
             reset(position, bufferedPosition, percentage)
             return false
         }
@@ -87,8 +90,7 @@ internal class NativePlaybackWatchdogPolicy(
     private companion object {
         const val PROGRESS_TIMEOUT_MS = 15_000L
         const val BUFFERING_TIMEOUT_MS = 45_000L
-        const val BUFFER_ADVANCE_THRESHOLD_MS = 1_000L
-        const val RECOVERY_COOLDOWN_MS = 10_000L
-        const val SOFT_RECOVERY_LIMIT = 2
+        val RECOVERY_COOLDOWN_MS = PlaybackPolicyValues.recoveryCooldownMs.toLong()
+        const val SOFT_RECOVERY_LIMIT = PlaybackPolicyValues.maxRuntimeRecoveries
     }
 }

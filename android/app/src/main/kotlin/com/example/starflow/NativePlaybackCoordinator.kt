@@ -152,6 +152,18 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                     "native.playback.state state=${NativePlaybackFormatting.playbackStateLabel(playbackState)} " +
                         "positionMs=${session.player?.currentPosition ?: -1L}"
                 )
+                val phase = PlaybackReliabilityPolicy.phase(
+                    ready = diagnostics.playbackFirstFrameRendered || playbackState == Player.STATE_READY,
+                    playing = session.player?.isPlaying == true,
+                    buffering = playbackState == Player.STATE_BUFFERING,
+                    ended = playbackState == Player.STATE_ENDED,
+                    failed = session.player?.playerError != null,
+                )
+                NativeAppLogger.info(
+                    "playback.reliability",
+                    "Playback state engine=exo policyVersion=${PlaybackPolicyValues.version} " +
+                        "phase=${phase.name} positionMs=${session.player?.currentPosition ?: 0L}",
+                )
             }
 
             override fun onRenderedFirstFrame() {
@@ -191,6 +203,13 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                val httpStatus = NativePlaybackErrorPolicy.httpResponseCode(error)
+                NativeAppLogger.info(
+                    "playback.reliability",
+                    "Playback error engine=exo policyVersion=${PlaybackPolicyValues.version} " +
+                        "phase=failed failureKind=${PlaybackReliabilityPolicy.failureLabel(PlaybackReliabilityPolicy.classifyHttpStatus(httpStatus))} " +
+                        "httpStatus=$httpStatus positionMs=${session.player?.currentPosition ?: 0L}",
+                )
                 NativePlaybackFormatting.logPlayback(
                     "native.playback.error code=${error.errorCode} " +
                         "name=${error.errorCodeName} message=${error.message ?: ""} " +

@@ -75,6 +75,7 @@ void main() {
             title: '9号秘事',
             imdbId: 'tt2674806',
             tmdbId: '65707',
+            posterUrl: 'https://example.com/poster.jpg',
           );
         },
       );
@@ -116,6 +117,9 @@ void main() {
       expect(enriched.imdbId, 'tt2674806');
       expect(enriched.tmdbId, '65707');
       expect(enriched.metadataMediaType, 'series');
+      expect(enriched.posterUrl, 'https://example.com/poster.jpg');
+      expect(SearchResult.fromJson(enriched.toJson()).posterUrl,
+          enriched.posterUrl);
     });
 
     test('keeps existing tmdb-based favorites without rematching', () async {
@@ -133,7 +137,7 @@ void main() {
       const result = SearchResult(
         id: 'favorite-2',
         title: '三体',
-        posterUrl: '',
+        posterUrl: 'https://example.com/existing.jpg',
         providerId: 'provider-1',
         providerName: 'PanSou',
         quality: '',

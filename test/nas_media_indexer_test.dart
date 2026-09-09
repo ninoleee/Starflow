@@ -20,6 +20,61 @@ import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 
 void main() {
+  test(
+      'NasMediaIndexer rebuilds old episode-range grouping after schema change',
+      () async {
+    final store = _MemoryNasMediaIndexStore();
+    const source = MediaSourceConfig(
+      id: 'episode-range-migration',
+      name: 'NAS',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/dav/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+    );
+    NasMediaIndexer buildIndexer({required bool corrected}) {
+      return _buildStructureGroupingTestIndexer(
+        store: store,
+        source: source,
+        client: _FakeWebDavNasClient(scannedItems: [
+          for (var episode = 1; episode <= 2; episode++)
+            _episodeItem(
+              id: 'episode-$episode',
+              path: 'Show/Season 1/0$episode.strm',
+              title: 'Show',
+              seasonNumber: 1,
+              episodeNumber: corrected ? episode : 1,
+            ),
+        ]),
+      );
+    }
+
+    final oldIndexer = buildIndexer(corrected: false);
+    await oldIndexer.refreshSource(source);
+    final state = (await store.loadSourceState(source.id))!;
+    await store.replaceSourceRecords(
+      sourceId: source.id,
+      records: await store.loadSourceRecords(source.id),
+      state: state.copyWith(
+        scopeKey: state.scopeKey.replaceFirst('webdav-v14', 'webdav-v13'),
+      ),
+    );
+    await oldIndexer.dispose();
+
+    final indexer = buildIndexer(corrected: true);
+    addTearDown(indexer.dispose);
+    expect(await indexer.loadLibrary(source), isEmpty);
+    expect(await indexer.tryAutoRebuildOnEmpty(source), isTrue);
+    final library = await indexer.loadLibrary(source);
+    final seasons =
+        await indexer.loadChildren(source, parentId: library.single.id);
+    final episodes =
+        await indexer.loadChildren(source, parentId: seasons.single.id);
+    expect(episodes.map((item) => item.episodeNumber), [1, 2]);
+    expect((await store.loadSourceState(source.id))?.scopeKey,
+        contains('webdav-v14'));
+  });
+
   test('NasMediaIndexer reads an indexed root through a nested section',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -2887,7 +2942,7 @@ void main() {
     );
     final indexedAt = DateTime.utc(2026, 4, 5, 12);
     final scopeKey =
-        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v13';
+        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v14';
     final record = NasMediaIndexRecord(
       id: NasMediaIndexRecord.buildRecordId(
         sourceId: source.id,

@@ -71,6 +71,15 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
           error: error,
           stackTrace: stackTrace,
         );
+        appLogInfo('playback.reliability', 'Playback error', fields: {
+          'engine': 'mpv',
+          'policyVersion': PlaybackPolicyValues.version,
+          'phase': willRetry ? PlaybackPhase.recovering.name : PlaybackPhase.failed.name,
+          'failureKind': failureKind.name,
+          'httpStatus': error is MpvOpenFailure ? error.httpStatus : null,
+          'action': willRetry ? 'retry' : 'stop',
+          'attempt': attempt,
+        });
         _traceWindowsMpv(
           'windows-mpv.open.attempt-failed',
           fields: {

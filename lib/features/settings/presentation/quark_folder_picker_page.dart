@@ -11,11 +11,14 @@ class QuarkFolderPickerPage extends ConsumerStatefulWidget {
     required this.cookie,
     this.initialFid = '0',
     this.initialPath = '/',
+    this.directoryLoader,
   });
 
   final String cookie;
   final String initialFid;
   final String initialPath;
+  final Future<List<QuarkDirectoryEntry>> Function(String id, String path)?
+      directoryLoader;
 
   @override
   ConsumerState<QuarkFolderPickerPage> createState() =>
@@ -52,10 +55,12 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
 
     try {
       final current = _breadcrumbs.last;
-      final entries = await ref.read(quarkSaveClientProvider).listDirectories(
-            cookie: widget.cookie,
-            parentFid: current.fid,
-          );
+      final entries = widget.directoryLoader != null
+          ? await widget.directoryLoader!(current.fid, current.path)
+          : await ref.read(quarkSaveClientProvider).listDirectories(
+                cookie: widget.cookie,
+                parentFid: current.fid,
+              );
       if (!mounted) {
         return;
       }

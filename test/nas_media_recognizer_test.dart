@@ -30,6 +30,37 @@ void main() {
       expect(result.episodeNumber, 5);
     });
 
+    for (final range in [
+      'E01-16',
+      'EP01-16',
+      'E01-E16',
+      'EP01-EP16',
+      'S01E01-E16',
+    ]) {
+      test('does not inherit an episode number from a $range pack folder', () {
+        final result = NasMediaRecognizer.recognize(
+          'Shows/Local Perspective/Local.Perspective.$range.2015/02.(mp4).strm',
+        );
+        expect(result.episodeNumber, 2);
+        if (range.startsWith('S01')) {
+          expect(result.seasonNumber, 1);
+        }
+
+        final explicit = NasMediaRecognizer.recognize(
+          'Shows/Local Perspective/Local.Perspective.$range.2015/S01E02.strm',
+        );
+        expect(explicit.seasonNumber, 1);
+        expect(explicit.episodeNumber, 2);
+      });
+    }
+
+    test('still inherits an individual episode folder number', () {
+      final result = NasMediaRecognizer.recognize(
+        'Shows/Local Perspective/Local.Perspective.EP16.2015/video.strm',
+      );
+      expect(result.episodeNumber, 16);
+    });
+
     test('extracts imdb and tmdb ids from file and folder names', () {
       final result = NasMediaRecognizer.recognize(
         'Movies/Dune {tmdb-438631}/Dune.Part.One.tt1160419.2021.mkv',

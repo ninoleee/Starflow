@@ -268,25 +268,6 @@ class DetailEpisodeGroup {
   }
 }
 
-List<MediaItem> sortEpisodesForDetailBrowser(List<MediaItem> items) {
-  final sorted = [...items]..sort((left, right) {
-      final seasonComparison =
-          (left.seasonNumber ?? 0).compareTo(right.seasonNumber ?? 0);
-      if (seasonComparison != 0) {
-        return seasonComparison;
-      }
-
-      final episodeComparison =
-          (left.episodeNumber ?? 0).compareTo(right.episodeNumber ?? 0);
-      if (episodeComparison != 0) {
-        return episodeComparison;
-      }
-
-      return left.title.toLowerCase().compareTo(right.title.toLowerCase());
-    });
-  return sorted;
-}
-
 DetailEpisodeGroup resolveSelectedEpisodeGroup({
   required List<DetailEpisodeGroup> groups,
   required String selectedGroupId,
@@ -399,31 +380,15 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
         if (widget.groups.length > 1) ...[
           SizedBox(
             height: 52,
-            child: DesktopHorizontalPager(
-              initialScrollOffset: widget.groups.indexOf(selectedGroup) * 120.0,
-              builder: (context, controller) => ListView.separated(
-                controller: controller,
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                itemCount: widget.groups.length,
-                separatorBuilder: (context, index) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  final group = widget.groups[index];
-                  final selected = group.id == selectedGroup.id;
-                  return _DetailSeasonChip(
-                    label: group.label,
-                    selected: selected,
-                    focusId: 'detail:season:${group.id}',
-                    autofocus: false,
-                    onTap: () {
-                      _initialPositionApplied = true;
-                      if (widget.selectedGroupId != group.id) {
-                        widget.onSeasonSelected(group.id);
-                      }
-                    },
-                  );
-                },
-              ),
+            child: _DetailSeasonTabs(
+              groups: widget.groups,
+              selectedGroupId: selectedGroup.id,
+              onSelected: (groupId) {
+                _initialPositionApplied = true;
+                if (widget.selectedGroupId != groupId) {
+                  widget.onSeasonSelected(groupId);
+                }
+              },
             ),
           ),
           const SizedBox(height: 16),
@@ -507,30 +472,59 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
   }
 }
 
-class _DetailSeasonChip extends StatelessWidget {
-  const _DetailSeasonChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.focusId,
-    this.autofocus = false,
+class _DetailSeasonTabs extends StatefulWidget {
+  const _DetailSeasonTabs({
+    required this.groups,
+    required this.selectedGroupId,
+    required this.onSelected,
   });
 
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final String? focusId;
-  final bool autofocus;
+  final List<DetailEpisodeGroup> groups;
+  final String selectedGroupId;
+  final ValueChanged<String> onSelected;
+
+  @override
+  State<_DetailSeasonTabs> createState() => _DetailSeasonTabsState();
+}
+
+class _DetailSeasonTabsState extends State<_DetailSeasonTabs> {
+  final _tabKeys = <String, GlobalKey>{};
+  bool _initialPositionScheduled = false;
 
   @override
   Widget build(BuildContext context) {
-    return StarflowChipButton(
-      label: label,
-      selected: selected,
-      onPressed: onTap,
-      focusId: focusId,
-      autofocus: autofocus,
-    );
+    return DesktopHorizontalPager(builder: (context, controller) {
+      if (!_initialPositionScheduled) {
+        _initialPositionScheduled = true;
+        final initialGroupId = widget.selectedGroupId;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !controller.hasClients) return;
+          final tab = _tabKeys[initialGroupId]?.currentContext?.findRenderObject();
+          if (tab == null) return;
+          // Position once on entry, without moving the page or TV focus.
+          controller.position.ensureVisible(tab, alignment: 0.5);
+        });
+      }
+      return SingleChildScrollView(
+        controller: controller,
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Row(
+          children: [
+            for (var index = 0; index < widget.groups.length; index++) ...[
+              if (index > 0) const SizedBox(width: 8),
+              StarflowChipButton(
+                key: _tabKeys.putIfAbsent(widget.groups[index].id, GlobalKey.new),
+                label: widget.groups[index].label,
+                selected: widget.groups[index].id == widget.selectedGroupId,
+                focusId: 'detail:season:${widget.groups[index].id}',
+                onPressed: () => widget.onSelected(widget.groups[index].id),
+              ),
+            ],
+          ],
+        ),
+      );
+    });
   }
 }
 

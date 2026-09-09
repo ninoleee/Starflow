@@ -21,6 +21,7 @@ class SearchPreferencesRepository {
   static const _maxFavoriteResults = 200;
 
   final AppPreferencesStore _preferences;
+  Future<void> _favoriteWrite = Future<void>.value();
 
   Future<List<String>> loadRecentQueries() async {
     return (await _preferences.getStringList(recentQueriesPreferenceKey) ??
@@ -79,6 +80,38 @@ class SearchPreferencesRepository {
   }
 
   Future<void> saveFavoriteResults(List<SearchResult> values) {
+    return _queueFavoriteWrite(() => _writeFavoriteResults(values));
+  }
+
+  Future<void> updateFavoritePoster(SearchResult enriched) {
+    return _queueFavoriteWrite(() async {
+      if (enriched.posterUrl.trim().isEmpty) {
+        return;
+      }
+      final latest = await loadFavoriteResults();
+      final key = searchResultFavoriteKey(enriched);
+      final index = latest.indexWhere(
+        (item) => searchResultFavoriteKey(item) == key,
+      );
+      if (index < 0 || latest[index].posterUrl.trim().isNotEmpty) {
+        return;
+      }
+      latest[index] = latest[index].copyWith(
+        posterUrl: enriched.posterUrl,
+        posterHeaders: enriched.posterHeaders,
+      );
+      await _writeFavoriteResults(latest);
+    });
+  }
+
+  Future<void> _queueFavoriteWrite(Future<void> Function() write) {
+    final next = _favoriteWrite.then((_) => write());
+    _favoriteWrite =
+        next.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return next;
+  }
+
+  Future<void> _writeFavoriteResults(List<SearchResult> values) {
     final normalized = values.take(_maxFavoriteResults).toList(growable: false);
     return _preferences.setString(
       favoriteResultsPreferenceKey,
@@ -91,7 +124,9 @@ class SearchPreferencesRepository {
   Future<void> clear() async {
     await _preferences.remove(recentQueriesPreferenceKey);
     await _preferences.remove(selectedTargetIdsPreferenceKey);
-    await _preferences.remove(favoriteResultsPreferenceKey);
+    await _queueFavoriteWrite(
+      () => _preferences.remove(favoriteResultsPreferenceKey),
+    );
   }
 
   Future<LocalStorageCacheSummary> inspectSummary() async {

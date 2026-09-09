@@ -141,7 +141,10 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     final remote =
         _isLikelyRemotePlaybackTarget(_resolvedTarget ?? widget.target);
     final deadline = DateTime.now().add(
-      remote ? const Duration(seconds: 15) : _kRuntimeMpvErrorConfirmWindow,
+      remote
+          ? const Duration(
+              milliseconds: PlaybackPolicyValues.remoteErrorConfirmationMs)
+          : _kRuntimeMpvErrorConfirmWindow,
     );
     final progress = MpvBufferProgress();
     progress.observe(
@@ -203,6 +206,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     if (_player != player) {
       return;
     }
+    if (!_takeAutomaticRecovery(player, 'runtime-error')) return;
     _traceWindowsMpv(
       'windows-mpv.player.error.reinitialize',
       fields: {
@@ -235,6 +239,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     }
     await _initialize(
       initialTarget: _buildRuntimeMpvRecoveryTarget(target),
+      automaticRecovery: true,
     );
     if (_error == null) {
       _markRuntimeMpvErrorRecovered();
@@ -419,6 +424,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
       _showMessage('当前网速低于片源码率，继续等待缓冲');
       return;
     }
+    if (!_takeAutomaticRecovery(player, 'stall')) return;
     _mpvStallRecoveryInProgress = true;
     _mpvPerformanceTracker?.recordRecovery();
     _traceWindowsMpv(
@@ -455,7 +461,10 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
       if (!_isCurrentStartup(generation)) {
         return;
       }
-      await _initialize(initialTarget: _buildRuntimeMpvRecoveryTarget(target));
+      await _initialize(
+        initialTarget: _buildRuntimeMpvRecoveryTarget(target),
+        automaticRecovery: true,
+      );
     } catch (error, stackTrace) {
       _traceWindowsMpv(
         'windows-mpv.stall.recover-hard-failed',
@@ -470,5 +479,23 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     } finally {
       _mpvStallRecoveryInProgress = false;
     }
+  }
+
+  bool _takeAutomaticRecovery(Player player, String reason) {
+    final allowed = _automaticRecoveryBudget.take();
+    appLogInfo('playback.reliability', 'Playback recovery decision', fields: {
+      'engine': 'mpv',
+      'policyVersion': PlaybackPolicyValues.version,
+      'phase':
+          allowed ? PlaybackPhase.recovering.name : PlaybackPhase.failed.name,
+      'action': allowed ? 'restart' : 'stop',
+      'reason': reason,
+      'attempt': _automaticRecoveryBudget.attempts,
+      'positionMs': player.state.position.inMilliseconds,
+    });
+    if (!allowed && mounted) {
+      setState(() => _error = '自动恢复次数已用完，请检查网络后重试播放。');
+    }
+    return allowed;
   }
 }

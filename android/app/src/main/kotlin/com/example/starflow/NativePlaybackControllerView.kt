@@ -88,8 +88,16 @@ internal class NativePlaybackControllerView(
     // STATE_READY covers sources that never render a frame (audio-only), so the
     // chrome is not left pinned on screen forever waiting for onRenderedFirstFrame.
     private fun isPlaybackStartupSettled(): Boolean {
-        return host.diagnostics.playbackFirstFrameRendered ||
-            host.session.player?.playbackState == Player.STATE_READY
+        val current = host.session.player
+        val phase = PlaybackReliabilityPolicy.phase(
+            ready = host.diagnostics.playbackFirstFrameRendered ||
+                current?.playbackState == Player.STATE_READY,
+            playing = current?.isPlaying == true,
+            buffering = current?.playbackState == Player.STATE_BUFFERING,
+            ended = current?.playbackState == Player.STATE_ENDED,
+            failed = current?.playerError != null,
+        )
+        return phase != PlaybackPhase.preparing && phase != PlaybackPhase.failed
     }
 
     fun hideTelevisionControllerAfterStartup() {

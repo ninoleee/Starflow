@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'playback_policy_values.dart';
 
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
 
@@ -102,7 +103,7 @@ class MpvStartupErrorGate {
       final now = _clock();
       if (consumeProgress!()) _lastProgressAt = now;
       if (idle == false &&
-          now.difference(_lastProgressAt!) >= const Duration(seconds: 15)) {
+          now.difference(_lastProgressAt!) >= const Duration(milliseconds: PlaybackPolicyValues.remoteErrorConfirmationMs)) {
         _confirm(_pendingFailure!, 'load-stalled');
         return;
       }

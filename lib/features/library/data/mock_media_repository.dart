@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:starflow/features/search/application/cloud115_sync_delete_service.dart';
+import 'package:starflow/features/search/data/cloud115_save_client.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/library/application/app_media_query_service.dart';
@@ -515,12 +517,23 @@ class AppMediaRepository implements MediaRepository {
     final effectiveResourcePath = record?.resourcePath.trim().isNotEmpty == true
         ? record!.resourcePath.trim()
         : normalizedResourcePath;
+    final cloud115DeleteService =
+        Cloud115SyncDeleteService(ref.read(cloud115SaveClientProvider));
+    final cloud115DeletePlan = await cloud115DeleteService.prepare(
+      config: ref.read(appSettingsProvider).networkStorage,
+      sourceId: source.id,
+      resourcePath: effectiveResourcePath,
+    );
     final quarkDeletePlan = await _prepareQuarkSyncDeletePlan(
       source: source,
       resourcePath: normalizedResourcePath,
       effectiveResourcePath: effectiveResourcePath,
       sectionId: sectionId,
     );
+
+    if (cloud115DeletePlan != null && quarkDeletePlan != null) {
+      throw const QuarkSaveException('夸克与 115 删除监听范围重叠，未执行删除');
+    }
 
     var quarkDeleteCompleted = false;
     try {
@@ -543,6 +556,13 @@ class AppMediaRepository implements MediaRepository {
     }
     if (quarkDeletePlan != null && !quarkDeleteCompleted) {
       await _deleteMatchedQuarkDirectory(quarkDeletePlan);
+    }
+    if (cloud115DeletePlan != null) {
+      try {
+        await cloud115DeleteService.execute(cloud115DeletePlan);
+      } catch (_) {
+        throw const QuarkSaveException('WebDAV 已删除，但 115 删除未确认，请检查网盘；本地索引暂未清理');
+      }
     }
     await _nasMediaIndexer.removeResourceScope(
       sourceId: normalizedSourceId,

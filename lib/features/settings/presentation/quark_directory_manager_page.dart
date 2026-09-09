@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class QuarkDirectoryManagerPage extends ConsumerStatefulWidget {
@@ -11,11 +12,13 @@ class QuarkDirectoryManagerPage extends ConsumerStatefulWidget {
     required this.cookie,
     this.initialFid = '0',
     this.initialPath = '/',
+    this.cloud115 = false,
   });
 
   final String cookie;
   final String initialFid;
   final String initialPath;
+  final bool cloud115;
 
   @override
   ConsumerState<QuarkDirectoryManagerPage> createState() =>
@@ -29,6 +32,7 @@ class _QuarkDirectoryManagerPageState
   bool _isDeleting = false;
   String? _errorMessage;
   List<QuarkFileEntry> _entries = const [];
+  String get _driveName => widget.cloud115 ? '115' : '夸克';
 
   @override
   void initState() {
@@ -52,10 +56,15 @@ class _QuarkDirectoryManagerPageState
 
     try {
       final current = _breadcrumbs.last;
-      final entries = await ref.read(quarkSaveClientProvider).listEntries(
-            cookie: widget.cookie,
-            parentFid: current.fid,
-          );
+      final entries = widget.cloud115
+          ? await ref.read(cloud115SaveClientProvider).listEntries(
+              cookie: widget.cookie,
+              parentFid: current.fid,
+              parentPath: current.path)
+          : await ref.read(quarkSaveClientProvider).listEntries(
+                cookie: widget.cookie,
+                parentFid: current.fid,
+              );
       if (!mounted) {
         return;
       }
@@ -109,7 +118,7 @@ class _QuarkDirectoryManagerPageState
     final label = entry.isDirectory ? '文件夹' : '文件';
     final confirmed = await _confirmDelete(
       title: '删除$label',
-      content: '将把“${entry.name}”移动到夸克回收站，是否继续？',
+      content: '将把“${entry.name}”移动到$_driveName回收站，是否继续？',
       confirmLabel: '确认删除',
     );
     if (!confirmed) {
@@ -117,7 +126,7 @@ class _QuarkDirectoryManagerPageState
     }
     await _performDelete(
       entries: [entry],
-      successMessage: '已将$label移到夸克回收站',
+      successMessage: '已将$label移到$_driveName回收站',
     );
   }
 
@@ -127,7 +136,7 @@ class _QuarkDirectoryManagerPageState
     }
     final confirmed = await _confirmDelete(
       title: '清空当前目录',
-      content: '将把当前目录下的 ${_entries.length} 个项目移动到夸克回收站，是否继续？',
+      content: '将把当前目录下的 ${_entries.length} 个项目移动到$_driveName回收站，是否继续？',
       confirmLabel: '确认清空',
     );
     if (!confirmed) {
@@ -135,7 +144,7 @@ class _QuarkDirectoryManagerPageState
     }
     await _performDelete(
       entries: _entries,
-      successMessage: '已将当前目录内容移到夸克回收站',
+      successMessage: '已将当前目录内容移到$_driveName回收站',
     );
   }
 
@@ -145,10 +154,17 @@ class _QuarkDirectoryManagerPageState
   }) async {
     setState(() => _isDeleting = true);
     try {
-      await ref.read(quarkSaveClientProvider).deleteEntries(
+      if (widget.cloud115) {
+        await ref.read(cloud115SaveClientProvider).deleteEntries(
             cookie: widget.cookie,
-            fids: entries.map((item) => item.fid).toList(growable: false),
-          );
+            parentId: _breadcrumbs.last.fid,
+            fids: entries.map((item) => item.fid).toList());
+      } else {
+        await ref.read(quarkSaveClientProvider).deleteEntries(
+              cookie: widget.cookie,
+              fids: entries.map((item) => item.fid).toList(growable: false),
+            );
+      }
       if (!mounted) {
         return;
       }
@@ -255,9 +271,9 @@ class _QuarkDirectoryManagerPageState
       onBack: () => Navigator.of(context).pop(),
       trailing: trailing,
       children: [
-        const Text(
-          '夸克目录管理',
-          style: TextStyle(
+        Text(
+          '$_driveName目录管理',
+          style: const TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.w700,
           ),
@@ -271,7 +287,9 @@ class _QuarkDirectoryManagerPageState
               StarflowChipButton(
                 label: _breadcrumbs[index].path,
                 selected: index == _breadcrumbs.length - 1,
-                onPressed: index == _breadcrumbs.length - 1
+                onPressed: _isLoading ||
+                        _isDeleting ||
+                        index == _breadcrumbs.length - 1
                     ? null
                     : () => _goBackTo(index),
               ),

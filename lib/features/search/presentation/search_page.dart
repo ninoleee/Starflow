@@ -15,6 +15,7 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
+import 'package:starflow/features/search/application/cloud115_save_workflow_service.dart';
 import 'package:starflow/features/search/application/search_favorite_metadata_service.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
@@ -165,6 +166,10 @@ class _SearchPageState extends ConsumerState<SearchPage>
   int _quarkLinkValidationMaxConcurrency = kTaskMaxConcurrencyDefault;
   String? _pendingAutoSearchQuery;
   bool _searchPreferencesLoaded = false;
+  int _searchPreferencesLoadId = 0;
+  bool _loadingFavoritePosters = false;
+  int _favoritePosterSession = 0;
+  final Set<String> _attemptedFavoritePosters = {};
   Timer? _searchUiCommitTimer;
   int _pendingSearchRequestId = 0;
   List<SearchResult>? _pendingSearchResults;
@@ -229,8 +234,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
   @override
   void onPageBecameActive() {
+    unawaited(_loadSearchPreferences());
     if (widget.favoritesOnly) {
-      unawaited(_loadSearchPreferences());
+      _attemptedFavoritePosters.clear();
     }
     _runPendingAutoSearchIfNeeded();
     _scheduleInitialTelevisionFocus();
@@ -238,6 +244,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
   @override
   void onPageBecameInactive() {
+    _favoritePosterSession += 1;
     _initialTelevisionFocusScheduled = false;
     _initialTelevisionFocusRequested = false;
     _televisionFocusRecoveryScheduled = false;
@@ -248,13 +255,14 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _showFavoriteResults ? _favoriteResults : _results;
 
   Future<void> _loadSearchPreferences() async {
+    final loadId = ++_searchPreferencesLoadId;
     final preferences = ref.read(searchPreferencesRepositoryProvider);
     final recentQueries = await preferences.loadRecentQueries();
     final selectedTargets = await preferences.loadSelectedTargetIds();
     final favoriteResults = _dedupeFavoriteResults(
       await preferences.loadFavoriteResults(),
     );
-    if (!mounted) {
+    if (!mounted || loadId != _searchPreferencesLoadId) {
       return;
     }
     setState(() {
@@ -278,6 +286,75 @@ class _SearchPageState extends ConsumerState<SearchPage>
     });
     _searchPreferencesLoaded = true;
     _runPendingAutoSearchIfNeeded();
+    unawaited(_loadMissingFavoritePosters());
+  }
+
+  Future<void> _loadMissingFavoritePosters() async {
+    if (_loadingFavoritePosters || !isPageActive || !_showFavoriteResults) {
+      return;
+    }
+    _loadingFavoritePosters = true;
+    final session = _favoritePosterSession;
+    final preferences = ref.read(searchPreferencesRepositoryProvider);
+    final metadata = ref.read(searchFavoriteMetadataServiceProvider);
+    try {
+      for (final result in _favoriteResults.toList(growable: false)) {
+        if (!mounted || !isPageActive || session != _favoritePosterSession) {
+          break;
+        }
+        final key = searchResultFavoriteKey(result);
+        if (result.posterUrl.trim().isNotEmpty ||
+            !_favoriteResultKeys.contains(key) ||
+            !_attemptedFavoritePosters.add(key)) {
+          continue;
+        }
+        try {
+          final enriched = await metadata.enrichPoster(
+            result: result,
+            settings: ref.read(appSettingsProvider),
+          );
+          if (!mounted || !isPageActive || session != _favoritePosterSession) {
+            break;
+          }
+          if (enriched.posterUrl.trim().isEmpty) {
+            continue;
+          }
+          final index = _favoriteResults.indexWhere(
+            (item) => searchResultFavoriteKey(item) == key,
+          );
+          if (index < 0 || _favoriteResults[index].posterUrl.trim().isNotEmpty) {
+            continue;
+          }
+          await preferences.updateFavoritePoster(enriched);
+          if (!mounted || !isPageActive || session != _favoritePosterSession) {
+            break;
+          }
+          setState(() {
+            _favoriteResults = _favoriteResults.map((item) {
+              return searchResultFavoriteKey(item) == key &&
+                      item.posterUrl.trim().isEmpty
+                  ? item.copyWith(
+                      posterUrl: enriched.posterUrl,
+                      posterHeaders: enriched.posterHeaders,
+                    )
+                  : item;
+            }).toList(growable: false);
+          });
+        } catch (error, stackTrace) {
+          appLogWarning(
+            'search.favorites',
+            'Failed to backfill favorite poster',
+            error: error,
+            stackTrace: stackTrace,
+          );
+        }
+      }
+    } finally {
+      _loadingFavoritePosters = false;
+      if (mounted && isPageActive && session != _favoritePosterSession) {
+        unawaited(_loadMissingFavoritePosters());
+      }
+    }
   }
 
   Future<void> _persistSelectedTargets() async {
@@ -359,6 +436,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
               (item) => searchResultFavoriteKey(item) != key,
             ),
           ]);
+    _searchPreferencesLoadId += 1;
     if (mounted) {
       setState(() {
         _favoriteResults = nextFavorites;
@@ -1453,6 +1531,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
       return false;
     }
     final cloudType = detectSearchCloudTypeFromUrl(result.resourceUrl);
+    if (cloudType == SearchCloudType.cloud115) {
+      return networkStorage.cloud115Cookie.trim().isNotEmpty;
+    }
     if (cloudType != SearchCloudType.quark) {
       return false;
     }
@@ -1463,6 +1544,12 @@ class _SearchPageState extends ConsumerState<SearchPage>
     required SearchResult result,
     required NetworkStorageConfig networkStorage,
   }) async {
+    if (_savingResultIds.contains(result.id)) return;
+    if (detectSearchCloudTypeFromUrl(result.resourceUrl) ==
+        SearchCloudType.cloud115) {
+      await _saveResultTo115(result, networkStorage);
+      return;
+    }
     if (_quarkValidationStateFor(result) == _QuarkLinkValidationState.pending) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('链接正在验证，请稍候')),
@@ -1581,6 +1668,35 @@ class _SearchPageState extends ConsumerState<SearchPage>
           _savingResultIds.remove(result.id);
         });
       }
+    }
+  }
+
+  Future<void> _saveResultTo115(
+      SearchResult result, NetworkStorageConfig storage) async {
+    setState(() => _savingResultIds.add(result.id));
+    try {
+      final message = await ref.read(cloud115SaveWorkflowProvider).save(
+            shareUrl: result.resourceUrl,
+            config: storage,
+            password: result.password,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    } on QuarkSaveException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('115 保存未确认，请检查网盘后再重试')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingResultIds.remove(result.id));
     }
   }
 }
@@ -1732,7 +1848,11 @@ class _SearchResultCard extends ConsumerWidget {
                       height: 32,
                       child: StarflowIconButton(
                         size: 32,
-                        tooltip: '保存到夸克',
+                        tooltip:
+                            detectSearchCloudTypeFromUrl(result.resourceUrl) ==
+                                    SearchCloudType.cloud115
+                                ? '保存到 115'
+                                : '保存到夸克',
                         variant: StarflowButtonVariant.ghost,
                         onPressed:
                             isSaving || isLinkValidationPending ? null : onSave,

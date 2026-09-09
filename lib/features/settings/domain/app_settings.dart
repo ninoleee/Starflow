@@ -872,6 +872,12 @@ const String kDefaultQuarkSanitizedNameCharacters = '#%?';
 
 class NetworkStorageConfig {
   const NetworkStorageConfig({
+    this.cloud115Cookie = '',
+    this.syncDelete115Enabled = false,
+    this.syncDelete115WebDavDirectories = const [],
+    this.cloud115SmartStrmTaskName = '',
+    this.cloud115SaveFolderId = '0',
+    this.cloud115SaveFolderPath = '/',
     this.quarkCookie = '',
     this.quarkSaveFolderId = '0',
     this.quarkSaveFolderPath = '/',
@@ -886,6 +892,12 @@ class NetworkStorageConfig {
     this.quarkSanitizedNameCharacters = kDefaultQuarkSanitizedNameCharacters,
   });
 
+  final String cloud115Cookie;
+  final bool syncDelete115Enabled;
+  final List<NetworkStorageWebDavDirectory> syncDelete115WebDavDirectories;
+  final String cloud115SmartStrmTaskName;
+  final String cloud115SaveFolderId;
+  final String cloud115SaveFolderPath;
   final String quarkCookie;
   final String quarkSaveFolderId;
   final String quarkSaveFolderPath;
@@ -903,7 +915,13 @@ class NetworkStorageConfig {
   final String quarkSanitizedNameCharacters;
 
   bool get hasAnyConfigured {
-    return quarkCookie.trim().isNotEmpty ||
+    return cloud115Cookie.trim().isNotEmpty ||
+        syncDelete115Enabled ||
+        syncDelete115WebDavDirectories.isNotEmpty ||
+        cloud115SmartStrmTaskName.trim().isNotEmpty ||
+        cloud115SaveFolderId != '0' ||
+        cloud115SaveFolderPath != '/' ||
+        quarkCookie.trim().isNotEmpty ||
         smartStrmWebhookUrl.trim().isNotEmpty ||
         smartStrmTaskName.trim().isNotEmpty ||
         smartStrmDelaySeconds != 1 ||
@@ -917,6 +935,12 @@ class NetworkStorageConfig {
   }
 
   NetworkStorageConfig copyWith({
+    String? cloud115Cookie,
+    bool? syncDelete115Enabled,
+    List<NetworkStorageWebDavDirectory>? syncDelete115WebDavDirectories,
+    String? cloud115SmartStrmTaskName,
+    String? cloud115SaveFolderId,
+    String? cloud115SaveFolderPath,
     String? quarkCookie,
     String? quarkSaveFolderId,
     String? quarkSaveFolderPath,
@@ -931,6 +955,15 @@ class NetworkStorageConfig {
     String? quarkSanitizedNameCharacters,
   }) {
     return NetworkStorageConfig(
+      cloud115Cookie: cloud115Cookie ?? this.cloud115Cookie,
+      syncDelete115Enabled: syncDelete115Enabled ?? this.syncDelete115Enabled,
+      syncDelete115WebDavDirectories:
+          syncDelete115WebDavDirectories ?? this.syncDelete115WebDavDirectories,
+      cloud115SmartStrmTaskName:
+          cloud115SmartStrmTaskName ?? this.cloud115SmartStrmTaskName,
+      cloud115SaveFolderId: cloud115SaveFolderId ?? this.cloud115SaveFolderId,
+      cloud115SaveFolderPath:
+          cloud115SaveFolderPath ?? this.cloud115SaveFolderPath,
       quarkCookie: quarkCookie ?? this.quarkCookie,
       quarkSaveFolderId: quarkSaveFolderId ?? this.quarkSaveFolderId,
       quarkSaveFolderPath: quarkSaveFolderPath ?? this.quarkSaveFolderPath,
@@ -954,6 +987,13 @@ class NetworkStorageConfig {
 
   Map<String, dynamic> toJson() {
     return {
+      'cloud115Cookie': cloud115Cookie,
+      'syncDelete115Enabled': syncDelete115Enabled,
+      'syncDelete115WebDavDirectories':
+          syncDelete115WebDavDirectories.map((item) => item.toJson()).toList(),
+      'cloud115SmartStrmTaskName': cloud115SmartStrmTaskName,
+      'cloud115SaveFolderId': cloud115SaveFolderId,
+      'cloud115SaveFolderPath': cloud115SaveFolderPath,
       'quarkCookie': quarkCookie,
       'quarkSaveFolderId': quarkSaveFolderId,
       'quarkSaveFolderPath': quarkSaveFolderPath,
@@ -978,6 +1018,18 @@ class NetworkStorageConfig {
         (json['smartStrmDelaySeconds'] as num?)?.toInt() ??
             resolvedRefreshDelaySeconds;
     return NetworkStorageConfig(
+      cloud115Cookie: json['cloud115Cookie'] as String? ?? '',
+      syncDelete115Enabled: json['syncDelete115Enabled'] as bool? ?? false,
+      syncDelete115WebDavDirectories:
+          (json['syncDelete115WebDavDirectories'] as List? ?? const [])
+              .whereType<Map>()
+              .map((item) => NetworkStorageWebDavDirectory.fromJson(
+                  Map<String, dynamic>.from(item)))
+              .toList(),
+      cloud115SmartStrmTaskName:
+          json['cloud115SmartStrmTaskName'] as String? ?? '',
+      cloud115SaveFolderId: json['cloud115SaveFolderId'] as String? ?? '0',
+      cloud115SaveFolderPath: json['cloud115SaveFolderPath'] as String? ?? '/',
       quarkCookie: json['quarkCookie'] as String? ?? '',
       quarkSaveFolderId: json['quarkSaveFolderId'] as String? ?? '0',
       quarkSaveFolderPath: json['quarkSaveFolderPath'] as String? ?? '/',

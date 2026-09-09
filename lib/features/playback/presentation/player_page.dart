@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'widgets/player_controls_layout.dart';
 import 'dart:math' as math;
+import 'package:starflow/features/playback/application/playback_reliability_policy.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -121,7 +123,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   static const MethodChannel _platformChannel = MethodChannel(
     'starflow/platform',
   );
-  static const int _maxPlaybackAttempts = 3;
+  static const int _maxPlaybackAttempts = PlaybackPolicyValues.maxPlayerAttempts;
   static const _kSeekStep = Duration(seconds: 10);
   static const _kSubtitleDelaySteps = <double>[-2, -1, -0.5, 0, 0.5, 1, 2];
   static const _kProgressPersistInterval = Duration(seconds: 10);
@@ -292,6 +294,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   DateTime? _lastRuntimeMpvErrorAt;
   int _runtimeMpvErrorBurstCount = 0;
   int _runtimeMpvErrorRecoveryAttempts = 0;
+  final _automaticRecoveryBudget = PlaybackRecoveryBudget();
   bool _runtimeMpvErrorRecoveryInProgress = false;
   bool _episodeQueueAdvanceInProgress = false;
   int? _androidMemoryClassMb;

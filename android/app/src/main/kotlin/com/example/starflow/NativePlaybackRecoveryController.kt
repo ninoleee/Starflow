@@ -15,15 +15,20 @@ internal class NativePlaybackRecoveryController(private val host: Host) {
         val runtime: NativePlaybackRuntimeController
         val systemSession: NativePlaybackSystemController
         val activity: Activity
+        val launch: NativePlaybackLaunchController
 
         fun showToast(message: String)
     }
 
     private var transcodedVideoFallbackAttempted = false
+    private val automaticRecoveryBudget = PlaybackRecoveryBudget()
+    private var recoveryItemKey = ""
 
     var smartStrmHlsFallbackAttempted = false
 
     fun resetForNewMedia() {
+        automaticRecoveryBudget.reset()
+        recoveryItemKey = ""
         transcodedVideoFallbackAttempted = false
         smartStrmHlsFallbackAttempted = false
     }
@@ -121,6 +126,25 @@ internal class NativePlaybackRecoveryController(private val host: Host) {
             return true
         }
 
+        val itemKey = host.activity.intent.getStringExtra(
+            NativePlaybackActivity.EXTRA_PLAYBACK_ITEM_KEY
+        ).orEmpty()
+        if (itemKey != recoveryItemKey) {
+            recoveryItemKey = itemKey
+            automaticRecoveryBudget.reset()
+        }
+        val allowed = automaticRecoveryBudget.take()
+        NativeAppLogger.info(
+            "playback.reliability",
+            "Playback recovery decision engine=exo policyVersion=${PlaybackPolicyValues.version} " +
+                "phase=${if (allowed) "recovering" else "failed"} " +
+                "action=${if (allowed) "restart" else "stop"} reason=stall " +
+                "attempt=${automaticRecoveryBudget.attempts} positionMs=$positionMs",
+        )
+        if (!allowed) {
+            host.launch.handlePlaybackFailure("自动恢复次数已用完，请检查网络后重试播放。")
+            return false
+        }
         restartPlayerAfterPlaybackStall(positionMs)
         return false
     }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'playback_reliability_policy.dart';
 
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
@@ -72,7 +73,7 @@ MpvBufferBudget resolveMpvBufferBudget({
   );
 }
 
-enum MpvOpenFailureKind { transientNetwork, permanent, unknown }
+typedef MpvOpenFailureKind = PlaybackFailureKind;
 
 class MpvOpenFailure implements Exception {
   const MpvOpenFailure(this.message, {this.httpStatus});
@@ -108,7 +109,7 @@ String? resolveMpvHttpReconnectOptions(PlaybackTarget target) {
 }
 
 bool isMpvPreparedAddressRefreshable(Object error) =>
-    const {401, 403, 404, 410}.contains(error is MpvOpenFailure
+    isPlaybackAddressRefreshable(error is MpvOpenFailure
         ? error.httpStatus ?? mpvHttpErrorStatus(error.message)
         : mpvHttpErrorStatus('$error'));
 
@@ -150,15 +151,8 @@ MpvOpenFailureKind classifyMpvOpenFailure(Object error) {
       ? error.httpStatus ?? mpvHttpErrorStatus(message)
       : mpvHttpErrorStatus(message);
   if (statusCode != null) {
-    if (statusCode == 408 ||
-        statusCode == 425 ||
-        statusCode == 429 ||
-        (statusCode >= 500 && statusCode <= 599)) {
-      return MpvOpenFailureKind.transientNetwork;
-    }
-    if (<int>{400, 401, 403, 404, 405, 410, 416}.contains(statusCode)) {
-      return MpvOpenFailureKind.permanent;
-    }
+    final kind = classifyPlaybackHttpStatus(statusCode);
+    if (kind != PlaybackFailureKind.unknown) return kind;
   }
   const permanentFragments = <String>[
     'protocol not found',

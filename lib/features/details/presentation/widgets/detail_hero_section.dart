@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/features/details/application/detail_start_playback_resolver.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
@@ -98,7 +99,6 @@ class DetailHeroSection extends ConsumerWidget {
             .resumeEntryForDetailTargetFromSnapshot(snapshot, target);
     final playbackActionsReady =
         snapshotAsync.hasValue || snapshotAsync.hasError;
-    final startPlaybackTarget = resolveStartPlaybackTarget(target);
     final resumePlaybackTarget = resolveResumePlaybackTarget(
       target,
       resumeEntry,
@@ -108,7 +108,7 @@ class DetailHeroSection extends ConsumerWidget {
       resumeEntry,
     );
     final hasHeroAction =
-        startPlaybackTarget != null || resumePlaybackTarget != null;
+        target.hasMatchedResource || resumePlaybackTarget != null;
     final primaryBackdropSources = buildDetailBackdropImageSourcesForTarget(
       target,
     );
@@ -186,7 +186,11 @@ class DetailHeroSection extends ConsumerWidget {
                     peopleLine: peopleLine,
                     simplifyVisualEffects: simplifyVisualEffects,
                     isTelevision: isTelevision,
-                    startPlaybackTarget: startPlaybackTarget,
+                    resolveStartTarget: target.hasMatchedResource
+                        ? () => ref
+                            .read(detailStartPlaybackResolverProvider)
+                            .resolve(detail: target)
+                        : null,
                     resumePlaybackTarget: resumePlaybackTarget,
                     resumePositionLabel: resumePositionLabel,
                     playbackActionsReady: playbackActionsReady,
@@ -225,8 +229,8 @@ class DetailHeroContent extends StatefulWidget {
     required this.peopleLine,
     required this.simplifyVisualEffects,
     required this.isTelevision,
-    required this.startPlaybackTarget,
     required this.resumePlaybackTarget,
+    this.resolveStartTarget,
     this.resumePositionLabel = '',
     this.playbackActionsReady = true,
     this.artworkFocusNode,
@@ -239,8 +243,8 @@ class DetailHeroContent extends StatefulWidget {
   final String peopleLine;
   final bool simplifyVisualEffects;
   final bool isTelevision;
-  final PlaybackTarget? startPlaybackTarget;
   final PlaybackTarget? resumePlaybackTarget;
+  final Future<PlaybackTarget> Function()? resolveStartTarget;
   final String resumePositionLabel;
   final bool playbackActionsReady;
   final FocusNode? artworkFocusNode;
@@ -277,7 +281,7 @@ class _DetailHeroContentState extends State<DetailHeroContent> {
     final peopleLine = widget.peopleLine;
     final simplifyVisualEffects = widget.simplifyVisualEffects;
     final isTelevision = widget.isTelevision;
-    final startPlaybackTarget = widget.startPlaybackTarget;
+    final resolveStartTarget = widget.resolveStartTarget;
     final resumePlaybackTarget = widget.resumePlaybackTarget;
     final resumePositionLabel = widget.resumePositionLabel;
     final artworkFocusNode = widget.artworkFocusNode;
@@ -308,17 +312,27 @@ class _DetailHeroContentState extends State<DetailHeroContent> {
       );
     }
 
-    Future<void> openPlaybackTarget(PlaybackTarget playbackTarget) async {
+    Future<void> openPlaybackTarget(
+      Future<PlaybackTarget> Function() resolveTarget,
+    ) async {
       if (_openingPlayback) {
         return;
       }
       activePlaybackLaunchInProgress.value = true;
       try {
+        final resolvedTarget = await resolveTarget();
+        if (!context.mounted) return;
         await ActivePlaybackCleanupCoordinator.cleanupAll(
           reason: 'open-new-playback',
         );
         if (!context.mounted) return;
-        await context.pushNamed('player', extra: playbackTarget);
+        await context.pushNamed('player', extra: resolvedTarget);
+      } catch (error) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('播放失败：$error')),
+          );
+        }
       } finally {
         activePlaybackLaunchInProgress.value = false;
       }
@@ -327,7 +341,7 @@ class _DetailHeroContentState extends State<DetailHeroContent> {
     Widget buildPlaybackButton({
       required String label,
       required IconData icon,
-      required PlaybackTarget playbackTarget,
+      required Future<PlaybackTarget> Function() resolveTarget,
       required String focusId,
       FocusNode? focusNode,
       bool autofocus = false,
@@ -343,7 +357,7 @@ class _DetailHeroContentState extends State<DetailHeroContent> {
         autofocus: autofocus,
         focusScale: isTelevision ? 1.06 : 1.0,
         onPressed:
-            _openingPlayback ? null : () => openPlaybackTarget(playbackTarget),
+            _openingPlayback ? null : () => openPlaybackTarget(resolveTarget),
       );
     }
 
@@ -352,19 +366,20 @@ class _DetailHeroContentState extends State<DetailHeroContent> {
         buildPlaybackButton(
           label: '继续播放',
           icon: Icons.history_rounded,
-          playbackTarget: resumePlaybackTarget,
+          resolveTarget: () async => resumePlaybackTarget,
           focusNode: playFocusNode,
           focusId: 'detail:hero:play:resume',
           autofocus: true,
         ),
-      if (startPlaybackTarget != null)
+      if (resolveStartTarget != null)
         buildPlaybackButton(
           label: '从头播放',
           icon: Icons.play_arrow_rounded,
-          playbackTarget: startPlaybackTarget,
+          resolveTarget: resolveStartTarget,
           focusNode: resumePlaybackTarget == null ? playFocusNode : null,
           focusId: 'detail:hero:play:start',
-          autofocus: widget.playbackActionsReady && resumePlaybackTarget == null,
+          autofocus:
+              widget.playbackActionsReady && resumePlaybackTarget == null,
         ),
     ];
 
@@ -655,19 +670,6 @@ List<AppNetworkImageSource> buildPrimaryBackdropFallbackSources(
   MediaDetailTarget target,
 ) {
   return buildDetailBackdropImageSourcesForTarget(target).fallbackSources;
-}
-
-PlaybackTarget? resolveStartPlaybackTarget(
-  MediaDetailTarget target,
-) {
-  final playbackTarget = target.playbackTarget;
-  if (playbackTarget == null) {
-    return null;
-  }
-  return _attachDetailArtworkToPlaybackTarget(
-    playbackTarget,
-    target,
-  ).copyWith(allowResume: false);
 }
 
 PlaybackTarget? resolveResumePlaybackTarget(

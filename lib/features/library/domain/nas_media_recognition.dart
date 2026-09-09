@@ -271,7 +271,7 @@ class NasMediaRecognizer {
       specialEpisodeKeywords: normalizedSpecialEpisodeKeywords,
     );
     final parentEpisodeMatch = _matchEpisode(
-          parentRaw,
+          _stripEpisodeRanges(parentRaw),
           specialEpisodeKeywords: normalizedSpecialEpisodeKeywords,
         ) ??
         (matchesHashNumberedEpisodeFolder(
@@ -495,6 +495,19 @@ class NasMediaRecognizer {
     );
   }
 
+  static String _stripEpisodeRanges(String input) {
+    // A pack folder describes its contents, not the episode of every child.
+    return input.replaceAllMapped(
+      RegExp(
+        r'(?<![a-z])e(?:p(?:isode)?)?[ ._]*(\d{1,3})\s*[-~]\s*(?:e(?:p(?:isode)?)?[ ._]*)?(\d{1,3})(?!\d)',
+        caseSensitive: false,
+      ),
+      (match) => int.parse(match.group(2)!) > int.parse(match.group(1)!)
+          ? ' '
+          : match.group(0)!,
+    );
+  }
+
   static _EpisodeMatch? _matchHashEpisode(String input) {
     final match = RegExp(
       r'(?:^|[\s._\-])[#＃]\s*0*(\d{1,4})(?:$|[\s._\-、])',
@@ -622,7 +635,7 @@ class NasMediaRecognizer {
   }
 
   static int? _matchSeason(String input) {
-    final normalized = input.trim();
+    final normalized = _stripEpisodeRanges(input).trim();
     for (final pattern in const [
       r'(?:^|[ ._\-])s(\d{1,2})(?:$|[ ._\-])',
       r'[\u3400-\u9fff]s(\d{1,2})(?:$|[ ._\-])',

@@ -369,6 +369,8 @@ class SearchResult {
 
   SearchResult copyWith({
     String? title,
+    String? posterUrl,
+    Map<String, String>? posterHeaders,
     MediaDetailTarget? detailTarget,
     String? favoriteFolderName,
     String? originalSearchTitle,
@@ -382,8 +384,8 @@ class SearchResult {
     return SearchResult(
       id: id,
       title: title ?? this.title,
-      posterUrl: posterUrl,
-      posterHeaders: posterHeaders,
+      posterUrl: posterUrl ?? this.posterUrl,
+      posterHeaders: posterHeaders ?? this.posterHeaders,
       providerId: providerId,
       providerName: providerName,
       quality: quality,

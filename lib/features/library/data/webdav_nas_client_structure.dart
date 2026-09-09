@@ -858,7 +858,7 @@ class _ExternalScanStructureModule {
 
   int? _parseGroupedLeadingEpisodeNumber(String value) {
     final match = RegExp(
-      r'^\s*0*(\d{1,3})(?:[ ._\-、]+)(?=\S)',
+      r'^\s*0*(\d{1,3})(?:[ ._\-、]+|(?=[(（\[【]))(?=\S)',
       caseSensitive: false,
     ).firstMatch(value.trim());
     final episodeNumber = int.tryParse(match?.group(1) ?? '');

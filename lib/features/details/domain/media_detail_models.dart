@@ -2,6 +2,25 @@ import 'package:starflow/core/utils/metadata_text.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
+List<MediaItem> sortEpisodesForDetailBrowser(List<MediaItem> items) {
+  final sorted = [...items]..sort((left, right) {
+      final seasonComparison =
+          (left.seasonNumber ?? 0).compareTo(right.seasonNumber ?? 0);
+      if (seasonComparison != 0) {
+        return seasonComparison;
+      }
+
+      final episodeComparison =
+          (left.episodeNumber ?? 0).compareTo(right.episodeNumber ?? 0);
+      if (episodeComparison != 0) {
+        return episodeComparison;
+      }
+
+      return left.title.toLowerCase().compareTo(right.title.toLowerCase());
+    });
+  return sorted;
+}
+
 class MediaPersonProfile {
   const MediaPersonProfile({
     required this.name,
@@ -164,6 +183,8 @@ class MediaDetailTarget {
   final String sourceName;
 
   bool get isPlayable => playbackTarget?.canPlay == true;
+
+  bool get hasMatchedResource => playbackTarget != null || !needsLibraryMatch;
 
   bool get isSeries => itemType.trim().toLowerCase() == 'series';
 

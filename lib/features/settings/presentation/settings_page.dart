@@ -26,6 +26,7 @@ import 'package:starflow/features/settings/presentation/network_proxy_settings_p
 import 'package:starflow/features/settings/presentation/playback_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_service_settings_page.dart';
 import 'package:starflow/features/settings/presentation/settings_management_page.dart';
+import 'package:starflow/features/settings/presentation/webdav_sync_settings_page.dart';
 import 'package:starflow/features/settings/presentation/settings_version_label.dart';
 import 'package:starflow/features/settings/presentation/subtitle_settings_page.dart';
 import 'package:starflow/features/settings/presentation/task_scheduling_settings_page.dart';
@@ -213,6 +214,15 @@ class SettingsPage extends ConsumerStatefulWidget {
                         title: '配置管理',
                         subtitle: '导入、导出与 TV 二维码传输',
                         onTap: () => _openSettingsManagement(context),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: '网络同步',
+                        subtitle: 'WebDAV 配置与收藏同步',
+                        onTap: () => Navigator.of(context, rootNavigator: true)
+                            .push<void>(SettingsMaterialPageRoute<void>(
+                          builder: (context) => const WebDavSyncSettingsPage(),
+                        )),
                       ),
                     ],
                   ),

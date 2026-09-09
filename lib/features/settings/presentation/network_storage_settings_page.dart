@@ -6,6 +6,7 @@ import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -16,7 +17,7 @@ import 'package:starflow/features/settings/presentation/webdav_directory_picker_
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
-enum NetworkStorageEditorSection { quark, smartStrm, synchronization }
+enum NetworkStorageEditorSection { quark, cloud115, smartStrm, synchronization }
 
 class NetworkStorageSettingsPage extends ConsumerWidget {
   const NetworkStorageSettingsPage({super.key});
@@ -48,10 +49,21 @@ class NetworkStorageSettingsPage extends ConsumerWidget {
             ),
           ),
           SettingsSelectionTile(
+            title: '115 网盘',
+            subtitle: config.cloud115Cookie.trim().isEmpty
+                ? 'Cookie 与保存目录未配置'
+                : '保存目录：${config.cloud115SaveFolderPath}',
+            value: '',
+            focusId: 'network-storage:115',
+            onPressed: () => _openEditor(
+                context, config, NetworkStorageEditorSection.cloud115),
+          ),
+          SettingsSelectionTile(
             title: 'SmartStrm',
             subtitle: config.smartStrmWebhookUrl.trim().isEmpty
                 ? 'Webhook 未配置'
-                : '任务：${config.smartStrmTaskName}',
+                : '夸克：${config.smartStrmTaskName.trim().isEmpty ? '未配置' : config.smartStrmTaskName} · '
+                    '115：${config.cloud115SmartStrmTaskName.trim().isEmpty ? '未配置' : config.cloud115SmartStrmTaskName}',
             value: '',
             focusId: 'network-storage:smart-strm',
             onPressed: () => _openEditor(
@@ -62,8 +74,7 @@ class NetworkStorageSettingsPage extends ConsumerWidget {
           ),
           SettingsSelectionTile(
             title: '同步与索引刷新',
-            subtitle:
-                '监听目录 ${config.syncDeleteQuarkWebDavDirectories.length} 个 · 刷新来源 ${config.refreshMediaSourceIds.length} 个',
+            subtitle: '刷新来源 ${config.refreshMediaSourceIds.length} 个',
             value: '',
             focusId: 'network-storage:synchronization',
             onPressed: () => _openEditor(
@@ -113,6 +124,7 @@ class _NetworkStorageEditorPageState
   late final TextEditingController _quarkCookieController;
   late final TextEditingController _smartStrmWebhookController;
   late final TextEditingController _smartStrmTaskNameController;
+  late final TextEditingController _cloud115SmartStrmTaskNameController;
   late final TextEditingController _smartStrmDelayController;
   late final TextEditingController _refreshDelayController;
   late String _quarkFolderId;
@@ -125,18 +137,24 @@ class _NetworkStorageEditorPageState
   final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
   bool _isTestingQuarkConnection = false;
   bool _isTestingSmartStrm = false;
+  bool _isTesting115SmartStrm = false;
+  bool get _is115 => widget.section == NetworkStorageEditorSection.cloud115;
+  String get _driveName => _is115 ? '115' : '夸克';
 
   @override
   void initState() {
     super.initState();
     _quarkCookieController = TextEditingController(
-      text: widget.initial.quarkCookie,
+      text: _is115 ? widget.initial.cloud115Cookie : widget.initial.quarkCookie,
     );
     _smartStrmWebhookController = TextEditingController(
       text: widget.initial.smartStrmWebhookUrl,
     );
     _smartStrmTaskNameController = TextEditingController(
       text: widget.initial.smartStrmTaskName,
+    );
+    _cloud115SmartStrmTaskNameController = TextEditingController(
+      text: widget.initial.cloud115SmartStrmTaskName,
     );
     _smartStrmDelayController = TextEditingController(
       text: widget.initial.smartStrmDelaySeconds > 0
@@ -154,14 +172,21 @@ class _NetworkStorageEditorPageState
     _quarkFolderPath = widget.initial.quarkSaveFolderPath.trim().isEmpty
         ? '/'
         : widget.initial.quarkSaveFolderPath.trim();
-    _sanitizeSavedNamesEnabled =
-        widget.initial.quarkSanitizeSavedNamesEnabled;
+    if (_is115) {
+      _quarkFolderId = widget.initial.cloud115SaveFolderId;
+      _quarkFolderPath = widget.initial.cloud115SaveFolderPath;
+    }
+    _sanitizeSavedNamesEnabled = widget.initial.quarkSanitizeSavedNamesEnabled;
     _sanitizedNameCharactersController = TextEditingController(
       text: widget.initial.quarkSanitizedNameCharacters,
     );
-    _syncDeleteQuarkEnabled = widget.initial.syncDeleteQuarkEnabled;
+    _syncDeleteQuarkEnabled = _is115
+        ? widget.initial.syncDelete115Enabled
+        : widget.initial.syncDeleteQuarkEnabled;
     _syncDeleteQuarkWebDavDirectories = [
-      ...widget.initial.syncDeleteQuarkWebDavDirectories,
+      ...(_is115
+          ? widget.initial.syncDelete115WebDavDirectories
+          : widget.initial.syncDeleteQuarkWebDavDirectories),
     ];
     _refreshSourceIds = widget.initial.refreshMediaSourceIds.toSet();
     for (final controller in _draftTextControllers) {
@@ -180,6 +205,7 @@ class _NetworkStorageEditorPageState
     _sanitizedNameCharactersController.dispose();
     _smartStrmWebhookController.dispose();
     _smartStrmTaskNameController.dispose();
+    _cloud115SmartStrmTaskNameController.dispose();
     _smartStrmDelayController.dispose();
     _refreshDelayController.dispose();
     super.dispose();
@@ -190,6 +216,7 @@ class _NetworkStorageEditorPageState
         _sanitizedNameCharactersController,
         _smartStrmWebhookController,
         _smartStrmTaskNameController,
+        _cloud115SmartStrmTaskNameController,
         _smartStrmDelayController,
         _refreshDelayController,
       ];
@@ -274,19 +301,29 @@ class _NetworkStorageEditorPageState
     final settings = ref.read(appSettingsProvider);
     final refreshableSourceIds =
         _refreshableMediaSources(settings).map((source) => source.id).toSet();
-    return NetworkStorageConfig(
-      quarkCookie: _quarkCookieController.text.trim(),
-      quarkSaveFolderId: _quarkFolderId,
-      quarkSaveFolderPath: _quarkFolderPath,
+    return widget.initial.copyWith(
+      cloud115Cookie: _is115 ? _quarkCookieController.text.trim() : null,
+      cloud115SaveFolderId: _is115 ? _quarkFolderId : null,
+      cloud115SaveFolderPath: _is115 ? _quarkFolderPath : null,
+      quarkCookie: _is115 ? null : _quarkCookieController.text.trim(),
+      quarkSaveFolderId: _is115 ? null : _quarkFolderId,
+      quarkSaveFolderPath: _is115 ? null : _quarkFolderPath,
       quarkSanitizeSavedNamesEnabled: _sanitizeSavedNamesEnabled,
       quarkSanitizedNameCharacters:
           _sanitizedNameCharactersController.text.trim(),
-      syncDeleteQuarkEnabled: _syncDeleteQuarkEnabled,
-      syncDeleteQuarkWebDavDirectories: _normalizedSyncDeleteDirectories(
-        settings,
-      ),
+      syncDelete115Enabled: _is115 ? _syncDeleteQuarkEnabled : null,
+      syncDelete115WebDavDirectories:
+          _is115 ? _normalizedSyncDeleteDirectories(settings) : null,
+      syncDeleteQuarkEnabled: _is115 ? null : _syncDeleteQuarkEnabled,
+      syncDeleteQuarkWebDavDirectories: _is115
+          ? null
+          : _normalizedSyncDeleteDirectories(
+              settings,
+            ),
       smartStrmWebhookUrl: _smartStrmWebhookController.text.trim(),
       smartStrmTaskName: _smartStrmTaskNameController.text.trim(),
+      cloud115SmartStrmTaskName:
+          _cloud115SmartStrmTaskNameController.text.trim(),
       smartStrmDelaySeconds: _smartStrmDelaySeconds(),
       refreshMediaSourceIds: _refreshSourceIds
           .where(refreshableSourceIds.contains)
@@ -347,21 +384,30 @@ class _NetworkStorageEditorPageState
     final cookie = _quarkCookieController.text.trim();
     if (cookie.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先填写夸克 Cookie')),
+        SnackBar(content: Text('请先填写 $_driveName Cookie')),
       );
       return;
     }
 
     setState(() => _isTestingQuarkConnection = true);
     try {
-      final status = await ref.read(quarkSaveClientProvider).testConnection(
-            cookie: cookie,
-          );
+      String summary;
+      if (_is115) {
+        await ref
+            .read(cloud115SaveClientProvider)
+            .listDirectories(cookie: cookie);
+        summary = '目录访问正常';
+      } else {
+        final status = await ref.read(quarkSaveClientProvider).testConnection(
+              cookie: cookie,
+            );
+        summary = status.summary;
+      }
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('夸克连接成功 · ${status.summary}')),
+        SnackBar(content: Text('$_driveName 连接成功 · $summary')),
       );
     } on QuarkSaveException catch (error) {
       if (!mounted) {
@@ -382,7 +428,7 @@ class _NetworkStorageEditorPageState
     final cookie = _quarkCookieController.text.trim();
     if (cookie.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先填写夸克 Cookie')),
+        SnackBar(content: Text('请先填写 $_driveName Cookie')),
       );
       return;
     }
@@ -391,8 +437,14 @@ class _NetworkStorageEditorPageState
       SettingsMaterialPageRoute(
         builder: (context) => QuarkFolderPickerPage(
           cookie: cookie,
-          initialFid: _quarkFolderId,
-          initialPath: _quarkFolderPath,
+          initialFid: _is115 ? '0' : _quarkFolderId,
+          initialPath: _is115 ? '/' : _quarkFolderPath,
+          directoryLoader: _is115
+              ? (id, path) => ref
+                  .read(cloud115SaveClientProvider)
+                  .listDirectories(
+                      cookie: cookie, parentFid: id, parentPath: path)
+              : null,
         ),
       ),
     );
@@ -411,7 +463,7 @@ class _NetworkStorageEditorPageState
     final cookie = _quarkCookieController.text.trim();
     if (cookie.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先填写夸克 Cookie')),
+        SnackBar(content: Text('请先填写 $_driveName Cookie')),
       );
       return;
     }
@@ -419,6 +471,7 @@ class _NetworkStorageEditorPageState
     await Navigator.of(context).push<void>(
       SettingsMaterialPageRoute(
         builder: (context) => QuarkDirectoryManagerPage(
+          cloud115: _is115,
           cookie: cookie,
           initialFid: _quarkFolderId,
           initialPath: _quarkFolderPath,
@@ -491,14 +544,27 @@ class _NetworkStorageEditorPageState
     });
   }
 
-  Future<void> _testSmartStrmTask() async {
+  Future<void> _testSmartStrmTask({bool cloud115 = false}) async {
     FocusScope.of(context).unfocus();
-    setState(() => _isTestingSmartStrm = true);
+    void setTesting(bool value) => setState(() {
+          if (cloud115) {
+            _isTesting115SmartStrm = value;
+          } else {
+            _isTestingSmartStrm = value;
+          }
+        });
+    setTesting(true);
+    final driveName = cloud115 ? '115' : '夸克';
+    final storagePath = _quarkFolderPath.trim();
     try {
       final result = await ref.read(smartStrmWebhookClientProvider).triggerTask(
             webhookUrl: _smartStrmWebhookController.text.trim(),
-            taskName: _smartStrmTaskNameController.text.trim(),
-            storagePath: _quarkFolderPath == '/' ? '' : _quarkFolderPath,
+            taskName: (cloud115
+                    ? _cloud115SmartStrmTaskNameController
+                    : _smartStrmTaskNameController)
+                .text
+                .trim(),
+            storagePath: storagePath == '/' ? '' : storagePath,
             delay: _smartStrmDelaySeconds(),
           );
       if (!mounted) {
@@ -510,18 +576,18 @@ class _NetworkStorageEditorPageState
               ? 'SmartStrm ${result.message.trim()}'
               : 'SmartStrm 任务触发成功';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
+        SnackBar(content: Text('$driveName $message')),
       );
     } on SmartStrmWebhookException catch (error) {
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
+        SnackBar(content: Text('$driveName ${error.message}')),
       );
     } finally {
       if (mounted) {
-        setState(() => _isTestingSmartStrm = false);
+        setTesting(false);
       }
     }
   }
@@ -551,20 +617,23 @@ class _NetworkStorageEditorPageState
           Text(
             switch (widget.section) {
               NetworkStorageEditorSection.quark => '夸克云盘',
+              NetworkStorageEditorSection.cloud115 => '115 网盘',
               NetworkStorageEditorSection.smartStrm => 'SmartStrm',
               NetworkStorageEditorSection.synchronization => '同步与索引刷新',
             },
             style: Theme.of(context).textTheme.headlineSmall,
           ),
-          if (widget.section == NetworkStorageEditorSection.quark) ...[
-            const SettingsSectionTitle(label: '夸克保存'),
+          if (widget.section == NetworkStorageEditorSection.quark ||
+              _is115) ...[
+            SettingsSectionTitle(label: '$_driveName 保存'),
             SettingsTextInputField(
               controller: _quarkCookieController,
-              labelText: '夸克 Cookie',
+              labelText: '$_driveName Cookie',
               minLines: 2,
               maxLines: 4,
               autocorrect: false,
-              hintText: '用于搜索结果一键保存到夸克网盘',
+              hintText:
+                  _is115 ? 'UID=...; CID=...; SEID=...' : '用于搜索结果一键保存到夸克网盘',
               summaryBuilder: (value) => value.isEmpty ? '未填写' : '已填写',
               autofocus: true,
               focusId: 'network-storage-quark:cookie',
@@ -575,7 +644,9 @@ class _NetworkStorageEditorPageState
               runSpacing: 12,
               children: [
                 SettingsActionButton(
-                  label: _isTestingQuarkConnection ? '测试中...' : '测试夸克连接',
+                  label: _isTestingQuarkConnection
+                      ? '测试中...'
+                      : '测试 $_driveName 连接',
                   icon: Icons.cloud_done_outlined,
                   onPressed:
                       _isTestingQuarkConnection ? null : _testQuarkConnection,
@@ -595,6 +666,27 @@ class _NetworkStorageEditorPageState
             ),
             const SizedBox(height: 8),
             Text('默认保存到：$_quarkFolderPath'),
+            const SizedBox(height: 12),
+            const SettingsSectionTitle(label: 'SmartStrm 任务'),
+            SettingsTextInputField(
+              controller: _is115
+                  ? _cloud115SmartStrmTaskNameController
+                  : _smartStrmTaskNameController,
+              labelText: '$_driveName SmartStrm 任务名',
+              focusId: 'network-storage-$_driveName:strm-task',
+            ),
+            const SizedBox(height: 12),
+            SettingsActionButton(
+              label: (_is115 ? _isTesting115SmartStrm : _isTestingSmartStrm)
+                  ? '测试中...'
+                  : '测试 $_driveName STRM 任务',
+              icon: Icons.bolt_rounded,
+              onPressed: (_is115 ? _isTesting115SmartStrm : _isTestingSmartStrm)
+                  ? null
+                  : () => _testSmartStrmTask(cloud115: _is115),
+            ),
+          ],
+          if (widget.section == NetworkStorageEditorSection.quark) ...[
             const SizedBox(height: 12),
             const SettingsSectionTitle(label: '保存后修正名称'),
             StarflowToggleTile(
@@ -617,8 +709,7 @@ class _NetworkStorageEditorPageState
                 labelText: '要去掉的字符',
                 autocorrect: false,
                 hintText: kDefaultQuarkSanitizedNameCharacters,
-                summaryBuilder: (value) =>
-                    value.isEmpty ? '未填写（不会改名）' : value,
+                summaryBuilder: (value) => value.isEmpty ? '未填写（不会改名）' : value,
                 focusId: 'network-storage-quark:sanitize-characters',
               ),
               const SizedBox(height: 8),
@@ -633,13 +724,14 @@ class _NetworkStorageEditorPageState
               ),
             ],
           ],
-          if (widget.section ==
-              NetworkStorageEditorSection.synchronization) ...[
+          if (widget.section == NetworkStorageEditorSection.quark ||
+              _is115) ...[
             const SettingsSectionTitle(label: '同步删除'),
             StarflowToggleTile(
-              title: '同步删除夸克目录',
-              subtitle:
-                  '开启后，删除命中下方监听目录中的 WebDAV 文件或文件夹时，也会到当前夸克保存目录里删除匹配到的影片或剧集目录。',
+              title: '同步删除$_driveName目录',
+              subtitle: _is115
+                  ? '删除监听范围内的 WebDAV 资源时，按相对路径同步删除 115 保存目录中的对应资源。'
+                  : '开启后，删除命中下方监听目录中的 WebDAV 文件或文件夹时，也会到当前夸克保存目录里删除匹配到的影片或剧集目录。',
               value: _syncDeleteQuarkEnabled,
               autofocus: true,
               focusId: 'network-storage-sync:delete',
@@ -652,7 +744,7 @@ class _NetworkStorageEditorPageState
             const SizedBox(height: 12),
             const SettingsSectionTitle(label: 'WebDAV 删除监听目录'),
             Text(
-              '只会在这里选中的 WebDAV 目录范围内触发夸克同步删除。',
+              '只会在这里选中的 WebDAV 目录范围内触发$_driveName同步删除。',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -702,7 +794,7 @@ class _NetworkStorageEditorPageState
               const Text('未选择目录'),
           ],
           if (widget.section == NetworkStorageEditorSection.smartStrm) ...[
-            const SettingsSectionTitle(label: 'SmartStrm'),
+            const SettingsSectionTitle(label: '公共配置'),
             SettingsTextInputField(
               controller: _smartStrmWebhookController,
               labelText: 'Webhook 地址',
@@ -713,29 +805,11 @@ class _NetworkStorageEditorPageState
               focusId: 'network-storage-smart-strm:webhook',
             ),
             const SizedBox(height: 12),
-            SettingsTextInputField(
-              controller: _smartStrmTaskNameController,
-              labelText: '任务名',
-              hintText: 'movie_task',
-            ),
-            const SizedBox(height: 12),
             SettingsSelectionTile(
               title: 'STRM 触发等待时间',
-              subtitle: '保存到夸克后，等待多久再触发 Smart STRM 任务。',
+              subtitle: '保存到夸克或 115 后，等待多久再触发 Smart STRM 任务。',
               value: '${_smartStrmDelaySeconds()} 秒',
               onPressed: _openSmartStrmDelayPicker,
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                SettingsActionButton(
-                  label: _isTestingSmartStrm ? '测试中...' : '测试 STRM 任务',
-                  icon: Icons.bolt_rounded,
-                  onPressed: _isTestingSmartStrm ? null : _testSmartStrmTask,
-                ),
-              ],
             ),
           ],
           if (widget.section ==

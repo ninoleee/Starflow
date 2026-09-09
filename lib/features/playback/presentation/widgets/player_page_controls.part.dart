@@ -380,7 +380,14 @@ extension _PlayerPageStateControls on _PlayerPageState {
         initialData: player.state.buffering,
         builder: (context, bufferingSnapshot) {
           final isBuffering = bufferingSnapshot.data ?? false;
-          if (!isBuffering) {
+          final phase = resolvePlaybackPhase(
+            ready: _isReady,
+            playing: player.state.playing,
+            buffering: isBuffering,
+            ended: player.state.completed,
+            failed: _error != null,
+          );
+          if (!phase.showsLoading) {
             return const SizedBox.shrink();
           }
           return StreamBuilder<double>(
@@ -573,32 +580,11 @@ extension _PlayerPageStateControls on _PlayerPageState {
       state,
       settings: settings,
     );
-    final isPortrait = _shouldInsetAdaptivePortraitControls(context);
-    final viewPadding = MediaQuery.viewPaddingOf(context);
-    const portraitTopInset = 18.0;
-    const portraitBottomInset = 28.0;
-    const portraitFullscreenBottomInset = 64.0;
-    final controlsPadding = isPortrait
-        ? EdgeInsets.fromLTRB(
-            viewPadding.left,
-            viewPadding.top + portraitTopInset,
-            viewPadding.right,
-            viewPadding.bottom + portraitBottomInset,
-          )
-        : viewPadding + const EdgeInsets.only(bottom: 6);
-    final bottomInset = isPortrait
-        ? fullscreen
-            ? portraitFullscreenBottomInset
-            : portraitBottomInset
-        : 0.0;
+    final controlsPadding = playbackControlsPadding(
+      viewport: MediaQuery.sizeOf(context),
+      safeArea: MediaQuery.viewPaddingOf(context),
+    );
     final enableVerticalGestureControls = _supportsAdaptiveVerticalGestures;
-    final seekBarMargin = isPortrait
-        ? EdgeInsets.only(
-            left: 16,
-            right: 16,
-            bottom: bottomInset,
-          )
-        : EdgeInsets.zero;
     return MaterialVideoControlsThemeData(
       automaticallyImplySkipNextButton: false,
       automaticallyImplySkipPreviousButton: false,
@@ -619,13 +605,9 @@ extension _PlayerPageStateControls on _PlayerPageState {
       padding: controlsPadding,
       primaryButtonBar: _buildAdaptiveMaterialPrimaryButtonBar(),
       topButtonBar: materialTopButtonBar,
-      topButtonBarMargin: EdgeInsets.fromLTRB(0, isPortrait ? 12 : 0, 16, 0),
-      bottomButtonBarMargin: EdgeInsets.only(
-        left: isPortrait ? 16 : 0,
-        right: isPortrait ? 8 : 0,
-        bottom: bottomInset,
-      ),
-      seekBarMargin: seekBarMargin,
+      topButtonBarMargin: EdgeInsets.zero,
+      bottomButtonBarMargin: EdgeInsets.zero,
+      seekBarMargin: playbackSeekBarMargin,
     );
   }
 
@@ -639,44 +621,20 @@ extension _PlayerPageStateControls on _PlayerPageState {
       state,
       settings: settings,
     );
-    final isPortrait = _shouldInsetAdaptivePortraitControls(context);
-    final viewPadding = MediaQuery.viewPaddingOf(context);
-    const portraitTopInset = 18.0;
-    const portraitBottomInset = 28.0;
-    final controlsPadding = isPortrait
-        ? EdgeInsets.fromLTRB(
-            viewPadding.left,
-            viewPadding.top + portraitTopInset,
-            viewPadding.right,
-            viewPadding.bottom + portraitBottomInset,
-          )
-        : viewPadding + const EdgeInsets.only(bottom: 6);
-    final bottomInset = isPortrait ? portraitBottomInset : 0.0;
+    final controlsPadding = playbackControlsPadding(
+      viewport: MediaQuery.sizeOf(context),
+      safeArea: MediaQuery.viewPaddingOf(context),
+    );
     return MaterialDesktopVideoControlsThemeData(
       automaticallyImplySkipNextButton: false,
       automaticallyImplySkipPreviousButton: false,
       padding: controlsPadding,
       topButtonBar: desktopTopButtonBar,
-      topButtonBarMargin: EdgeInsets.fromLTRB(0, isPortrait ? 12 : 0, 16, 0),
-      bottomButtonBarMargin: EdgeInsets.fromLTRB(
-        isPortrait ? 16 : 0,
-        0,
-        isPortrait ? 16 : 0,
-        bottomInset,
-      ),
+      topButtonBarMargin: EdgeInsets.zero,
+      bottomButtonBarMargin: EdgeInsets.zero,
       bottomButtonBar: _buildAdaptiveDesktopBottomButtonBar(),
-      seekBarMargin: EdgeInsets.fromLTRB(
-        isPortrait ? 16 : 0,
-        0,
-        isPortrait ? 16 : 0,
-        bottomInset,
-      ),
+      seekBarMargin: playbackSeekBarMargin,
     );
-  }
-
-  bool _shouldInsetAdaptivePortraitControls(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    return size.height > size.width;
   }
 
   bool get _supportsAdaptiveVerticalGestures {
@@ -1117,13 +1075,23 @@ extension _PlayerPageStateControls on _PlayerPageState {
     bool buffering, {
     required double percentage,
   }) {
-    if (!_shouldTraceWindowsMpv) {
-      return;
-    }
     if (_lastTracedBufferingState == buffering) {
       return;
     }
     _lastTracedBufferingState = buffering;
+    final player = _player;
+    appLogInfo('playback.reliability', 'Playback state', fields: {
+      'engine': 'mpv',
+      'policyVersion': PlaybackPolicyValues.version,
+      'phase': resolvePlaybackPhase(
+        ready: _isReady,
+        playing: player?.state.playing ?? false,
+        buffering: buffering,
+        ended: player?.state.completed ?? false,
+        failed: _error != null,
+      ).name,
+      'positionMs': player?.state.position.inMilliseconds ?? 0,
+    });
     if (!buffering) {
       _lastTracedBufferingBucket = null;
     }

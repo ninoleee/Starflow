@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.ResultReceiver
 import androidx.media3.common.PlaybackException
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_LAUNCH_RESULT_RECEIVER
@@ -17,12 +18,14 @@ import com.example.starflow.NativePlaybackActivity.Companion.RESULT_PLAYBACK_CAN
 internal class NativePlaybackLaunchController(
     private val host: Host,
     private val playbackLaunchTimeoutHandler: Handler = Handler(Looper.getMainLooper()),
+    private val now: () -> Long = SystemClock::elapsedRealtime,
 ) {
     interface Host {
         val session: NativePlaybackSession
         val diagnostics: NativePlaybackDiagnostics
         val episodes: NativePlaybackEpisodeController
         val activity: Activity
+        val recovery: NativePlaybackRecoveryController
     }
 
     private var launchResultReceiver: ResultReceiver? = null
@@ -37,14 +40,14 @@ internal class NativePlaybackLaunchController(
     private var startupBufferedPositionMs = 0L
 
     private var startupBufferedPercentage = 0
+    private val startupProgress = PlaybackBufferProgress()
+    private var startupDeadlineMs = 0L
+    private var startupAttempts = 0
 
     private val playbackLaunchTimeoutRunnable = Runnable {
         if (startupPending && !host.activity.isFinishing && !host.activity.isDestroyed) {
-            // A slow source is not a dead one. While bytes keep landing, give the
-            // load another window instead of tearing down a NAS that simply needs
-            // longer than the timeout; the stall watchdog already owns the case
-            // where buffering stops moving altogether.
-            if (consumeStartupBufferProgress()) {
+            // Buffer progress earns another window, never a new hard deadline.
+            if (now() < startupDeadlineMs && consumeStartupBufferProgress()) {
                 NativePlaybackFormatting.logPlayback(
                     "native.launch.timeout.extended " +
                         "bufferedPositionMs=$startupBufferedPositionMs " +
@@ -63,15 +66,14 @@ internal class NativePlaybackLaunchController(
         val player = host.session.player ?: return false
         val bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0L)
         val bufferedPercentage = player.bufferedPercentage.coerceIn(0, 100)
-        val progressed =
-            bufferedPositionMs > startupBufferedPositionMs + PLAYBACK_LAUNCH_BUFFER_ADVANCE_MS ||
-                bufferedPercentage > startupBufferedPercentage
+        val progressed = startupProgress.observe(bufferedPositionMs, bufferedPercentage)
         startupBufferedPositionMs = bufferedPositionMs
         startupBufferedPercentage = bufferedPercentage
         return progressed
     }
 
     fun applyIntent(intent: Intent) {
+        resetStartupDeadline()
         launchRequestId =
             intent.getStringExtra(NativePlaybackActivity.EXTRA_LAUNCH_REQUEST_ID)?.trim().orEmpty()
         launchResultReceiver = readLaunchResultReceiver(intent)
@@ -96,6 +98,7 @@ internal class NativePlaybackLaunchController(
     }
 
     fun reportPlaybackLaunchResult(resultCode: Int, message: String = "") {
+        if (resultCode == NativePlaybackActivity.RESULT_PLAYBACK_READY) resetStartupDeadline()
         if (launchResultDelivered) {
             return
         }
@@ -149,6 +152,8 @@ internal class NativePlaybackLaunchController(
                 .setCancelable(false)
                 .setPositiveButton("重试") { _, _ ->
                     playbackErrorDialog = null
+                    host.recovery.resetForNewMedia()
+                    resetStartupDeadline()
                     host.diagnostics.playbackPerformanceTracker.onRecovery()
                     host.session.nextInitializePlayWhenReady = true
                     host.session.initializePlayer()
@@ -175,6 +180,15 @@ internal class NativePlaybackLaunchController(
     }
 
     fun schedulePlaybackLaunchTimeout() {
+        startupAttempts++
+        if (startupAttempts > PlaybackPolicyValues.maxPlayerAttempts) {
+            handlePlaybackFailure("超过最大播放尝试次数，请检查网络后重试。")
+            return
+        }
+        startupProgress.reset()
+        if (startupDeadlineMs == 0L) {
+            startupDeadlineMs = now() + PlaybackPolicyValues.startupHardLimitMs
+        }
         startupBufferedPositionMs = 0L
         startupBufferedPercentage = 0
         armPlaybackLaunchTimeout()
@@ -185,13 +199,18 @@ internal class NativePlaybackLaunchController(
         startupPending = true
         playbackLaunchTimeoutHandler.postDelayed(
             playbackLaunchTimeoutRunnable,
-            PLAYBACK_LAUNCH_TIMEOUT_MS,
+            minOf(PLAYBACK_LAUNCH_TIMEOUT_MS, (startupDeadlineMs - now()).coerceAtLeast(0L)),
         )
     }
 
     fun cancelPlaybackLaunchTimeout() {
         startupPending = false
         playbackLaunchTimeoutHandler.removeCallbacks(playbackLaunchTimeoutRunnable)
+    }
+
+    fun resetStartupDeadline() {
+        startupDeadlineMs = 0L
+        startupAttempts = 0
     }
 
     private fun buildPlaybackErrorMessage(error: PlaybackException): String {

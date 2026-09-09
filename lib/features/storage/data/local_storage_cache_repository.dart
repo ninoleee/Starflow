@@ -1027,11 +1027,21 @@ class LocalStorageCacheRepository {
         break;
       }
     }
-    recordId ??= requestLookupKeys.first;
+    if (recordId == null) {
+      final baseRecordId = requestLookupKeys.first;
+      var newRecordId = baseRecordId;
+      // Legacy aliases may point at an incompatible episode stored under this ID.
+      var suffix = 1;
+      while (records.containsKey(newRecordId)) {
+        newRecordId = '$baseRecordId|record:${suffix++}';
+      }
+      recordId = newRecordId;
+    }
 
     final existing = records[recordId];
     final mergedLookupKeys = {
-      if (existing != null) ...existing.lookupKeys,
+      if (existing != null)
+        ...existing.lookupKeys.where((key) => lookupKeys[key] == recordId),
       ...requestLookupKeys,
     }.toList(growable: false)
       ..sort();
@@ -1643,18 +1653,22 @@ class LocalStorageCacheRepository {
     final keys = <String>{};
     final detailKind = _detailLookupKind(target);
     final isNestedEpisodic = _isNestedEpisodicKind(detailKind);
+    final nestedScope = _nestedDetailLookupScope(target);
 
     void addKey(String key) {
+      if (isNestedEpisodic && nestedScope == null) {
+        return;
+      }
       final trimmed = key.trim();
       if (trimmed.isNotEmpty) {
-        keys.add(trimmed);
+        keys.add(isNestedEpisodic ? '$trimmed|$nestedScope' : trimmed);
       }
     }
 
     final sourceId = target.sourceId.trim();
     final itemId = target.itemId.trim();
     if (sourceId.isNotEmpty && itemId.isNotEmpty) {
-      addKey('library|$sourceId|$itemId');
+      keys.add('library|$sourceId|$itemId');
     }
 
     final doubanId = target.doubanId.trim();
@@ -2185,6 +2199,25 @@ bool _isNestedEpisodicKind(String detailKind) {
   return detailKind == 'episode' || detailKind == 'season';
 }
 
+String? _nestedDetailLookupScope(MediaDetailTarget target) {
+  final kind = _detailLookupKind(target);
+  if (!_isNestedEpisodicKind(kind)) {
+    return null;
+  }
+  final season = target.seasonNumber ?? target.playbackTarget?.seasonNumber;
+  if (season == null || season < 0) {
+    return null;
+  }
+  if (kind == 'season') {
+    return 's:$season';
+  }
+  final episode = target.episodeNumber ?? target.playbackTarget?.episodeNumber;
+  if (episode == null || episode <= 0) {
+    return null;
+  }
+  return 's:$season|e:$episode';
+}
+
 bool _isTopLevelDetailKind(String detailKind) {
   return detailKind == 'series' || detailKind == 'movie';
 }
@@ -2200,6 +2233,36 @@ bool _canShareDetailCacheRecord({
   }
   if (_isNestedEpisodicKind(leftKind) && _isTopLevelDetailKind(rightKind)) {
     return false;
+  }
+  if (_isNestedEpisodicKind(leftKind) || _isNestedEpisodicKind(rightKind)) {
+    if (leftKind != rightKind) {
+      return false;
+    }
+    final leftSeason = left.seasonNumber ?? left.playbackTarget?.seasonNumber;
+    final rightSeason =
+        right.seasonNumber ?? right.playbackTarget?.seasonNumber;
+    final leftEpisode =
+        left.episodeNumber ?? left.playbackTarget?.episodeNumber;
+    final rightEpisode =
+        right.episodeNumber ?? right.playbackTarget?.episodeNumber;
+    if ((leftSeason != null &&
+            rightSeason != null &&
+            leftSeason != rightSeason) ||
+        (leftKind == 'episode' &&
+            leftEpisode != null &&
+            rightEpisode != null &&
+            leftEpisode != rightEpisode)) {
+      return false;
+    }
+    final leftScope = _nestedDetailLookupScope(left);
+    final rightScope = _nestedDetailLookupScope(right);
+    if (leftScope != null && rightScope != null) {
+      return leftScope == rightScope;
+    }
+    return left.sourceId.trim().isNotEmpty &&
+        left.itemId.trim().isNotEmpty &&
+        left.sourceId.trim() == right.sourceId.trim() &&
+        left.itemId.trim() == right.itemId.trim();
   }
   return true;
 }

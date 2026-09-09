@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "maxPlayerAttempts": 3,
+  "maxRuntimeRecoveries": 2,
+  "startupHardLimitMs": 120000,
+  "bufferAdvanceMs": 1000,
+  "bufferAdvancePercent": 1,
+  "positionAdvanceMs": 250,
+  "backwardSeekMs": 1000,
+  "remoteErrorConfirmationMs": 15000,
+  "localErrorConfirmationMs": 3000,
+  "recoveryCooldownMs": 10000,
+  "transientHttpStatuses": [408, 425, 429],
+  "permanentHttpStatuses": [400, 401, 403, 404, 405, 410, 416],
+  "refreshableHttpStatuses": [401, 403, 404, 410]
+}

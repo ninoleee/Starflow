@@ -13,6 +13,69 @@ void main() {
     webDavSeriesTitleFilterKeywords: ['movies', 'strm', 'quark'],
   );
 
+  test('keeps all Local Perspective files in their real seasons and episodes',
+      () {
+    const seasonFolders = [
+      '局部1.9.6.Local.Perspective.EP01-16.2015.4K.WEB-DL.HEVC.AAC-HQC',
+      '局部2.9.4.Local.Perspective.S02.2018.4K.WEB-DL.HEVC.AAC-HQC',
+      '局部3.9.6.Local.Perspective.S03.2020.4K.WEB-DL.HEVC.AAC-HQC',
+    ];
+    final items = <ExternalScanPendingItem>[];
+    for (var season = 1; season <= 3; season++) {
+      for (var episode = 1; episode <= (season == 3 ? 12 : 16); episode++) {
+        final fileName = season == 1 && episode == 16
+            ? '16(1080x264).(mp4).strm'
+            : '${episode.toString().padLeft(2, '0')}.(mp4).strm';
+        final directories = [
+          'strm',
+          'quark',
+          '陈丹青',
+          '局bu',
+          seasonFolders[season - 1],
+        ];
+        items.add(_pendingItem(
+          id: 's${season}e$episode',
+          address: '/movies/${directories.join('/')}/$fileName',
+          directories: directories,
+        ));
+      }
+    }
+    final resolved =
+        applyExternalDirectoryStructureInference(items, source: source);
+    expect(resolved, hasLength(44));
+    for (var season = 1; season <= 3; season++) {
+      final count = season == 3 ? 12 : 16;
+      for (var episode = 1; episode <= count; episode++) {
+        final item = resolved
+            .singleWhere((item) => item.resourceId == 's${season}e$episode');
+        expect(item.metadataSeed.itemType, 'episode');
+        expect(item.metadataSeed.seasonNumber, season,
+            reason: item.actualAddress);
+        expect(item.metadataSeed.episodeNumber, episode,
+            reason: item.actualAddress);
+      }
+    }
+  });
+
+  test('preserves numeric episodes with attached brackets and missing numbers',
+      () {
+    final names = [
+      '01.(mp4).strm',
+      '10[1080p].strm',
+      '16(1080x264).(mp4).strm'
+    ];
+    final resolved = applyExternalDirectoryStructureInference([
+      for (final name in names)
+        _pendingItem(
+          id: name,
+          address: '/movies/strm/quark/Show/Season 1/$name',
+          directories: const ['strm', 'quark', 'Show', 'Season 1'],
+        ),
+    ], source: source);
+    expect(
+        resolved.map((item) => item.metadataSeed.episodeNumber), [1, 10, 16]);
+  });
+
   test('groups SE folders under the parent series with explicit episodes', () {
     final resolved = applyExternalDirectoryStructureInference(
       [

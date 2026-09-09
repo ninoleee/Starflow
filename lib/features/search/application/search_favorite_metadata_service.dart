@@ -34,6 +34,36 @@ class SearchFavoriteMetadataService {
 
   final SearchFavoriteMetadataResolver? _resolveMatch;
 
+  Future<SearchResult> enrichPoster({
+    required SearchResult result,
+    required AppSettings settings,
+  }) async {
+    if (result.posterUrl.trim().isNotEmpty) {
+      return result;
+    }
+    final detailTarget = result.detailTarget;
+    if (detailTarget != null && detailTarget.posterUrl.trim().isNotEmpty) {
+      return result.copyWith(
+        posterUrl: detailTarget.posterUrl,
+        posterHeaders: detailTarget.posterHeaders,
+      );
+    }
+    final enriched = await enrichFavorite(
+      result: result,
+      query: '',
+      settings: settings,
+    );
+    if (result.tmdbId.trim().isNotEmpty &&
+        result.tmdbId.trim() != enriched.tmdbId.trim()) {
+      return result;
+    }
+    // Backfilling artwork must not rename or rematch the saved resource identity.
+    return result.copyWith(
+      posterUrl: enriched.posterUrl,
+      posterHeaders: enriched.posterHeaders,
+    );
+  }
+
   Future<SearchResult> enrichFavorite({
     required SearchResult result,
     required String query,
@@ -157,6 +187,12 @@ class SearchFavoriteMetadataService {
     final preferredSearchName = _preferredSearchName(result, query);
     final normalizedTitle = result.title.trim();
     return result.copyWith(
+      posterUrl: result.posterUrl.trim().isNotEmpty
+          ? result.posterUrl
+          : detailTarget?.posterUrl ?? '',
+      posterHeaders: result.posterUrl.trim().isNotEmpty
+          ? result.posterHeaders
+          : detailTarget?.posterHeaders ?? const {},
       title: preferredSearchName.isNotEmpty
           ? preferredSearchName
           : normalizedTitle.isNotEmpty
@@ -203,7 +239,8 @@ class SearchFavoriteMetadataService {
   }
 
   bool _hasResolvedFavoriteMetadata(SearchResult result) {
-    return result.tmdbId.trim().isNotEmpty &&
+    return result.posterUrl.trim().isNotEmpty &&
+        result.tmdbId.trim().isNotEmpty &&
         result.title.trim().isNotEmpty &&
         result.favoriteFolderName.trim().isNotEmpty;
   }
@@ -236,6 +273,11 @@ class SearchFavoriteMetadataService {
         ? result.originalSearchTitle.trim()
         : result.title.trim();
     return result.copyWith(
+      posterUrl: result.posterUrl.trim().isNotEmpty
+          ? result.posterUrl
+          : match.posterUrl.trim(),
+      posterHeaders:
+          result.posterUrl.trim().isNotEmpty ? result.posterHeaders : const {},
       title: nextTitle,
       originalSearchTitle: nextOriginalTitle,
       favoriteFolderName: result.favoriteFolderName.trim().isNotEmpty

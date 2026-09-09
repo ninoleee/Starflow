@@ -2,15 +2,20 @@
 
 part of '../player_page.dart';
 
-const Duration _kRuntimeMpvErrorConfirmWindow = Duration(seconds: 3);
+const Duration _kRuntimeMpvErrorConfirmWindow = Duration(
+  milliseconds: PlaybackPolicyValues.localErrorConfirmationMs,
+);
 const Duration _kRuntimeMpvErrorBurstWindow = Duration(seconds: 10);
 const int _kMaxTransientRuntimeMpvErrorBurst = 2;
-const int _kMaxRuntimeMpvErrorRecoveryAttempts = 2;
+const int _kMaxRuntimeMpvErrorRecoveryAttempts =
+    PlaybackPolicyValues.maxRuntimeRecoveries;
 
 extension _PlayerPageStateStartupMpv on _PlayerPageState {
   Future<void> _initialize({
     PlaybackTarget? initialTarget,
+    bool automaticRecovery = false,
   }) async {
+    if (!automaticRecovery) _automaticRecoveryBudget.reset();
     final generation = ++_startupGeneration;
     _startupScope.cancel();
     final scope = _startupScope = MpvStartupScope();
@@ -363,6 +368,6 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     if (remotePlayback && isLikelyQuarkPlaybackTarget(target)) {
       resolved += 10;
     }
-    return resolved.clamp(1, 120);
+    return resolved.clamp(1, PlaybackPolicyValues.startupHardLimitMs ~/ 1000);
   }
 }

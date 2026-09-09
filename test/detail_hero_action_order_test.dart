@@ -8,6 +8,7 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/details/application/detail_start_playback_resolver.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_hero_section.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -19,6 +20,245 @@ import 'package:starflow/features/playback/domain/playback_models.dart';
 void main() {
   setUp(() => activePlaybackLaunchInProgress.value = false);
   tearDown(() => activePlaybackLaunchInProgress.value = false);
+
+  const seriesTarget = MediaDetailTarget(
+    title: 'Series',
+    posterUrl: '',
+    overview: '',
+    sourceId: 'nas',
+    itemId: 'series',
+    itemType: 'series',
+  );
+  const historyTarget = PlaybackTarget(
+    title: 'Episode 4',
+    sourceId: 'nas',
+    itemId: 'episode-4',
+    itemType: 'episode',
+    seriesId: 'series',
+    seriesTitle: 'Series',
+    seasonNumber: 2,
+    episodeNumber: 4,
+    streamUrl: 'https://example.com/episode-4.mkv',
+    sourceName: 'NAS',
+    sourceKind: MediaSourceKind.nas,
+    headers: {'Authorization': 'test-token'},
+    preferredMediaSourceId: 'version-2',
+  );
+  final historyEntry = PlaybackProgressEntry(
+    key: buildPlaybackItemKey(historyTarget),
+    target: historyTarget,
+    updatedAt: _testUpdatedAt,
+    position: const Duration(minutes: 12),
+    duration: const Duration(hours: 1),
+  );
+
+  test('matched resource identity does not require a playback target', () {
+    expect(seriesTarget.hasMatchedResource, isTrue);
+    expect(seriesTarget.copyWith(itemType: 'movie').hasMatchedResource, isTrue);
+    const metadataOnly = MediaDetailTarget(
+      title: 'Series',
+      posterUrl: '',
+      overview: '',
+      tmdbId: '123',
+    );
+    expect(metadataOnly.hasMatchedResource, isFalse);
+    expect(metadataOnly.copyWith(sourceId: 'nas').hasMatchedResource, isFalse);
+    expect(metadataOnly.copyWith(itemId: 'series').hasMatchedResource, isFalse);
+    expect(
+        metadataOnly.copyWith(playbackTarget: historyTarget).hasMatchedResource,
+        isTrue);
+  });
+
+  for (final itemType in ['series', 'movie']) {
+    for (final historyFails in [false, true]) {
+      testWidgets(
+          '$itemType match shows start independently of history, error: $historyFails',
+          (tester) async {
+        final snapshot = Completer<PlaybackMemorySnapshot>();
+        final target = ValueNotifier(const MediaDetailTarget(
+          title: 'Unmatched',
+          posterUrl: '',
+          overview: '',
+        ));
+        addTearDown(target.dispose);
+        await tester.pumpWidget(ProviderScope(
+          overrides: [
+            appSettingsProvider.overrideWithValue(SeedData.defaultSettings),
+            isTelevisionProvider.overrideWith((ref) => true),
+            playbackMemorySnapshotProvider
+                .overrideWith((ref) => snapshot.future),
+            detailStartPlaybackResolverProvider.overrideWith((ref) {
+              throw StateError('Rendering must not resolve playback');
+            }),
+          ],
+          child: MaterialApp(
+              home: Scaffold(
+            body: ValueListenableBuilder<MediaDetailTarget>(
+              valueListenable: target,
+              builder: (_, current, __) => DetailHeroSection(
+                target: current,
+                simplifyVisualEffects: true,
+                isTelevision: true,
+              ),
+            ),
+          )),
+        ));
+        expect(find.text('从头播放'), findsNothing);
+        target.value = seriesTarget.copyWith(itemType: itemType);
+        await tester.pump();
+        expect(find.text('从头播放'), findsOneWidget);
+        final start = tester.element(find.text('从头播放'));
+        expect(
+            tester
+                .widget<StarflowButton>(find.byType(StarflowButton))
+                .onPressed,
+            isNotNull);
+        if (historyFails) {
+          snapshot.completeError(StateError('History unavailable'));
+        } else {
+          snapshot.complete(PlaybackMemorySnapshot());
+        }
+        await tester.pumpAndSettle();
+        target.value = target.value.copyWith(overview: 'Updated metadata');
+        await tester.pumpAndSettle();
+        expect(tester.element(find.text('从头播放')), same(start));
+        expect(find.text('继续播放'), findsNothing);
+        expect(
+            tester
+                .widget<StarflowButton>(find.byType(StarflowButton))
+                .onPressed,
+            isNotNull);
+        target.value =
+            target.value.copyWith(sourceId: 'other', itemId: 'other-item');
+        await tester.pumpAndSettle();
+        expect(tester.element(find.text('从头播放')), same(start));
+        target.value = const MediaDetailTarget(
+          title: 'Unmatched',
+          posterUrl: '',
+          overview: '',
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('从头播放'), findsNothing);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
+  testWidgets('completed and cleared history leave matched start mounted',
+      (tester) async {
+    final seriesKey = buildSeriesKeyForMetadata(
+      sourceId: 'nas',
+      itemId: 'series',
+      title: 'Series',
+      year: 0,
+    );
+    var snapshot = PlaybackMemorySnapshot(series: {seriesKey: historyEntry});
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        appSettingsProvider.overrideWithValue(SeedData.defaultSettings),
+        isTelevisionProvider.overrideWith((ref) => true),
+        playbackMemorySnapshotProvider.overrideWith((ref) => snapshot),
+      ],
+      child: const MaterialApp(
+          home: Scaffold(
+              body: DetailHeroSection(
+        target: seriesTarget,
+        simplifyVisualEffects: true,
+        isTelevision: true,
+      ))),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('继续播放'), findsOneWidget);
+    final start = tester.element(find.text('从头播放'));
+    final container = ProviderScope.containerOf(start);
+    for (final next in [
+      PlaybackMemorySnapshot(
+          series: {seriesKey: historyEntry.copyWith(completed: true)}),
+      PlaybackMemorySnapshot(),
+    ]) {
+      snapshot = next;
+      container.invalidate(playbackMemorySnapshotProvider);
+      await tester.pumpAndSettle();
+      expect(find.text('继续播放'), findsNothing);
+      expect(tester.element(find.text('从头播放')), same(start));
+      expect(
+          tester.widget<StarflowButton>(find.byType(StarflowButton)).onPressed,
+          isNotNull);
+      expect(tester.takeException(), isNull);
+    }
+  });
+
+  for (final startsWithPlayback in [false, true]) {
+    testWidgets(
+        'series resume always has start, initial playback: $startsWithPlayback',
+        (tester) async {
+      final snapshot = Completer<PlaybackMemorySnapshot>();
+      final target = ValueNotifier(startsWithPlayback
+          ? seriesTarget.copyWith(playbackTarget: historyTarget)
+          : seriesTarget);
+      addTearDown(target.dispose);
+      final playFocusNode = FocusNode(debugLabel: 'series-primary-play');
+      addTearDown(playFocusNode.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(SeedData.defaultSettings),
+          isTelevisionProvider.overrideWith((ref) => true),
+          playbackMemorySnapshotProvider.overrideWith((ref) => snapshot.future),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: ValueListenableBuilder<MediaDetailTarget>(
+              valueListenable: target,
+              builder: (_, current, __) => DetailHeroSection(
+                target: current,
+                simplifyVisualEffects: true,
+                isTelevision: true,
+                playFocusNode: playFocusNode,
+              ),
+            ),
+          ),
+        ),
+      ));
+      expect(find.text('从头播放'), findsOneWidget);
+      expect(find.text('继续播放'), findsNothing);
+      final startElement = tester.element(find.text('从头播放'));
+      snapshot.complete(PlaybackMemorySnapshot(series: {
+        buildSeriesKeyForMetadata(
+          sourceId: 'nas',
+          itemId: 'series',
+          title: 'Series',
+          year: 0,
+        ): historyEntry,
+      }));
+      await tester.pumpAndSettle();
+      expect(find.text('继续播放'), findsOneWidget);
+      expect(find.text('从头播放'), findsOneWidget);
+      expect(playFocusNode.hasFocus, isTrue);
+      expect(tester.element(find.text('从头播放')), same(startElement));
+
+      // A series-only refresh must not remove start while resume stays valid.
+      target.value = seriesTarget;
+      await tester.pumpAndSettle();
+      expect(tester.element(find.text('从头播放')), same(startElement));
+      expect(tester.getTopLeft(find.text('继续播放')).dx,
+          lessThan(tester.getTopLeft(find.text('从头播放')).dx));
+      expect(
+          tester
+              .widgetList<StarflowButton>(find.byType(StarflowButton))
+              .every((button) => button.onPressed != null),
+          isTrue);
+      expect(
+          tester
+              .widget<DetailHeroContent>(find.byType(DetailHeroContent))
+              .resolveStartTarget,
+          isNotNull);
+      final content =
+          tester.widget<DetailHeroContent>(find.byType(DetailHeroContent));
+      expect(content.resumePlaybackTarget!.itemId, 'episode-4');
+      expect(content.resumePlaybackTarget!.allowResume, isTrue);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   test('resume position label names season, episode and clock position', () {
     const resumeTarget = PlaybackTarget(
@@ -86,7 +326,7 @@ void main() {
               peopleLine: '',
               simplifyVisualEffects: true,
               isTelevision: true,
-              startPlaybackTarget: startTarget,
+              resolveStartTarget: () async => startTarget,
               resumePlaybackTarget: resumeTarget,
               playFocusNode: playFocusNode,
             ),
@@ -200,7 +440,8 @@ void main() {
     expect(repository.loadSnapshotCount, 1);
   });
 
-  testWidgets('cold history load keeps start action mounted while adding resume',
+  testWidgets(
+      'cold history load keeps start action mounted while adding resume',
       (tester) async {
     final snapshot = Completer<PlaybackMemorySnapshot>();
     const playback = PlaybackTarget(
@@ -318,7 +559,7 @@ void main() {
                 peopleLine: '',
                 simplifyVisualEffects: true,
                 isTelevision: true,
-                startPlaybackTarget: playback,
+                resolveStartTarget: () async => playback,
                 resumePlaybackTarget: null,
                 playbackActionsReady: ready,
               ),
@@ -355,15 +596,15 @@ void main() {
     final router = GoRouter(routes: [
       GoRoute(
           path: '/',
-          builder: (_, __) => const Scaffold(
+          builder: (_, __) => Scaffold(
                 body: DetailHeroContent(
-                  target: MediaDetailTarget(
+                  target: const MediaDetailTarget(
                       title: 'Movie', posterUrl: '', overview: ''),
                   metadata: [],
                   peopleLine: '',
                   simplifyVisualEffects: true,
                   isTelevision: false,
-                  startPlaybackTarget: playback,
+                  resolveStartTarget: () async => playback,
                   resumePlaybackTarget: playback,
                 ),
               )),

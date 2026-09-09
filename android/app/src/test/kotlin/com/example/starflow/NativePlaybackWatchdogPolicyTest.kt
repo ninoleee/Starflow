@@ -45,9 +45,9 @@ class NativePlaybackWatchdogPolicyTest {
     }
 
     @Test
-    fun exactBufferAdvanceThresholdDoesNotResetTimer() {
+    fun exactBufferAdvanceThresholdResetsTimer() {
         timeMs += 45_000L
-        assertTrue(stalled(buffered = 1_000L, buffering = true, playing = false))
+        assertFalse(stalled(buffered = 1_000L, buffering = true, playing = false))
     }
 
     @Test
@@ -59,8 +59,8 @@ class NativePlaybackWatchdogPolicyTest {
     @Test
     fun forwardProgressAndBackwardSeekResetTimeout() {
         timeMs += 15_000L
-        assertTrue(stalled(position = 500L))
-        assertFalse(stalled(position = 501L))
+        assertTrue(stalled(position = 249L))
+        assertFalse(stalled(position = 250L))
         policy.reset(5_000L, 5_000L, 0)
         timeMs += 15_000L
         assertTrue(stalled(position = 4_000L))

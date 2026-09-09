@@ -18,6 +18,7 @@ import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
@@ -28,6 +29,64 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
+
+  for (final deleteSucceeds in [true, false]) {
+    test(
+        '115 sync delete clears local index only after remote success: $deleteSucceeds',
+        () async {
+      const source = MediaSourceConfig(
+          id: 'nas-115',
+          name: 'NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/dav/',
+          enabled: true);
+      const resource = 'https://nas.example.com/dav/115/E01.strm';
+      final webDav = _RecordingWebDavNasClient();
+      final indexer = _FakeNasMediaIndexer();
+      final drive = Cloud115SaveClient(MockClient((request) async {
+        if (request.method == 'POST') {
+          expect(webDav.deletedResourcePaths, [resource]);
+          return http.Response(
+              deleteSucceeds ? '{"state":true}' : '{"state":false}', 200);
+        }
+        expect(webDav.deletedResourcePaths, isEmpty);
+        return http.Response(
+            '{"state":true,"count":1,"data":[{"fid":"30","n":"E01.mkv"}]}',
+            200);
+      }));
+      final container = ProviderContainer(overrides: [
+        appSettingsProvider.overrideWithValue(SeedData.defaultSettings.copyWith(
+            mediaSources: [source],
+            networkStorage: const NetworkStorageConfig(
+                cloud115Cookie: 'test',
+                cloud115SaveFolderId: '10',
+                syncDelete115Enabled: true,
+                syncDelete115WebDavDirectories: [
+                  NetworkStorageWebDavDirectory(
+                      sourceId: 'nas-115',
+                      directoryId: 'https://nas.example.com/dav/115')
+                ]))),
+        webDavNasClientProvider.overrideWithValue(webDav),
+        cloud115SaveClientProvider.overrideWithValue(drive),
+        nasMediaIndexerProvider.overrideWithValue(indexer),
+        localStorageCacheRepositoryProvider
+            .overrideWithValue(_RecordingLocalStorageCacheRepository()),
+        playbackMemoryRepositoryProvider
+            .overrideWithValue(_RecordingPlaybackMemoryRepository()),
+      ]);
+      addTearDown(container.dispose);
+      final result = container
+          .read(mediaRepositoryProvider)
+          .deleteResource(sourceId: source.id, resourcePath: resource);
+      if (deleteSucceeds) {
+        await result;
+        expect(indexer.removedScopes, [resource]);
+      } else {
+        await expectLater(result, throwsA(isA<QuarkSaveException>()));
+        expect(indexer.removedScopes, isEmpty);
+      }
+    });
+  }
 
   test('nested NAS section query keeps the configured root index scope',
       () async {
