@@ -3,10 +3,12 @@ import 'package:starflow/features/search/application/cloud115_sync_delete_servic
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/library/application/app_media_query_service.dart';
 import 'package:starflow/features/library/application/empty_library_auto_rebuild_scheduler.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/data/quark_external_storage_client.dart';
@@ -111,6 +113,10 @@ class AppMediaRepository implements MediaRepository {
 
   final Ref ref;
   final EmbyApiClient _embyApiClient;
+  MediaServerClient _serverClient(MediaSourceConfig source) =>
+      source.kind == MediaSourceKind.emby
+          ? _embyApiClient
+          : ref.read(mediaServerClientProvider(source.kind));
   final WebDavNasClient _webDavNasClient;
   final NasMediaIndexer _nasMediaIndexer;
   final QuarkExternalStorageClient _quarkExternalStorageClient;
@@ -186,6 +192,7 @@ class AppMediaRepository implements MediaRepository {
   }) async {
     switch (source.kind) {
       case MediaSourceKind.emby:
+      case MediaSourceKind.fntv:
         return _queryService.loadCachedEmbyLibraryMatchItems(
           source,
           titles: titles,
@@ -235,7 +242,18 @@ class AppMediaRepository implements MediaRepository {
       return;
     }
 
-    if (source.kind == MediaSourceKind.emby) {
+    if ((source.kind == MediaSourceKind.nas &&
+            source.endpoint.trim().isNotEmpty) ||
+        (source.kind == MediaSourceKind.quark &&
+            source.hasConfiguredQuarkFolder)) {
+      ref.read(webDavScrapeProgressProvider.notifier).startScanning(
+            sourceId: source.id,
+            sourceName: source.name,
+            totalCollections: 1,
+          );
+    }
+
+    if (source.kind.isMediaServer) {
       if (!source.hasActiveSession) {
         return;
       }
@@ -430,7 +448,7 @@ class AppMediaRepository implements MediaRepository {
     if (source.kind == MediaSourceKind.quark) {
       final cookie = _quarkCookie;
       if (cookie.isEmpty) {
-        throw Exception('请先在夸克与 STRM 里填写夸克 Cookie');
+        throw Exception('请先在「网盘与转存 → 夸克云盘」中填写 Cookie');
       }
       final parsed = _parseQuarkResourceId(normalizedResourcePath);
       final directResourceId = normalizedResourcePath;
@@ -522,7 +540,13 @@ class AppMediaRepository implements MediaRepository {
     final cloud115DeletePlan = await cloud115DeleteService.prepare(
       config: ref.read(appSettingsProvider).networkStorage,
       sourceId: source.id,
-      resourcePath: effectiveResourcePath,
+      resourcePath: _webDavNasClient
+          .resolveResourceUri(
+            source,
+            resourcePath: normalizedResourcePath,
+            sectionId: sectionId,
+          )
+          .toString(),
     );
     final quarkDeletePlan = await _prepareQuarkSyncDeletePlan(
       source: source,
@@ -543,6 +567,13 @@ class AppMediaRepository implements MediaRepository {
         sectionId: sectionId,
       );
     } on WebDavDeleteException catch (error, stackTrace) {
+      if (cloud115DeletePlan != null) {
+        appLogWarning(
+          '115.sync-delete',
+          '115 sync deletion skipped after WebDAV failure',
+          fields: {'sourceId': source.id, 'statusCode': error.statusCode},
+        );
+      }
       final canDeleteFromQuarkSource = quarkDeletePlan != null &&
           const <int>{403, 405}.contains(error.statusCode);
       if (!canDeleteFromQuarkSource) {
@@ -664,13 +695,13 @@ class AppMediaRepository implements MediaRepository {
     // Transitional path kept while query responsibilities finish moving out.
     try {
       final hasScopedSections = _hasScopedSections(source);
-      if (source.kind == MediaSourceKind.emby) {
+      if (source.kind.isMediaServer) {
         if (!source.hasActiveSession) {
           return const _SourceFetchResult(items: <MediaItem>[]);
         }
         if (sectionId?.trim().isNotEmpty == true) {
           return _SourceFetchResult(
-            items: await _embyApiClient.fetchLibrary(
+            items: await _serverClient(source).fetchLibrary(
               source,
               limit: limit,
               sectionId: sectionId,
@@ -694,7 +725,7 @@ class AppMediaRepository implements MediaRepository {
         }
 
         return _SourceFetchResult(
-          items: await _embyApiClient.fetchLibrary(
+          items: await _serverClient(source).fetchLibrary(
             source,
             limit: limit,
           ),
@@ -836,8 +867,8 @@ class AppMediaRepository implements MediaRepository {
   }) async {
     final groups = await Future.wait(
       collections.map((collection) async {
-        if (source.kind == MediaSourceKind.emby) {
-          return _embyApiClient.fetchLibrary(
+        if (source.kind.isMediaServer) {
+          return _serverClient(source).fetchLibrary(
             source,
             limit: limit,
             sectionId: collection.id,
@@ -964,11 +995,11 @@ class AppMediaRepository implements MediaRepository {
     bool applySelection = true,
   }) async {
     late final List<MediaCollection> collections;
-    if (source.kind == MediaSourceKind.emby) {
+    if (source.kind.isMediaServer) {
       if (!source.hasActiveSession) {
         return const [];
       }
-      collections = await _embyApiClient.fetchCollections(source);
+      collections = await _serverClient(source).fetchCollections(source);
     } else if (source.kind == MediaSourceKind.quark) {
       collections = await _quarkExternalStorageClient.fetchCollections(source);
     } else {

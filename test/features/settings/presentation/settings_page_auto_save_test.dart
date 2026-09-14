@@ -74,6 +74,24 @@ void main() {
       expect(requests.map((request) => request['task']), [
         {'name': 'new-task', 'storage_path': is115 ? '/115' : '/quark'},
       ]);
+      await tester.ensureVisible(find.text('转存后自动修正名称'));
+      await tester.tap(find.text('转存后自动修正名称'));
+      await tester.pumpAndSettle();
+      final characters = tester
+          .widgetList<SettingsTextInputField>(
+              find.byType(SettingsTextInputField))
+          .singleWhere((field) => field.labelText == '要去掉的字符');
+      characters.controller.text = '#';
+      await tester.pump(const Duration(seconds: 1));
+      expect(
+          repository.settings.networkStorage.cloud115SanitizeSavedNamesEnabled,
+          is115);
+      expect(repository.settings.networkStorage.quarkSanitizeSavedNamesEnabled,
+          !is115);
+      expect(repository.settings.networkStorage.cloud115SanitizedNameCharacters,
+          is115 ? '#' : kDefaultCloudSanitizedNameCharacters);
+      expect(repository.settings.networkStorage.quarkSanitizedNameCharacters,
+          is115 ? kDefaultCloudSanitizedNameCharacters : '#');
       await tester.ensureVisible(find.text('同步删除$drive目录'));
       await tester.tap(find.text('同步删除$drive目录'));
       await tester.pump(const Duration(seconds: 1));

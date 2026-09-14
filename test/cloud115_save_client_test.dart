@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -11,6 +12,48 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 http.Response response(Object body) => http.Response(jsonEncode(body), 200);
 
 void main() {
+  for (final rejectSave in [false, true]) {
+    test('405 identifies the failed operation and never retries: $rejectSave',
+        () async {
+      var calls = 0;
+      final client = Cloud115SaveClient(MockClient((request) async {
+        calls++;
+        expect(request.followRedirects, isFalse);
+        expect(request.headers['origin'], 'https://115.com');
+        expect(request.headers['referer'], 'https://115.com/');
+        expect(request.headers['user-agent'], contains('AppleWebKit/537.36'));
+        if (request.method == 'GET' && rejectSave) {
+          return response({
+            'state': true,
+            'data': {
+              'count': 1,
+              'list': [
+                {'fid': '1'}
+              ]
+            }
+          });
+        }
+        expect(request.method, rejectSave ? 'POST' : 'GET');
+        if (rejectSave) {
+          expect(request.url.path, '/share/receive');
+          expect(request.headers['content-type'],
+              startsWith('application/x-www-form-urlencoded'));
+          expect(Uri.splitQueryString(request.body)['file_id'], '1');
+        }
+        return http.Response('blocked', 405);
+      }));
+      await expectLater(
+          client.saveShareLink(
+              shareUrl: 'https://115.com/s/abc', cookie: 'secret'),
+          throwsA(isA<QuarkSaveException>().having(
+              (e) => e.message,
+              'operation',
+              contains(
+                  rejectSave ? '提交转存失败（HTTP 405）' : '读取分享目录失败（HTTP 405）'))));
+      expect(calls, rejectSave ? 2 : 1);
+    });
+  }
+
   for (final path in ['/', '/115/Movies']) {
     test('save triggers STRM before refresh using 115 path $path', () async {
       final events = <String>[];
@@ -91,7 +134,7 @@ void main() {
             smartStrmDelaySeconds: 0,
             refreshMediaSourceIds: ['nas']));
     expect(refreshed, isTrue);
-    expect(message, contains('已保存到 115'));
+    expect(message, contains('已提交到 115，保存 1 个，略过 0 个'));
     expect(message, contains('STRM 触发失败'));
   });
 
@@ -178,11 +221,12 @@ void main() {
       });
     }));
     expect(
-        await client.saveShareLink(
-            shareUrl: 'https://115.com/s/abc',
-            cookie: 'test',
-            password: '1234',
-            folderId: '42'),
+        (await client.saveShareLink(
+                shareUrl: 'https://115.com/s/abc',
+                cookie: 'test',
+                password: '1234',
+                folderId: '42'))
+            .savedCount,
         2);
     expect(calls, 3);
   });
@@ -211,7 +255,8 @@ void main() {
     expect(entries.single.path, '/Library/Movies');
   });
 
-  test('refresh failure retains successful save message', () async {
+  test('background refresh failure retains save success and reports separately',
+      () async {
     final client = Cloud115SaveClient(
         MockClient((request) async => response(request.method == 'POST'
             ? {'state': true}
@@ -224,19 +269,78 @@ void main() {
                   ]
                 },
               })));
-    final service = Cloud115SaveWorkflowService(client, (ids, delay) async {
-      throw StateError('refresh failed');
-    }, smartStrm: SmartStrmWebhookClient(MockClient((_) async {
+    final refreshFinished = Completer<void>();
+    final service = Cloud115SaveWorkflowService(
+        client, (ids, delay) => refreshFinished.future,
+        smartStrm: SmartStrmWebhookClient(MockClient((_) async {
       fail('Unconfigured SmartStrm must not be called');
     })));
+    final failures = <String>[];
     final message = await service.save(
         shareUrl: 'https://115.com/s/abc',
         config: const NetworkStorageConfig(
             cloud115Cookie: 'test',
             refreshMediaSourceIds: ['nas'],
             smartStrmWebhookUrl: 'https://strm.test/webhook',
-            smartStrmTaskName: 'quark-only'));
-    expect(message, contains('已保存到 115'));
-    expect(message, contains('刷新失败'));
+            smartStrmTaskName: 'quark-only'),
+        onBackgroundRefreshFailure: failures.add);
+    expect(message, contains('已提交到 115，保存 1 个，略过 0 个'));
+    expect(message, contains('秒后刷新媒体源'));
+    expect(message, isNot(contains('已执行媒体源刷新')));
+    expect(failures, isEmpty);
+    refreshFinished.completeError(StateError('refresh failed'));
+    await Future<void>.delayed(Duration.zero);
+    expect(failures.single, contains('115 保存成功，但媒体源刷新失败'));
+  });
+
+  test('progress stays concise during STRM; refresh does not hold the result',
+      () async {
+    final saveFinished = Completer<http.Response>();
+    final strmFinished = Completer<http.Response>();
+    final refreshFinished = Completer<void>();
+    final client = Cloud115SaveClient(MockClient((request) async {
+      if (request.method == 'POST') return saveFinished.future;
+      return response({
+        'state': true,
+        'data': {
+          'count': 1,
+          'list': [
+            {'fid': '1'}
+          ],
+        },
+      });
+    }));
+    final service = Cloud115SaveWorkflowService(
+      client,
+      (ids, delay) {
+        expect(ids, ['nas']);
+        expect(delay, 1);
+        return refreshFinished.future;
+      },
+      smartStrm: SmartStrmWebhookClient(MockClient((_) => strmFinished.future)),
+    );
+    final progress = <String>[];
+    final saved = service.save(
+      shareUrl: 'https://115.com/s/abc',
+      config: const NetworkStorageConfig(
+        cloud115Cookie: 'test',
+        smartStrmWebhookUrl: 'https://strm.test/webhook',
+        cloud115SmartStrmTaskName: '115-task',
+        refreshMediaSourceIds: ['nas'],
+        refreshDelaySeconds: 0,
+      ),
+      onProgress: (update) => progress.add(update.message),
+    );
+    expect(progress, ['115 保存中...']);
+    saveFinished.complete(response({'state': true}));
+    await Future<void>.delayed(Duration.zero);
+    expect(progress, ['115 保存中...']);
+    strmFinished.complete(response({'success': true}));
+    final message = await saved;
+    expect(message, '已提交到 115，保存 1 个，略过 0 个，STRM 已延迟 1 秒触发，1 秒后刷新媒体源');
+    expect(message, contains('STRM 已延迟 1 秒触发'));
+    expect(message, contains('1 秒后刷新媒体源'));
+    expect(refreshFinished.isCompleted, isFalse);
+    refreshFinished.complete();
   });
 }

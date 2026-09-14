@@ -4,6 +4,45 @@ import 'package:starflow/features/playback/presentation/widgets/player_adaptive_
 
 void main() {
   group('PlayerAdaptiveTopChrome', () {
+    for (final insets in [
+      EdgeInsets.zero,
+      const EdgeInsets.fromLTRB(24, 44, 12, 21)
+    ]) {
+      testWidgets(
+          'top bar adds 12 side and 6 top pixels inside view insets $insets',
+          (tester) async {
+        final controller =
+            PlayerAdaptiveTopChromeController(autoHideEnabled: false);
+        addTearDown(controller.dispose);
+        await tester.pumpWidget(MaterialApp(
+          home: MediaQuery(
+            data:
+                MediaQueryData(size: const Size(800, 600), viewPadding: insets),
+            child: Material(
+              child: PlayerAdaptiveTopChrome(
+                controller: controller,
+                onBack: () {},
+                onMore: () {},
+              ),
+            ),
+          ),
+        ));
+        final row = find.descendant(
+          of: find.byType(PlayerAdaptiveTopChrome),
+          matching: find.byType(Row),
+        );
+        expect(
+            tester.getTopLeft(row), Offset(insets.left + 12, insets.top + 6));
+        expect(tester.getSize(row), Size(800 - insets.horizontal - 24, 56));
+        expect(
+            tester
+                .getCenter(find.byKey(kPlayerAdaptiveTopChromeBackButtonKey))
+                .dy,
+            insets.top + 34);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
     testWidgets('renders back and more buttons', (tester) async {
       final controller = PlayerAdaptiveTopChromeController(
         autoHideEnabled: false,

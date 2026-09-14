@@ -1,5 +1,5 @@
 import 'package:riverpod/misc.dart';
-import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -32,6 +32,7 @@ class PlaybackEpisodeQueueResolver {
 
     switch (source.kind) {
       case MediaSourceKind.emby:
+      case MediaSourceKind.fntv:
         return _resolveEmbyQueue(source, target);
       case MediaSourceKind.nas:
       case MediaSourceKind.quark:
@@ -61,7 +62,7 @@ class PlaybackEpisodeQueueResolver {
       return null;
     }
 
-    final emby = read(embyApiClientProvider);
+    final emby = read(mediaServerClientProvider(source.kind));
     final seriesChildren = await emby.fetchChildren(
       source,
       parentId: target.seriesId,

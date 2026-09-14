@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
-import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
+import 'package:starflow/features/library/data/fntv_api_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
@@ -38,7 +39,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late final TextEditingController _webDavSeriesTitleFilterKeywordsController;
 
   late MediaSourceKind _kind;
-  late bool _enabled;
   String _resolvedUserId = '';
   String _resolvedServerId = '';
   String _resolvedDeviceId = '';
@@ -57,11 +57,11 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   late String _selectedQuarkFolderId;
   late String _selectedQuarkFolderPath;
   late String _boundWebDavEndpoint;
-  late bool _webDavStructureInferenceEnabled;
   late bool _webDavSidecarScrapingEnabled;
   late bool _webDavSeriesScrapeUsesDirectoryTitleOnly;
   bool _didDelete = false;
   bool _draftHasBeenPersisted = false;
+  bool _applyingServerSession = false;
   final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
 
   @override
@@ -84,7 +84,6 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       text: (e?.webDavSeriesTitleFilterKeywords ?? const []).join('\n'),
     );
     _kind = e?.kind ?? MediaSourceKind.emby;
-    _enabled = e?.enabled ?? true;
     _resolvedUserId = e?.userId ?? '';
     _resolvedServerId = e?.serverId ?? '';
     _resolvedDeviceId = e?.deviceId ?? '';
@@ -100,12 +99,12 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         e?.kind == MediaSourceKind.quark ? (e?.libraryPath ?? '').trim() : '';
     _boundWebDavEndpoint =
         (e?.kind == MediaSourceKind.nas ? (e?.endpoint ?? '') : '').trim();
-    _webDavStructureInferenceEnabled =
-        e?.webDavStructureInferenceEnabled ?? false;
     _webDavSidecarScrapingEnabled = e?.webDavSidecarScrapingEnabled ?? true;
     _webDavSeriesScrapeUsesDirectoryTitleOnly =
-        e?.webDavSeriesScrapeUsesDirectoryTitleOnly ?? false;
+        e?.webDavSeriesScrapeUsesDirectoryTitleOnly ?? true;
     _endpointController.addListener(_handleEndpointChanged);
+    _usernameController.addListener(_handleFntvCredentialsChanged);
+    _passwordController.addListener(_handleFntvCredentialsChanged);
     for (final controller in _draftTextControllers) {
       controller.addListener(_scheduleAutoSave);
     }
@@ -116,6 +115,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   @override
   void dispose() {
     _endpointController.removeListener(_handleEndpointChanged);
+    _usernameController.removeListener(_handleFntvCredentialsChanged);
+    _passwordController.removeListener(_handleFntvCredentialsChanged);
     for (final controller in _draftTextControllers) {
       controller.removeListener(_scheduleAutoSave);
     }
@@ -209,15 +210,14 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       endpoint: _kind == MediaSourceKind.quark
           ? _selectedQuarkFolderId.trim()
           : _endpointController.text.trim(),
-      enabled: _enabled,
+      enabled: true,
       username:
           _kind == MediaSourceKind.quark ? '' : _usernameController.text.trim(),
       password: _kind == MediaSourceKind.quark ? '' : _passwordController.text,
-      accessToken:
-          _kind == MediaSourceKind.emby ? _tokenController.text.trim() : '',
-      userId: _kind == MediaSourceKind.emby ? _resolvedUserId : '',
-      serverId: _kind == MediaSourceKind.emby ? _resolvedServerId : '',
-      deviceId: _kind == MediaSourceKind.emby ? _resolvedDeviceId : '',
+      accessToken: _kind.isMediaServer ? _tokenController.text.trim() : '',
+      userId: _kind.isMediaServer ? _resolvedUserId : '',
+      serverId: _kind.isMediaServer ? _resolvedServerId : '',
+      deviceId: _kind.isMediaServer ? _resolvedDeviceId : '',
       libraryPath: _kind == MediaSourceKind.nas
           ? _selectedNasPath.trim()
           : _kind == MediaSourceKind.quark
@@ -225,8 +225,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
               : '',
       featuredSectionIds: _selectedSectionIdsForSave(),
       webDavStructureInferenceEnabled:
-          (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark) &&
-              _webDavStructureInferenceEnabled,
+          _kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark,
       webDavSidecarScrapingEnabled:
           (_kind == MediaSourceKind.nas || _kind == MediaSourceKind.quark) &&
               _webDavSidecarScrapingEnabled,
@@ -301,12 +300,14 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
 
   String _defaultConnectionMessage(MediaSourceKind kind) {
     switch (kind) {
+      case MediaSourceKind.fntv:
+        return '填写飞牛影视服务器地址和账号密码后测试登录。';
       case MediaSourceKind.emby:
         return '填写账号密码后可以直接验证 Emby 登录。';
       case MediaSourceKind.nas:
         return '填写 WebDAV 地址、用户名和密码后可以直接验证连接。';
       case MediaSourceKind.quark:
-        return '夸克媒体源会复用「夸克与 STRM」里的全局 Cookie，选择目录后即可使用。';
+        return '夸克媒体源会复用「网盘与转存 → 夸克云盘」里的 Cookie，选择目录后即可使用。';
     }
   }
 
@@ -314,13 +315,31 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     if (source == null) {
       return _defaultConnectionMessage(_kind);
     }
-    if (source.kind == MediaSourceKind.emby) {
+    if (source.kind.isMediaServer) {
       return source.embyEditorStatusMessage;
     }
     return _defaultConnectionMessage(source.kind);
   }
 
+  void _handleFntvCredentialsChanged() {
+    if (_kind == MediaSourceKind.fntv && !_applyingServerSession) {
+      setState(() {
+        _tokenController.clear();
+        _resolvedUserId = '';
+        _savedFeaturedSectionIds = const [];
+        _availableSections = const [];
+        _selectedSectionIds.clear();
+        _didHydrateSectionSelection = false;
+        _connectionMessage = _defaultConnectionMessage(_kind);
+      });
+    }
+  }
+
   void _handleEndpointChanged() {
+    if (_kind == MediaSourceKind.fntv) {
+      _handleFntvCredentialsChanged();
+      return;
+    }
     if (_kind != MediaSourceKind.nas) {
       return;
     }
@@ -351,22 +370,41 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
 
   Future<void> _onTestEmbyLogin() async {
     final draft = _draftConfig();
+    final password = _passwordController.text;
     setState(() {
       _isAuthenticating = true;
-      _connectionMessage = '正在连接 Emby...';
+      _connectionMessage = '正在连接 ${_kind.label}...';
     });
     try {
-      final authenticated =
-          await ref.read(settingsControllerProvider.notifier).authenticateEmby(
+      final authenticated = draft.kind == MediaSourceKind.fntv
+          ? await ref
+              .read(fntvApiClientProvider)
+              .authenticate(source: draft, password: password)
+          : await ref
+              .read(settingsControllerProvider.notifier)
+              .authenticateEmby(
                 source: draft,
-                password: _passwordController.text.trim(),
+                password: password,
               );
       if (!mounted) {
         return;
       }
-      _usernameController.text = authenticated.username;
-      _endpointController.text = authenticated.endpoint;
-      _tokenController.text = authenticated.accessToken;
+      if (draft.kind == MediaSourceKind.fntv &&
+          (_kind != draft.kind ||
+              _endpointController.text.trim() != draft.endpoint ||
+              _usernameController.text.trim() != draft.username ||
+              _passwordController.text != password)) {
+        setState(() => _isAuthenticating = false);
+        return;
+      }
+      _applyingServerSession = true;
+      try {
+        _usernameController.text = authenticated.username;
+        _endpointController.text = authenticated.endpoint;
+        _tokenController.text = authenticated.accessToken;
+      } finally {
+        _applyingServerSession = false;
+      }
       setState(() {
         _isAuthenticating = false;
         _resolvedUserId = authenticated.userId;
@@ -375,7 +413,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         _connectionMessage = authenticated.embyEditorStatusMessage;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Emby 登录成功')),
+        SnackBar(content: Text('${_kind.label} 登录成功')),
       );
     } catch (error) {
       if (!mounted) {
@@ -386,7 +424,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
         _connectionMessage = '登录失败：$error';
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Emby 登录失败：$error')),
+        SnackBar(content: Text('${_kind.label} 登录失败：$error')),
       );
     }
   }
@@ -427,15 +465,24 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   }
 
   Future<void> _onFetchEmbySections() async {
+    final draft = _draftConfig();
     setState(() {
       _isLoadingSections = true;
-      _connectionMessage = '正在读取 Emby 分区...';
+      _connectionMessage = '正在读取 ${_kind.label} 分区...';
     });
     try {
-      final sections = await ref.read(embyApiClientProvider).fetchCollections(
-            _draftConfig(),
+      final sections = await ref
+          .read(mediaServerClientProvider(draft.kind))
+          .fetchCollections(
+            draft,
           );
       if (!mounted) {
+        return;
+      }
+      if (_kind != draft.kind ||
+          _endpointController.text.trim() != draft.endpoint ||
+          _tokenController.text.trim() != draft.accessToken) {
+        setState(() => _isLoadingSections = false);
         return;
       }
       setState(() {
@@ -489,7 +536,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     final cookie = _quarkCookie;
     if (cookie.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在夸克与 STRM 中填写夸克 Cookie')),
+        const SnackBar(content: Text('请先在「网盘与转存 → 夸克云盘」中填写 Cookie')),
       );
       return;
     }
@@ -546,7 +593,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     final cookie = _quarkCookie;
     if (cookie.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在夸克与 STRM 中填写夸克 Cookie')),
+        const SnackBar(content: Text('请先在「网盘与转存 → 夸克云盘」中填写 Cookie')),
       );
       return;
     }
@@ -584,7 +631,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
     final cookie = _quarkCookie;
     if (cookie.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在夸克与 STRM 中填写夸克 Cookie')),
+        const SnackBar(content: Text('请先在「网盘与转存 → 夸克云盘」中填写 Cookie')),
       );
       return;
     }
@@ -724,8 +771,13 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
   }
 
   void _applyKindSelection(MediaSourceKind value) {
+    if (value == _kind) return;
     setState(() {
       _kind = value;
+      _tokenController.clear();
+      _resolvedUserId = '';
+      _resolvedServerId = '';
+      _resolvedDeviceId = '';
       _savedFeaturedSectionIds = const [];
       _didHydrateSectionSelection = false;
       _availableSections = const [];
@@ -739,9 +791,8 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
       _isTestingWebDav = false;
       _isTestingQuark = false;
       _isLoadingSections = false;
-      _webDavStructureInferenceEnabled = false;
       _webDavSidecarScrapingEnabled = true;
-      _webDavSeriesScrapeUsesDirectoryTitleOnly = false;
+      _webDavSeriesScrapeUsesDirectoryTitleOnly = true;
       _webDavExcludedKeywordsController.clear();
       _connectionMessage = _defaultConnectionMessage(value);
     });
@@ -817,10 +868,9 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isEmby = _kind == MediaSourceKind.emby;
+    final isEmby = _kind.isMediaServer;
     final isNas = _kind == MediaSourceKind.nas;
     final isQuark = _kind == MediaSourceKind.quark;
-    final supportsNasInferenceOptions = isNas || isQuark;
     final quarkCookieConfigured = ref.watch(
       appSettingsProvider.select(
         (settings) => settings.networkStorage.quarkCookie.trim().isNotEmpty,
@@ -860,6 +910,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
           const SettingsSectionTitle(label: '连接'),
           if (isEmby)
             _EmbySourceConnectionForm(
+              serverName: _kind.label,
               endpointController: _endpointController,
               usernameController: _usernameController,
               passwordController: _passwordController,
@@ -966,22 +1017,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                 ),
               ),
             ),
-            SettingsToggleTile(
-              title: '启用此媒体源',
-              value: _enabled,
-              onChanged: (value) => setState(() => _enabled = value),
-            ),
-            if (supportsNasInferenceOptions)
-              SettingsToggleTile(
-                title: '目录结构推断',
-                value: _webDavStructureInferenceEnabled,
-                onChanged: (value) {
-                  setState(() {
-                    _webDavStructureInferenceEnabled = value;
-                  });
-                },
-              ),
-            if (supportsNasInferenceOptions)
+            if (isNas || isQuark)
               SettingsToggleTile(
                 title: '本地刮削/NFO',
                 value: _webDavSidecarScrapingEnabled,
@@ -991,10 +1027,10 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                   });
                 },
               ),
-            if (supportsNasInferenceOptions)
+            if (isNas || isQuark)
               SettingsToggleTile(
-                title: '剧集复用系列级图片',
-                subtitle: '仅目录结构推断开启时生效。所有模式都先按剧名匹配；开启后还会跳过单集剧照请求。',
+                title: '跳过剧集海报索引',
+                subtitle: '开启后剧集只复用系列级图片，不再为每个单集请求海报。',
                 value: _webDavSeriesScrapeUsesDirectoryTitleOnly,
                 onChanged: (value) {
                   setState(() {
@@ -1003,7 +1039,7 @@ class _MediaSourceEditorPageState extends ConsumerState<MediaSourceEditorPage> {
                 },
               ),
           ], spacing: 12),
-          if (supportsNasInferenceOptions) ...[
+          if (isNas || isQuark) ...[
             const SettingsSectionTitle(label: '目录规则'),
             SettingsTextInputField(
               controller: _webDavExcludedKeywordsController,

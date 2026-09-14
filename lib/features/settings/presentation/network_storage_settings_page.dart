@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:starflow/features/settings/presentation/cloud115_login_page.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -31,13 +32,13 @@ class NetworkStorageSettingsPage extends ConsumerWidget {
     return SettingsPageScaffold(
       onBack: () => Navigator.of(context).pop(),
       children: [
-        Text('网络存储', style: theme.textTheme.headlineSmall),
-        const SettingsSectionTitle(label: '分类'),
+        Text('网盘与转存', style: theme.textTheme.headlineSmall),
+        const SettingsSectionTitle(label: '网盘账号'),
         ...buildSettingsTileGroup([
           SettingsSelectionTile(
             title: '夸克云盘',
             subtitle: config.quarkCookie.trim().isEmpty
-                ? 'Cookie 与保存目录未配置'
+                ? '未配置登录凭据'
                 : '保存目录：${config.quarkSaveFolderPath}',
             value: '',
             autofocus: true,
@@ -51,19 +52,21 @@ class NetworkStorageSettingsPage extends ConsumerWidget {
           SettingsSelectionTile(
             title: '115 网盘',
             subtitle: config.cloud115Cookie.trim().isEmpty
-                ? 'Cookie 与保存目录未配置'
+                ? '未配置登录凭据'
                 : '保存目录：${config.cloud115SaveFolderPath}',
             value: '',
             focusId: 'network-storage:115',
             onPressed: () => _openEditor(
                 context, config, NetworkStorageEditorSection.cloud115),
           ),
+        ]),
+        const SettingsSectionTitle(label: '转存后处理'),
+        ...buildSettingsTileGroup([
           SettingsSelectionTile(
             title: 'SmartStrm',
             subtitle: config.smartStrmWebhookUrl.trim().isEmpty
                 ? 'Webhook 未配置'
-                : '夸克：${config.smartStrmTaskName.trim().isEmpty ? '未配置' : config.smartStrmTaskName} · '
-                    '115：${config.cloud115SmartStrmTaskName.trim().isEmpty ? '未配置' : config.cloud115SmartStrmTaskName}',
+                : 'Webhook 已配置 · 等待 ${config.smartStrmDelaySeconds} 秒',
             value: '',
             focusId: 'network-storage:smart-strm',
             onPressed: () => _openEditor(
@@ -73,8 +76,9 @@ class NetworkStorageSettingsPage extends ConsumerWidget {
             ),
           ),
           SettingsSelectionTile(
-            title: '同步与索引刷新',
-            subtitle: '刷新来源 ${config.refreshMediaSourceIds.length} 个',
+            title: '转存后刷新媒体库',
+            subtitle: '刷新来源 ${config.refreshMediaSourceIds.length} 个 · '
+                '等待 ${config.refreshDelaySeconds} 秒',
             value: '',
             focusId: 'network-storage:synchronization',
             onPressed: () => _openEditor(
@@ -176,9 +180,13 @@ class _NetworkStorageEditorPageState
       _quarkFolderId = widget.initial.cloud115SaveFolderId;
       _quarkFolderPath = widget.initial.cloud115SaveFolderPath;
     }
-    _sanitizeSavedNamesEnabled = widget.initial.quarkSanitizeSavedNamesEnabled;
+    _sanitizeSavedNamesEnabled = _is115
+        ? widget.initial.cloud115SanitizeSavedNamesEnabled
+        : widget.initial.quarkSanitizeSavedNamesEnabled;
     _sanitizedNameCharactersController = TextEditingController(
-      text: widget.initial.quarkSanitizedNameCharacters,
+      text: _is115
+          ? widget.initial.cloud115SanitizedNameCharacters
+          : widget.initial.quarkSanitizedNameCharacters,
     );
     _syncDeleteQuarkEnabled = _is115
         ? widget.initial.syncDelete115Enabled
@@ -228,7 +236,10 @@ class _NetworkStorageEditorPageState
   }
 
   String _draftFingerprint(NetworkStorageConfig draft) =>
-      jsonEncode(draft.toJson());
+      jsonEncode({
+        ...draft.toJson(),
+        if (_is115) '_localCloud115Cookie': draft.cloud115Cookie,
+      });
 
   void _scheduleAutoSave() {
     if (!mounted) {
@@ -264,7 +275,7 @@ class _NetworkStorageEditorPageState
         .where(
           (source) =>
               source.enabled &&
-              (source.kind == MediaSourceKind.emby ||
+              (source.kind.isMediaServer ||
                   source.kind == MediaSourceKind.nas ||
                   (source.kind == MediaSourceKind.quark &&
                       source.hasConfiguredQuarkFolder)),
@@ -308,9 +319,14 @@ class _NetworkStorageEditorPageState
       quarkCookie: _is115 ? null : _quarkCookieController.text.trim(),
       quarkSaveFolderId: _is115 ? null : _quarkFolderId,
       quarkSaveFolderPath: _is115 ? null : _quarkFolderPath,
-      quarkSanitizeSavedNamesEnabled: _sanitizeSavedNamesEnabled,
+      quarkSanitizeSavedNamesEnabled:
+          _is115 ? null : _sanitizeSavedNamesEnabled,
       quarkSanitizedNameCharacters:
-          _sanitizedNameCharactersController.text.trim(),
+          _is115 ? null : _sanitizedNameCharactersController.text.trim(),
+      cloud115SanitizeSavedNamesEnabled:
+          _is115 ? _sanitizeSavedNamesEnabled : null,
+      cloud115SanitizedNameCharacters:
+          _is115 ? _sanitizedNameCharactersController.text.trim() : null,
       syncDelete115Enabled: _is115 ? _syncDeleteQuarkEnabled : null,
       syncDelete115WebDavDirectories:
           _is115 ? _normalizedSyncDeleteDirectories(settings) : null,
@@ -379,9 +395,26 @@ class _NetworkStorageEditorPageState
     return '${uri.host}$path';
   }
 
+  String get _currentCookie => _quarkCookieController.text.trim();
+
+  Future<void> _login115() async {
+    final cookie =
+        await Navigator.of(context).push<String>(SettingsMaterialPageRoute(
+      builder: (_) => const Cloud115LoginPage(),
+    ));
+    if (!mounted || cookie == null) return;
+    setState(() => _quarkCookieController.text = cookie);
+    _flushAutoSave();
+  }
+
+  void _signOut115() {
+    setState(() => _quarkCookieController.clear());
+    _flushAutoSave();
+  }
+
   Future<void> _testQuarkConnection() async {
     FocusScope.of(context).unfocus();
-    final cookie = _quarkCookieController.text.trim();
+    final cookie = _currentCookie;
     if (cookie.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('请先填写 $_driveName Cookie')),
@@ -425,7 +458,7 @@ class _NetworkStorageEditorPageState
 
   Future<void> _pickQuarkFolder() async {
     FocusScope.of(context).unfocus();
-    final cookie = _quarkCookieController.text.trim();
+    final cookie = _currentCookie;
     if (cookie.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('请先填写 $_driveName Cookie')),
@@ -460,7 +493,7 @@ class _NetworkStorageEditorPageState
 
   Future<void> _openQuarkDirectoryManager() async {
     FocusScope.of(context).unfocus();
-    final cookie = _quarkCookieController.text.trim();
+    final cookie = _currentCookie;
     if (cookie.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('请先填写 $_driveName Cookie')),
@@ -619,7 +652,7 @@ class _NetworkStorageEditorPageState
               NetworkStorageEditorSection.quark => '夸克云盘',
               NetworkStorageEditorSection.cloud115 => '115 网盘',
               NetworkStorageEditorSection.smartStrm => 'SmartStrm',
-              NetworkStorageEditorSection.synchronization => '同步与索引刷新',
+              NetworkStorageEditorSection.synchronization => '转存后刷新媒体库',
             },
             style: Theme.of(context).textTheme.headlineSmall,
           ),
@@ -638,6 +671,20 @@ class _NetworkStorageEditorPageState
               autofocus: true,
               focusId: 'network-storage-quark:cookie',
             ),
+            if (_is115) ...[
+              Text(_currentCookie.isEmpty ? '未配置登录凭据' : '已配置登录凭据'),
+              const SizedBox(height: 12),
+              Wrap(spacing: 12, runSpacing: 12, children: [
+                SettingsActionButton(
+                    label: '扫码登录',
+                    icon: Icons.qr_code_scanner_rounded,
+                    onPressed: _login115),
+                SettingsActionButton(
+                    label: '清除登录凭据',
+                    icon: Icons.logout_rounded,
+                    onPressed: _currentCookie.isEmpty ? null : _signOut115),
+              ]),
+            ],
             const SizedBox(height: 12),
             Wrap(
               spacing: 12,
@@ -686,16 +733,17 @@ class _NetworkStorageEditorPageState
                   : () => _testSmartStrmTask(cloud115: _is115),
             ),
           ],
-          if (widget.section == NetworkStorageEditorSection.quark) ...[
+          if (widget.section == NetworkStorageEditorSection.quark ||
+              _is115) ...[
             const SizedBox(height: 12),
             const SettingsSectionTitle(label: '保存后修正名称'),
             StarflowToggleTile(
               title: '转存后自动修正名称',
               subtitle: '转存完成、触发 SmartStrm 之前，把新存入的目录名和文件名里的特殊字符去掉。'
                   '路径里的 # 会截断直链并导致签名校验失败，是这类播放失败最常见的原因。'
-                  '这会直接重命名夸克网盘里的真实文件，只作用于本次新存入的内容。',
+                  '这会直接重命名$_driveName网盘里的真实文件，只作用于本次新存入的内容。',
               value: _sanitizeSavedNamesEnabled,
-              focusId: 'network-storage-quark:sanitize',
+              focusId: 'network-storage-${_is115 ? '115' : 'quark'}:sanitize',
               onChanged: (value) {
                 setState(() {
                   _sanitizeSavedNamesEnabled = value;
@@ -708,16 +756,17 @@ class _NetworkStorageEditorPageState
                 controller: _sanitizedNameCharactersController,
                 labelText: '要去掉的字符',
                 autocorrect: false,
-                hintText: kDefaultQuarkSanitizedNameCharacters,
+                hintText: kDefaultCloudSanitizedNameCharacters,
                 summaryBuilder: (value) => value.isEmpty ? '未填写（不会改名）' : value,
-                focusId: 'network-storage-quark:sanitize-characters',
+                focusId:
+                    'network-storage-${_is115 ? '115' : 'quark'}:sanitize-characters',
               ),
               const SizedBox(height: 8),
               Text(
                 '逐个字符匹配，不是正则。留空则不改名。'
                 '只处理本次转存新存入的内容，已经在网盘里的旧文件不会被碰；'
                 '开启后转存去重也改按净化后的名字比对，不会重复保存；'
-                '同名冲突会跳过并在结果里提示。',
+                '同名冲突会跳过并在结果里提示；名称修正未确认时不触发 STRM。',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -733,7 +782,6 @@ class _NetworkStorageEditorPageState
                   ? '删除监听范围内的 WebDAV 资源时，按相对路径同步删除 115 保存目录中的对应资源。'
                   : '开启后，删除命中下方监听目录中的 WebDAV 文件或文件夹时，也会到当前夸克保存目录里删除匹配到的影片或剧集目录。',
               value: _syncDeleteQuarkEnabled,
-              autofocus: true,
               focusId: 'network-storage-sync:delete',
               onChanged: (value) {
                 setState(() {
@@ -741,6 +789,17 @@ class _NetworkStorageEditorPageState
                 });
               },
             ),
+            if (_is115 &&
+                _syncDeleteQuarkEnabled &&
+                selectedSyncDeleteDirectories.isEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                '115 同步删除未就绪：未选择 WebDAV 删除监听目录',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+              ),
+            ],
             const SizedBox(height: 12),
             const SettingsSectionTitle(label: 'WebDAV 删除监听目录'),
             Text(
@@ -819,6 +878,8 @@ class _NetworkStorageEditorPageState
               title: '索引刷新等待时间',
               subtitle: '任务结束后，等待多久再自动执行媒体库增量刷新。',
               value: '${_refreshDelaySeconds()} 秒',
+              autofocus: true,
+              focusId: 'network-storage-refresh:delay',
               onPressed: _openRefreshDelayPicker,
             ),
             const SizedBox(height: 12),

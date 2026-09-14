@@ -97,8 +97,8 @@ class SettingsPage extends ConsumerStatefulWidget {
                       ),
                       const SizedBox(height: 10),
                       _SettingsNavigationTile(
-                        title: '网络存储',
-                        subtitle: '夸克、SmartStrm、同步与索引刷新',
+                        title: '网盘与转存',
+                        subtitle: '夸克、115、STRM 与转存后刷新',
                         onTap: () => _openNetworkStorageSettings(context),
                       ),
                     ],
@@ -212,7 +212,7 @@ class SettingsPage extends ConsumerStatefulWidget {
                       const SizedBox(height: 10),
                       _SettingsNavigationTile(
                         title: '配置管理',
-                        subtitle: '导入、导出与 TV 二维码传输',
+                        subtitle: isTelevision ? '导入、导出与 TV 二维码传输' : '导入与导出配置',
                         onTap: () => _openSettingsManagement(context),
                       ),
                       const SizedBox(height: 10),

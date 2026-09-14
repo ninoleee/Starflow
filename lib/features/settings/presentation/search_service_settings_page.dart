@@ -170,6 +170,6 @@ bool _isSelectableLocalSource(MediaSourceConfig source) {
   if (source.kind == MediaSourceKind.quark) {
     return source.hasConfiguredQuarkFolder;
   }
-  return source.kind == MediaSourceKind.emby ||
+  return source.kind.isMediaServer ||
       source.kind == MediaSourceKind.nas;
 }

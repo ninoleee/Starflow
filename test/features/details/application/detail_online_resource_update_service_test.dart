@@ -5,7 +5,9 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:starflow/features/details/application/detail_online_resource_update_service.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -26,6 +28,116 @@ http.Response _jsonResponse(
 
 void main() {
   group('DetailOnlineResourceUpdateService', () {
+    const target115 = MediaDetailTarget(
+        title: 'Show',
+        posterUrl: '',
+        overview: '',
+        itemType: 'series',
+        searchQuery: 'Show');
+    const favorite115 = SearchResult(
+        id: '115',
+        title: 'Show',
+        posterUrl: '',
+        providerId: 'online',
+        providerName: 'Online',
+        quality: '',
+        sizeLabel: '',
+        seeders: 0,
+        summary: '',
+        resourceUrl: 'https://115.com/s/abc',
+        password: 'abcd',
+        favoriteFolderName: 'Show');
+
+    test(
+        'mixed online matches are stable and exclude local or unsupported favorites',
+        () {
+      const service = DetailOnlineResourceUpdateService();
+      final matches =
+          service.resolveFavoriteMatches(target: target115, favorites: [
+        favorite115,
+        favorite115.copyWith(resourceUrl: 'https://pan.quark.cn/s/abc'),
+        favorite115.copyWith(detailTarget: target115),
+        favorite115.copyWith(resourceUrl: 'https://example.com/s/abc'),
+      ]);
+      expect(matches.map((m) => m.drive),
+          [CloudSaveDrive.cloud115, CloudSaveDrive.quark]);
+      expect(searchResultSharePassword(matches.first.result), 'abcd');
+      expect(
+          Uri.parse(matches.first.result.resourceUrl)
+              .queryParameters['password'],
+          'abcd');
+    });
+
+    test('115 check uses only its configured cookie, folder and name rules',
+        () async {
+      const service = DetailOnlineResourceUpdateService();
+      final match = service
+          .resolveFavoriteMatch(target: target115, favorites: [favorite115])!;
+      final quark =
+          QuarkSaveClient(MockClient((_) async => fail('No Quark requests')));
+      final cloud115 = Cloud115SaveClient(MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(request.headers['cookie'], '115-cookie');
+        if (request.url.path == '/share/snap') {
+          expect(request.url.queryParameters['receive_code'], 'abcd');
+          return _jsonResponse({
+            'state': true,
+            'data': {
+              'count': 2,
+              'list': [
+                {'fid': '1', 'n': '#E01.mkv'},
+                {'fid': '2', 'n': '#E02.mkv'},
+              ]
+            }
+          });
+        }
+        expect(request.url.path, '/files');
+        expect(request.url.queryParameters['cid'], '42');
+        return _jsonResponse({
+          'state': true,
+          'count': 1,
+          'data': [
+            {'fid': '101', 'n': 'E01.mkv'}
+          ]
+        });
+      }));
+      await expectLater(
+          service.checkForUpdates(
+              target: target115,
+              favoriteMatch: match,
+              networkStorage:
+                  const NetworkStorageConfig(quarkCookie: 'quark-cookie'),
+              quarkSaveClient: quark,
+              cloud115SaveClient: cloud115),
+          throwsA(isA<QuarkSaveException>()
+              .having((e) => e.message, 'message', contains('115 Cookie'))));
+      const config = NetworkStorageConfig(
+          cloud115Cookie: '115-cookie',
+          cloud115SaveFolderId: '42',
+          cloud115SaveFolderPath: '/115/Show',
+          cloud115SanitizeSavedNamesEnabled: true,
+          cloud115SanitizedNameCharacters: '#',
+          quarkSaveFolderId: 'unused',
+          quarkSaveFolderPath: '/quark');
+      final result = await service.checkForUpdates(
+          target: target115,
+          favoriteMatch: match,
+          networkStorage: config,
+          quarkSaveClient: quark,
+          cloud115SaveClient: cloud115);
+      expect(result.updatedEpisodeLabels, ['#E02.mkv']);
+      expect(result.buildDialogMessage(), contains('115目录：/115/Show'));
+      expect(result.buildDialogMessage(), isNot(contains('夸克')));
+      final uncleaned = await service.checkForUpdates(
+          target: target115,
+          favoriteMatch: match,
+          networkStorage:
+              config.copyWith(cloud115SanitizeSavedNamesEnabled: false),
+          quarkSaveClient: quark,
+          cloud115SaveClient: cloud115);
+      expect(uncleaned.updatedEpisodeLabels, ['#E01.mkv', '#E02.mkv']);
+    });
+
     test('prefers an exact favorite folder-name match', () {
       const service = DetailOnlineResourceUpdateService();
       const target = MediaDetailTarget(
@@ -298,6 +410,7 @@ void main() {
         favoriteMatch: favoriteMatch!,
         networkStorage: const NetworkStorageConfig(
           quarkCookie: 'kps=test; sign=test; vcode=test;',
+          quarkSaveFolderId: 'dir-series-root',
           quarkSaveFolderPath: '/剧集',
         ),
         quarkSaveClient: client,

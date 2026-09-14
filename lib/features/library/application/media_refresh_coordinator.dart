@@ -164,7 +164,7 @@ class MediaRefreshCoordinator {
         .where(
           (source) =>
               source.enabled &&
-              (source.kind == MediaSourceKind.emby ||
+              (source.kind.isMediaServer ||
                   source.kind == MediaSourceKind.nas ||
                   (source.kind == MediaSourceKind.quark &&
                       source.hasConfiguredQuarkFolder)),
@@ -254,10 +254,9 @@ class MediaRefreshCoordinator {
       scopedIds.map(
         (sourceId) async {
           try {
-            await repository.refreshSource(
-              sourceId: sourceId,
-              forceFullRescan: forceFullRescan,
-            );
+            Future<void> refresh() => repository.refreshSource(
+                sourceId: sourceId, forceFullRescan: forceFullRescan);
+            await refresh();
             completedCount += 1;
           } catch (error, stackTrace) {
             failedCount += 1;
@@ -361,7 +360,7 @@ class MediaRefreshCoordinator {
         },
       );
       progressController.completeTask(
-        _embyRefreshCompletedMessage(refreshedSourceCount),
+        _embyRefreshCompletedMessage(refreshedSourceCount, sources),
       );
       return;
     }
@@ -377,7 +376,7 @@ class MediaRefreshCoordinator {
         },
       );
       progressController.completeTask(
-        '已完成 $refreshedSourceCount 个 Emby 媒体源更新，'
+        '已完成 $refreshedSourceCount 个 ${_serverRefreshLabel(sources)}媒体源更新，'
         '${failedSourceNames.length} 个失败',
       );
       return;
@@ -393,7 +392,7 @@ class MediaRefreshCoordinator {
       error: lastError,
     );
     progressController.failTask(
-      'Emby 后台更新失败：${lastError ?? failedSourceNames.join('、')}',
+      '${_serverRefreshLabel(sources)}后台更新失败：${lastError ?? failedSourceNames.join('、')}',
     );
   }
 
@@ -414,15 +413,22 @@ class MediaRefreshCoordinator {
         .where(
           (source) =>
               source.enabled &&
-              source.kind == MediaSourceKind.emby &&
+              source.kind.isMediaServer &&
               source.hasActiveSession &&
               normalizedIds.contains(source.id.trim()),
         )
         .toList(growable: false);
   }
 
-  String _embyRefreshCompletedMessage(int sourceCount) {
-    return sourceCount == 1 ? '已完成 Emby 更新' : '已完成 $sourceCount 个 Emby 媒体源更新';
+  String _serverRefreshLabel(List<MediaSourceConfig> sources) {
+    final kinds = sources.map((source) => source.kind).toSet();
+    return kinds.length == 1 ? '${kinds.single.label} ' : '';
+  }
+
+  String _embyRefreshCompletedMessage(
+      int sourceCount, List<MediaSourceConfig> sources) {
+    final label = _serverRefreshLabel(sources);
+    return sourceCount == 1 ? '已完成 $label更新' : '已完成 $sourceCount 个 $label媒体源更新';
   }
 
   void _afterRefreshCompleted() {

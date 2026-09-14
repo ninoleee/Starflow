@@ -12,7 +12,7 @@ String mediaSourceResourceIdentity(MediaSourceConfig source) {
         source.quarkFolderId.trim(),
         _normalizePath(source.quarkFolderPath),
       ].join('|'),
-    MediaSourceKind.emby => <String>[
+    MediaSourceKind.emby || MediaSourceKind.fntv => <String>[
         source.kind.name,
         _normalizeLocation(source.endpoint),
         source.userId.trim(),

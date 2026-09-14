@@ -37,39 +37,62 @@ internal class NativePlaybackLaunchController(
 
     private var startupPending = false
 
+    val isStartupPending: Boolean
+        get() = startupPending
+
     private var startupBufferedPositionMs = 0L
 
     private var startupBufferedPercentage = 0
     private val startupProgress = PlaybackBufferProgress()
     private var startupDeadlineMs = 0L
+    private var startupLastProgressAtMs = 0L
     private var startupAttempts = 0
 
     private val playbackLaunchTimeoutRunnable = Runnable {
         if (startupPending && !host.activity.isFinishing && !host.activity.isDestroyed) {
-            // Buffer progress earns another window, never a new hard deadline.
-            if (now() < startupDeadlineMs && consumeStartupBufferProgress()) {
-                NativePlaybackFormatting.logPlayback(
-                    "native.launch.timeout.extended " +
-                        "bufferedPositionMs=$startupBufferedPositionMs " +
-                        "bufferedPercentage=$startupBufferedPercentage"
-                )
-                armPlaybackLaunchTimeout()
+            val timeMs = now()
+            consumeStartupProgress(timeMs)
+            if (startupTimedOut(timeMs)) {
+                handleStartupTimeout(timeMs)
             } else {
-                handlePlaybackFailure("视频画面迟迟没有出现，请检查网络或重试播放。")
+                armPlaybackLaunchTimeout()
             }
         }
     }
 
     private var playbackErrorDialog: AlertDialog? = null
 
-    private fun consumeStartupBufferProgress(): Boolean {
-        val player = host.session.player ?: return false
+    private fun startupTimedOut(timeMs: Long): Boolean =
+        timeMs >= startupDeadlineMs ||
+            timeMs - startupLastProgressAtMs >= PlaybackPolicyValues.exoStartupNoProgressTimeoutMs
+
+    private fun handleStartupTimeout(timeMs: Long) {
+        val player = host.session.player
+        NativeAppLogger.warning(
+            "playback.reliability",
+            "Playback startup timeout engine=exo phase=preparing " +
+                "reason=${if (timeMs >= startupDeadlineMs) "hard-deadline" else "no-progress"} " +
+                "idleMs=${(timeMs - startupLastProgressAtMs).coerceAtLeast(0L)} " +
+                "attempt=$startupAttempts state=${player?.playbackState} " +
+                "loading=${player?.isLoading} positionMs=${player?.currentPosition ?: 0L} " +
+                "bufferedPositionMs=$startupBufferedPositionMs " +
+                "bufferedPercentage=$startupBufferedPercentage",
+        )
+        handlePlaybackFailure("视频画面迟迟没有出现，请检查网络或重试播放。")
+    }
+
+    private fun consumeStartupProgress(timeMs: Long) {
+        val player = host.session.player ?: return
         val bufferedPositionMs = player.bufferedPosition.coerceAtLeast(0L)
         val bufferedPercentage = player.bufferedPercentage.coerceIn(0, 100)
-        val progressed = startupProgress.observe(bufferedPositionMs, bufferedPercentage)
+        // Absolute buffer positions include the intro/resume offset, not just downloaded media.
+        if (startupProgress.observe(player.totalBufferedDuration.coerceAtLeast(0L), 0)) {
+            startupLastProgressAtMs = maxOf(startupLastProgressAtMs, timeMs)
+        }
+        val receivedAtMs = host.session.playbackTransferProgress?.lastProgressAtMs ?: -1L
+        startupLastProgressAtMs = maxOf(startupLastProgressAtMs, receivedAtMs)
         startupBufferedPositionMs = bufferedPositionMs
         startupBufferedPercentage = bufferedPercentage
-        return progressed
     }
 
     fun applyIntent(intent: Intent) {
@@ -186,30 +209,45 @@ internal class NativePlaybackLaunchController(
             return
         }
         startupProgress.reset()
+        val timeMs = now()
         if (startupDeadlineMs == 0L) {
-            startupDeadlineMs = now() + PlaybackPolicyValues.startupHardLimitMs
+            startupLastProgressAtMs = timeMs
+            startupDeadlineMs = startupLastProgressAtMs + PlaybackPolicyValues.exoStartupHardLimitMs
         }
         startupBufferedPositionMs = 0L
         startupBufferedPercentage = 0
+        if (startupTimedOut(timeMs)) {
+            handleStartupTimeout(timeMs)
+            return
+        }
         armPlaybackLaunchTimeout()
     }
 
     private fun armPlaybackLaunchTimeout() {
         playbackLaunchTimeoutHandler.removeCallbacks(playbackLaunchTimeoutRunnable)
         startupPending = true
+        val timeMs = now()
+        val idleRemainingMs =
+            startupLastProgressAtMs + PlaybackPolicyValues.exoStartupNoProgressTimeoutMs - timeMs
         playbackLaunchTimeoutHandler.postDelayed(
             playbackLaunchTimeoutRunnable,
-            minOf(PLAYBACK_LAUNCH_TIMEOUT_MS, (startupDeadlineMs - now()).coerceAtLeast(0L)),
+            minOf(
+                PLAYBACK_LAUNCH_CHECK_INTERVAL_MS,
+                (startupDeadlineMs - timeMs).coerceAtLeast(0L),
+                idleRemainingMs.coerceAtLeast(0L),
+            ),
         )
     }
 
     fun cancelPlaybackLaunchTimeout() {
+        if (startupPending) consumeStartupProgress(now())
         startupPending = false
         playbackLaunchTimeoutHandler.removeCallbacks(playbackLaunchTimeoutRunnable)
     }
 
     fun resetStartupDeadline() {
         startupDeadlineMs = 0L
+        startupLastProgressAtMs = 0L
         startupAttempts = 0
     }
 

@@ -17,7 +17,7 @@ import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_hero_section.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_episode_browser.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
-import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
@@ -2045,7 +2045,7 @@ class _FakeDetailExternalEpisodeVariantService
     required MediaDetailTarget target,
     required AppSettings settings,
     required NasMediaIndexer nasMediaIndexer,
-    required EmbyApiClient embyApiClient,
+    required MediaServerClient embyApiClient,
   }) async {
     requestedTargets.add(target);
     return statesByItemId[target.itemId.trim()] ?? state;

@@ -29,6 +29,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         return source.endpoint.trim().isNotEmpty;
       case MediaSourceKind.quark:
         return source.hasConfiguredQuarkFolder;
+      case MediaSourceKind.fntv:
       case MediaSourceKind.emby:
         return false;
     }
@@ -70,6 +71,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           resetCaches: resetScanCaches,
           shouldCancel: shouldCancel,
         );
+      case MediaSourceKind.fntv:
       case MediaSourceKind.emby:
         return Future.value(const <WebDavScannedItem>[]);
     }
@@ -108,6 +110,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           resolvePlayableStreams: false,
           shouldCancel: shouldCancel,
         );
+      case MediaSourceKind.fntv:
       case MediaSourceKind.emby:
         return Future.value(null);
     }
@@ -772,6 +775,14 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       isExternallyCancelled: () =>
           (_readInvalidationRevision?.call(normalizedSourceId) ?? 0) !=
           initialInvalidationRevision,
+    );
+    if (_isDisposed) {
+      return;
+    }
+    _progressController.startScanning(
+      sourceId: normalizedSourceId,
+      sourceName: source.name,
+      totalCollections: scopedCollections?.length ?? 1,
     );
     _updateIndexerConcurrencyLimits();
     final future = _sourceBudget.withPermit(() {

@@ -1,5 +1,97 @@
 import 'package:starflow/features/library/domain/media_models.dart';
 
+class PlaybackAudioStream {
+  const PlaybackAudioStream({
+    required this.id,
+    this.title = '',
+    this.language = '',
+    this.codec = '',
+    this.channels = 0,
+    this.isDefault = false,
+    this.index = 0,
+  });
+
+  final String id;
+  final String title;
+  final String language;
+  final String codec;
+  final int channels;
+  final bool isDefault;
+  final int index;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'language': language,
+        'codec': codec,
+        'channels': channels,
+        'isDefault': isDefault,
+        'index': index,
+      };
+
+  factory PlaybackAudioStream.fromJson(Map<String, dynamic> json) {
+    return PlaybackAudioStream(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      language: json['language'] as String? ?? '',
+      codec: json['codec'] as String? ?? '',
+      channels: (json['channels'] as num?)?.toInt() ?? 0,
+      isDefault: json['isDefault'] as bool? ?? false,
+      index: (json['index'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class PlaybackSubtitleStream {
+  const PlaybackSubtitleStream({
+    required this.id,
+    this.title = '',
+    this.language = '',
+    this.codec = '',
+    this.isDefault = false,
+    this.isForced = false,
+    this.isExternal = false,
+    this.isBitmap = false,
+    this.index = 0,
+  });
+
+  final String id;
+  final String title;
+  final String language;
+  final String codec;
+  final bool isDefault;
+  final bool isForced;
+  final bool isExternal;
+  final bool isBitmap;
+  final int index;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'language': language,
+        'codec': codec,
+        'isDefault': isDefault,
+        'isForced': isForced,
+        'isExternal': isExternal,
+        'isBitmap': isBitmap,
+        'index': index,
+      };
+
+  factory PlaybackSubtitleStream.fromJson(Map<String, dynamic> json) {
+    return PlaybackSubtitleStream(
+      id: json['id'] as String? ?? '',
+      title: json['title'] as String? ?? '',
+      language: json['language'] as String? ?? '',
+      codec: json['codec'] as String? ?? '',
+      isDefault: json['isDefault'] as bool? ?? false,
+      isForced: json['isForced'] as bool? ?? false,
+      isExternal: json['isExternal'] as bool? ?? false,
+      isBitmap: json['isBitmap'] as bool? ?? false,
+      index: (json['index'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 class PlaybackTarget {
   const PlaybackTarget({
     required this.title,
@@ -29,6 +121,10 @@ class PlaybackTarget {
     this.container = '',
     this.videoCodec = '',
     this.audioCodec = '',
+    this.audioStreams = const [],
+    this.subtitleStreams = const [],
+    this.preferredAudioStreamId = '',
+    this.preferredSubtitleStreamId = '',
     this.seasonNumber,
     this.episodeNumber,
     this.width,
@@ -64,6 +160,10 @@ class PlaybackTarget {
   final String container;
   final String videoCodec;
   final String audioCodec;
+  final List<PlaybackAudioStream> audioStreams;
+  final List<PlaybackSubtitleStream> subtitleStreams;
+  final String preferredAudioStreamId;
+  final String preferredSubtitleStreamId;
   final int? seasonNumber;
   final int? episodeNumber;
   final int? width;
@@ -99,6 +199,10 @@ class PlaybackTarget {
     String? container,
     String? videoCodec,
     String? audioCodec,
+    List<PlaybackAudioStream>? audioStreams,
+    List<PlaybackSubtitleStream>? subtitleStreams,
+    String? preferredAudioStreamId,
+    String? preferredSubtitleStreamId,
     int? seasonNumber,
     int? episodeNumber,
     int? width,
@@ -137,6 +241,12 @@ class PlaybackTarget {
       container: container ?? this.container,
       videoCodec: videoCodec ?? this.videoCodec,
       audioCodec: audioCodec ?? this.audioCodec,
+      audioStreams: audioStreams ?? this.audioStreams,
+      subtitleStreams: subtitleStreams ?? this.subtitleStreams,
+      preferredAudioStreamId:
+          preferredAudioStreamId ?? this.preferredAudioStreamId,
+      preferredSubtitleStreamId:
+          preferredSubtitleStreamId ?? this.preferredSubtitleStreamId,
       seasonNumber: seasonNumber ?? this.seasonNumber,
       episodeNumber: episodeNumber ?? this.episodeNumber,
       width: width ?? this.width,
@@ -148,7 +258,7 @@ class PlaybackTarget {
 
   bool get needsResolution =>
       (streamUrl.trim().isEmpty &&
-          sourceKind == MediaSourceKind.emby &&
+          sourceKind.isMediaServer &&
           itemId.trim().isNotEmpty) ||
       (streamUrl.trim().isEmpty &&
           sourceKind == MediaSourceKind.quark &&
@@ -293,6 +403,10 @@ class PlaybackTarget {
       'container': container,
       'videoCodec': videoCodec,
       'audioCodec': audioCodec,
+      'audioStreams': audioStreams.map((item) => item.toJson()).toList(),
+      'subtitleStreams': subtitleStreams.map((item) => item.toJson()).toList(),
+      'preferredAudioStreamId': preferredAudioStreamId,
+      'preferredSubtitleStreamId': preferredSubtitleStreamId,
       'seasonNumber': seasonNumber,
       'episodeNumber': episodeNumber,
       'width': width,
@@ -338,6 +452,19 @@ class PlaybackTarget {
       container: json['container'] as String? ?? '',
       videoCodec: json['videoCodec'] as String? ?? '',
       audioCodec: json['audioCodec'] as String? ?? '',
+      audioStreams: (json['audioStreams'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((item) =>
+              PlaybackAudioStream.fromJson(Map<String, dynamic>.from(item)))
+          .toList(growable: false),
+      subtitleStreams: (json['subtitleStreams'] as List<dynamic>? ?? const [])
+          .whereType<Map>()
+          .map((item) =>
+              PlaybackSubtitleStream.fromJson(Map<String, dynamic>.from(item)))
+          .toList(growable: false),
+      preferredAudioStreamId: json['preferredAudioStreamId'] as String? ?? '',
+      preferredSubtitleStreamId:
+          json['preferredSubtitleStreamId'] as String? ?? '',
       seasonNumber: (json['seasonNumber'] as num?)?.toInt(),
       episodeNumber: (json['episodeNumber'] as num?)?.toInt(),
       width: (json['width'] as num?)?.toInt(),

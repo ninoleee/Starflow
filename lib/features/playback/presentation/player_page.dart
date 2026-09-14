@@ -23,6 +23,7 @@ import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
 import 'package:starflow/features/playback/application/mpv_startup_scope.dart';
@@ -33,6 +34,7 @@ import 'package:starflow/features/playback/application/native_playback_media_typ
 import 'package:starflow/features/playback/application/playback_episode_queue_resolver.dart';
 import 'package:starflow/features/playback/application/playback_performance_tracker.dart';
 import 'package:starflow/features/playback/application/playback_remote_preflight.dart';
+import 'package:starflow/features/playback/application/playback_server_track_resolver.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
@@ -123,7 +125,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   static const MethodChannel _platformChannel = MethodChannel(
     'starflow/platform',
   );
-  static const int _maxPlaybackAttempts = PlaybackPolicyValues.maxPlayerAttempts;
+  static const int _maxPlaybackAttempts =
+      PlaybackPolicyValues.maxPlayerAttempts;
   static const _kSeekStep = Duration(seconds: 10);
   static const _kSubtitleDelaySteps = <double>[-2, -1, -0.5, 0, 0.5, 1, 2];
   static const _kProgressPersistInterval = Duration(seconds: 10);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
@@ -20,6 +21,7 @@ class InterfaceSettingsPage extends ConsumerWidget {
       ),
     );
     final controller = ref.read(settingsControllerProvider.notifier);
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final theme = Theme.of(context);
 
     return SettingsPageScaffold(
@@ -88,7 +90,7 @@ class InterfaceSettingsPage extends ConsumerWidget {
           ),
           SettingsToggleTile(
             title: '自动隐藏菜单栏',
-            subtitle: '普通端会按页面交互自动隐藏；TV 端会在焦点离开左侧菜单后收起。',
+            subtitle: isTelevision ? '焦点离开左侧菜单后自动收起。' : '按页面交互自动隐藏。',
             value: settings.autoHideNavigationBarEnabled,
             focusId: 'performance-interface:auto-hide-navigation',
             onChanged: controller.setAutoHideNavigationBarEnabled,

@@ -59,6 +59,8 @@ internal class NativeEpisodeTransition(private val now: () -> Long) {
     private var prefetchAttempt: NativeEpisodePreparationKey? = null
     private var automaticAttempt: NativeEpisodePreparationKey? = null
     private var sequence = 0L
+    private var pendingDeadlineMs = 0L
+    private var pendingPromoted = false
 
     val isSwitching: Boolean
         get() = state == State.SWITCHING || state == State.WAITING_FOR_FIRST_FRAME
@@ -85,13 +87,20 @@ internal class NativeEpisodeTransition(private val now: () -> Long) {
             state = State.SWITCHING
             return Decision.Ready(Destination(cached.entry, reason, prepared = true))
         }
-        if (pending?.key == key && now() - pending!!.startedAtMs < RESOLUTION_TIMEOUT_MS)
+        val current = pending
+        if (current?.key == key && !isExpired(current)) {
+            // Reuse the request, but do not spend the foreground wait in the background.
+            if (current.background && !pendingPromoted) {
+                pendingDeadlineMs = now() + RESOLUTION_TIMEOUT_MS
+                pendingPromoted = true
+            }
             return Decision.Wait
+        }
         return Decision.Resolve(newRequest(key))
     }
 
     fun resolve(request: Request, entry: NativeEpisodeQueueEntry): Destination? {
-        if (pending != request) return null
+        if (pending != request || isExpired(request)) return null
         pending = null
         val requestedReason = reason
         if (requestedReason == null) {
@@ -111,8 +120,10 @@ internal class NativeEpisodeTransition(private val now: () -> Long) {
         return failedReason
     }
 
-    fun expiredRequest(): Request? =
-        pending?.takeIf { now() - it.startedAtMs >= RESOLUTION_TIMEOUT_MS }
+    fun isExpired(request: Request): Boolean =
+        pending == request && now() >= pendingDeadlineMs
+
+    fun expiredRequest(): Request? = pending?.takeIf(::isExpired)
 
     fun awaitFirstFrame() {
         state = State.WAITING_FOR_FIRST_FRAME
@@ -151,10 +162,16 @@ internal class NativeEpisodeTransition(private val now: () -> Long) {
         reason = null
         prefetchAttempt = null
         automaticAttempt = null
+        pendingDeadlineMs = 0L
+        pendingPromoted = false
     }
 
     private fun newRequest(key: NativeEpisodePreparationKey, background: Boolean = false): Request =
-        Request(++sequence, key, now(), background).also { pending = it }
+        Request(++sequence, key, now(), background).also {
+            pending = it
+            pendingDeadlineMs = it.startedAtMs + RESOLUTION_TIMEOUT_MS
+            pendingPromoted = false
+        }
 
     companion object {
         const val PREPARED_TTL_MS = 60_000L

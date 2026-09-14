@@ -2,10 +2,12 @@
 package com.example.starflow
 
 internal object PlaybackPolicyValues {
-    const val version = 1
+    const val version = 2
     const val maxPlayerAttempts = 3
     const val maxRuntimeRecoveries = 2
     const val startupHardLimitMs = 120000
+    const val exoStartupHardLimitMs = 60000
+    const val exoStartupNoProgressTimeoutMs = 30000
     const val bufferAdvanceMs = 1000
     const val bufferAdvancePercent = 1
     const val positionAdvanceMs = 250

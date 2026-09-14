@@ -8,7 +8,11 @@ internal class NativePlaybackMemoryStore(
     private val writeSnapshot: (String, Boolean) -> Boolean,
     private val now: () -> String = NativePlaybackFormatting::isoNow,
     private val log: (String) -> Unit = { NativePlaybackFormatting.logPlayback(it) },
+    private val decodeSnapshot: (String) -> JSONObject = ::JSONObject,
 ) {
+    private var cachedRaw: String? = null
+    private var cachedSnapshot: JSONObject? = null
+
     constructor(
         preferences: SharedPreferences
     ) : this(
@@ -52,14 +56,27 @@ internal class NativePlaybackMemoryStore(
 
     private fun loadPlaybackSnapshot(): JSONObject {
         val raw = readSnapshot()
-        if (raw.isNullOrBlank()) {
-            return JSONObject()
-        }
-        return try {
-            JSONObject(raw)
+        cachedSnapshot?.let { if (cachedRaw == raw) return it }
+        val snapshot = try {
+            if (raw.isNullOrBlank()) JSONObject() else decodeSnapshot(raw)
         } catch (_: Throwable) {
             JSONObject()
         }
+        cachedRaw = raw
+        cachedSnapshot = snapshot
+        return snapshot
+    }
+
+    private fun persistSnapshot(snapshot: JSONObject, synchronous: Boolean): Boolean {
+        // Writers mutate the cached object. Do not retain it if persistence fails.
+        cachedSnapshot = null
+        val raw = snapshot.toString()
+        val written = writeSnapshot(raw, synchronous)
+        if (written) {
+            cachedRaw = raw
+            cachedSnapshot = snapshot
+        }
+        return written
     }
 
     fun loadSeriesSubtitlePreference(seriesKey: String): NativeSubtitleSessionPreference? {
@@ -99,7 +116,7 @@ internal class NativePlaybackMemoryStore(
             preference.toJson(seriesKey = normalizedSeriesKey, updatedAt = now()),
         )
         snapshot.put("subtitlePreferences", subtitlePreferences)
-        writeSnapshot(snapshot.toString(), false)
+        persistSnapshot(snapshot, false)
     }
 
     fun clearSeriesSubtitlePreference(seriesKey: String) {
@@ -111,7 +128,7 @@ internal class NativePlaybackMemoryStore(
         val subtitlePreferences = snapshot.optJSONObject("subtitlePreferences") ?: return
         subtitlePreferences.remove(normalizedSeriesKey)
         snapshot.put("subtitlePreferences", subtitlePreferences)
-        writeSnapshot(snapshot.toString(), false)
+        persistSnapshot(snapshot, false)
     }
 
     fun savePlaybackEntry(
@@ -197,7 +214,7 @@ internal class NativePlaybackMemoryStore(
                 put("skipPreferences", skipPreferences)
                 put("subtitlePreferences", subtitlePreferences)
             }
-        val committed = writeSnapshot(nextSnapshot.toString(), synchronous)
+        val committed = persistSnapshot(nextSnapshot, synchronous)
         if (synchronous) {
             log(
                 "native.playback.progress.saved " +
@@ -235,6 +252,7 @@ internal class NativePlaybackMemoryStore(
             return null
         }
         return loadPlaybackSnapshot().optJSONObject("skipPreferences")?.optJSONObject(seriesKey)
+            ?.let { JSONObject(it.toString()) }
     }
 
     fun saveSeriesSkipPreference(
@@ -269,6 +287,6 @@ internal class NativePlaybackMemoryStore(
                     snapshot.optJSONObject("subtitlePreferences") ?: JSONObject(),
                 )
             }
-        writeSnapshot(nextSnapshot.toString(), false)
+        persistSnapshot(nextSnapshot, false)
     }
 }

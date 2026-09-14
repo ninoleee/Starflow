@@ -2,7 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
@@ -234,7 +234,7 @@ class DetailTargetResolver {
     required DetailEnrichmentSettings settings,
     required String traceKey,
   }) async {
-    if (target.sourceKind == MediaSourceKind.emby) {
+    if (target.sourceKind.isMediaServer) {
       return _resolveEmbyPlayback(target, settings, traceKey);
     }
     if (target.sourceKind == MediaSourceKind.nas) {
@@ -264,7 +264,7 @@ class DetailTargetResolver {
       throw const _PlaybackResolutionException();
     }
     return _ref
-        .read(embyApiClientProvider)
+        .read(mediaServerClientProvider(source.kind))
         .resolvePlaybackTarget(source: source, target: target);
   }
 
@@ -321,7 +321,7 @@ class DetailTargetResolver {
     PlaybackTarget target, {
     required DetailEnrichmentSettings settings,
   }) {
-    final needsEmby = target.sourceKind == MediaSourceKind.emby &&
+    final needsEmby = target.sourceKind.isMediaServer &&
         target.itemId.trim().isNotEmpty &&
         (target.streamUrl.trim().isEmpty ||
             target.formatLabel.trim().isEmpty ||

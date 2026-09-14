@@ -131,6 +131,15 @@ class PlaybackSystemSessionManager(
 
     private var audioFocusRequest: AudioFocusRequest? = null
     private var currentState = PlaybackSystemSessionState()
+    private var publishedMetadataState: PlaybackSystemSessionState? = null
+    private var publishedNotificationState: PlaybackSystemSessionState? = null
+    private val displayIcon by lazy {
+        BitmapFactory.decodeResource(
+            context.resources,
+            R.drawable.icon_preview_sharp,
+            BitmapFactory.Options().apply { inSampleSize = 4 },
+        )
+    }
     private var isActive = false
     private var noisyReceiverRegistered = false
     private var hasAudioFocus = false
@@ -187,6 +196,8 @@ class PlaybackSystemSessionManager(
         }
 
         isActive = active
+        publishedMetadataState = null
+        publishedNotificationState = null
         if (active) {
             ensureNotificationChannel()
             mediaSession.setSessionActivity(contentIntentFactory())
@@ -222,8 +233,16 @@ class PlaybackSystemSessionManager(
         }
 
         mediaSession.setPlaybackState(buildPlaybackState(state))
-        mediaSession.setMetadata(buildMetadata(state))
-        updateNotification(state)
+        if (PlaybackSystemSessionUpdatePolicy.metadataChanged(publishedMetadataState, state)) {
+            mediaSession.setMetadata(buildMetadata(state))
+            publishedMetadataState = state
+        }
+        if (!notificationsAllowed()) {
+            publishedNotificationState = null
+        } else if (PlaybackSystemSessionUpdatePolicy.notificationChanged(publishedNotificationState, state)) {
+            updateNotification(state)
+            publishedNotificationState = state
+        }
     }
 
     fun prepareForPlayback(): Boolean {
@@ -286,16 +305,12 @@ class PlaybackSystemSessionManager(
             )
             .putBitmap(
                 MediaMetadata.METADATA_KEY_DISPLAY_ICON,
-                BitmapFactory.decodeResource(context.resources, R.drawable.icon_preview_sharp),
+                displayIcon,
             )
             .build()
     }
 
     private fun updateNotification(state: PlaybackSystemSessionState) {
-        if (!notificationsAllowed()) {
-            return
-        }
-
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(context, notificationChannelId)
         } else {

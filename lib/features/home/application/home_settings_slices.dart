@@ -58,7 +58,7 @@ final homeSelectableMediaSourceIdsProvider = Provider<Set<String>>((ref) {
 
 bool _isSelectableHomeMediaSource(MediaSourceConfig source) {
   return source.canAppearInLibraryNavigation &&
-      (source.kind == MediaSourceKind.emby ||
+      (source.kind.isMediaServer ||
           source.kind == MediaSourceKind.nas ||
           source.kind == MediaSourceKind.quark);
 }

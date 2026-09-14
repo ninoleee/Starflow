@@ -30,6 +30,7 @@ import org.json.JSONObject
 
 internal class NativePlaybackSession(private val host: Host) {
     interface Host {
+        val remote: NativePlaybackRemoteController
         val controllerView: NativePlaybackControllerView
         val externalSubtitles: NativePlaybackExternalSubtitleController
         val subtitles: NativePlaybackTrackController
@@ -54,6 +55,9 @@ internal class NativePlaybackSession(private val host: Host) {
     var player: ExoPlayer? = null
 
     var playbackBandwidthMeter: DefaultBandwidthMeter? = null
+
+    var playbackTransferProgress: NativePlaybackTransferProgress? = null
+        private set
 
     var baseMediaItem: MediaItem? = null
 
@@ -162,8 +166,12 @@ internal class NativePlaybackSession(private val host: Host) {
         playbackBandwidthMeter = bandwidthMeter
         host.diagnostics.latestNetworkBytesPerSecond = 0L
         host.diagnostics.latestNetworkSampleAtMs = 0L
+        // Each player owns its listener so a released stream cannot keep the next startup alive.
+        val transferProgress = NativePlaybackTransferProgress()
+        playbackTransferProgress = transferProgress
         val dataSourceFactory =
             DefaultHttpDataSource.Factory()
+                .setTransferListener(transferProgress)
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(NATIVE_HTTP_CONNECT_TIMEOUT_MS)
                 .setReadTimeoutMs(NATIVE_HTTP_READ_TIMEOUT_MS)
@@ -267,6 +275,8 @@ internal class NativePlaybackSession(private val host: Host) {
 
         val initialPlayWhenReady = nextInitializePlayWhenReady ?: true
         nextInitializePlayWhenReady = null
+        host.launch.schedulePlaybackLaunchTimeout()
+        if (player !== exoPlayer) return
         if (initialPlayWhenReady) {
             host.systemSession.playbackSystemSessionManager.prepareForPlayback()
         }
@@ -276,6 +286,7 @@ internal class NativePlaybackSession(private val host: Host) {
             setMediaItem(initialMediaItem, restoredResumePositionMs)
             prepare()
         }
+        if (player !== exoPlayer) return
         NativePlaybackFormatting.logPlayback(
             "native.initialize.prepare-called playWhenReady=${exoPlayer.playWhenReady}"
         )
@@ -298,10 +309,10 @@ internal class NativePlaybackSession(private val host: Host) {
         }
         host.runtime.startPlaybackWatchdog()
         host.runtime.startPlaybackRuntimeLoop()
-        host.launch.schedulePlaybackLaunchTimeout()
     }
 
     fun releasePlayer() {
+        host.remote.resetInputState()
         host.controllerView.cancelPendingControllerFocus()
         host.launch.cancelPlaybackLaunchTimeout()
         val dualSubtitleWasEnabled = host.subtitles.dualSubtitleController.isEnabled
@@ -318,6 +329,7 @@ internal class NativePlaybackSession(private val host: Host) {
         player = null
         playbackBandwidthMeter?.removeEventListener(host.diagnostics.bandwidthEventListener)
         playbackBandwidthMeter = null
+        playbackTransferProgress = null
         host.diagnostics.latestNetworkBytesPerSecond = 0L
         host.diagnostics.latestNetworkSampleAtMs = 0L
         host.diagnostics.networkSpeedVisible = false
@@ -436,13 +448,18 @@ internal class NativePlaybackSession(private val host: Host) {
 
     fun seekBy(deltaMs: Long): Boolean {
         val currentPlayer = player ?: return false
+        return seekTo(currentPlayer.currentPosition.coerceAtLeast(0L) + deltaMs)
+    }
+
+    fun seekTo(positionMs: Long): Boolean {
+        val currentPlayer = player ?: return false
         val durationMs = currentPlayer.duration.takeIf { it > 0L } ?: 0L
         val currentPositionMs = currentPlayer.currentPosition.coerceAtLeast(0L)
         val nextPositionMs =
             if (durationMs > 0L) {
-                (currentPositionMs + deltaMs).coerceIn(0L, durationMs)
+                positionMs.coerceIn(0L, durationMs)
             } else {
-                (currentPositionMs + deltaMs).coerceAtLeast(0L)
+                positionMs.coerceAtLeast(0L)
             }
         if (nextPositionMs == currentPositionMs) {
             return false

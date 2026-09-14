@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 final embyApiClientProvider = Provider<EmbyApiClient>((ref) {
@@ -18,7 +19,7 @@ enum EmbyImageRequestProfile {
   libraryGrid,
 }
 
-class EmbyApiClient {
+class EmbyApiClient implements MediaServerClient {
   EmbyApiClient(this._client);
 
   final http.Client _client;
@@ -76,6 +77,7 @@ class EmbyApiClient {
     );
   }
 
+  @override
   Future<List<MediaItem>> fetchLibrary(
     MediaSourceConfig source, {
     int limit = 200,
@@ -125,6 +127,7 @@ class EmbyApiClient {
     );
   }
 
+  @override
   Future<PlaybackTarget> resolvePlaybackTarget({
     required MediaSourceConfig source,
     required PlaybackTarget target,
@@ -168,6 +171,7 @@ class EmbyApiClient {
     );
   }
 
+  @override
   Future<List<PlaybackTarget>> fetchPlaybackVariants({
     required MediaSourceConfig source,
     required PlaybackTarget target,
@@ -208,6 +212,15 @@ class EmbyApiClient {
     return variants;
   }
 
+  @override
+  Future<String> downloadExternalSubtitle({
+    required MediaSourceConfig source,
+    required String subtitleId,
+  }) {
+    throw UnsupportedError('Emby external subtitle download is not supported');
+  }
+
+  @override
   Future<List<MediaItem>> fetchChildren(
     MediaSourceConfig source, {
     required String parentId,
@@ -490,6 +503,7 @@ class EmbyApiClient {
     );
   }
 
+  @override
   Future<List<MediaCollection>> fetchCollections(
       MediaSourceConfig source) async {
     if (!source.hasActiveSession) {

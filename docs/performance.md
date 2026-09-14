@@ -44,6 +44,20 @@ The latest architecture pass moved several hot paths out of single large files:
 * After changing `home_feed_load_scheduler.dart`, `metadata_prefetch_concurrency_limiter.dart`, network guards, startup refresh settings, or structured logging.
 * Before merging large refactors that could affect the timeline between user interaction and the first frame.
 
+### Post-save directory refresh
+
+Post-save WebDAV discovery uses the existing incremental refresh path and its normal scan, cache and concurrency policies. OpenList/AList STRM directories are supported when exposed through a WebDAV `/dav/...` path; no management `/api/...` request or server refresh call is made. Compare the existing `index_refresh` smoke separately; no server refresh API or periodic worker is part of this change.
+
+### Exo TV directional-hold verification
+
+The September 10 change coalesces directional repeats into one absolute seek per 250 ms window, with immediate first-press and key-up commits. Acceleration remains 10/30/60/120 seconds per input. Pending work is cancelled when focus, playback session, or the active interaction changes. The native memory store reuses unchanged decoded history, and Android media-session updates reuse the sampled display icon and skip unchanged metadata/notifications. These are code-level work reductions, not measured device frame-rate improvements.
+
+* Run `./gradlew :app:testDebugUnitTest :app:compileReleaseKotlin -Pandroid-skip-build-dependency-validation=true` from `android` for hold timing, release, reversal, cancellation, seek bounds, snapshot invalidation and media-publication regressions.
+* On a connected TV, compare short taps and 2/5/10-second holds in both directions, with the controller initially hidden and visible, and while paused or buffering. Include a low-memory/API 23 device and both a local sample and the same remote high-bitrate sample.
+* Record controller frame timing separately from decoded-video dropped frames, audio underruns and key-up-to-playback recovery. Use existing `playback.performance` session summaries and Android device traces; seek buffering is not evidence of a rendering regression by itself.
+* Check direction changes, start/end bounds, Back/Menu/confirm during a hold, focus loss and an episode switch with pending input. Confirm the controller does not flash closed or steal focus, no old callback seeks the next episode, and playback metadata/buttons update after a title, duration, pause or queue-boundary change.
+* Host smoke timings and JVM mock-call counts cannot certify these device results. No TV device measurement is recorded for this change yet.
+
 ### Command
 ```bash
 dart tool/perf/run_perf_baselines.dart

@@ -310,7 +310,7 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell>
         .where(
           (source) =>
               source.enabled &&
-              source.kind == MediaSourceKind.emby &&
+              source.kind.isMediaServer &&
               source.hasActiveSession,
         )
         .map((source) => source.id.trim())

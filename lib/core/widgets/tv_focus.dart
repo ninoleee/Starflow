@@ -409,6 +409,7 @@ class _TvOutlinedFocusableAction extends ConsumerStatefulWidget {
     required this.borderRadius,
     this.onFocused,
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
     this.focusNode,
     this.focusId,
     this.borderWidth = 2,
@@ -419,6 +420,7 @@ class _TvOutlinedFocusableAction extends ConsumerStatefulWidget {
   final VoidCallback? onPressed;
   final VoidCallback? onFocused;
   final bool autofocus;
+  final bool focusableWhenDisabled;
   final FocusNode? focusNode;
   final String? focusId;
   final BorderRadius borderRadius;
@@ -491,6 +493,7 @@ class _TvOutlinedFocusableActionState
     );
     return TvFocusableAction(
       onPressed: widget.onPressed,
+      focusableWhenDisabled: widget.focusableWhenDisabled,
       onFocused: widget.onFocused,
       autofocus: widget.autofocus,
       focusNode: _effectiveFocusNode,
@@ -633,6 +636,7 @@ class TvFocusableAction extends ConsumerStatefulWidget {
     this.onContextAction,
     this.onFocused,
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
     this.focusNode,
     this.focusId,
     this.borderRadius = const BorderRadius.all(Radius.circular(AppRadii.md)),
@@ -645,6 +649,7 @@ class TvFocusableAction extends ConsumerStatefulWidget {
   final VoidCallback? onContextAction;
   final VoidCallback? onFocused;
   final bool autofocus;
+  final bool focusableWhenDisabled;
   final FocusNode? focusNode;
   final String? focusId;
   final BorderRadius borderRadius;
@@ -769,7 +774,7 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
     return FocusableActionDetector(
       focusNode: _effectiveFocusNode,
       autofocus: widget.autofocus,
-      enabled: enabled,
+      enabled: enabled || widget.focusableWhenDisabled,
       onFocusChange: (value) {
         if (_isFocused != value) {
           setState(() {
@@ -862,7 +867,7 @@ _StarflowButtonPalette _starflowButtonPalette(
   );
 }
 
-class StarflowButton extends StatelessWidget {
+class StarflowButton extends ConsumerWidget {
   const StarflowButton({
     super.key,
     required this.label,
@@ -895,10 +900,19 @@ class StarflowButton extends StatelessWidget {
   final double focusScale;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    // Dialog actions need a subdued fill so the white TV focus outline stands out.
+    final isTvPopup = isTelevision &&
+        (context.findAncestorWidgetOfExactType<Dialog>() != null ||
+            context.findAncestorWidgetOfExactType<BottomSheet>() != null);
+    final effectiveVariant =
+        isTvPopup && variant == StarflowButtonVariant.primary
+            ? StarflowButtonVariant.secondary
+            : variant;
     final palette = _starflowButtonPalette(
       Theme.of(context),
-      variant: variant,
+      variant: effectiveVariant,
       enabled: onPressed != null && !loading,
     );
     final radius = BorderRadius.circular(AppRadii.pill);
@@ -978,6 +992,7 @@ class StarflowIconButton extends StatelessWidget {
     this.iconColor,
     this.variant = StarflowButtonVariant.ghost,
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
     this.focusNode,
     this.focusId,
     this.onFocused,
@@ -990,6 +1005,7 @@ class StarflowIconButton extends StatelessWidget {
   final Color? iconColor;
   final StarflowButtonVariant variant;
   final bool autofocus;
+  final bool focusableWhenDisabled;
   final FocusNode? focusNode;
   final String? focusId;
   final VoidCallback? onFocused;
@@ -1006,6 +1022,7 @@ class StarflowIconButton extends StatelessWidget {
     final radius = BorderRadius.circular(AppRadii.pill);
     final child = _TvOutlinedFocusableAction(
       onPressed: onPressed,
+      focusableWhenDisabled: focusableWhenDisabled,
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,11 +18,16 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
 import 'package:starflow/features/search/application/cloud115_save_workflow_service.dart';
 import 'package:starflow/features/search/application/search_favorite_metadata_service.dart';
+import 'package:starflow/features/search/application/favorite_auto_sync.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
+import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
+import 'package:starflow/features/search/presentation/cloud_save_feedback_controller.dart';
+import 'package:starflow/features/search/domain/share_link_validation.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -80,7 +86,7 @@ List<MediaSourceConfig> _resolveVisibleLocalSources({
       .where(
         (source) =>
             source.enabled &&
-            (source.kind == MediaSourceKind.emby ||
+            (source.kind.isMediaServer ||
                 source.kind == MediaSourceKind.nas ||
                 (source.kind == MediaSourceKind.quark &&
                     source.hasConfiguredQuarkFolder)),
@@ -150,6 +156,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   bool _isSearching = false;
   late bool _showFavoriteResults;
   Set<String> _selectedTargetIds = const {_SearchTarget.allId};
+  SearchCloudType? _selectedCloudType;
   Set<String> _favoriteResultKeys = const <String>{};
   String? _errorMessage;
   int _activeSearchRequestId = 0;
@@ -157,13 +164,15 @@ class _SearchPageState extends ConsumerState<SearchPage>
   int _completedSearchTaskCount = 0;
   int _filteredResultCount = 0;
   final Set<String> _savingResultIds = <String>{};
-  final Set<ScaffoldFeatureController<SnackBar, SnackBarClosedReason>>
-      _quarkSaveProgressSnackBars = {};
-  final Map<String, _QuarkLinkValidationState> _quarkLinkValidationStates = {};
-  final List<_QuarkLinkValidationJob> _quarkLinkValidationQueue = [];
-  final Set<String> _queuedOrRunningQuarkValidationJobs = {};
-  int _activeQuarkLinkValidationCount = 0;
-  int _quarkLinkValidationMaxConcurrency = kTaskMaxConcurrencyDefault;
+  late final _saveFeedback = CloudSaveFeedbackController(
+    () => mounted ? context : null,
+    isActive: () => isPageActive,
+  );
+  final Map<String, _ShareLinkValidationState> _shareLinkValidationStates = {};
+  final List<_ShareLinkValidationJob> _shareLinkValidationQueue = [];
+  final Set<String> _queuedOrRunningShareValidationJobs = {};
+  int _activeShareLinkValidationCount = 0;
+  int _shareLinkValidationMaxConcurrency = kTaskMaxConcurrencyDefault;
   String? _pendingAutoSearchQuery;
   bool _searchPreferencesLoaded = false;
   int _searchPreferencesLoadId = 0;
@@ -180,6 +189,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
   bool _initialTelevisionFocusScheduled = false;
   bool _initialTelevisionFocusRequested = false;
   bool _televisionFocusRecoveryScheduled = false;
+  StreamSubscription<void>? _favoriteChanges;
+  bool _favoriteRouteVisible = false;
 
   @override
   void initState() {
@@ -187,7 +198,32 @@ class _SearchPageState extends ConsumerState<SearchPage>
     _showFavoriteResults = widget.favoritesOnly;
     _controller = TextEditingController(text: widget.initialQuery ?? '');
     unawaited(_loadSearchPreferences());
+    _favoriteChanges = ref
+        .read(searchPreferencesRepositoryProvider)
+        .favoriteChanges
+        .listen((_) {
+      if (mounted && isPageActive) unawaited(_loadSearchPreferences());
+    });
     _scheduleAutoSearch(widget.initialQuery);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Track navigation separately from app lifecycle: resuming is not an entry.
+    final route = ModalRoute.of(context);
+    final visible = widget.favoritesOnly &&
+        (route == null || route.isCurrent) &&
+        TickerMode.valuesOf(context).enabled;
+    if (visible && !_favoriteRouteVisible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _favoriteRouteVisible) {
+          unawaited(
+              ref.read(favoriteAutoSyncProvider).onFavoritesPageEntered());
+        }
+      });
+    }
+    _favoriteRouteVisible = visible;
   }
 
   @override
@@ -205,12 +241,10 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
   @override
   void dispose() {
+    _favoriteChanges?.cancel();
     _cancelPendingSearchUiCommit(clearState: true);
-    _cancelQuarkLinkValidations(clearStates: true);
-    for (final controller in _quarkSaveProgressSnackBars.toList()) {
-      controller.close();
-    }
-    _quarkSaveProgressSnackBars.clear();
+    _cancelShareLinkValidations(clearStates: true);
+    _saveFeedback.dispose();
     _queryFocusNode.dispose();
     _scrollController.dispose();
     _controller.dispose();
@@ -251,8 +285,18 @@ class _SearchPageState extends ConsumerState<SearchPage>
     _cancelSearchTasks();
   }
 
-  List<SearchResult> get _displayedResults =>
-      _showFavoriteResults ? _favoriteResults : _results;
+  List<SearchResult> get _displayedResults {
+    if (_showFavoriteResults) return _favoriteResults;
+    final selected = _selectedCloudType;
+    if (selected == null) return _results;
+    return _results.where((result) {
+      return resolveSearchCloudTypeCode(
+            rawUrl: result.resourceUrl,
+            hints: [result.cloudType],
+          ) ==
+          selected.code;
+    }).toList(growable: false);
+  }
 
   Future<void> _loadSearchPreferences() async {
     final loadId = ++_searchPreferencesLoadId;
@@ -322,7 +366,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
           final index = _favoriteResults.indexWhere(
             (item) => searchResultFavoriteKey(item) == key,
           );
-          if (index < 0 || _favoriteResults[index].posterUrl.trim().isNotEmpty) {
+          if (index < 0 ||
+              _favoriteResults[index].posterUrl.trim().isNotEmpty) {
             continue;
           }
           await preferences.updateFavoritePoster(enriched);
@@ -426,27 +471,21 @@ class _SearchPageState extends ConsumerState<SearchPage>
         searchQuery: _controller.text.trim(),
       ),
     );
-    final nextFavorites = removing
-        ? _favoriteResults
-            .where((item) => searchResultFavoriteKey(item) != key)
-            .toList(growable: false)
-        : _dedupeFavoriteResults([
-            favoriteResult,
-            ..._favoriteResults.where(
-              (item) => searchResultFavoriteKey(item) != key,
-            ),
-          ]);
-    _searchPreferencesLoadId += 1;
-    if (mounted) {
-      setState(() {
-        _favoriteResults = nextFavorites;
-        _favoriteResultKeys =
-            nextFavorites.map(searchResultFavoriteKey).toSet();
-      });
+    if (!mounted) return;
+    try {
+      await ref.read(searchPreferencesRepositoryProvider).setFavorite(
+          searchResultFavoriteKey(favoriteResult),
+          removing ? null : favoriteResult);
+      if (!mounted) return;
+      await _loadSearchPreferences();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('收藏保存失败，请检查本地存储或 200 条收藏上限')),
+        );
+      }
+      return;
     }
-    await ref
-        .read(searchPreferencesRepositoryProvider)
-        .saveFavoriteResults(nextFavorites);
     if (!mounted) {
       return;
     }
@@ -513,8 +552,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
     }
     final completed = _pendingSearchCompletedCount;
     final totalCount = _pendingSearchTotalCount;
-    final hasPendingValidations = _quarkLinkValidationStates.values.any(
-      (state) => state == _QuarkLinkValidationState.pending,
+    final hasPendingValidations = _shareLinkValidationStates.values.any(
+      (state) => state == _ShareLinkValidationState.pending,
     );
     final hasFinished = completed >= totalCount && !hasPendingValidations;
     final sortedResults = _sortResults(aggregated);
@@ -528,6 +567,24 @@ class _SearchPageState extends ConsumerState<SearchPage>
           : null;
     });
     _scheduleTelevisionFocusRecoveryIfLost();
+    if (hasFinished) {
+      _logSearchResultVisibility();
+    }
+  }
+
+  void _logSearchResultVisibility() {
+    appLogInfo(
+      'search.results',
+      'Search result visibility updated',
+      fields: {
+        'requestId': _activeSearchRequestId,
+        'isSearching': _isSearching,
+        'selectedCloudType': _selectedCloudType?.code ?? 'all',
+        'resultCount': _results.length,
+        'visibleCount': _displayedResults.length,
+        'resultsByCloudType': countSearchResultsByCloudType(_results),
+      },
+    );
   }
 
   void _scheduleSearchUiCommit({
@@ -565,7 +622,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   void _cancelSearchTasks({bool clearResults = false}) {
     _activeSearchRequestId += 1;
     _cancelPendingSearchUiCommit(clearState: true);
-    _cancelQuarkLinkValidations(clearStates: true);
+    _cancelShareLinkValidations(clearStates: true);
     if (!mounted) {
       return;
     }
@@ -591,16 +648,16 @@ class _SearchPageState extends ConsumerState<SearchPage>
     });
   }
 
-  void _cancelQuarkLinkValidations({required bool clearStates}) {
-    for (final job in _quarkLinkValidationQueue) {
+  void _cancelShareLinkValidations({required bool clearStates}) {
+    for (final job in _shareLinkValidationQueue) {
       if (!job.completer.isCompleted) {
         job.completer.complete(
-          const QuarkShareValidationResult.unavailable('验证已取消'),
+          const ShareLinkValidationResult.unavailable('验证已取消'),
         );
       }
     }
-    _quarkLinkValidationQueue.clear();
-    _queuedOrRunningQuarkValidationJobs.removeWhere((identity) {
+    _shareLinkValidationQueue.clear();
+    _queuedOrRunningShareValidationJobs.removeWhere((identity) {
       final separator = identity.indexOf('|');
       if (separator < 0) {
         return true;
@@ -609,107 +666,119 @@ class _SearchPageState extends ConsumerState<SearchPage>
       return requestId != _activeSearchRequestId;
     });
     if (clearStates) {
-      _quarkLinkValidationStates.clear();
+      _shareLinkValidationStates.clear();
     }
   }
 
-  String _quarkValidationKey(SearchResult result) {
-    final normalizedUrl = normalizeSearchResourceUrl(result.resourceUrl);
-    return normalizedUrl.isEmpty ? result.id : normalizedUrl;
+  String _shareValidationKey(SearchResult result) {
+    return searchResultDeduplicationKey(result);
   }
 
-  _QuarkLinkValidationState? _quarkValidationStateFor(SearchResult result) {
-    return _quarkLinkValidationStates[_quarkValidationKey(result)];
+  _ShareLinkValidationState? _shareValidationStateFor(SearchResult result) {
+    return _shareLinkValidationStates[_shareValidationKey(result)];
   }
 
-  Future<QuarkShareValidationResult>? _enqueueQuarkLinkValidation({
+  Future<ShareLinkValidationResult>? _enqueueShareLinkValidation({
     required int requestId,
     required SearchResult result,
-    required String cookie,
+    required NetworkStorageConfig networkStorage,
     required int maxConcurrency,
-    required ValueChanged<QuarkShareValidationResult> onCompleted,
   }) {
-    if (detectSearchCloudTypeFromUrl(result.resourceUrl) !=
-            SearchCloudType.quark ||
-        cookie.trim().isEmpty) {
+    if (result.detailTarget != null) {
       return null;
     }
-    final key = _quarkValidationKey(result);
+    final cloudType = detectSearchCloudTypeFromUrl(result.resourceUrl);
+    late final Future<ShareLinkValidationResult> Function() validate;
+    if (cloudType == SearchCloudType.quark) {
+      if (networkStorage.quarkCookie.trim().isEmpty) return null;
+      final client = ref.read(quarkSaveClientProvider);
+      validate = () => client.validateShareLink(
+            shareUrl: result.resourceUrl,
+            cookie: networkStorage.quarkCookie,
+          );
+    } else if (cloudType == SearchCloudType.cloud115) {
+      final client = ref.read(cloud115SaveClientProvider);
+      validate = () => client.validateShareLink(
+            shareUrl: result.resourceUrl,
+            cookie: networkStorage.cloud115Cookie,
+            password: result.password,
+          );
+    } else {
+      return null;
+    }
+    final key = _shareValidationKey(result);
     final identity = '$requestId|$key';
-    if (!_queuedOrRunningQuarkValidationJobs.add(identity)) {
+    if (!_queuedOrRunningShareValidationJobs.add(identity)) {
       return null;
     }
-    _quarkLinkValidationMaxConcurrency = maxConcurrency.clamp(
+    _shareLinkValidationMaxConcurrency = maxConcurrency.clamp(
       kTaskMaxConcurrencyMin,
       kTaskMaxConcurrencyMax,
     );
-    _quarkLinkValidationStates[key] = _QuarkLinkValidationState.pending;
-    final job = _QuarkLinkValidationJob(
+    _shareLinkValidationStates[key] = _ShareLinkValidationState.pending;
+    final job = _ShareLinkValidationJob(
       requestId: requestId,
       identity: identity,
       key: key,
       result: result,
-      cookie: cookie,
-      client: ref.read(quarkSaveClientProvider),
-      onCompleted: onCompleted,
+      cloudType: cloudType!,
+      validate: validate,
     );
-    _quarkLinkValidationQueue.add(job);
-    _drainQuarkLinkValidationQueue();
+    _shareLinkValidationQueue.add(job);
+    _drainShareLinkValidationQueue();
     return job.completer.future;
   }
 
-  void _drainQuarkLinkValidationQueue() {
+  void _drainShareLinkValidationQueue() {
     while (
-        _activeQuarkLinkValidationCount < _quarkLinkValidationMaxConcurrency &&
-            _quarkLinkValidationQueue.isNotEmpty) {
-      final job = _quarkLinkValidationQueue.removeAt(0);
+        _activeShareLinkValidationCount < _shareLinkValidationMaxConcurrency &&
+            _shareLinkValidationQueue.isNotEmpty) {
+      final job = _shareLinkValidationQueue.removeAt(0);
       if (job.requestId != _activeSearchRequestId) {
-        _queuedOrRunningQuarkValidationJobs.remove(job.identity);
+        _queuedOrRunningShareValidationJobs.remove(job.identity);
         continue;
       }
-      _activeQuarkLinkValidationCount += 1;
-      unawaited(_runQuarkLinkValidation(job));
+      _activeShareLinkValidationCount += 1;
+      unawaited(_runShareLinkValidation(job));
     }
   }
 
-  Future<void> _runQuarkLinkValidation(_QuarkLinkValidationJob job) async {
+  Future<void> _runShareLinkValidation(_ShareLinkValidationJob job) async {
     try {
-      final validation = await job.client.validateShareLink(
-        shareUrl: job.result.resourceUrl,
-        cookie: job.cookie,
-      );
+      final validation = await job.validate();
       if (!mounted || job.requestId != _activeSearchRequestId) {
         return;
       }
       switch (validation.status) {
-        case QuarkShareValidationStatus.valid:
-          _quarkLinkValidationStates[job.key] = _QuarkLinkValidationState.valid;
+        case ShareLinkValidationStatus.valid:
+          _shareLinkValidationStates[job.key] = _ShareLinkValidationState.valid;
           break;
-        case QuarkShareValidationStatus.invalid:
-          _quarkLinkValidationStates.remove(job.key);
+        case ShareLinkValidationStatus.invalid:
+          _shareLinkValidationStates.remove(job.key);
           break;
-        case QuarkShareValidationStatus.unavailable:
-          _quarkLinkValidationStates[job.key] =
-              _QuarkLinkValidationState.unavailable;
+        case ShareLinkValidationStatus.unavailable:
+          _shareLinkValidationStates[job.key] =
+              _ShareLinkValidationState.unavailable;
           break;
       }
-      job.onCompleted(validation);
       if (!job.completer.isCompleted) {
         job.completer.complete(validation);
       }
+      final cloudLabel =
+          job.cloudType == SearchCloudType.quark ? 'Quark' : '115';
       if (validation.isInvalid) {
         appLogInfo(
-          'search.quark-validation',
-          'Invalid Quark search result filtered',
+          'search.${job.cloudType.code}-validation',
+          'Invalid $cloudLabel search result filtered',
           fields: {
             'providerId': job.result.providerId,
             'reason': validation.reason,
           },
         );
-      } else if (validation.status == QuarkShareValidationStatus.unavailable) {
+      } else if (validation.status == ShareLinkValidationStatus.unavailable) {
         appLogWarning(
-          'search.quark-validation',
-          'Quark search result could not be validated',
+          'search.${job.cloudType.code}-validation',
+          '$cloudLabel search result could not be validated',
           fields: {
             'providerId': job.result.providerId,
             'reason': validation.reason,
@@ -722,14 +791,14 @@ class _SearchPageState extends ConsumerState<SearchPage>
     } finally {
       if (!job.completer.isCompleted) {
         job.completer.complete(
-          const QuarkShareValidationResult.unavailable('验证未完成'),
+          const ShareLinkValidationResult.unavailable('验证未完成'),
         );
       }
-      if (_activeQuarkLinkValidationCount > 0) {
-        _activeQuarkLinkValidationCount -= 1;
+      if (_activeShareLinkValidationCount > 0) {
+        _activeShareLinkValidationCount -= 1;
       }
-      _queuedOrRunningQuarkValidationJobs.remove(job.identity);
-      _drainQuarkLinkValidationQueue();
+      _queuedOrRunningShareValidationJobs.remove(job.identity);
+      _drainShareLinkValidationQueue();
     }
   }
 
@@ -781,7 +850,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
     final repository = ref.read(searchRepositoryProvider);
     final requestId = ++_activeSearchRequestId;
-    _cancelQuarkLinkValidations(clearStates: true);
+    _cancelShareLinkValidations(clearStates: true);
     final operations = _buildSearchOperations(
       repository: repository,
       keyword: keyword,
@@ -807,7 +876,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
     });
 
     final aggregated = <SearchResult>[];
-    final seenResourceKeys = <String>{};
+    final searchCandidates = <String, _SearchCandidate>{};
     final errors = <String>[];
     var completed = 0;
     var filteredCount = 0;
@@ -820,7 +889,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
           aggregated: aggregated,
           errors: errors,
           totalCount: operations.length,
-          seenResourceKeys: seenResourceKeys,
+          searchCandidates: searchCandidates,
           onCompleted: () => completed += 1,
           getCompleted: () => completed,
           onFiltered: (count) => filteredCount += count,
@@ -841,9 +910,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
     final enabledProviders =
         ref.watch(_searchPageVisibleSearchProvidersProvider);
     final localSources = ref.watch(_searchPageVisibleLocalSourcesProvider);
-    final displayedResults = _displayedResults;
-    final pendingLinkValidationCount = _quarkLinkValidationStates.values
-        .where((state) => state == _QuarkLinkValidationState.pending)
+    final pendingLinkValidationCount = _shareLinkValidationStates.values
+        .where((state) => state == _ShareLinkValidationState.pending)
         .length;
     final targets = _buildTargets(
       localSources: localSources,
@@ -852,6 +920,34 @@ class _SearchPageState extends ConsumerState<SearchPage>
     final effectiveSelectedTargetIds = _searchPreferencesLoaded
         ? _resolveSelectedTargets(targets).map((item) => item.id).toSet()
         : const <String>{};
+    final availableCloudTypes = <SearchCloudType>{};
+    for (final provider in enabledProviders) {
+      if (!effectiveSelectedTargetIds.contains(_SearchTarget.allId) &&
+          !effectiveSelectedTargetIds.contains('provider:${provider.id}')) {
+        continue;
+      }
+      // An empty stored list is the existing settings representation of all.
+      availableCloudTypes.addAll(provider.allowedCloudTypes.isEmpty
+          ? SearchCloudType.values
+          : provider.allowedCloudTypes
+              .map(SearchCloudTypeX.fromCode)
+              .whereType<SearchCloudType>());
+    }
+    final resultCloudTypes = _results
+        .where((result) => result.detailTarget == null)
+        .map((result) => resolveSearchCloudTypeCode(
+              rawUrl: result.resourceUrl,
+              hints: [result.cloudType],
+            ))
+        .whereType<String>()
+        .map(SearchCloudTypeX.fromCode)
+        .whereType<SearchCloudType>()
+        .toSet();
+    availableCloudTypes.retainAll(resultCloudTypes);
+    if (!availableCloudTypes.contains(_selectedCloudType)) {
+      _selectedCloudType = null;
+    }
+    final displayedResults = _displayedResults;
 
     return AppPrimaryScrollController(
       controller: _scrollController,
@@ -883,12 +979,21 @@ class _SearchPageState extends ConsumerState<SearchPage>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             if (_showFavoriteResults)
-                              Text(
-                                '收藏',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.w800),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '收藏',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .headlineSmall
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.w800),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  const _FavoriteSyncButton(),
+                                ],
                               )
                             else
                               isTelevision
@@ -923,7 +1028,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                       ],
                                     ),
                             if (!_showFavoriteResults &&
-                                isTelevision &&
                                 _recentQueries.isNotEmpty) ...[
                               const SizedBox(height: 14),
                               Text(
@@ -936,20 +1040,52 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                     ),
                               ),
                               const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                children: [
-                                  for (var index = 0;
-                                      index < _recentQueries.length;
-                                      index++)
-                                    _SearchHistoryChip(
-                                      label: _recentQueries[index],
-                                      focusId: 'search:recent:$index',
-                                      onPressed: () => _runRecentQuery(
-                                          _recentQueries[index]),
-                                    ),
-                                ],
+                              SizedBox(
+                                height: 64,
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    return ScrollConfiguration(
+                                      behavior: ScrollConfiguration.of(context)
+                                          .copyWith(dragDevices: {
+                                        ...ScrollConfiguration.of(context)
+                                            .dragDevices,
+                                        PointerDeviceKind.mouse,
+                                      }),
+                                      child: SingleChildScrollView(
+                                        key: const PageStorageKey(
+                                            'search-recent-queries'),
+                                        scrollDirection: Axis.horizontal,
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 4, vertical: 6),
+                                        child: Row(
+                                          children: [
+                                            for (var index = 0;
+                                                index < _recentQueries.length;
+                                                index++) ...[
+                                              if (index > 0)
+                                                const SizedBox(width: 10),
+                                              ConstrainedBox(
+                                                constraints: BoxConstraints(
+                                                  maxWidth:
+                                                      constraints.maxWidth - 8,
+                                                ),
+                                                child: _SearchHistoryChip(
+                                                  label: _recentQueries[index],
+                                                  focusId:
+                                                      'search:recent:$index',
+                                                  onPressed: () =>
+                                                      _runRecentQuery(
+                                                          _recentQueries[
+                                                              index]),
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
                               ),
                             ],
                             const SizedBox(height: 10),
@@ -1016,6 +1152,40 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                         },
                                       ),
                                     ),
+                            if (!_showFavoriteResults &&
+                                _results.isNotEmpty &&
+                                availableCloudTypes.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                '网盘类型',
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final type in SearchCloudType.values
+                                      .where(availableCloudTypes.contains))
+                                    StarflowChipButton(
+                                      key: ValueKey(
+                                          'search-cloud-type:${type.code}'),
+                                      label: type.label,
+                                      selected: _selectedCloudType == type,
+                                      focusId: 'search:cloud-type:${type.code}',
+                                      onPressed: () {
+                                        setState(() {
+                                          _selectedCloudType =
+                                              _selectedCloudType == type
+                                                  ? null
+                                                  : type;
+                                        });
+                                        _logSearchResultVisibility();
+                                      },
+                                    ),
+                                ],
+                              ),
+                            ],
                             const SizedBox(height: 12),
                             if (!_showFavoriteResults && _isSearching) ...[
                               LinearProgressIndicator(
@@ -1041,7 +1211,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 child: Text('收藏 ${displayedResults.length} 条'),
                               )
                             else if (_controller.text.trim().isNotEmpty &&
-                                (displayedResults.isNotEmpty ||
+                                (_results.isNotEmpty ||
                                     _filteredResultCount > 0))
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
@@ -1065,11 +1235,14 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 child: Text(
                                   _showFavoriteResults
                                       ? '还没有收藏结果。'
-                                      : _controller.text.trim().isEmpty
-                                          ? '输入关键字后开始搜索。'
-                                          : _filteredResultCount > 0
-                                              ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
-                                              : '没有找到结果。',
+                                      : _selectedCloudType != null &&
+                                              _results.isNotEmpty
+                                          ? '当前网盘类型暂无结果。'
+                                          : _controller.text.trim().isEmpty
+                                              ? '输入关键字后开始搜索。'
+                                              : _filteredResultCount > 0
+                                                  ? '没有可用结果，已过滤 $_filteredResultCount 条结果。'
+                                                  : '没有找到结果。',
                                 ),
                               ),
                           ],
@@ -1082,7 +1255,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
                           (context, index) {
                             final result = displayedResults[index];
                             final validationState =
-                                _quarkValidationStateFor(result);
+                                _shareValidationStateFor(result);
                             return _SearchResultCard(
                               result: result,
                               focusId: 'search:result:${result.id}',
@@ -1095,10 +1268,10 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 networkStorage: networkStorage,
                               ),
                               isLinkValidationPending: validationState ==
-                                  _QuarkLinkValidationState.pending,
+                                  _ShareLinkValidationState.pending,
                               linkValidationLabel: switch (validationState) {
-                                _QuarkLinkValidationState.pending => '链接验证中',
-                                _QuarkLinkValidationState.unavailable =>
+                                _ShareLinkValidationState.pending => '链接验证中',
+                                _ShareLinkValidationState.unavailable =>
                                   '链接暂未验证',
                                 _ => '',
                               },
@@ -1364,56 +1537,90 @@ class _SearchPageState extends ConsumerState<SearchPage>
     required List<SearchResult> aggregated,
     required List<String> errors,
     required int totalCount,
-    required Set<String> seenResourceKeys,
+    required Map<String, _SearchCandidate> searchCandidates,
     required VoidCallback onCompleted,
     required int Function() getCompleted,
     required ValueChanged<int> onFiltered,
     required int Function() getFiltered,
   }) async {
+    void commitResults() {
+      _scheduleSearchUiCommit(
+        requestId: requestId,
+        aggregated: aggregated,
+        errors: errors,
+        totalCount: totalCount,
+        completedCount: getCompleted(),
+        filteredCount: getFiltered(),
+      );
+    }
+
+    void validateCandidate(_SearchCandidate candidate) {
+      final item = candidate.result;
+      final settings = ref.read(appSettingsProvider);
+      final future = _enqueueShareLinkValidation(
+        requestId: requestId,
+        result: item,
+        networkStorage: settings.networkStorage,
+        maxConcurrency: settings.taskMaxConcurrency,
+      );
+      if (future == null) {
+        aggregated.add(item);
+        return;
+      }
+      candidate.validating = true;
+      unawaited(future.then((validation) {
+        if (!mounted || requestId != _activeSearchRequestId) return;
+        candidate.validating = false;
+        // A later source may have supplied the previously missing passcode.
+        if (!identical(candidate.result, item)) {
+          validateCandidate(candidate);
+          commitResults();
+          return;
+        }
+        if (validation.isInvalid) {
+          candidate.invalid = true;
+          onFiltered(1);
+        } else {
+          aggregated.add(item);
+        }
+        commitResults();
+      }));
+    }
+
     try {
       final result = await operation.run();
       if (!mounted || requestId != _activeSearchRequestId) {
         return;
       }
       var duplicateCount = 0;
+      final candidatesToValidate = <_SearchCandidate>{};
       for (final item in result.items) {
-        final key = normalizeSearchResourceUrl(item.resourceUrl).isEmpty
-            ? item.id
-            : normalizeSearchResourceUrl(item.resourceUrl);
-        if (!seenResourceKeys.add(key)) {
+        final key = searchResultDeduplicationKey(item);
+        final previous = searchCandidates[key];
+        if (previous != null) {
           duplicateCount += 1;
+          final merged =
+              mergeSearchResultShareCredentials(previous.result, item);
+          if (!identical(merged, previous.result)) {
+            aggregated.remove(previous.result);
+            previous.result = merged;
+            if (previous.invalid) {
+              previous.invalid = false;
+              onFiltered(-1);
+            }
+            if (!previous.validating) candidatesToValidate.add(previous);
+          }
           continue;
         }
-        final settings = ref.read(appSettingsProvider);
-        final validationFuture = _enqueueQuarkLinkValidation(
-          requestId: requestId,
-          result: item,
-          cookie: settings.networkStorage.quarkCookie,
-          maxConcurrency: settings.taskMaxConcurrency,
-          onCompleted: (validation) {
-            if (!mounted || requestId != _activeSearchRequestId) {
-              return;
-            }
-            if (validation.isInvalid) {
-              onFiltered(1);
-            } else {
-              aggregated.add(item);
-            }
-            _scheduleSearchUiCommit(
-              requestId: requestId,
-              aggregated: aggregated,
-              errors: errors,
-              totalCount: totalCount,
-              completedCount: getCompleted(),
-              filteredCount: getFiltered(),
-            );
-          },
-        );
-        if (validationFuture == null) {
-          aggregated.add(item);
-        }
+        final candidate =
+            _SearchCandidate(prepareSearchResultShareCredentials(item));
+        searchCandidates[key] = candidate;
+        candidatesToValidate.add(candidate);
       }
       onFiltered(result.filteredCount + duplicateCount);
+      for (final candidate in candidatesToValidate) {
+        validateCandidate(candidate);
+      }
       _scheduleSearchUiCommit(
         requestId: requestId,
         aggregated: aggregated,
@@ -1545,25 +1752,25 @@ class _SearchPageState extends ConsumerState<SearchPage>
     required NetworkStorageConfig networkStorage,
   }) async {
     if (_savingResultIds.contains(result.id)) return;
-    if (detectSearchCloudTypeFromUrl(result.resourceUrl) ==
-        SearchCloudType.cloud115) {
-      await _saveResultTo115(result, networkStorage);
-      return;
-    }
-    if (_quarkValidationStateFor(result) == _QuarkLinkValidationState.pending) {
+    if (_shareValidationStateFor(result) == _ShareLinkValidationState.pending) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('链接正在验证，请稍候')),
       );
       return;
     }
+    final is115 = detectSearchCloudTypeFromUrl(result.resourceUrl) ==
+        SearchCloudType.cloud115;
     final storage = networkStorage;
-    final cookie = storage.quarkCookie.trim();
+    final cookie =
+        (is115 ? storage.cloud115Cookie : storage.quarkCookie).trim();
     if (cookie.isEmpty) {
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在搜索设置里填写夸克 Cookie')),
+        SnackBar(
+            content: Text(
+                is115 ? '请先在网盘与转存设置里填写 115 Cookie' : '请先在网盘与转存设置里填写夸克 Cookie')),
       );
       return;
     }
@@ -1572,97 +1779,49 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _savingResultIds.add(result.id);
     });
 
-    ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? progressSnackBar;
-
-    void closeProgress() {
-      final controller = progressSnackBar;
-      progressSnackBar = null;
-      if (controller == null) {
-        return;
-      }
-      if (!_quarkSaveProgressSnackBars.remove(controller)) {
-        return;
-      }
-      controller.close();
-    }
-
-    void showProgress(QuarkSaveWorkflowProgress progress) {
-      if (!mounted) {
-        return;
-      }
-      closeProgress();
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.removeCurrentSnackBar();
-      final controller = messenger.showSnackBar(
-        SnackBar(
-          content: Text(progress.message),
-          duration: const Duration(minutes: 2),
-        ),
-      );
-      progressSnackBar = controller;
-      _quarkSaveProgressSnackBars.add(controller);
-      unawaited(
-        controller.closed.whenComplete(
-          () => _quarkSaveProgressSnackBars.remove(controller),
-        ),
-      );
-    }
+    final feedback = _saveFeedback.start();
 
     try {
-      final response =
-          await ref.read(quarkSaveWorkflowServiceProvider).saveToQuark(
-                shareUrl: result.resourceUrl,
-                saveFolderName: resolveSearchSaveFolderName(
-                  result: result,
-                  isFavoriteResultsView: _showFavoriteResults,
-                  searchQuery: _controller.text.trim(),
-                ),
-                networkStorage: storage,
-                onProgress: showProgress,
-              );
-      if (!mounted) {
-        return;
-      }
-      closeProgress();
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.removeCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(response.buildSuccessMessage()),
-        ),
+      final String message;
+      final saveFolderName = resolveSearchSaveFolderName(
+        result: result,
+        isFavoriteResultsView: _showFavoriteResults,
+        searchQuery: _controller.text.trim(),
       );
+      if (is115) {
+        message = await ref.read(cloud115SaveWorkflowProvider).save(
+              shareUrl: result.resourceUrl,
+              config: storage,
+              password: result.password,
+              saveFolderName: saveFolderName,
+              onProgress: feedback.showProgress,
+              onBackgroundRefreshFailure: feedback.showRefreshFailure,
+            );
+      } else {
+        final response =
+            await ref.read(quarkSaveWorkflowServiceProvider).saveToQuark(
+                  shareUrl: result.resourceUrl,
+                  saveFolderName: saveFolderName,
+                  networkStorage: storage,
+                  onProgress: feedback.showProgress,
+                  onBackgroundRefreshFailure: feedback.showRefreshFailure,
+                );
+        message = response.buildSuccessMessage();
+      }
+      feedback.complete(message);
     } on QuarkSaveException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      closeProgress();
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.removeCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(content: Text(error.message)),
-      );
+      feedback.fail(error.message);
     } on SmartStrmWebhookException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      closeProgress();
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.removeCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(content: Text('夸克保存成功，但 STRM 触发失败：${error.message}')),
+      feedback.fail(
+        (is115 ? CloudSaveDrive.cloud115 : CloudSaveDrive.quark)
+            .smartStrmFailureMessage(error.message),
       );
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      closeProgress();
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.removeCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(content: Text('保存失败：$error')),
+      feedback.fail(
+        is115 ? '115 保存未确认，请检查网盘后再重试' : '保存失败：$error',
       );
     } finally {
-      closeProgress();
+      feedback.closeProgress();
       if (mounted) {
         setState(() {
           _savingResultIds.remove(result.id);
@@ -1670,34 +1829,33 @@ class _SearchPageState extends ConsumerState<SearchPage>
       }
     }
   }
+}
 
-  Future<void> _saveResultTo115(
-      SearchResult result, NetworkStorageConfig storage) async {
-    setState(() => _savingResultIds.add(result.id));
-    try {
-      final message = await ref.read(cloud115SaveWorkflowProvider).save(
-            shareUrl: result.resourceUrl,
-            config: storage,
-            password: result.password,
-          );
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(message)));
-      }
-    } on QuarkSaveException catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(error.message)));
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('115 保存未确认，请检查网盘后再重试')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _savingResultIds.remove(result.id));
-    }
+class _FavoriteSyncButton extends ConsumerWidget {
+  const _FavoriteSyncButton();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sync = ref.watch(favoriteAutoSyncProvider);
+    return ListenableBuilder(
+      listenable: sync,
+      builder: (context, child) => StarflowIconButton(
+        icon: sync.running ? Icons.hourglass_top_rounded : Icons.sync_rounded,
+        tooltip: sync.running ? '收藏正在同步' : '手动同步收藏',
+        focusId: 'favorites:sync',
+        focusableWhenDisabled: true,
+        size: 42,
+        onPressed: sync.running
+            ? null
+            : () async {
+                await sync.synchronize(manual: true);
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(sync.status)),
+                );
+              },
+      ),
+    );
   }
 }
 
@@ -1782,23 +1940,28 @@ class _SearchResultCard extends ConsumerWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 6),
-              Text(
-                result.summary,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+              if (result.summary.trim().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  result.summary,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+              ],
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 runSpacing: 6,
                 children: [
-                  _MetaChip(label: result.providerName),
-                  _MetaChip(label: result.quality),
-                  _MetaChip(label: result.sizeLabel),
+                  if (result.providerName.trim().isNotEmpty)
+                    _MetaChip(label: result.providerName),
+                  if (result.quality.trim().isNotEmpty)
+                    _MetaChip(label: result.quality),
+                  if (result.sizeLabel.trim().isNotEmpty)
+                    _MetaChip(label: result.sizeLabel),
                   if (result.seeders > 0)
                     _MetaChip(label: '${result.seeders} seeders'),
                   if (linkValidationLabel.isNotEmpty)
@@ -2368,32 +2531,38 @@ class _MetaChip extends StatelessWidget {
   }
 }
 
-enum _QuarkLinkValidationState {
+enum _ShareLinkValidationState {
   pending,
   valid,
   unavailable,
 }
 
-class _QuarkLinkValidationJob {
-  _QuarkLinkValidationJob({
+class _ShareLinkValidationJob {
+  _ShareLinkValidationJob({
     required this.requestId,
     required this.identity,
     required this.key,
     required this.result,
-    required this.cookie,
-    required this.client,
-    required this.onCompleted,
+    required this.cloudType,
+    required this.validate,
   });
 
   final int requestId;
   final String identity;
   final String key;
   final SearchResult result;
-  final String cookie;
-  final QuarkSaveClient client;
-  final ValueChanged<QuarkShareValidationResult> onCompleted;
-  final Completer<QuarkShareValidationResult> completer =
-      Completer<QuarkShareValidationResult>();
+  final SearchCloudType cloudType;
+  final Future<ShareLinkValidationResult> Function() validate;
+  final Completer<ShareLinkValidationResult> completer =
+      Completer<ShareLinkValidationResult>();
+}
+
+class _SearchCandidate {
+  _SearchCandidate(this.result);
+
+  SearchResult result;
+  bool validating = false;
+  bool invalid = false;
 }
 
 enum _SearchTargetKind {

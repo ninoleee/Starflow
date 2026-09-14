@@ -21,6 +21,7 @@ import 'package:starflow/features/home/application/home_feed_load_scheduler.dart
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/domain/webdav_sync_config.dart';
 import 'package:starflow/features/settings/application/media_source_cache_lifecycle.dart';
 
 final settingsControllerProvider =
@@ -179,6 +180,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> saveNetworkProxy(NetworkProxyConfig config) async {
     final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(networkProxy: config));
+  }
+
+  Future<void> saveWebDavSync(WebDavSyncConfig config) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(current.copyWith(webDavSync: config));
   }
 
   Future<void> setTmdbMetadataMatchEnabled(bool enabled) async {
@@ -408,7 +414,13 @@ class SettingsController extends AsyncNotifier<AppSettings> {
   Future<void> replaceAllSettings(AppSettings settings) async {
     final current = state.value ?? await _repository.load();
     final reconciledSettings = reconcileSettingsMediaSourceReferences(
-      settings,
+      settings.copyWith(
+        webDavSync: settings.webDavSync ?? current.webDavSync,
+        networkStorage: settings.networkStorage.copyWith(
+          // 115 login credentials belong to this device, never to an import.
+          cloud115Cookie: current.networkStorage.cloud115Cookie,
+        ),
+      ),
     );
     final nextSourceById = <String, MediaSourceConfig>{
       for (final source in reconciledSettings.mediaSources)

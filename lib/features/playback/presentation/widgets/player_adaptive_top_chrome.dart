@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'player_controls_layout.dart';
+
 const kPlayerAdaptiveTopChromeRootKey = Key(
   'player-adaptive-top-chrome-root',
 );
@@ -171,7 +173,10 @@ class _PlayerAdaptiveTopChromeState extends State<PlayerAdaptiveTopChrome> {
 
   @override
   Widget build(BuildContext context) {
-    final topInset = MediaQuery.paddingOf(context).top;
+    final controlsPadding = playbackControlsPadding(
+      viewport: MediaQuery.sizeOf(context),
+      safeArea: MediaQuery.viewPaddingOf(context),
+    );
     return IgnorePointer(
       ignoring: !_visible,
       child: AnimatedOpacity(
@@ -192,10 +197,10 @@ class _PlayerAdaptiveTopChromeState extends State<PlayerAdaptiveTopChrome> {
                 ],
               ),
             ),
-            child: SafeArea(
-              bottom: false,
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(8, topInset > 0 ? 4 : 10, 8, 8),
+            child: Padding(
+              padding: controlsPadding.copyWith(bottom: 0),
+              child: SizedBox(
+                height: playbackButtonBarHeight,
                 child: Row(
                   children: [
                     _TopActionButton(
@@ -238,6 +243,7 @@ class _TopActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return IconButton(
+      padding: EdgeInsets.zero,
       onPressed: onPressed,
       tooltip: tooltip,
       icon: Icon(icon),

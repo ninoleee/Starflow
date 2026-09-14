@@ -134,7 +134,7 @@ class CloudSaverApiClient {
     SearchProviderConfig provider,
   ) {
     final results = <SearchResult>[];
-    final seen = <String>{};
+    final seen = <(String, String)>{};
     final groups = payload['data'] as List<dynamic>? ?? const [];
 
     for (final rawGroup in groups) {
@@ -155,7 +155,8 @@ class CloudSaverApiClient {
           if (sanitizedUrl.isEmpty) {
             continue;
           }
-          if (!seen.add(sanitizedUrl)) {
+          final password = _extractPassword(sanitizedUrl, content);
+          if (!seen.add((sanitizedUrl, password))) {
             continue;
           }
           final resolvedCloudType = resolveSearchCloudTypeCode(
@@ -163,7 +164,6 @@ class CloudSaverApiClient {
                 hints: [cloudType, title, content],
               ) ??
               cloudType.trim();
-          final password = _extractPassword(sanitizedUrl, content);
           results.add(
             SearchResult(
               id: sanitizedUrl,

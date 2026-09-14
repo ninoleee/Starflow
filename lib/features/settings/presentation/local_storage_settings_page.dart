@@ -9,6 +9,7 @@ import 'package:starflow/features/playback/data/online_subtitle_repository.dart'
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/settings/application/media_source_cache_lifecycle.dart';
+import 'package:starflow/features/settings/data/webdav_sync_service.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -197,6 +198,32 @@ class _LocalStorageSettingsPageState
     List<LocalStorageCacheType> types, {
     required String successMessage,
   }) async {
+    if (types.contains(LocalStorageCacheType.televisionSearchPreferences)) {
+      final sync = await ref.read(webDavSyncPreferencesProvider).load();
+      if (!context.mounted) return;
+      if (sync.autoFavorites) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('清空收藏并同步删除'),
+            content: const Text('收藏自动同步已开启。此次清理会删除本机收藏，并将删除同步到云端和其他设备，是否继续？'),
+            actions: [
+              StarflowButton(
+                  label: '取消',
+                  autofocus: true,
+                  compact: true,
+                  variant: StarflowButtonVariant.ghost,
+                  onPressed: () => Navigator.of(context).pop(false)),
+              StarflowButton(
+                  label: '确认清理',
+                  compact: true,
+                  onPressed: () => Navigator.of(context).pop(true)),
+            ],
+          ),
+        );
+        if (confirmed != true || !context.mounted) return;
+      }
+    }
     for (final type in types.toSet()) {
       await _clearType(ref, type);
     }

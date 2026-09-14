@@ -1,104 +1,90 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
+import 'package:starflow/features/search/domain/favorite_sync_document.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/domain/webdav_sync_config.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:xml/xml.dart';
 
-class WebDavSyncConfig {
-  const WebDavSyncConfig({
-    this.url = '',
-    this.directory = 'Starflow',
-    this.username = '',
-    this.password = '',
-    this.settings = true,
-    this.favorites = true,
+export 'package:starflow/features/settings/domain/webdav_sync_config.dart';
+
+final webDavSyncPreferencesProvider = Provider((ref) {
+  final preferences = WebDavSyncPreferences(
+    loadConfig: () async =>
+        (await ref.read(settingsControllerProvider.future)).webDavSync ??
+        const WebDavSyncConfig(),
+    saveConfig: (config) async {
+      await ref.read(settingsControllerProvider.future);
+      await ref
+          .read(settingsControllerProvider.notifier)
+          .saveWebDavSync(config);
+    },
+  );
+  ref.listen(settingsControllerProvider, (previous, next) {
+    if (jsonEncode(previous?.value?.webDavSync?.toJson()) !=
+        jsonEncode(next.value?.webDavSync?.toJson())) {
+      preferences.notifyChanged();
+    }
   });
-
-  final String url;
-  final String directory;
-  final String username;
-  final String password;
-  final bool settings;
-  final bool favorites;
-
-  Uri get baseUri {
-    final uri = Uri.tryParse(url.trim());
-    if (uri == null ||
-        !['http', 'https'].contains(uri.scheme) ||
-        uri.host.isEmpty ||
-        uri.userInfo.isNotEmpty ||
-        uri.hasQuery ||
-        uri.hasFragment ||
-        username.contains(':')) {
-      throw const FormatException('请填写有效的 HTTP / HTTPS 地址，认证信息请填写在账号字段中');
-    }
-    return uri.replace(
-        path: uri.path.endsWith('/') ? uri.path : '${uri.path}/');
-  }
-
-  List<String> get directories {
-    final parts =
-        directory.trim().split('/').where((s) => s.isNotEmpty).toList();
-    if (parts.any((s) => s == '.' || s == '..' || s.contains('\\'))) {
-      throw const FormatException('同步目录不能包含 .、.. 或反斜杠');
-    }
-    return parts;
-  }
-
-  Uri get directoryUri => baseUri.replace(
-        pathSegments: [
-          ...baseUri.pathSegments.where((s) => s.isNotEmpty),
-          ...directories,
-          '',
-        ],
-      );
-
-  Uri get fileUri => directoryUri.resolve('starflow-sync.json');
-
-  Map<String, dynamic> toJson() => {
-        'url': url,
-        'directory': directory,
-        'username': username,
-        'password': password,
-        'settings': settings,
-        'favorites': favorites,
-      };
-
-  factory WebDavSyncConfig.fromJson(Map<String, dynamic> json) =>
-      WebDavSyncConfig(
-        url: json['url'] as String? ?? '',
-        directory: json['directory'] as String? ?? 'Starflow',
-        username: json['username'] as String? ?? '',
-        password: json['password'] as String? ?? '',
-        settings: json['settings'] as bool? ?? true,
-        favorites: json['favorites'] as bool? ?? true,
-      );
-}
-
-final webDavSyncPreferencesProvider =
-    Provider((ref) => WebDavSyncPreferences());
+  ref.onDispose(preferences.dispose);
+  return preferences;
+});
 
 class WebDavSyncPreferences {
+  WebDavSyncPreferences({
+    Future<WebDavSyncConfig> Function()? loadConfig,
+    Future<void> Function(WebDavSyncConfig)? saveConfig,
+  })  : _loadConfig = loadConfig,
+        _saveConfig = saveConfig;
+
+  final Future<WebDavSyncConfig> Function()? _loadConfig;
+  final Future<void> Function(WebDavSyncConfig)? _saveConfig;
+  final _changes = StreamController<void>.broadcast();
+  Stream<void> get changes => _changes.stream;
+  void dispose() => _changes.close();
   final _store = AppPreferencesStore();
   static const _key = 'starflow.webdavSync.v1';
 
+  void notifyChanged() {
+    if (!_changes.isClosed) _changes.add(null);
+  }
+
   Future<WebDavSyncConfig> load() async {
+    if (_loadConfig != null) return _loadConfig();
     final raw = await _store.getString(_key);
     return raw == null
         ? const WebDavSyncConfig()
         : WebDavSyncConfig.fromJson(jsonDecode(raw) as Map<String, dynamic>);
   }
 
-  Future<void> save(WebDavSyncConfig config) =>
-      _store.setString(_key, jsonEncode(config.toJson()));
+  Future<void> save(WebDavSyncConfig config) async {
+    if (_saveConfig != null) return _saveConfig(config);
+    await _store.setString(_key, jsonEncode(config.toJson()));
+    notifyChanged();
+  }
 }
 
 final webDavSyncServiceProvider = Provider(
   (ref) => WebDavSyncService(ref.watch(starflowHttpClientProvider)),
 );
+
+enum WebDavConnectionTestResult {
+  directoryAvailable,
+  directoryMissing;
+
+  String get message => switch (this) {
+        directoryAvailable => '连接成功，同步目录可访问（写入权限尚未验证）',
+        directoryMissing => 'WebDAV 连接成功，同步目录尚未创建；首次上传或写入收藏时将尝试创建（写入权限尚未验证）',
+      };
+}
 
 class WebDavSyncSnapshot {
   const WebDavSyncSnapshot({this.settings, this.favorites});
@@ -149,6 +135,235 @@ class WebDavSyncService {
   WebDavSyncService(this._client);
   final http.Client _client;
   static const _maxBytes = 16 * 1024 * 1024;
+  static final _deviceFileName =
+      RegExp(r'^starflow-favorites-[a-f0-9]{32}\.json$');
+
+  Future<
+          ({
+            List<FavoriteSyncDocument> documents,
+            FavoriteSyncDocument? deviceDocument,
+            bool deviceNeedsCompaction,
+            int deviceCount
+          })>
+      readFavorites(WebDavSyncConfig config, {required String deviceId}) async {
+    final ownUri = config.favoriteDeviceFileUri(deviceId);
+    final listing = await _request(config, 'PROPFIND', config.directoryUri,
+        headers: {'Depth': '1', 'Cache-Control': 'no-cache'});
+    _check(listing, {200, 207, 404}, operation: '读取收藏设备列表');
+    if (listing.statusCode == 404) {
+      return (
+        documents: <FavoriteSyncDocument>[],
+        deviceDocument: null,
+        deviceNeedsCompaction: false,
+        deviceCount: 0
+      );
+    }
+    final devices = _favoriteDevices(listing, config.directoryUri);
+    // Read our own file even if a gateway has not refreshed its directory listing.
+    final files = {config.favoritesFileUri, ownUri, ...devices};
+    final documents = <FavoriteSyncDocument>[];
+    FavoriteSyncDocument? own;
+    var deviceNeedsCompaction = false;
+    var totalBytes = 0;
+    var deviceCount = 0;
+    for (final uri in files) {
+      final response = await _request(config, 'GET', uri,
+          headers: {'Cache-Control': 'no-cache'});
+      _check(response, {200, 404}, operation: '读取设备收藏');
+      if (response.statusCode == 404) {
+        if (devices.contains(uri)) {
+          throw StateError('设备收藏文件暂时不可读，请再次同步');
+        }
+        continue;
+      }
+      totalBytes += response.bodyBytes.length;
+      if (totalBytes > _maxBytes) {
+        throw const FormatException('设备收藏数据合计超过 16 MB');
+      }
+      final json =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final document = FavoriteSyncDocument.fromJson(json);
+      documents.add(document);
+      if (uri == ownUri) {
+        own = document;
+        // Full v1 results always include posterUrl, even when it is empty.
+        deviceNeedsCompaction = (json['entries'] as List).any((entry) =>
+            entry['result'] is Map &&
+            (entry['result'] as Map).containsKey('posterUrl'));
+      }
+      if (uri != config.favoritesFileUri) deviceCount++;
+    }
+    return (
+      documents: documents,
+      deviceDocument: own,
+      deviceNeedsCompaction: deviceNeedsCompaction,
+      deviceCount: deviceCount
+    );
+  }
+
+  Set<Uri> _favoriteDevices(http.Response response, Uri directory) {
+    try {
+      if (!_isDirectory(response, directory)) {
+        throw const FormatException('WebDAV 收藏设备目录响应无效');
+      }
+      final document = XmlDocument.parse(utf8.decode(response.bodyBytes));
+      final parent = directory.pathSegments.where((s) => s.isNotEmpty).toList();
+      final devices = <Uri>{};
+      for (final resource
+          in document.rootElement.findElements('response', namespace: 'DAV:')) {
+        final href =
+            resource.getElement('href', namespace: 'DAV:')?.innerText.trim();
+        if (href == null || href.isEmpty) continue;
+        final uri = directory.resolve(href);
+        final segments = uri.pathSegments;
+        if (uri.scheme != directory.scheme ||
+            uri.host != directory.host ||
+            uri.port != directory.port ||
+            uri.userInfo.isNotEmpty ||
+            uri.hasQuery ||
+            uri.hasFragment ||
+            segments.length != parent.length + 1 ||
+            !listEquals(segments.take(parent.length).toList(), parent) ||
+            _deviceFileName.stringMatch(segments.last) != segments.last) {
+          continue;
+        }
+        final properties = _successfulDavProperties(resource).toList();
+        if (properties.isEmpty ||
+            properties.any((prop) =>
+                prop
+                    .getElement('resourcetype', namespace: 'DAV:')
+                    ?.getElement('collection', namespace: 'DAV:') !=
+                null)) {
+          throw const FormatException('设备收藏文件属性无效');
+        }
+        devices.add(uri);
+        if (devices.length > 100) {
+          throw StateError('收藏同步设备记录超过 100 份，请检查同步目录');
+        }
+      }
+      return devices;
+    } on XmlException {
+      throw const FormatException('WebDAV 收藏设备列表无效');
+    }
+  }
+
+  Future<void> writeFavorites(
+      WebDavSyncConfig config, FavoriteSyncDocument document,
+      {required String deviceId}) async {
+    document.validateCapacity();
+    // Only this installation writes this path; other devices own different files.
+    final response = await _request(
+        config, 'PUT', config.favoriteDeviceFileUri(deviceId),
+        body: document.encodeForSync());
+    _check(response, {200, 201, 204}, operation: '写入本设备收藏');
+  }
+
+  Future<FavoriteSyncDocument> verifyFavoritesWrite(
+      WebDavSyncConfig config, FavoriteSyncDocument sent,
+      {required String deviceId}) async {
+    final response = await _request(
+        config, 'GET', config.favoriteDeviceFileUri(deviceId),
+        headers: {'Cache-Control': 'no-cache'});
+    _check(response, {200, 404}, operation: '验证收藏上传结果');
+    if (response.statusCode == 404) {
+      throw StateError('服务器已接受上传，但尚未读到收藏文件；未确认同步完成，请稍后手动同步');
+    }
+    final received =
+        FavoriteSyncDocument.decode(utf8.decode(response.bodyBytes));
+    // Concurrent additions or newer tombstones are valid; lost sent entries are not.
+    if (received.merge(sent).encodeForSync() != received.encodeForSync()) {
+      appLogWarning(
+          'sync.webdav', 'Favorite readback is missing uploaded changes',
+          fields: {'reason': 'readbackMismatch', 'phase': 'verify'});
+      throw StateError('上传后的收藏内容未通过读回验证；可能存在缓存延迟或并发覆盖，请再次手动同步');
+    }
+    return received;
+  }
+
+  Future<void> ensureDirectory(WebDavSyncConfig config) async {
+    var directory = config.baseUri;
+    for (final segment in config.directories) {
+      directory = directory.replace(pathSegments: [
+        ...directory.pathSegments.where((s) => s.isNotEmpty),
+        segment,
+        '',
+      ]);
+      final result = await _request(config, 'MKCOL', directory);
+      _check(result, {200, 201, 204, 405}, operation: '创建同步目录');
+      // A successful MKCOL or 405 does not prove that a usable collection exists.
+      final verification = await _request(config, 'PROPFIND', directory,
+          headers: {'Depth': '0', 'Cache-Control': 'no-cache'});
+      if (verification.statusCode == 404) {
+        throw StateError('创建同步目录后仍无法访问（MKCOL HTTP ${result.statusCode}，'
+            'PROPFIND HTTP 404），已停止上传；请检查 WebDAV 新建目录权限及挂载存储状态');
+      }
+      _check(verification, {200, 207}, operation: '验证同步目录');
+      if (!_isDirectory(verification, directory)) {
+        throw StateError('验证同步目录失败（MKCOL HTTP ${result.statusCode}，'
+            'PROPFIND HTTP ${verification.statusCode}）：'
+            '服务器未确认目标路径为目录，已停止上传；请检查同名文件或 WebDAV 响应');
+      }
+    }
+  }
+
+  bool _isDirectory(http.Response response, Uri directory) {
+    try {
+      return _davProperties(response, directory).any((prop) =>
+          prop
+              .getElement('resourcetype', namespace: 'DAV:')
+              ?.getElement('collection', namespace: 'DAV:') !=
+          null);
+    } on FormatException {
+      return false;
+    } on XmlException {
+      return false;
+    }
+  }
+
+  Iterable<XmlElement> _davProperties(
+      http.Response response, Uri target) sync* {
+    const dav = 'DAV:';
+    final expected = target.pathSegments.toList();
+    if (expected.isNotEmpty && expected.last.isEmpty) expected.removeLast();
+    final document = XmlDocument.parse(utf8.decode(response.bodyBytes));
+    if (document.rootElement.name.local != 'multistatus' ||
+        document.rootElement.namespaceUri != dav) {
+      throw const FormatException('Invalid DAV multistatus');
+    }
+    for (final resource
+        in document.rootElement.findElements('response', namespace: dav)) {
+      final href =
+          resource.getElement('href', namespace: dav)?.innerText.trim();
+      if (href == null || href.isEmpty) continue;
+      final uri = target.resolve(href);
+      final segments = uri.pathSegments.toList();
+      if (segments.isNotEmpty && segments.last.isEmpty) segments.removeLast();
+      if (uri.scheme != target.scheme ||
+          uri.host != target.host ||
+          uri.port != target.port ||
+          uri.userInfo.isNotEmpty ||
+          uri.hasQuery ||
+          uri.hasFragment ||
+          !listEquals(segments, expected)) {
+        continue;
+      }
+      yield* _successfulDavProperties(resource);
+    }
+  }
+
+  Iterable<XmlElement> _successfulDavProperties(XmlElement resource) sync* {
+    for (final propstat
+        in resource.findElements('propstat', namespace: 'DAV:')) {
+      final status =
+          propstat.getElement('status', namespace: 'DAV:')?.innerText;
+      if (status == null ||
+          !RegExp(r'^HTTP/\S+\s+200(?:\s|$)').hasMatch(status.trim())) {
+        continue;
+      }
+      final prop = propstat.getElement('prop', namespace: 'DAV:');
+      if (prop != null) yield prop;
+    }
+  }
 
   Future<http.Response> _request(
     WebDavSyncConfig config,
@@ -174,6 +389,20 @@ class WebDavSyncService {
     }
     return (() async {
       final response = await _client.send(request);
+      final fields = <String, Object?>{
+        'method': method,
+        'host': uri.host,
+        'path': uri.path,
+        'statusCode': response.statusCode,
+        if (method == 'PUT' && _deviceFileName.hasMatch(uri.pathSegments.last))
+          'writeMode': 'device',
+      };
+      if (response.statusCode >= 400) {
+        appLogWarning('sync.webdav', 'WebDAV response received',
+            fields: fields);
+      } else {
+        appLogInfo('sync.webdav', 'WebDAV response received', fields: fields);
+      }
       final bytes = <int>[];
       await for (final chunk in response.stream) {
         if (bytes.length + chunk.length > _maxBytes) {
@@ -187,28 +416,48 @@ class WebDavSyncService {
         .timeout(const Duration(seconds: 30));
   }
 
-  void _check(http.Response response, Set<int> allowed) {
+  void _check(http.Response response, Set<int> allowed, {String? operation}) {
     if (!allowed.contains(response.statusCode)) {
-      throw StateError(switch (response.statusCode) {
+      final reason = switch (response.statusCode) {
         401 || 403 => '认证失败或没有访问权限',
         404 => '远端同步文件或目录不存在',
+        409 when operation == '创建同步目录' => '父目录不存在或挂载存储尚未就绪',
         412 => '远端文件已被其他设备修改，请重新操作',
         >= 300 && < 400 => '服务器返回重定向，请填写最终 WebDAV 地址',
-        _ => 'WebDAV 请求失败（HTTP ${response.statusCode}）',
-      });
+        _ => operation == null
+            ? 'WebDAV 请求失败（HTTP ${response.statusCode}）'
+            : 'WebDAV 服务器拒绝请求',
+      };
+      throw StateError(operation == null
+          ? reason
+          : '$operation失败（HTTP ${response.statusCode}）：$reason');
     }
   }
 
-  Future<void> testConnection(WebDavSyncConfig config) async {
+  Future<WebDavConnectionTestResult> testConnection(
+      WebDavSyncConfig config) async {
     // Probe the configured directory without creating or changing remote data.
     final response = await _request(config, 'PROPFIND', config.directoryUri,
         headers: {'Depth': '0'});
+    if (response.statusCode == 404) {
+      // A new sync subdirectory may not exist yet; this is not a connection failure.
+      final base = config.directories.isEmpty
+          ? response
+          : await _request(config, 'PROPFIND', config.baseUri,
+              headers: {'Depth': '0'});
+      if (base.statusCode == 404) {
+        throw StateError('WebDAV 基础地址不存在，请检查服务器地址是否为 WebDAV 接口；同步目录应单独填写');
+      }
+      _check(base, {200, 207});
+      return WebDavConnectionTestResult.directoryMissing;
+    }
     _check(response, {200, 207});
+    return WebDavConnectionTestResult.directoryAvailable;
   }
 
   Future<WebDavSyncSnapshot> download(WebDavSyncConfig config) async {
     final response = await _request(config, 'GET', config.fileUri);
-    _check(response, {200});
+    _check(response, {200}, operation: '下载同步文件');
     final snapshot = WebDavSyncSnapshot.decode(utf8.decode(response.bodyBytes));
     if ((config.settings && snapshot.settings == null) ||
         (config.favorites && snapshot.favorites == null)) {
@@ -218,18 +467,9 @@ class WebDavSyncService {
   }
 
   Future<void> upload(WebDavSyncConfig config, WebDavSyncSnapshot local) async {
-    var directory = config.baseUri;
-    for (final segment in config.directories) {
-      directory = directory.replace(pathSegments: [
-        ...directory.pathSegments.where((s) => s.isNotEmpty),
-        segment,
-        '',
-      ]);
-      final result = await _request(config, 'MKCOL', directory);
-      _check(result, {200, 201, 204, 405});
-    }
+    await ensureDirectory(config);
     final previous = await _request(config, 'GET', config.fileUri);
-    _check(previous, {200, 404});
+    _check(previous, {200, 404}, operation: '读取远端同步文件');
     final remote = previous.statusCode == 404
         ? const WebDavSyncSnapshot()
         : WebDavSyncSnapshot.decode(utf8.decode(previous.bodyBytes));
@@ -244,6 +484,6 @@ class WebDavSyncService {
           if (previous.headers['etag'] != null)
             'If-Match': previous.headers['etag']!,
         });
-    _check(response, {200, 201, 204});
+    _check(response, {200, 201, 204}, operation: '上传同步文件');
   }
 }

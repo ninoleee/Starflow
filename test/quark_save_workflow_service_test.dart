@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
+import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
@@ -65,7 +66,7 @@ void main() {
           isA<QuarkSaveException>().having(
             (error) => error.message,
             'message',
-            '请先在搜索设置里填写夸克 Cookie',
+            '请先在网盘与转存设置里填写夸克 Cookie',
           ),
         ),
       );
@@ -154,7 +155,7 @@ void main() {
         refreshDelaySeconds: 6,
         smartStrmDelaySeconds: 4,
       );
-      final progressStages = <QuarkSaveWorkflowStage>[];
+      final progressStages = <CloudSaveStage>[];
       final progressMessages = <String>[];
 
       final result = await service.saveToQuark(
@@ -182,7 +183,7 @@ void main() {
         {
           'webhookUrl': 'https://strm.example.com/hook',
           'taskName': 'quark-sync',
-          'storagePath': '/影视',
+          'storagePath': '/影视/三体',
           'delay': 4,
         },
       );
@@ -198,7 +199,7 @@ void main() {
       expect(result.saveResult.targetFolderPath, '/影视/三体');
       expect(
         progressStages,
-        [QuarkSaveWorkflowStage.saving],
+        [CloudSaveStage.saving],
       );
       expect(progressMessages.first, '夸克保存中...');
       expect(

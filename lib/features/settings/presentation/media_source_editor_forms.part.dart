@@ -8,6 +8,7 @@ class _EmbySourceConnectionForm extends StatelessWidget {
     required this.tokenController,
     required this.advancedExpanded,
     required this.onAdvancedChanged,
+    this.serverName = 'Emby',
   });
 
   final TextEditingController endpointController;
@@ -16,6 +17,7 @@ class _EmbySourceConnectionForm extends StatelessWidget {
   final TextEditingController tokenController;
   final bool advancedExpanded;
   final ValueChanged<bool> onAdvancedChanged;
+  final String serverName;
 
   @override
   Widget build(BuildContext context) {
@@ -28,32 +30,35 @@ class _EmbySourceConnectionForm extends StatelessWidget {
             keyboardType: TextInputType.url,
             textInputAction: TextInputAction.next,
             autocorrect: false,
-            hintText: 'https://emby.example.com',
+            hintText: serverName == 'Emby'
+                ? 'https://emby.example.com'
+                : 'http://192.168.1.100:5666',
           ),
           _SourceCredentialsForm(
             usernameController: usernameController,
             passwordController: passwordController,
-            usernameLabel: 'Emby 用户名',
-            passwordLabel: 'Emby 密码',
+            usernameLabel: '$serverName 用户名',
+            passwordLabel: '$serverName 密码',
           ),
         ], spacing: 12),
-        const SizedBox(height: 12),
-        SettingsExpandableSection(
-          title: '高级（可选）',
-          subtitle: '手动粘贴 Access Token / API Key',
-          expanded: advancedExpanded,
-          onChanged: onAdvancedChanged,
-          children: [
-            SettingsTextInputField(
-              controller: tokenController,
-              labelText: 'Access Token / API Key',
-              minLines: 1,
-              maxLines: 4,
-              alignLabelWithHint: true,
-              summaryBuilder: _secretSummary,
-            ),
-          ],
-        ),
+        if (serverName == 'Emby') const SizedBox(height: 12),
+        if (serverName == 'Emby')
+          SettingsExpandableSection(
+            title: '高级（可选）',
+            subtitle: '手动粘贴 Access Token / API Key',
+            expanded: advancedExpanded,
+            onChanged: onAdvancedChanged,
+            children: [
+              SettingsTextInputField(
+                controller: tokenController,
+                labelText: 'Access Token / API Key',
+                minLines: 1,
+                maxLines: 4,
+                alignLabelWithHint: true,
+                summaryBuilder: _secretSummary,
+              ),
+            ],
+          ),
       ],
     );
   }

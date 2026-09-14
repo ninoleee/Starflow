@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
@@ -10,6 +11,65 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  for (final keepFocusable in [false, true]) {
+    testWidgets('disabled icon button focus opt-in: $keepFocusable',
+        (tester) async {
+      final node = FocusNode(debugLabel: 'busy-icon');
+      final busy = ValueNotifier(false);
+      addTearDown(node.dispose);
+      addTearDown(busy.dispose);
+      var activations = 0;
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(const AppSettings(
+            mediaSources: [],
+            searchProviders: [],
+            doubanAccount: DoubanAccountConfig(enabled: false),
+            homeModules: [],
+          )),
+        ],
+        child: MaterialApp(
+            home: Scaffold(
+                body: ValueListenableBuilder<bool>(
+          valueListenable: busy,
+          builder: (context, disabled, child) => StarflowIconButton(
+            icon: Icons.sync,
+            focusNode: node,
+            focusableWhenDisabled: keepFocusable,
+            onPressed: disabled ? null : () => activations++,
+          ),
+        ))),
+      ));
+      await tester.pumpAndSettle();
+      node.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      expect(activations, 1);
+      busy.value = true;
+      await tester.pumpAndSettle();
+      expect(node.hasPrimaryFocus, keepFocusable);
+      expect(node.canRequestFocus, keepFocusable);
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(activations, 1);
+      expect(
+          tester
+              .widget<StarflowIconButton>(find.byType(StarflowIconButton))
+              .onPressed,
+          isNull);
+      busy.value = false;
+      await tester.pumpAndSettle();
+      expect(node.canRequestFocus, isTrue);
+      if (keepFocusable) expect(node.hasPrimaryFocus, isTrue);
+      node.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      expect(activations, 2);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   testWidgets('unlaid-out page candidate does not trigger the left boundary',
       (tester) async {
     final current = FocusNode();

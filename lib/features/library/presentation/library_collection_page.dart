@@ -557,7 +557,7 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
             title: Text(isDirectory ? '删除目录' : '删除文件'),
             content: Text(
               isDirectory
-                  ? '将从${_managedSourceLabel(item)}删除“${item.title}”对应目录，并从本地索引中移除相关条目。'
+                  ? '将从${_managedSourceLabel(item)}删除“${item.title}”对应目录及其中全部内容（含图片、字幕和 NFO），并从本地索引中移除相关条目。'
                   : '将从${_managedSourceLabel(item)}删除“${item.title}”对应文件，并从本地索引中移除该条目。',
             ),
             actions: [

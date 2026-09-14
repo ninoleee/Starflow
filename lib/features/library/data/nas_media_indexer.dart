@@ -44,14 +44,18 @@ final nasMediaIndexerProvider = Provider<NasMediaIndexer>((ref) {
       ref.read(nasMediaIndexRevisionProvider.notifier).state++;
     },
     readInvalidationRevision: (sourceId) {
-      final globalRevision = ref.read(
-        nasMediaIndexGlobalInvalidationRevisionProvider,
-      );
-      final sourceRevision = ref.read(
-            nasMediaIndexSourceInvalidationRevisionsProvider,
-          )[sourceId.trim()] ??
-          0;
-      return Object.hash(globalRevision, sourceRevision);
+      try {
+        final globalRevision = ref.read(
+          nasMediaIndexGlobalInvalidationRevisionProvider,
+        );
+        final sourceRevision = ref.read(
+              nasMediaIndexSourceInvalidationRevisionsProvider,
+            )[sourceId.trim()] ??
+            0;
+        return Object.hash(globalRevision, sourceRevision);
+      } catch (_) {
+        return -1;
+      }
     },
     backgroundLimiter: ref.read(metadataPrefetchConcurrencyLimiterProvider),
   );

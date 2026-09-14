@@ -9,7 +9,8 @@ import org.mockito.Mockito.*
 
 class NativePlaybackRuntimeControllerTest {
     private val host = mock(NativePlaybackRuntimeController.Host::class.java, RETURNS_DEEP_STUBS)
-    private val runtime = NativePlaybackRuntimeController(host)
+    private var time = 100_000L
+    private val runtime = NativePlaybackRuntimeController(host, NativePlaybackWatchdogPolicy { time })
     private var position = 60_000L
 
     @Before
@@ -96,5 +97,27 @@ class NativePlaybackRuntimeControllerTest {
         runtime.onUserSeek()
         runtime.maybeApplyAutoSkip()
         verify(host.episodes, never()).advanceToAdjacentEpisode(anyBoolean(), anyString())
+    }
+
+    @Test
+    fun startupDoesNotSeekOrRebuildWhileLaunchControllerOwnsTheDeadline() {
+        `when`(host.activity.hasWindowFocus()).thenReturn(true)
+        `when`(host.session.player!!.playbackState).thenReturn(Player.STATE_BUFFERING)
+        `when`(host.launch.isStartupPending).thenReturn(true)
+        runtime.resetPlaybackWatchdogProgress(position)
+        repeat(3) {
+            time += 30_000L
+            assertTrue(runtime.evaluatePlaybackWatchdog())
+        }
+        verify(host.recovery, never()).recoverPlaybackStall(anyLong())
+
+        `when`(host.launch.isStartupPending).thenReturn(false)
+        assertTrue(runtime.evaluatePlaybackWatchdog())
+        time += 44_999L
+        assertTrue(runtime.evaluatePlaybackWatchdog())
+        verify(host.recovery, never()).recoverPlaybackStall(anyLong())
+        time++
+        runtime.evaluatePlaybackWatchdog()
+        verify(host.recovery).recoverPlaybackStall(position)
     }
 }

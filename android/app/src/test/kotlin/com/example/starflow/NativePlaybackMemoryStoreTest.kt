@@ -7,6 +7,7 @@ import org.junit.Test
 class NativePlaybackMemoryStoreTest {
     private var raw: String? = null
     private var tick = 0
+    private var decodes = 0
     private val writes = mutableListOf<Boolean>()
     private val store =
         NativePlaybackMemoryStore(
@@ -18,6 +19,10 @@ class NativePlaybackMemoryStoreTest {
             },
             now = { (++tick).toString().padStart(8, '0') },
             log = {},
+            decodeSnapshot = { value ->
+                decodes++
+                JSONObject(value)
+            },
         )
 
     private fun save(
@@ -161,5 +166,71 @@ class NativePlaybackMemoryStoreTest {
         assertTrue(writes.last())
         store.savePlaybackEntry("{}", "episode", "series", 20_000L, 100_000L, true)
         assertEquals(20_000L, store.loadResumePositionMs("episode"))
+    }
+
+    @Test
+    fun unchangedSnapshotsAreDecodedOnceAndExternalChangesAreObserved() {
+        raw = """{"skipPreferences":{"series":{"enabled":true,"introDurationMs":10000}}}"""
+        repeat(100) {
+            assertEquals(10_000L, store.loadSeriesSkipPreference("series")!!.getLong("introDurationMs"))
+            store.loadResumePositionMs("item")
+            store.loadSeriesSubtitlePreference("series")
+        }
+        assertEquals(1, decodes)
+        raw = """{"skipPreferences":{"series":{"enabled":false,"introDurationMs":20000}}}"""
+        assertFalse(store.loadSeriesSkipPreference("series")!!.getBoolean("enabled"))
+        assertEquals(20_000L, store.loadSeriesSkipPreference("series")!!.getLong("introDurationMs"))
+        assertEquals(2, decodes)
+        raw = null
+        assertNull(store.loadSeriesSkipPreference("series"))
+    }
+
+    @Test
+    fun localWritesRefreshCacheWithoutDecodingTheWholeSnapshotAgain() {
+        raw = "{}"
+        store.loadResumePositionMs("item")
+        assertEquals(1, decodes)
+        repeat(10) {
+            save(position = 20_000L + it * 1_000L)
+            store.saveSeriesSkipPreference("series", "Series", true, it * 1_000L, 2_000L)
+            assertEquals(it * 1_000L, store.loadSeriesSkipPreference("series")!!.getLong("introDurationMs"))
+            assertEquals(20_000L + it * 1_000L, store.loadResumePositionMs("item"))
+        }
+        assertEquals(1, decodes)
+    }
+
+    @Test
+    fun callersCannotMutateTheCachedSkipPreference() {
+        store.saveSeriesSkipPreference("series", "Series", true, 10_000L, 2_000L)
+        store.loadSeriesSkipPreference("series")!!.put("introDurationMs", 90_000L)
+        assertEquals(10_000L, store.loadSeriesSkipPreference("series")!!.getLong("introDurationMs"))
+        save()
+        assertEquals(
+            10_000L,
+            JSONObject(raw!!).getJSONObject("skipPreferences").getJSONObject("series").getLong("introDurationMs"),
+        )
+    }
+
+    @Test
+    fun failedWriteDoesNotLeaveMutatedDataInCache() {
+        val previous = """{"skipPreferences":{"series":{"enabled":false}}}"""
+        val failingStore = NativePlaybackMemoryStore(
+            readSnapshot = { previous },
+            writeSnapshot = { _, _ -> false },
+            now = { "0" },
+            log = {},
+        )
+        failingStore.saveSeriesSkipPreference("series", "Series", true, 10_000L, 2_000L)
+        assertFalse(failingStore.loadSeriesSkipPreference("series")!!.getBoolean("enabled"))
+    }
+
+    @Test
+    fun malformedSnapshotIsCachedButLaterValidDataIsNotIgnored() {
+        raw = "invalid"
+        repeat(20) { assertNull(store.loadSeriesSkipPreference("series")) }
+        assertEquals(1, decodes)
+        raw = "{}"
+        assertNull(store.loadSeriesSkipPreference("series"))
+        assertEquals(2, decodes)
     }
 }

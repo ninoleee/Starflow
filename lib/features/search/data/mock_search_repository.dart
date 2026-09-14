@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/search/data/cloud_saver_api_client.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
@@ -57,10 +58,6 @@ class AppSearchRepository implements SearchRepository {
       SearchProviderKind.cloudSaver =>
         await _cloudSaverApiClient.search(keyword, provider: provider),
     };
-
-    if (rawResults.isEmpty) {
-      return SearchFetchResult(items: [], filteredCount: 0);
-    }
 
     final filtered = _applyProviderFilters(
       rawResults,
@@ -166,27 +163,39 @@ class AppSearchRepository implements SearchRepository {
     final maxTitleLength = provider.maxTitleLength.clamp(1, 500);
 
     final filtered = <SearchResult>[];
-    final seen = <String>{};
+    final seen = <String, int>{};
     var filteredCount = 0;
+    final excludedByReason = <String, Map<String, int>>{};
 
     for (final item in rawResults) {
+      final detectedCloudType = resolveSearchCloudTypeCode(
+            rawUrl: item.resourceUrl,
+            hints: [item.cloudType],
+          ) ??
+          '';
+      void exclude(String reason) {
+        filteredCount += 1;
+        final counts = excludedByReason.putIfAbsent(reason, () => {});
+        counts.update(detectedCloudType.isEmpty ? 'unknown' : detectedCloudType,
+            (count) => count + 1,
+            ifAbsent: () => 1);
+      }
+
       if (provider.strongMatchEnabled) {
         if (!_matchesStrongQuery(item.title, query)) {
-          filteredCount += 1;
+          exclude('strongMatch');
           continue;
         }
       }
 
       if (item.title.trim().runes.length > maxTitleLength) {
-        filteredCount += 1;
+        exclude('titleLength');
         continue;
       }
 
-      final detectedCloudType =
-          detectSearchCloudTypeFromUrl(item.resourceUrl)?.code ?? '';
       if (allowedCloudTypes.isNotEmpty &&
           !allowedCloudTypes.contains(detectedCloudType)) {
-        filteredCount += 1;
+        exclude('cloudType');
         continue;
       }
 
@@ -197,20 +206,47 @@ class AppSearchRepository implements SearchRepository {
         item.providerName,
       ].join(' ').toLowerCase();
       if (blockedKeywords.any(haystack.contains)) {
-        filteredCount += 1;
+        exclude('blockedKeyword');
         continue;
       }
 
-      final dedupeKey = normalizeSearchResourceUrl(item.resourceUrl).isEmpty
-          ? item.id
-          : normalizeSearchResourceUrl(item.resourceUrl);
-      if (!seen.add(dedupeKey)) {
-        filteredCount += 1;
+      final dedupeKey = searchResultDeduplicationKey(item);
+      final previousIndex = seen[dedupeKey];
+      if (previousIndex != null) {
+        filtered[previousIndex] = mergeSearchResultShareCredentials(
+            filtered[previousIndex], item);
+        exclude('duplicate');
         continue;
       }
 
-      filtered.add(item);
+      seen[dedupeKey] = filtered.length;
+      filtered.add(prepareSearchResultShareCredentials(item));
     }
+
+    appLogInfo(
+      'search.filters',
+      'Search provider filtering completed',
+      fields: {
+        'providerId': provider.id,
+        'providerKind': provider.kind.name,
+        'queryLength': query.runes.length,
+        'rawCount': rawResults.length,
+        'resultCount': filtered.length,
+        'filteredCount': filteredCount,
+        'rawByCloudType': countSearchResultsByCloudType(rawResults),
+        'keptByCloudType': countSearchResultsByCloudType(filtered),
+        'excludedByReason': excludedByReason,
+        'allowedCloudTypes': allowedCloudTypes.isEmpty
+            ? ['all']
+            : allowedCloudTypes
+                .map((code) => SearchCloudTypeX.fromCode(code)?.code ?? 'unknown')
+                .toSet()
+                .toList(growable: false),
+        'strongMatchEnabled': provider.strongMatchEnabled,
+        'maxTitleLength': maxTitleLength,
+        'blockedKeywordCount': blockedKeywords.length,
+      },
+    );
 
     return SearchFetchResult(
       items: filtered,

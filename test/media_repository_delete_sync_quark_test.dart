@@ -30,10 +30,23 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  for (final deleteSucceeds in [true, false]) {
+  for (final outcome in [
+    'success',
+    '115-failure',
+    '115-not-removed',
+    '115-verify-failure',
+    'webdav-403',
+    'webdav-405',
+    'preflight-failure',
+    'missing-scope'
+  ]) {
     test(
-        '115 sync delete clears local index only after remote success: $deleteSucceeds',
+        '115 sync delete clears local index only after remote success: $outcome',
         () async {
+      final deleteSucceeds = outcome == 'success';
+      final webDavStatus = outcome.startsWith('webdav-')
+          ? int.parse(outcome.substring('webdav-'.length))
+          : null;
       const source = MediaSourceConfig(
           id: 'nas-115',
           name: 'NAS',
@@ -41,15 +54,34 @@ void main() {
           endpoint: 'https://nas.example.com/dav/',
           enabled: true);
       const resource = 'https://nas.example.com/dav/115/E01.strm';
-      final webDav = _RecordingWebDavNasClient();
+      final webDav = _RecordingWebDavNasClient(
+        deleteError:
+            webDavStatus == null ? null : WebDavDeleteException(webDavStatus),
+      );
       final indexer = _FakeNasMediaIndexer();
+      final cacheRepository = _RecordingLocalStorageCacheRepository();
+      final playbackRepository = _RecordingPlaybackMemoryRepository();
       final drive = Cloud115SaveClient(MockClient((request) async {
+        expect(outcome, isNot('missing-scope'));
         if (request.method == 'POST') {
+          expect(webDavStatus, isNull);
           expect(webDav.deletedResourcePaths, [resource]);
           return http.Response(
-              deleteSucceeds ? '{"state":true}' : '{"state":false}', 200);
+              outcome == '115-failure' ? '{"state":false}' : '{"state":true}',
+              200);
+        }
+        if (webDav.deletedResourcePaths.isNotEmpty) {
+          if (outcome == '115-verify-failure') return http.Response('', 503);
+          return http.Response(
+              outcome == '115-not-removed'
+                  ? '{"state":true,"count":1,"data":[{"fid":"30","n":"E01.mkv"}]}'
+                  : '{"state":true,"count":0,"data":[]}',
+              200);
         }
         expect(webDav.deletedResourcePaths, isEmpty);
+        if (outcome == 'preflight-failure') {
+          return http.Response('{"state":true,"count":0,"data":[]}', 200);
+        }
         return http.Response(
             '{"state":true,"count":1,"data":[{"fid":"30","n":"E01.mkv"}]}',
             200);
@@ -57,15 +89,109 @@ void main() {
       final container = ProviderContainer(overrides: [
         appSettingsProvider.overrideWithValue(SeedData.defaultSettings.copyWith(
             mediaSources: [source],
-            networkStorage: const NetworkStorageConfig(
+            networkStorage: NetworkStorageConfig(
                 cloud115Cookie: 'test',
                 cloud115SaveFolderId: '10',
                 syncDelete115Enabled: true,
                 syncDelete115WebDavDirectories: [
-                  NetworkStorageWebDavDirectory(
-                      sourceId: 'nas-115',
-                      directoryId: 'https://nas.example.com/dav/115')
+                  if (outcome != 'missing-scope')
+                    const NetworkStorageWebDavDirectory(
+                        sourceId: 'nas-115',
+                        directoryId: 'https://nas.example.com/dav/115')
                 ]))),
+        webDavNasClientProvider.overrideWithValue(webDav),
+        cloud115SaveClientProvider.overrideWithValue(drive),
+        nasMediaIndexerProvider.overrideWithValue(indexer),
+        localStorageCacheRepositoryProvider.overrideWithValue(cacheRepository),
+        playbackMemoryRepositoryProvider.overrideWithValue(playbackRepository),
+      ]);
+      addTearDown(container.dispose);
+      final result = container
+          .read(mediaRepositoryProvider)
+          .deleteResource(sourceId: source.id, resourcePath: resource);
+      if (deleteSucceeds) {
+        await result;
+        expect(indexer.removedScopes, [resource]);
+        expect(cacheRepository.clearedResources, hasLength(1));
+        expect(playbackRepository.clearedResources, hasLength(1));
+      } else {
+        await expectLater(
+            result,
+            throwsA(webDavStatus == null
+                ? isA<QuarkSaveException>()
+                : isA<WebDavDeleteException>()));
+        expect(indexer.removedScopes, isEmpty);
+        expect(cacheRepository.clearedResources, isEmpty);
+        expect(playbackRepository.clearedResources, isEmpty);
+        if (outcome == 'preflight-failure' || outcome == 'missing-scope') {
+          expect(webDav.deletedResourcePaths, isEmpty);
+        }
+      }
+    });
+  }
+
+  for (final kind in ['indexed-file', 'directory-path', 'section-relative']) {
+    test('115 sync delete matches the actual WebDAV URI for $kind', () async {
+      const source = MediaSourceConfig(
+        id: 'nas-115',
+        name: 'NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/',
+        enabled: true,
+      );
+      const scope = 'https://nas.example.com/dav/strm/115/';
+      const directoryPath = '/dav/strm/115/Show (2026)';
+      const filePath = '$directoryPath/E01.strm';
+      final fileUri = Uri.https('nas.example.com', filePath).toString();
+      final isFile = kind == 'indexed-file';
+      final resourcePath = switch (kind) {
+        'indexed-file' => fileUri,
+        'section-relative' => 'Show (2026)',
+        _ => directoryPath,
+      };
+      final webDav = _RecordingWebDavNasClient();
+      final indexer = _FakeNasMediaIndexer(recordsByResourceId: {
+        if (isFile)
+          fileUri: _nasIndexRecord(
+            source: source,
+            resourceId: fileUri,
+            path: filePath,
+          ),
+      });
+      final deletedIds = <String>[];
+      final drive = Cloud115SaveClient(MockClient((request) async {
+        if (request.method == 'POST') {
+          expect(webDav.deletedResourcePaths, [resourcePath]);
+          final body = Uri.splitQueryString(request.body);
+          expect(body['pid'], isFile ? '20' : '10');
+          deletedIds.add(body['fid[0]']!);
+          return http.Response('{"state":true}', 200);
+        }
+        if (deletedIds.isNotEmpty) {
+          return http.Response('{"state":true,"count":0,"data":[]}', 200);
+        }
+        expect(webDav.deletedResourcePaths, isEmpty);
+        final isRoot = request.url.queryParameters['cid'] == '10';
+        return http.Response(
+          isRoot
+              ? '{"state":true,"count":1,"data":[{"cid":"20","n":"Show (2026)"}]}'
+              : '{"state":true,"count":1,"data":[{"fid":"30","n":"E01.mkv"}]}',
+          200,
+        );
+      }));
+      final container = ProviderContainer(overrides: [
+        appSettingsProvider.overrideWithValue(SeedData.defaultSettings.copyWith(
+          mediaSources: [source],
+          networkStorage: const NetworkStorageConfig(
+            cloud115Cookie: 'test',
+            cloud115SaveFolderId: '10',
+            syncDelete115Enabled: true,
+            syncDelete115WebDavDirectories: [
+              NetworkStorageWebDavDirectory(
+                  sourceId: 'nas-115', directoryId: scope),
+            ],
+          ),
+        )),
         webDavNasClientProvider.overrideWithValue(webDav),
         cloud115SaveClientProvider.overrideWithValue(drive),
         nasMediaIndexerProvider.overrideWithValue(indexer),
@@ -75,16 +201,15 @@ void main() {
             .overrideWithValue(_RecordingPlaybackMemoryRepository()),
       ]);
       addTearDown(container.dispose);
-      final result = container
-          .read(mediaRepositoryProvider)
-          .deleteResource(sourceId: source.id, resourcePath: resource);
-      if (deleteSucceeds) {
-        await result;
-        expect(indexer.removedScopes, [resource]);
-      } else {
-        await expectLater(result, throwsA(isA<QuarkSaveException>()));
-        expect(indexer.removedScopes, isEmpty);
-      }
+
+      await container.read(mediaRepositoryProvider).deleteResource(
+            sourceId: source.id,
+            resourcePath: resourcePath,
+            sectionId: kind == 'section-relative' ? scope : '',
+          );
+
+      expect(deletedIds, [isFile ? '30' : '20']);
+      expect(indexer.removedScopes, [isFile ? filePath : resourcePath]);
     });
   }
 

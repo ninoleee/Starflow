@@ -128,7 +128,7 @@ bool shouldRetryMpvOpenFailure({
 
 PlaybackTarget buildMpvRecoveryTarget(PlaybackTarget currentTarget) {
   final refresh = currentTarget.sourceKind == MediaSourceKind.quark ||
-      currentTarget.sourceKind == MediaSourceKind.emby ||
+      currentTarget.sourceKind.isMediaServer ||
       (currentTarget.sourceKind == MediaSourceKind.nas &&
           [currentTarget.streamUrl, currentTarget.actualAddress].any(
             (url) => (Uri.tryParse(url)?.path ?? url)

@@ -596,7 +596,7 @@ class WebDavNasClient {
       return '';
     }
 
-    final targetUri = _resolveResourceUri(
+    final targetUri = resolveResourceUri(
       source,
       resourcePath: normalizedResourcePath,
       sectionId: sectionId,
@@ -618,7 +618,7 @@ class WebDavNasClient {
       return;
     }
 
-    final targetUri = _resolveResourceUri(
+    final targetUri = resolveResourceUri(
       source,
       resourcePath: normalizedResourcePath,
       sectionId: sectionId,
@@ -635,16 +635,20 @@ class WebDavNasClient {
     if (cacheStore != null) {
       unawaited(cacheStore.removeSource(source.id));
     }
-    if (_looksLikePlayableResourceUri(targetUri)) {
-      final parentUri = _parentDirectoryUri(targetUri);
-      if (parentUri != null) {
-        final siblings = await _loadDirectoryEntries(parentUri, source: source);
-        final stillExists = siblings.any(
-          (entry) => !entry.isCollection && entry.uri == targetUri,
-        );
-        if (stillExists) {
-          throw Exception('WebDAV 删除未生效：远端文件仍然存在');
-        }
+    final parentUri = _parentDirectoryUri(targetUri);
+    if (parentUri != null) {
+      // Deletion checks must not use filtered caches or swallow read failures.
+      final siblings = await _propfind(parentUri, source: source);
+      if (!siblings.any((entry) => entry.isSelf && entry.isCollection)) {
+        throw Exception('WebDAV 删除结果未确认：父目录响应不完整');
+      }
+      final stillExists = siblings.any(
+        (entry) =>
+            _normalizeParsedWebDavUri(entry.uri) ==
+            _normalizeParsedWebDavUri(targetUri),
+      );
+      if (stillExists) {
+        throw Exception('WebDAV 删除未生效：远端文件或目录仍然存在');
       }
     }
   }
@@ -733,7 +737,8 @@ class WebDavNasClient {
     return parsed;
   }
 
-  Uri _resolveResourceUri(
+  /// Use the same target for remote operations and cloud sync-delete matching.
+  Uri resolveResourceUri(
     MediaSourceConfig source, {
     required String resourcePath,
     required String sectionId,
@@ -755,24 +760,5 @@ class WebDavNasClient {
     return baseUri.replace(
       path: resolvedPath.replaceAll(RegExp(r'/+'), '/'),
     );
-  }
-
-  bool _looksLikePlayableResourceUri(Uri uri) {
-    final normalizedPath = uri.path.toLowerCase();
-    return const [
-      '.mp4',
-      '.m4v',
-      '.mov',
-      '.mkv',
-      '.iso',
-      '.avi',
-      '.ts',
-      '.webm',
-      '.flv',
-      '.wmv',
-      '.mpg',
-      '.mpeg',
-      '.strm',
-    ].any(normalizedPath.endsWith);
   }
 }

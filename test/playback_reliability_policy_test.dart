@@ -27,6 +27,12 @@ void main() {
     expect(isPlaybackAddressRefreshable(416), false);
   });
 
+  test('Exo startup limits do not change the MPV adaptive ceiling', () {
+    expect(PlaybackPolicyValues.exoStartupHardLimitMs, 60000);
+    expect(PlaybackPolicyValues.exoStartupNoProgressTimeoutMs, 30000);
+    expect(PlaybackPolicyValues.startupHardLimitMs, 120000);
+  });
+
   test('state precedence suppresses loading after failure and completion', () {
     for (var mask = 0; mask < 64; mask++) {
       final phase = resolvePlaybackPhase(

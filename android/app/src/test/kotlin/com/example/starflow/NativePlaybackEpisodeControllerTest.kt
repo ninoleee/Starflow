@@ -1,6 +1,9 @@
 package com.example.starflow
 
 import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.HttpDataSource
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Before
@@ -117,6 +120,38 @@ class NativePlaybackEpisodeControllerTest {
     }
 
     @Test
+    fun promotedPreparationAcceptsResultAfterOriginalBackgroundDeadline() {
+        controller.tick()
+        time += 29_000L
+        controller.advanceToAdjacentEpisode(true, "outro")
+        time += 2_000L
+        controller.tick()
+        callbacks.single()(resolved)
+
+        assertEquals(1, callbacks.size)
+        assertEquals(1, controller.episodeQueue?.currentIndex)
+        verify(host.session).initializePlayer()
+        verify(host, never()).showToast("解析剧集超时，请手动重试。")
+    }
+
+    @Test
+    fun promotedPreparationRejectsResultAtForegroundDeadlineWithoutWaitingForTick() {
+        controller.tick()
+        time += 29_000L
+        controller.advanceToAdjacentEpisode(true, "outro")
+        time += 30_000L
+        callbacks.single()(resolved)
+
+        assertEquals(0, controller.episodeQueue?.currentIndex)
+        verify(host.session, never()).initializePlayer()
+        verify(host, times(1)).showToast("解析剧集超时，请手动重试。")
+        controller.advanceToAdjacentEpisode(true, "ended")
+        assertEquals(1, callbacks.size)
+        controller.advanceToAdjacentEpisode(true, "remote-next")
+        assertEquals(2, callbacks.size)
+    }
+
+    @Test
     fun backgroundFailureIsSilentAndForegroundCanRetry() {
         controller.tick()
         callbacks.single()(mapOf("ok" to false))
@@ -143,5 +178,41 @@ class NativePlaybackEpisodeControllerTest {
         controller.advanceToAdjacentEpisode(true, "outro")
         assertEquals(listOf(next.playbackTargetJson, next.playbackTargetJson), requestedTargets)
         verify(host.session, never()).releasePlayer()
+    }
+
+    private fun expiredAddressError(): PlaybackException {
+        val response = HttpDataSource.InvalidResponseCodeException(
+            403, "Forbidden", null, emptyMap(), mock(DataSpec::class.java), byteArrayOf(),
+        )
+        return mock(PlaybackException::class.java).also {
+            `when`(it.cause).thenReturn(response)
+        }
+    }
+
+    @Test
+    fun preparedAddressRefreshKeepsStartupDeadlineAndRetriesOnlyOnce() {
+        controller.tick()
+        callbacks.single()(resolved)
+        controller.advanceToAdjacentEpisode(true, "outro")
+        clearInvocations(host.launch)
+        val error = expiredAddressError()
+        assertTrue(controller.retryPreparedAddressIfNeeded(error))
+        verify(host.launch, never()).cancelPlaybackLaunchTimeout()
+        assertEquals(2, callbacks.size)
+        callbacks.last()(resolved)
+        verify(host.launch, never()).resetStartupDeadline()
+        verify(host.session, times(2)).initializePlayer()
+        assertFalse(controller.retryPreparedAddressIfNeeded(error))
+    }
+
+    @Test
+    fun startupTimeoutInvalidatesPendingAddressRefresh() {
+        controller.tick()
+        callbacks.single()(resolved)
+        controller.advanceToAdjacentEpisode(true, "outro")
+        assertTrue(controller.retryPreparedAddressIfNeeded(expiredAddressError()))
+        controller.onPlaybackFailed()
+        callbacks.last()(resolved)
+        verify(host.session, times(1)).initializePlayer()
     }
 }

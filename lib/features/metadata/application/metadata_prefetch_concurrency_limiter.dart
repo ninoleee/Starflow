@@ -266,6 +266,13 @@ class MetadataPrefetchConcurrencyLimiter {
     _waitDiagnostics.dispose();
   }
 
+  /// Stops the idle bookkeeping timer when an owning page is torn down.
+  /// Queued and active work remain shared with other pages.
+  void cancelIdleResetTimer() {
+    _idleResetTimer?.cancel();
+    _idleResetTimer = null;
+  }
+
   void _drain() {
     if (_globalPauseHoldCount > 0) {
       _waitDiagnostics.update();

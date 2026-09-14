@@ -1,12 +1,13 @@
 name: starflow
 description: Cross-platform personal streaming hub for NAS, Emby, Douban, and configurable online sources.
 publish_to: none
-version: 1.9.82
+version: 1.9.115
 environment:
   sdk: ">=3.4.0 <4.0.0"
 
 dependencies:
   archive: ^4.0.7
+  crypto: ^3.0.6
   cupertino_icons: ^1.0.8
   flutter:
     sdk: flutter
@@ -52,9 +53,6 @@ flutter:
     - assets/branding/
     - assets/bootstrap/
     - assets/perf/
-
-
-
 
 
 

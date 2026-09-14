@@ -517,7 +517,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     if (normalizedActualAddress.isEmpty) {
       return null;
     }
-    return _resolveResourceUri(
+    return resolveResourceUri(
       source,
       resourcePath: normalizedActualAddress,
       sectionId: '',

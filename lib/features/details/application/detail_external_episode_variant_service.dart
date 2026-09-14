@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -28,14 +28,14 @@ class DetailExternalEpisodeVariantService {
     required MediaDetailTarget target,
     required AppSettings settings,
     required NasMediaIndexer nasMediaIndexer,
-    required EmbyApiClient embyApiClient,
+    required MediaServerClient embyApiClient,
   }) async {
     final source = settings.mediaSources
         .where(
           (candidate) =>
               candidate.enabled &&
               candidate.id == target.sourceId &&
-              (candidate.kind == MediaSourceKind.emby ||
+              (candidate.kind.isMediaServer ||
                   candidate.kind == MediaSourceKind.nas ||
                   candidate.kind == MediaSourceKind.quark),
         )
@@ -44,7 +44,7 @@ class DetailExternalEpisodeVariantService {
       return null;
     }
 
-    if (source.kind == MediaSourceKind.emby) {
+    if (source.kind.isMediaServer) {
       return _loadEmbyChoices(
         target: target,
         source: source,
@@ -104,7 +104,7 @@ class DetailExternalEpisodeVariantService {
   Future<DetailExternalEpisodeVariantState?> _loadEmbyChoices({
     required MediaDetailTarget target,
     required MediaSourceConfig source,
-    required EmbyApiClient embyApiClient,
+    required MediaServerClient embyApiClient,
   }) async {
     final playback = target.playbackTarget;
     final playbackItemId = playback?.itemId.trim() ?? '';

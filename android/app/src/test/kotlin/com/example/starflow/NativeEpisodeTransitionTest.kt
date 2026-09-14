@@ -50,6 +50,37 @@ class NativeEpisodeTransitionTest {
     }
 
     @Test
+    fun latePromotionGetsOneForegroundWindowWithoutDuplicatingTheRequest() {
+        val request = transition.prefetch(key)!!
+        time += 29_000L
+        assertEquals(NativeEpisodeTransition.Decision.Wait, transition.begin(key, "outro"))
+        time += 1_000L
+        assertNull(transition.expiredRequest())
+        assertEquals(request, transition.pending)
+        assertEquals(NativeEpisodeTransition.Decision.Wait, transition.begin(key, "ended"))
+        time += 28_999L
+        assertNull(transition.expiredRequest())
+        time++
+        assertEquals(request, transition.expiredRequest())
+        transition.fail(request)
+        assertNull(transition.resolve(request, entry))
+        assertEquals(NativeEpisodeTransition.Decision.Wait, transition.begin(key, "ended"))
+    }
+
+    @Test
+    fun pauseAndResumeCannotKeepExtendingTheSameResolution() {
+        val request = transition.prefetch(key)!!
+        time += 20_000L
+        transition.begin(key, "outro")
+        transition.cancelAutomaticAdvance()
+        time += 20_000L
+        transition.begin(key, "outro")
+        assertEquals(request, transition.pending)
+        time += 10_000L
+        assertEquals(request, transition.expiredRequest())
+    }
+
+    @Test
     fun repeatedAutomaticFailureDoesNotLoopAndManualRetryIsAllowed() {
         val request =
             (transition.begin(key, "outro") as NativeEpisodeTransition.Decision.Resolve).request

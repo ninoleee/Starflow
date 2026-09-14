@@ -163,9 +163,7 @@ internal class NativePlaybackEpisodeController(
             resolveEpisode(request.key.resolverSessionId, entry.playbackTargetJson) { result ->
                 host.activity.runOnUiThread {
                     if (transition.pending != request) return@runOnUiThread
-                    if (
-                        now() - request.startedAtMs >= NativeEpisodeTransition.RESOLUTION_TIMEOUT_MS
-                    ) {
+                    if (transition.isExpired(request)) {
                         failResolution(request, "解析剧集超时，请手动重试。")
                         return@runOnUiThread
                     }
@@ -222,9 +220,11 @@ internal class NativePlaybackEpisodeController(
 
     private fun failResolution(request: NativeEpisodeTransition.Request, message: String) {
         if (transition.pending != request) return
+        val timedOut = transition.isExpired(request)
         val reason = transition.fail(request)
         NativePlaybackFormatting.logPlayback(
-            "native.queue.resolve.failed index=${request.key.index} background=${reason == null}"
+            "native.queue.resolve.failed index=${request.key.index} background=${reason == null} " +
+                "durationMs=${now() - request.startedAtMs} timedOut=$timedOut"
         )
         if (reason == "prepared-address-retry") host.launch.handlePlaybackFailure(message)
         else if (reason != null && !host.activity.isFinishing && !host.activity.isDestroyed) {
@@ -318,7 +318,6 @@ internal class NativePlaybackEpisodeController(
         preparedRetryEntry = null
         retryPositionMs = host.session.restoredResumePositionMs
         host.session.pendingResumePositionOverrideMs = retryPositionMs
-        host.launch.cancelPlaybackLaunchTimeout()
         transition.reset()
         transitionStartedAtMs = now()
         val key = preparationKey(episodeQueue?.currentIndex ?: return false) ?: return false

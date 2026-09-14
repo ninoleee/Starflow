@@ -22,6 +22,38 @@ http.Response _jsonResponse(
 
 void main() {
   group('QuarkSaveClient', () {
+    for (final mode in ['complete', 'missing', 'duplicate']) {
+      test('paginates stored entries before using them: $mode', () async {
+        final pages = <String>[];
+        final client = QuarkSaveClient(MockClient((request) async {
+          final page = request.url.queryParameters['_page']!;
+          pages.add(page);
+          return _jsonResponse({
+            'code': 0,
+            'metadata': {'_total': 2},
+            'data': {
+              'list': [
+                if (page == '1' || mode != 'missing')
+                  {
+                    'fid': mode == 'duplicate' ? '1' : page,
+                    'file_name': 'E$page.mkv',
+                    'dir': false
+                  },
+              ],
+            },
+          });
+        }));
+        if (mode == 'complete') {
+          final entries = await client.listEntries(cookie: 'cookie');
+          expect(entries.map((entry) => entry.fid), ['1', '2']);
+        } else {
+          await expectLater(client.listEntries(cookie: 'cookie'),
+              throwsA(isA<QuarkSaveException>()));
+        }
+        expect(pages, ['1', '2']);
+      });
+    }
+
     test('lists directories for folder picker', () async {
       final client = QuarkSaveClient(
         MockClient((request) async {

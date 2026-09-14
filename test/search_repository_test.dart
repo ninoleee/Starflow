@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -229,8 +231,107 @@ void main() {
 
       expect(results.items, hasLength(1));
       expect(results.items.single.title, '有效资源');
+      expect(results.items.single.password, '1234');
+      expect(Uri.parse(results.items.single.resourceUrl).queryParameters['pwd'],
+          '1234');
       expect(results.filteredCount, 1);
       expect(results.rawCount, 2);
+    });
+
+    test('same-share aliases retain first title and later passcodes', () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(MockClient((_) async => http.Response.bytes(
+              utf8.encode(jsonEncode({
+                'code': 0,
+                'data': {
+                  'merged_by_type': {
+                    '115': [
+                      {'url': 'https://115.com/s/AbC', 'note': '首条'},
+                      {
+                        'url': 'https://115cdn.com/s/AbC?from=app',
+                        'note': '重复',
+                        'password': 'abcd'
+                      },
+                      {
+                        'url': 'https://anxia.com/s/AbC?password=abcd',
+                        'note': '重复'
+                      },
+                      {'url': 'https://115.com/s/Other', 'note': '首条'},
+                      {
+                        'url': 'https://115.com/s/Other',
+                        'note': '首条',
+                        'password': 'efgh'
+                      },
+                    ],
+                    'quark': [
+                      {'url': 'https://pan.quark.cn/s/AbC', 'note': '首条'},
+                    ],
+                  }
+                }
+              })),
+              200,
+              headers: {'content-type': 'application/json'},
+            ))),
+        CloudSaverApiClient(MockClient((_) async => http.Response('{}', 200))),
+        const _FakeMediaRepository(items: []),
+      );
+      final result = await repository.searchOnline('首条',
+          provider: const SearchProviderConfig(
+            id: 'online',
+            name: 'Online',
+            kind: SearchProviderKind.panSou,
+            endpoint: 'https://example.test',
+            enabled: true,
+            allowedCloudTypes: ['115', 'quark'],
+          ));
+      expect(result.items, hasLength(3));
+      expect(result.rawCount, 6);
+      expect(result.filteredCount, 3);
+      expect(result.items.map((item) => item.title), everyElement('首条'));
+      expect(result.items.map((item) => item.password), ['abcd', 'efgh', '']);
+    });
+
+    test('CloudSaver retains separate passcodes for duplicate URL merging',
+        () async {
+      final repository = AppSearchRepository(
+        PanSouApiClient(MockClient((_) async => http.Response('{}', 200))),
+        CloudSaverApiClient(MockClient((_) async => http.Response.bytes(
+              utf8.encode(jsonEncode({
+                'code': 0,
+                'success': true,
+                'data': [
+                  {
+                    'list': [
+                      {
+                        'title': '首条',
+                        'cloudLinks': ['https://115.com/s/abc']
+                      },
+                      {
+                        'title': '重复',
+                        'cloudLinks': ['https://115.com/s/abc'],
+                        'content': '提取码: abcd'
+                      },
+                    ]
+                  },
+                ]
+              })),
+              200,
+              headers: {'content-type': 'application/json'},
+            ))),
+        const _FakeMediaRepository(items: []),
+      );
+      final result = await repository.searchOnline('首条',
+          provider: const SearchProviderConfig(
+            id: 'online',
+            name: 'Online',
+            kind: SearchProviderKind.cloudSaver,
+            endpoint: 'https://example.test',
+            enabled: true,
+            allowedCloudTypes: ['115'],
+          ));
+      expect(result.items, hasLength(1));
+      expect(result.items.single.password, 'abcd');
+      expect(result.filteredCount, 1);
     });
 
     test('searchOnline filters by cloud type and blocked keywords', () async {
@@ -381,18 +482,24 @@ void main() {
       expect(results.filteredCount, 1);
     });
 
-    test('searchOnline keeps 115 results for anxia url', () async {
-      final repository = AppSearchRepository(
-        PanSouApiClient(
-          MockClient((request) async {
-            return http.Response(
-              '''
+    for (final shareUrl in [
+      'https://anxia.com/s/share115',
+      'https://115cdn.com/s/share115?password=abcd',
+      'https://share.example.com/s/share115',
+    ]) {
+      test('searchOnline keeps declared 115 results for $shareUrl', () async {
+        final repository = AppSearchRepository(
+          PanSouApiClient(
+            MockClient((request) async {
+              return http.Response(
+                '''
               {
                 "code": 0,
                 "data": {
                   "merged_by_type": {
                     "115": [
-                      {"url":"https://anxia.com/s/share115","note":"115资源","password":""}
+                      {"url":"$shareUrl","note":"115资源","password":""},
+                      {"url":"https://pan.quark.cn/s/mislabeled","note":"类型冲突","password":""}
                     ],
                     "quark": [
                       {"url":"https://pan.quark.cn/s/quark-item","note":"夸克资源","password":""}
@@ -401,33 +508,34 @@ void main() {
                 }
               }
               ''',
-              200,
-              headers: const {'content-type': 'application/json'},
-            );
-          }),
-        ),
-        CloudSaverApiClient(
-          MockClient((request) async => http.Response('{}', 200)),
-        ),
-        const _FakeMediaRepository(items: []),
-      );
+                200,
+                headers: const {'content-type': 'application/json'},
+              );
+            }),
+          ),
+          CloudSaverApiClient(
+            MockClient((request) async => http.Response('{}', 200)),
+          ),
+          const _FakeMediaRepository(items: []),
+        );
 
-      final results = await repository.searchOnline(
-        '测试资源',
-        provider: const SearchProviderConfig(
-          id: 'pansou-api',
-          name: 'PanSou',
-          kind: SearchProviderKind.panSou,
-          endpoint: 'https://so.252035.xyz',
-          enabled: true,
-          allowedCloudTypes: ['115'],
-        ),
-      );
+        final results = await repository.searchOnline(
+          '测试资源',
+          provider: const SearchProviderConfig(
+            id: 'pansou-api',
+            name: 'PanSou',
+            kind: SearchProviderKind.panSou,
+            endpoint: 'https://so.252035.xyz',
+            enabled: true,
+            allowedCloudTypes: ['115'],
+          ),
+        );
 
-      expect(results.items, hasLength(1));
-      expect(results.items.single.resourceUrl, 'https://anxia.com/s/share115');
-      expect(results.filteredCount, 1);
-    });
+        expect(results.items, hasLength(1));
+        expect(results.items.single.resourceUrl, shareUrl);
+        expect(results.filteredCount, 2);
+      });
+    }
 
     test('searchOnline strong match keeps titles containing query characters',
         () async {
@@ -529,8 +637,7 @@ void main() {
       expect(results.rawCount, 2);
     });
 
-    test(
-        'searchOnline filters CloudSaver result when url does not expose cloud type',
+    test('searchOnline keeps declared CloudSaver type when url is unrecognized',
         () async {
       final repository = AppSearchRepository(
         PanSouApiClient(
@@ -579,8 +686,9 @@ void main() {
         ),
       );
 
-      expect(results.items, isEmpty);
-      expect(results.filteredCount, 1);
+      expect(results.items, hasLength(1));
+      expect(results.items.single.cloudType, 'quark');
+      expect(results.filteredCount, 0);
     });
   });
 }

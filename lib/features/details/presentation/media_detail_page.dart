@@ -32,7 +32,7 @@ import 'package:starflow/features/details/presentation/widgets/detail_hero_secti
 import 'package:starflow/features/details/presentation/widgets/detail_resource_info_section.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_television_picker_dialog.dart';
-import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -45,7 +45,11 @@ import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/application/playback_engine_support.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
+import 'package:starflow/features/search/application/cloud115_save_workflow_service.dart';
+import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
+import 'package:starflow/features/search/presentation/cloud_save_feedback_controller.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
@@ -594,7 +598,7 @@ Future<List<Future<List<_LibraryMatchCandidate>> Function()>>
   final wikidataId = _resolveManualMatchWikidataId(target);
 
   final embySources = sources
-      .where((source) => source.kind == MediaSourceKind.emby)
+      .where((source) => source.kind.isMediaServer)
       .toList(growable: false);
   for (final source in embySources) {
     controller.throwIfCancelled();
@@ -1266,9 +1270,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     with PageActivityMixin<MediaDetailPage> {
   bool _isRefreshingMetadata = false;
   bool _isCheckingOnlineResourceUpdate = false;
+  bool _onlineResourceUpdateInProgress = false;
   bool _isSavingOnlineResourceUpdate = false;
-  final Set<ScaffoldFeatureController<SnackBar, SnackBarClosedReason>>
-      _quarkSaveProgressSnackBars = {};
+  late final _saveFeedback = CloudSaveFeedbackController(
+    () => mounted ? context : null,
+    isActive: () => isPageActive,
+  );
   bool _showDeferredDetailContent = false;
   bool _detailEnrichmentReady = false;
   bool _seriesSourceReady = false;
@@ -1337,10 +1344,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   @override
   void dispose() {
     _cancelActiveLibraryMatch(reason: 'dispose');
-    for (final controller in _quarkSaveProgressSnackBars.toList()) {
-      controller.close();
-    }
-    _quarkSaveProgressSnackBars.clear();
+    _saveFeedback.dispose();
     _pageController.dispose();
     _selectedSeasonIdNotifier.dispose();
     _heroArtworkFocusNode.dispose();
@@ -1386,7 +1390,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     setState(() {
       _isRefreshingMetadata = false;
       _isCheckingOnlineResourceUpdate = false;
-      _isSavingOnlineResourceUpdate = false;
       _deferredDetailContentScheduled = false;
     });
     _updateLibraryMatchView(isMatching: false);
@@ -1449,64 +1452,73 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   Future<void> _checkFavoriteOnlineResourceUpdate(
     MediaDetailTarget target,
   ) async {
-    if (_isCheckingOnlineResourceUpdate || _isSavingOnlineResourceUpdate) {
+    if (_onlineResourceUpdateInProgress || _isSavingOnlineResourceUpdate) {
       return;
     }
-
-    try {
-      await _loadFavoriteSearchResults();
-    } catch (error, stackTrace) {
-      detailResourceSwitchTrace(
-        'online-update.favorites-load.error',
-        fields: <String, Object?>{
-          'target': _detailResourceTraceTarget(target),
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('读取收藏资源失败：$error')),
-        );
-      }
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-
-    final service = ref.read(detailOnlineResourceUpdateServiceProvider);
-    final favoriteMatch = service.resolveFavoriteMatch(
-      target: target,
-      favorites: _favoriteSearchResults,
-    );
-    if (favoriteMatch == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('还没有可用于检查更新的在线收藏资源')),
-      );
-      return;
-    }
-
+    _onlineResourceUpdateInProgress = true;
+    final pageTarget = widget.target;
+    final overrideTarget = _manualOverrideTarget;
+    bool isCurrent() =>
+        mounted &&
+        identical(widget.target, pageTarget) &&
+        identical(_manualOverrideTarget, overrideTarget) &&
+        (ModalRoute.of(context)?.isCurrent ?? true);
     setState(() {
       _isCheckingOnlineResourceUpdate = true;
     });
-
     try {
-      detailResourceSwitchTrace(
-        'online-update.check.begin',
-        fields: <String, Object?>{
-          'target': _detailResourceTraceTarget(target),
-          'favoriteId': favoriteMatch.result.id,
-        },
-      );
+      await _loadFavoriteSearchResults();
+      if (!mounted || !isCurrent()) return;
+      final service = ref.read(detailOnlineResourceUpdateServiceProvider);
       final networkStorage = ref.read(
         appSettingsProvider.select((settings) => settings.networkStorage),
       );
+      final matches = service.resolveFavoriteMatches(
+        target: target,
+        favorites: _favoriteSearchResults,
+      );
+      if (matches.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('还没有可用于检查更新的在线收藏资源')),
+        );
+        return;
+      }
+      if (matches.length > 1) {
+        setState(() => _isCheckingOnlineResourceUpdate = false);
+      }
+      final favoriteMatch = matches.length == 1
+          ? matches.single
+          : await showDetailTelevisionPickerDialog<
+              DetailFavoriteSearchResourceMatch>(
+              context: context,
+              enabled: ref.read(isTelevisionProvider).value ?? false,
+              title: '选择更新来源',
+              options: [
+                for (var index = 0; index < matches.length; index++)
+                  DetailTelevisionPickerOption(
+                    value: matches[index],
+                    title:
+                        '${matches[index].drive.label} · ${matches[index].result.title}',
+                    subtitle: matches[index].hasConfiguredCookie(networkStorage)
+                        ? '保存目录：${matches[index].folderName}'
+                        : '未配置此网盘 Cookie',
+                    focusId: 'detail:update-source:$index',
+                    icon: Icons.cloud_outlined,
+                  ),
+              ],
+              selectedValue: null,
+              optionDebugLabelPrefix: 'detail-update-source',
+              closeFocusDebugLabel: 'detail-update-source-close',
+              closeFocusId: 'detail:update-source:close',
+            );
+      if (favoriteMatch == null || !isCurrent()) return;
+      setState(() => _isCheckingOnlineResourceUpdate = true);
       final result = await service.checkForUpdates(
         target: target,
         favoriteMatch: favoriteMatch,
         networkStorage: networkStorage,
         quarkSaveClient: ref.read(quarkSaveClientProvider),
+        cloud115SaveClient: ref.read(cloud115SaveClientProvider),
       );
       detailResourceSwitchTrace(
         'online-update.check.done',
@@ -1518,15 +1530,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           'updatedEpisodeCount': result.updatedEpisodeLabels.length,
         },
       );
-      if (!mounted) {
-        return;
-      }
+      if (!isCurrent()) return;
+      setState(() => _isCheckingOnlineResourceUpdate = false);
       final shouldSave = await _showOnlineResourceUpdateDialog(
         title: result.hasUpdates ? '发现更新' : '检查更新',
         message: result.buildDialogMessage(),
         canSave: result.hasUpdates,
+        drive: favoriteMatch.drive,
       );
-      if (!mounted || !shouldSave) {
+      if (!isCurrent() || !shouldSave) {
         return;
       }
       await _saveFavoriteOnlineResourceUpdate(
@@ -1538,18 +1550,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         'online-update.check.error',
         fields: <String, Object?>{
           'target': _detailResourceTraceTarget(target),
-          'favoriteId': favoriteMatch.result.id,
         },
         error: error,
         stackTrace: stackTrace,
       );
-      if (!mounted) {
-        return;
-      }
+      if (!mounted || !isCurrent()) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('检查更新失败：$error')),
       );
     } finally {
+      _onlineResourceUpdateInProgress = false;
       if (mounted) {
         setState(() {
           _isCheckingOnlineResourceUpdate = false;
@@ -1561,15 +1571,27 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   Future<bool> _showOnlineResourceUpdateDialog({
     required String title,
     required String message,
+    required CloudSaveDrive drive,
     bool canSave = false,
   }) async {
     final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final saveFocusNode = FocusNode(debugLabel: 'detail-update-save');
     final closeFocusNode = FocusNode(debugLabel: 'detail-update-close');
+    var dialogClosed = false;
+    var initialFocusRequested = false;
     try {
       final result = await showDialog<bool>(
         context: context,
         builder: (dialogContext) {
+          if (isTelevision && !initialFocusRequested) {
+            initialFocusRequested = true;
+            scheduleTelevisionDialogInitialFocus(
+              enabled: true,
+              focusNode: canSave ? saveFocusNode : closeFocusNode,
+              dialogFocusNodes: [if (canSave) saveFocusNode, closeFocusNode],
+              isActive: () => !dialogClosed,
+            );
+          }
           final dialog = AlertDialog(
             title: Text(title),
             content: SingleChildScrollView(
@@ -1579,7 +1601,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
               if (canSave)
                 if (isTelevision)
                   TvAdaptiveButton(
-                    label: '保存到夸克',
+                    label:
+                        '保存到${drive == CloudSaveDrive.cloud115 ? ' 115' : '夸克'}',
                     icon: Icons.bookmark_add_rounded,
                     focusNode: saveFocusNode,
                     autofocus: true,
@@ -1590,7 +1613,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                   TextButton.icon(
                     onPressed: () => Navigator.of(dialogContext).pop(true),
                     icon: const Icon(Icons.bookmark_add_rounded),
-                    label: const Text('保存到夸克'),
+                    label: Text(
+                        '保存到${drive == CloudSaveDrive.cloud115 ? ' 115' : '夸克'}'),
                   ),
               if (isTelevision)
                 TvAdaptiveButton(
@@ -1626,6 +1650,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       );
       return result == true;
     } finally {
+      dialogClosed = true;
       saveFocusNode.dispose();
       closeFocusNode.dispose();
     }
@@ -1639,13 +1664,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       return;
     }
 
-    final cookie = networkStorage.quarkCookie.trim();
-    if (cookie.isEmpty) {
+    final drive = favoriteMatch.drive;
+    if (!favoriteMatch.hasConfiguredCookie(networkStorage)) {
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在搜索设置里填写夸克 Cookie')),
+        SnackBar(content: Text('请先在网盘与转存设置中配置${drive.label} Cookie')),
       );
       return;
     }
@@ -1654,41 +1679,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _isSavingOnlineResourceUpdate = true;
     });
 
-    ScaffoldFeatureController<SnackBar, SnackBarClosedReason>? progressSnackBar;
-
-    void closeProgress() {
-      final controller = progressSnackBar;
-      progressSnackBar = null;
-      if (controller == null) {
-        return;
-      }
-      if (!_quarkSaveProgressSnackBars.remove(controller)) {
-        return;
-      }
-      controller.close();
-    }
-
-    void showProgress(QuarkSaveWorkflowProgress progress) {
-      if (!mounted) {
-        return;
-      }
-      closeProgress();
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.removeCurrentSnackBar();
-      final controller = messenger.showSnackBar(
-        SnackBar(
-          content: Text(progress.message),
-          duration: const Duration(minutes: 2),
-        ),
-      );
-      progressSnackBar = controller;
-      _quarkSaveProgressSnackBars.add(controller);
-      unawaited(
-        controller.closed.whenComplete(
-          () => _quarkSaveProgressSnackBars.remove(controller),
-        ),
-      );
-    }
+    final feedback = _saveFeedback.start();
 
     try {
       detailResourceSwitchTrace(
@@ -1698,13 +1689,28 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           'folderName': favoriteMatch.folderName,
         },
       );
-      final response =
-          await ref.read(quarkSaveWorkflowServiceProvider).saveToQuark(
-                shareUrl: favoriteMatch.result.resourceUrl,
-                saveFolderName: favoriteMatch.folderName,
-                networkStorage: networkStorage,
-                onProgress: showProgress,
-              );
+      final share = prepareSearchResultShareCredentials(favoriteMatch.result);
+      final String message;
+      if (drive == CloudSaveDrive.cloud115) {
+        message = await ref.read(cloud115SaveWorkflowProvider).save(
+              shareUrl: share.resourceUrl,
+              password: searchResultSharePassword(share),
+              saveFolderName: favoriteMatch.folderName,
+              config: networkStorage,
+              onProgress: feedback.showProgress,
+              onBackgroundRefreshFailure: feedback.showRefreshFailure,
+            );
+      } else {
+        final response =
+            await ref.read(quarkSaveWorkflowServiceProvider).saveToQuark(
+                  shareUrl: share.resourceUrl,
+                  saveFolderName: favoriteMatch.folderName,
+                  networkStorage: networkStorage,
+                  onProgress: feedback.showProgress,
+                  onBackgroundRefreshFailure: feedback.showRefreshFailure,
+                );
+        message = response.buildSuccessMessage();
+      }
       detailResourceSwitchTrace(
         'online-update.save.done',
         fields: <String, Object?>{
@@ -1712,35 +1718,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           'folderName': favoriteMatch.folderName,
         },
       );
-      if (!mounted) {
-        return;
-      }
-      closeProgress();
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.removeCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(response.buildSuccessMessage()),
-        ),
-      );
+      feedback.complete(message);
     } on QuarkSaveException catch (error) {
       detailResourceSwitchTrace(
         'online-update.save.error',
         fields: <String, Object?>{
           'favoriteId': favoriteMatch.result.id,
-          'errorType': 'quark-save',
+          'errorType': 'cloud-save',
         },
         error: error,
       );
-      if (!mounted) {
-        return;
-      }
-      closeProgress();
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.removeCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(content: Text(error.message)),
-      );
+      feedback.fail(error.message);
     } on SmartStrmWebhookException catch (error) {
       detailResourceSwitchTrace(
         'online-update.save.error',
@@ -1750,14 +1738,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         },
         error: error,
       );
-      if (!mounted) {
-        return;
-      }
-      closeProgress();
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.removeCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(content: Text('夸克保存成功，但 STRM 触发失败：${error.message}')),
+      feedback.fail(
+        drive.smartStrmFailureMessage(error.message),
       );
     } catch (error, stackTrace) {
       detailResourceSwitchTrace(
@@ -1769,17 +1751,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         error: error,
         stackTrace: stackTrace,
       );
-      if (!mounted) {
-        return;
-      }
-      closeProgress();
-      final messenger = ScaffoldMessenger.of(context);
-      messenger.removeCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(content: Text('保存失败：$error')),
-      );
+      feedback.fail('保存失败：$error');
     } finally {
-      closeProgress();
+      feedback.closeProgress();
       if (mounted) {
         setState(() {
           _isSavingOnlineResourceUpdate = false;
@@ -2178,7 +2152,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
     final settings = ref.read(appSettingsProvider);
     final nasMediaIndexer = ref.read(nasMediaIndexerProvider);
-    final embyApiClient = ref.read(embyApiClientProvider);
     final variantService =
         ref.read(detailExternalEpisodeVariantServiceProvider);
     final expandedChoices = <MediaDetailTarget>[];
@@ -2202,7 +2175,11 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           target: choice,
           settings: settings,
           nasMediaIndexer: nasMediaIndexer,
-          embyApiClient: embyApiClient,
+          embyApiClient: ref.read(mediaServerClientProvider(
+            choice.sourceKind == MediaSourceKind.fntv
+                ? MediaSourceKind.fntv
+                : MediaSourceKind.emby,
+          )),
         );
         detailResourceSwitchTrace(
           'variant.expand.choice',
@@ -3123,15 +3100,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                         !_showDeferredDetailContent) {
                       _scheduleDeferredDetailContent();
                     }
-                    final favoriteOnlineResourceMatch = ref
+                    final favoriteOnlineResourceMatches = ref
                         .read(detailOnlineResourceUpdateServiceProvider)
-                        .resolveFavoriteMatch(
+                        .resolveFavoriteMatches(
                           target: target,
                           favorites: _favoriteSearchResults,
                         );
                     final canCheckFavoriteOnlineResourceUpdate =
-                        favoriteOnlineResourceMatch != null &&
-                            networkStorage.quarkCookie.trim().isNotEmpty;
+                        favoriteOnlineResourceMatches.any((match) =>
+                            match.hasConfiguredCookie(networkStorage));
                     final galleryImages = showDeferredDetailContent
                         ? buildDetailGalleryImages(target)
                         : const <DetailImageAsset>[];
@@ -3283,7 +3260,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   ),
                                 ),
                               if (showDeferredDetailContent &&
-                                  shouldShowDetailResourceInfo(target))
+                                  (shouldShowDetailResourceInfo(target) ||
+                                      canCheckFavoriteOnlineResourceUpdate))
                                 _buildResourceInfoBlock(
                                   target: target,
                                   isTelevision: isTelevision,

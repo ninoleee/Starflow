@@ -6,7 +6,10 @@ import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.Player
 
-internal class NativePlaybackRuntimeController(private val host: Host) {
+internal class NativePlaybackRuntimeController(
+    private val host: Host,
+    val playbackWatchdogPolicy: NativePlaybackWatchdogPolicy = NativePlaybackWatchdogPolicy(),
+) {
     interface Host {
         val diagnostics: NativePlaybackDiagnostics
         val session: NativePlaybackSession
@@ -15,6 +18,7 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
         val recovery: NativePlaybackRecoveryController
         val target: NativePlaybackTarget
         val episodes: NativePlaybackEpisodeController
+        val launch: NativePlaybackLaunchController
 
         fun showToast(message: String)
 
@@ -32,8 +36,6 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
     private var completedByAutoSkip = false
 
     private var playbackWatchdogActive = false
-
-    val playbackWatchdogPolicy = NativePlaybackWatchdogPolicy()
 
     private val playbackWatchdogRunnable =
         object : Runnable {
@@ -224,8 +226,12 @@ internal class NativePlaybackRuntimeController(private val host: Host) {
         }
     }
 
-    private fun evaluatePlaybackWatchdog(): Boolean {
+    internal fun evaluatePlaybackWatchdog(): Boolean {
         val currentPlayer = host.session.player ?: return true
+        if (host.launch.isStartupPending) {
+            resetPlaybackWatchdogProgress(currentPlayer.currentPosition)
+            return true
+        }
         val inPictureInPicture =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && host.activity.isInPictureInPictureMode
         if (

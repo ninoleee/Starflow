@@ -1,6 +1,6 @@
 import 'package:riverpod/misc.dart';
 import 'package:starflow/core/utils/playback_trace.dart';
-import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
@@ -21,6 +21,11 @@ class PlaybackTargetResolver {
 
   Future<PlaybackTarget> resolve(PlaybackTarget target) async {
     PlaybackTarget preparedTarget = _resetStaleQuarkRelayIfNeeded(target);
+    if (preparedTarget.sourceKind == MediaSourceKind.fntv &&
+        preparedTarget.itemId.trim().isNotEmpty) {
+      preparedTarget =
+          preparedTarget.copyWith(streamUrl: '', headers: const {});
+    }
     try {
       _traceQuarkResolve(
         'quark.resolve.begin',
@@ -56,11 +61,12 @@ class PlaybackTargetResolver {
         throw const _TargetResolutionException('媒体源不存在或已被移除');
       }
 
-      if (source.kind == MediaSourceKind.emby) {
+      if (source.kind.isMediaServer) {
         if (!source.hasActiveSession) {
-          throw const _TargetResolutionException('Emby 会话已失效，请重新登录');
+          throw _TargetResolutionException('${source.kind.label} 会话已失效，请重新登录');
         }
-        return read(embyApiClientProvider).resolvePlaybackTarget(
+        return read(mediaServerClientProvider(source.kind))
+            .resolvePlaybackTarget(
           source: source,
           target: preparedTarget,
         );

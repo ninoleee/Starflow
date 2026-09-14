@@ -1,34 +1,25 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:starflow/features/search/domain/share_link_validation.dart';
 import 'dart:math' as math;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/features/search/application/cloud_save_planner.dart';
+import 'package:starflow/features/search/application/cloud_saved_name_sanitizer.dart';
+import 'package:starflow/features/search/domain/cloud_save_rules.dart';
 
 final quarkSaveClientProvider = Provider<QuarkSaveClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
   return QuarkSaveClient(client);
 });
 
-String normalizeQuarkDirectoryPath(String rawPath) {
-  final trimmed = rawPath.trim();
-  if (trimmed.isEmpty || trimmed == '/') {
-    return '/';
-  }
-  final normalized = trimmed.replaceAll('\\', '/');
-  final withLeadingSlash =
-      normalized.startsWith('/') ? normalized : '/$normalized';
-  return withLeadingSlash.replaceFirst(RegExp(r'/+$'), '');
-}
+String normalizeQuarkDirectoryPath(String rawPath) =>
+    normalizeCloudDirectoryPath(rawPath);
 
-String sanitizeQuarkDirectoryName(String rawName) {
-  final sanitized = rawName
-      .replaceAll(RegExp(r'[\\/:*?"<>|]+'), ' ')
-      .replaceAll(RegExp(r'\s+'), ' ')
-      .trim();
-  return sanitized == '.' || sanitized == '..' ? '' : sanitized;
-}
+String sanitizeQuarkDirectoryName(String rawName) =>
+    sanitizeCloudDirectoryName(rawName);
 
 /// Characters that survive the drive but break URL-addressed playback.
 ///
@@ -36,7 +27,7 @@ String sanitizeQuarkDirectoryName(String rawName) {
 /// path segment containing one can be truncated or re-encoded before the
 /// request reaches the file — and any signature computed over the original path
 /// then fails to match.
-const String kQuarkUnsafeUrlNameCharacters = '#%?';
+const String kQuarkUnsafeUrlNameCharacters = kCloudUnsafeUrlNameCharacters;
 
 /// Strips [characters] out of [rawName], collapsing the whitespace they leave
 /// behind. Returns an empty string when nothing usable remains, which callers
@@ -44,25 +35,8 @@ const String kQuarkUnsafeUrlNameCharacters = '#%?';
 String sanitizeQuarkNameForUrl(
   String rawName, {
   String characters = kQuarkUnsafeUrlNameCharacters,
-}) {
-  final unsafe = characters.runes
-      .map(String.fromCharCode)
-      .where((character) => character.trim().isNotEmpty)
-      .toSet();
-  if (unsafe.isEmpty) {
-    return rawName;
-  }
-  final buffer = StringBuffer();
-  for (final rune in rawName.runes) {
-    final character = String.fromCharCode(rune);
-    if (unsafe.contains(character)) {
-      continue;
-    }
-    buffer.write(character);
-  }
-  final collapsed = buffer.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
-  return collapsed == '.' || collapsed == '..' ? '' : collapsed;
-}
+}) =>
+    sanitizeCloudNameForUrl(rawName, characters: characters);
 
 class QuarkSaveClient {
   QuarkSaveClient(this._client);
@@ -130,7 +104,7 @@ class QuarkSaveClient {
   }) async {
     final trimmedCookie = cookie.trim();
     if (trimmedCookie.isEmpty) {
-      throw const QuarkSaveException('请先在搜索设置里填写夸克 Cookie');
+      throw const QuarkSaveException('请先在网盘与转存设置里填写夸克 Cookie');
     }
 
     final parsed = _parseShareUrl(shareUrl);
@@ -153,64 +127,16 @@ class QuarkSaveClient {
       throw const QuarkSaveException('分享链接里没有可保存的文件');
     }
 
-    final normalizedTargetDirectoryPath = normalizeQuarkDirectoryPath(
-      toPdirPath,
-    );
-    var resolvedTargetDirectoryId =
-        toPdirFid.trim().isEmpty ? '0' : toPdirFid.trim();
-    final sanitizedFolderName = sanitizeQuarkDirectoryName(saveFolderName);
-    final currentTargetDirectoryName = sanitizeQuarkDirectoryName(
-      _lastQuarkDirectoryName(normalizedTargetDirectoryPath),
-    );
-    var shouldRecursivelyDeduplicate = false;
-    final shouldCreateNamedDirectory = sanitizedFolderName.isNotEmpty &&
-        currentTargetDirectoryName.toLowerCase() !=
-            sanitizedFolderName.toLowerCase();
-    if (shouldCreateNamedDirectory) {
-      final ensuredTargetDirectory = await _ensureDirectory(
-        cookie: trimmedCookie,
-        parentFid: resolvedTargetDirectoryId,
-        parentPath: toPdirPath,
-        folderName: sanitizedFolderName,
-      );
-      resolvedTargetDirectoryId = ensuredTargetDirectory.fid;
-      shouldRecursivelyDeduplicate = ensuredTargetDirectory.alreadyExists;
-    } else if (sanitizedFolderName.isNotEmpty &&
-        currentTargetDirectoryName.toLowerCase() ==
-            sanitizedFolderName.toLowerCase()) {
-      shouldRecursivelyDeduplicate = true;
-    }
-    final effectiveSharedEntries = sanitizedFolderName.isEmpty
-        ? sharedEntries
-        : await _flattenTopDirectory(
-            pwdId: parsed.pwdId,
-            stoken: stoken,
-            cookie: trimmedCookie,
-            entries: sharedEntries,
-          );
-    final resolvedTargetDirectoryPath = _resolveQuarkTargetFolderPath(
-      toPdirPath: toPdirPath,
+    final planner = _savePlanner(parsed.pwdId, stoken, trimmedCookie);
+    final savePlan = await planner.build(
+      entries: sharedEntries,
+      folderId: toPdirFid,
+      folderPath: toPdirPath,
       saveFolderName: saveFolderName,
+      sanitizedNameCharacters: sanitizedNameCharacters,
     );
-    final savePlan = shouldRecursivelyDeduplicate
-        ? await _buildRecursiveSavePlan(
-            pwdId: parsed.pwdId,
-            stoken: stoken,
-            cookie: trimmedCookie,
-            targetDirectoryFid: resolvedTargetDirectoryId,
-            entries: effectiveSharedEntries,
-            sanitizedNameCharacters: sanitizedNameCharacters,
-          )
-        : _QuarkRecursiveSavePlan(
-            batches: [
-              if (effectiveSharedEntries.isNotEmpty)
-                _QuarkSaveBatch(
-                  targetDirectoryFid: resolvedTargetDirectoryId,
-                  entries: effectiveSharedEntries,
-                ),
-            ],
-            skippedCount: 0,
-          );
+    final resolvedTargetDirectoryId = savePlan.targetFolderId;
+    final resolvedTargetDirectoryPath = savePlan.targetFolderPath;
     if (savePlan.batches.isEmpty) {
       return QuarkSaveResult(
         taskId: '',
@@ -222,19 +148,20 @@ class QuarkSaveClient {
     }
 
     final taskIds = <String>[];
-    final savedEntries = <QuarkSavedEntry>[];
+    final savedEntries = sanitizedNameCharacters.trim().isNotEmpty
+        ? await planner.trackNewEntries(savePlan.batches)
+        : <QuarkSavedEntry>[
+            for (final batch in savePlan.batches)
+              for (final entry in batch.entries)
+                QuarkSavedEntry(
+                    parentFid: batch.targetDirectoryFid,
+                    name: entry.name,
+                    isDirectory: entry.isDirectory),
+          ];
     var savedCount = 0;
     for (final batch in savePlan.batches) {
       if (batch.entries.isEmpty) {
         continue;
-      }
-      for (final entry in batch.entries) {
-        savedEntries.add(
-          QuarkSavedEntry(
-            parentFid: batch.targetDirectoryFid,
-            name: entry.name,
-          ),
-        );
       }
       final taskId = await _saveShareEntries(
         pwdId: parsed.pwdId,
@@ -290,7 +217,7 @@ class QuarkSaveClient {
   }) async {
     final trimmedCookie = cookie.trim();
     if (trimmedCookie.isEmpty) {
-      throw const QuarkSaveException('请先在搜索设置里填写夸克 Cookie');
+      throw const QuarkSaveException('请先在网盘与转存设置里填写夸克 Cookie');
     }
 
     final parsed = _parseShareUrl(shareUrl);
@@ -316,12 +243,8 @@ class QuarkSaveClient {
     final sanitizedFolderName = sanitizeQuarkDirectoryName(saveFolderName);
     final effectiveSharedEntries = sanitizedFolderName.isEmpty
         ? sharedEntries
-        : await _flattenTopDirectory(
-            pwdId: parsed.pwdId,
-            stoken: stoken,
-            cookie: trimmedCookie,
-            entries: sharedEntries,
-          );
+        : await _savePlanner(parsed.pwdId, stoken, trimmedCookie)
+            .flattenTopDirectory(sharedEntries);
 
     final previewEntries = await _collectSharePreviewEntries(
       pwdId: parsed.pwdId,
@@ -338,6 +261,35 @@ class QuarkSaveClient {
     );
   }
 
+  Future<CloudSavePreview> previewSave({
+    required String shareUrl,
+    required String cookie,
+    String folderId = '0',
+    String folderPath = '/',
+    String saveFolderName = '',
+    String sanitizedNameCharacters = '',
+  }) async {
+    if (cookie.trim().isEmpty) {
+      throw const QuarkSaveException('请先在网盘与转存设置中填写夸克 Cookie');
+    }
+    final parsed = _parseShareUrl(shareUrl);
+    if (parsed == null) throw const QuarkSaveException('不是可识别的夸克分享链接');
+    final stoken = await _fetchShareToken(
+        pwdId: parsed.pwdId, passcode: parsed.passcode, cookie: cookie);
+    final entries = await _fetchShareEntries(
+        pwdId: parsed.pwdId,
+        stoken: stoken,
+        pdirFid: parsed.pdirFid,
+        cookie: cookie);
+    if (entries.isEmpty) throw const QuarkSaveException('分享链接里没有可保存的文件');
+    return _savePlanner(parsed.pwdId, stoken, cookie).preview(
+        entries: entries,
+        folderId: folderId,
+        folderPath: folderPath,
+        saveFolderName: saveFolderName,
+        sanitizedNameCharacters: sanitizedNameCharacters);
+  }
+
   Future<QuarkConnectionStatus> testConnection({
     required String cookie,
   }) async {
@@ -352,6 +304,35 @@ class QuarkSaveClient {
     required String cookie,
     String parentFid = '0',
   }) async {
+    final entries = <QuarkFileEntry>[];
+    final ids = <String>{};
+    for (var page = 1; page <= 500; page++) {
+      final payload = await _listEntriesPage(cookie, parentFid, page);
+      final data = payload['data'];
+      final rows = data is Map ? data['list'] : null;
+      if (rows is! List) throw const QuarkSaveException('夸克目录响应不完整');
+      for (final row in rows) {
+        final entry =
+            row is Map<String, dynamic> ? QuarkFileEntry.fromJson(row) : null;
+        if (entry == null || !ids.add(entry.fid)) {
+          throw const QuarkSaveException('夸克目录文件信息不完整或重复');
+        }
+        entries.add(entry);
+      }
+      final metadata = payload['metadata'];
+      final total =
+          metadata is Map ? int.tryParse('${metadata['_total']}') : null;
+      if (total != null && entries.length >= total) return entries;
+      if (rows.isEmpty && total != null && entries.length < total) {
+        throw const QuarkSaveException('夸克目录分页不完整，已停止操作');
+      }
+      if (rows.isEmpty || (total == null && rows.length < 200)) return entries;
+    }
+    throw const QuarkSaveException('夸克目录过大，已停止操作');
+  }
+
+  Future<Map<String, dynamic>> _listEntriesPage(
+      String cookie, String parentFid, int page) async {
     final trimmedCookie = cookie.trim();
     if (trimmedCookie.isEmpty) {
       throw const QuarkSaveException('请先填写夸克 Cookie');
@@ -367,7 +348,7 @@ class QuarkSaveClient {
           '__dt': '${(math.Random().nextDouble() * 4 + 1).round() * 60 * 1000}',
           '__t': '${DateTime.now().millisecondsSinceEpoch ~/ 1000}',
           'pdir_fid': parentFid,
-          '_page': '1',
+          '_page': '$page',
           '_size': '200',
           '_fetch_total': '1',
           '_fetch_sub_dirs': '0',
@@ -390,15 +371,7 @@ class QuarkSaveClient {
           _resolveErrorMessage(payload, response.statusCode));
     }
 
-    final entries = (payload['data'] as Map<String, dynamic>? ??
-            const {})['list'] as List<dynamic>? ??
-        const [];
-    return entries
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .map(QuarkFileEntry.fromJson)
-        .whereType<QuarkFileEntry>()
-        .toList(growable: false);
+    return payload;
   }
 
   /// Renames a single drive entry. Works for files and directories alike; the
@@ -458,87 +431,11 @@ class QuarkSaveClient {
     required List<QuarkSavedEntry> savedEntries,
     required String characters,
   }) async {
-    if (savedEntries.isEmpty || characters.trim().isEmpty) {
-      return const QuarkNameSanitizeResult();
-    }
-    final wantedNamesByParent = <String, Set<String>>{};
-    for (final saved in savedEntries) {
-      final parentFid = saved.parentFid.trim();
-      final name = saved.name.trim();
-      if (parentFid.isEmpty || name.isEmpty) {
-        continue;
-      }
-      wantedNamesByParent.putIfAbsent(parentFid, () => <String>{}).add(name);
-    }
-    if (wantedNamesByParent.isEmpty) {
-      return const QuarkNameSanitizeResult();
-    }
-
-    var renamedCount = 0;
-    var listedDirectoryCount = 0;
-    final failedNames = <String>[];
-    final visited = <String>{};
-
-    // Mutually recursive: a renamed directory is descended into, and each new
-    // child found there goes back through the same handling.
-    late final Future<void> Function(String directoryFid) descend;
-
-    /// Renames [entry] when its name is unsafe, then descends if it is a
-    /// directory. Everything below a directory this save created is also new,
-    /// so the whole subtree is in scope once we are inside one.
-    Future<void> handleNewEntry(QuarkFileEntry entry) async {
-      final sanitized = sanitizeQuarkNameForUrl(
-        entry.name,
-        characters: characters,
-      );
-      if (sanitized.isNotEmpty && sanitized != entry.name) {
-        try {
-          await renameEntry(cookie: cookie, fid: entry.fid, name: sanitized);
-          renamedCount += 1;
-        } on QuarkSaveException {
-          failedNames.add(entry.name);
-        }
-      }
-      if (!entry.isDirectory) {
-        return;
-      }
-      // The fid is stable across a rename, so descending afterwards is safe.
-      await descend(entry.fid);
-    }
-
-    descend = (String directoryFid) async {
-      if (!visited.add(directoryFid)) {
-        return;
-      }
-      listedDirectoryCount += 1;
-      final children = await listEntries(
-        cookie: cookie,
-        parentFid: directoryFid,
-      );
-      for (final child in children) {
-        await handleNewEntry(child);
-      }
-    };
-
-    for (final parentEntry in wantedNamesByParent.entries) {
-      listedDirectoryCount += 1;
-      final children = await listEntries(
-        cookie: cookie,
-        parentFid: parentEntry.key,
-      );
-      for (final child in children) {
-        if (!parentEntry.value.contains(child.name.trim())) {
-          continue;
-        }
-        await handleNewEntry(child);
-      }
-    }
-
-    return QuarkNameSanitizeResult(
-      renamedCount: renamedCount,
-      listedDirectoryCount: listedDirectoryCount,
-      failedNames: List<String>.unmodifiable(failedNames),
-    );
+    return CloudSavedNameSanitizer(
+      listEntries: (id) => listEntries(cookie: cookie, parentFid: id),
+      renameEntry: (id, name) =>
+          renameEntry(cookie: cookie, fid: id, name: name),
+    ).sanitize(savedEntries: savedEntries, characters: characters);
   }
 
   Future<QuarkDeleteResult> deleteEntries({
@@ -601,26 +498,22 @@ class QuarkSaveClient {
     );
   }
 
-  Future<_QuarkEnsuredDirectory> _ensureDirectory({
+  CloudSavePlanner<_QuarkShareEntry> _savePlanner(
+          String pwdId, String stoken, String cookie) =>
+      CloudSavePlanner(
+        driveName: '夸克',
+        listShared: (id) => _fetchShareEntries(
+            pwdId: pwdId, stoken: stoken, pdirFid: id, cookie: cookie),
+        listStored: (id) => listEntries(cookie: cookie, parentFid: id),
+        createDirectory: (id, name) =>
+            _createDirectory(cookie: cookie, parentFid: id, folderName: name),
+      );
+
+  Future<String> _createDirectory({
     required String cookie,
     required String parentFid,
-    required String parentPath,
     required String folderName,
   }) async {
-    final folderNameKey = _normalizeQuarkEntryNameKey(folderName);
-    final existingDirectories = await listDirectories(
-      cookie: cookie,
-      parentFid: parentFid,
-    );
-    for (final directory in existingDirectories) {
-      if (_normalizeQuarkEntryNameKey(directory.name) == folderNameKey) {
-        return _QuarkEnsuredDirectory(
-          fid: directory.fid,
-          alreadyExists: true,
-        );
-      }
-    }
-
     final response = await _client.post(
       Uri.parse('$_baseUrl/1/clouddrive/file').replace(
         queryParameters: const {
@@ -655,25 +548,9 @@ class QuarkSaveClient {
         '${(payload['data'] as Map<String, dynamic>? ?? const {})['fid'] ?? ''}'
             .trim();
     if (createdFid.isNotEmpty) {
-      return _QuarkEnsuredDirectory(
-        fid: createdFid,
-        alreadyExists: false,
-      );
+      return createdFid;
     }
-
-    final refreshedDirectories = await listDirectories(
-      cookie: cookie,
-      parentFid: parentFid,
-    );
-    for (final directory in refreshedDirectories) {
-      if (_normalizeQuarkEntryNameKey(directory.name) == folderNameKey) {
-        return _QuarkEnsuredDirectory(
-          fid: directory.fid,
-          alreadyExists: false,
-        );
-      }
-    }
-    throw const QuarkSaveException('夸克文件夹创建成功，但未返回目录 ID');
+    throw const QuarkSaveException('夸克文件夹创建后未返回目录 ID，未提交转存，请先检查网盘');
   }
 
   Future<List<QuarkDirectoryEntry>> listDirectories({
@@ -943,9 +820,9 @@ class QuarkSaveClient {
     required String cookie,
   }) async {
     final entries = <_QuarkShareEntry>[];
-    var page = 1;
+    final ids = <String>{};
 
-    while (true) {
+    for (var page = 1; page <= 2000; page++) {
       final response = await _client.get(
         _buildShareDetailUri(
           pwdId: pwdId,
@@ -967,26 +844,27 @@ class QuarkSaveClient {
             _resolveErrorMessage(payload, response.statusCode));
       }
 
-      final data = payload['data'] as Map<String, dynamic>? ?? const {};
-      final list = (data['list'] as List<dynamic>? ?? const [])
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .map(_QuarkShareEntry.fromJson)
-          .whereType<_QuarkShareEntry>()
-          .toList(growable: false);
-      if (list.isEmpty) {
-        break;
+      final data = payload['data'];
+      final rows = data is Map ? data['list'] : null;
+      if (rows is! List) throw const QuarkSaveException('夸克分享目录响应不完整');
+      for (final row in rows) {
+        final entry =
+            row is Map<String, dynamic> ? _QuarkShareEntry.fromJson(row) : null;
+        if (entry == null || !ids.add(entry.fid)) {
+          throw const QuarkSaveException('夸克分享文件信息不完整或重复');
+        }
+        entries.add(entry);
       }
-      entries.addAll(list);
-      final metadata = payload['metadata'] as Map<String, dynamic>? ?? const {};
-      final total = metadata['_total'] as int? ?? entries.length;
-      if (entries.length >= total) {
-        break;
+      final metadata = payload['metadata'];
+      final total =
+          metadata is Map ? int.tryParse('${metadata['_total']}') : null;
+      if (total != null && entries.length >= total) return entries;
+      if (rows.isEmpty && total != null && entries.length < total) {
+        throw const QuarkSaveException('夸克分享目录分页不完整，已停止操作');
       }
-      page += 1;
+      if (rows.isEmpty || (total == null && rows.length < 50)) return entries;
     }
-
-    return entries;
+    throw const QuarkSaveException('夸克分享目录过大，已停止操作');
   }
 
   Future<void> _validateShareDetail({
@@ -1054,27 +932,6 @@ class QuarkSaveClient {
     );
   }
 
-  Future<List<_QuarkShareEntry>> _flattenTopDirectory({
-    required String pwdId,
-    required String stoken,
-    required String cookie,
-    required List<_QuarkShareEntry> entries,
-  }) async {
-    if (entries.length != 1 || !entries.single.isDirectory) {
-      return entries;
-    }
-    final nestedEntries = await _fetchShareEntries(
-      pwdId: pwdId,
-      stoken: stoken,
-      pdirFid: entries.single.fid,
-      cookie: cookie,
-    );
-    if (nestedEntries.isEmpty) {
-      return entries;
-    }
-    return nestedEntries;
-  }
-
   Future<List<QuarkSharePreviewEntry>> _collectSharePreviewEntries({
     required String pwdId,
     required String stoken,
@@ -1117,112 +974,6 @@ class QuarkSaveClient {
       );
     }
     return previewEntries;
-  }
-
-  Future<_QuarkRecursiveSavePlan> _buildRecursiveSavePlan({
-    required String pwdId,
-    required String stoken,
-    required String cookie,
-    required String targetDirectoryFid,
-    required List<_QuarkShareEntry> entries,
-    required String sanitizedNameCharacters,
-  }) async {
-    if (entries.isEmpty) {
-      return const _QuarkRecursiveSavePlan();
-    }
-    final existingEntries = await listEntries(
-      cookie: cookie,
-      parentFid: targetDirectoryFid,
-    );
-    if (existingEntries.isEmpty) {
-      return _QuarkRecursiveSavePlan(
-        batches: [
-          _QuarkSaveBatch(
-            targetDirectoryFid: targetDirectoryFid,
-            entries: entries,
-          ),
-        ],
-        skippedCount: 0,
-      );
-    }
-    final existingFileNameKeys = existingEntries
-        .where((item) => !item.isDirectory)
-        .map((item) =>
-            _normalizeQuarkSaveMatchKey(item.name, sanitizedNameCharacters))
-        .where((item) => item.isNotEmpty)
-        .toSet();
-    final existingDirectoriesByName = <String, QuarkFileEntry>{};
-    for (final entry in existingEntries) {
-      if (!entry.isDirectory) {
-        continue;
-      }
-      // Already-present directories are keyed by their current (possibly
-      // already sanitised) name.
-      final nameKey = _normalizeQuarkSaveMatchKey(
-        entry.name,
-        sanitizedNameCharacters,
-      );
-      if (nameKey.isEmpty || existingDirectoriesByName.containsKey(nameKey)) {
-        continue;
-      }
-      existingDirectoriesByName[nameKey] = entry;
-    }
-
-    final batches = <_QuarkSaveBatch>[];
-    final pendingEntries = <_QuarkShareEntry>[];
-    var skippedCount = 0;
-    for (final entry in entries) {
-      final nameKey = _normalizeQuarkSaveMatchKey(
-        entry.name,
-        sanitizedNameCharacters,
-      );
-      if (!entry.isDirectory) {
-        if (nameKey.isNotEmpty && existingFileNameKeys.contains(nameKey)) {
-          skippedCount += 1;
-        } else {
-          pendingEntries.add(entry);
-        }
-        continue;
-      }
-      final matchedDirectory =
-          nameKey.isEmpty ? null : existingDirectoriesByName[nameKey];
-      if (matchedDirectory == null) {
-        pendingEntries.add(entry);
-        continue;
-      }
-      final nestedEntries = await _fetchShareEntries(
-        pwdId: pwdId,
-        stoken: stoken,
-        pdirFid: entry.fid,
-        cookie: cookie,
-      );
-      if (nestedEntries.isEmpty) {
-        continue;
-      }
-      final nestedPlan = await _buildRecursiveSavePlan(
-        pwdId: pwdId,
-        stoken: stoken,
-        cookie: cookie,
-        targetDirectoryFid: matchedDirectory.fid,
-        entries: nestedEntries,
-        sanitizedNameCharacters: sanitizedNameCharacters,
-      );
-      skippedCount += nestedPlan.skippedCount;
-      batches.addAll(nestedPlan.batches);
-    }
-    if (pendingEntries.isNotEmpty) {
-      batches.insert(
-        0,
-        _QuarkSaveBatch(
-          targetDirectoryFid: targetDirectoryFid,
-          entries: pendingEntries,
-        ),
-      );
-    }
-    return _QuarkRecursiveSavePlan(
-      batches: batches,
-      skippedCount: skippedCount,
-    );
   }
 
   Future<String> _saveShareEntries({
@@ -1480,30 +1231,8 @@ class QuarkSaveResult {
   String get summary => '保存 $savedCount 个，略过 $skippedCount 个';
 }
 
-enum QuarkShareValidationStatus {
-  valid,
-  invalid,
-  unavailable,
-}
-
-class QuarkShareValidationResult {
-  const QuarkShareValidationResult.valid()
-      : status = QuarkShareValidationStatus.valid,
-        reason = '';
-
-  const QuarkShareValidationResult.invalid(this.reason)
-      : status = QuarkShareValidationStatus.invalid;
-
-  const QuarkShareValidationResult.unavailable(this.reason)
-      : status = QuarkShareValidationStatus.unavailable;
-
-  final QuarkShareValidationStatus status;
-  final String reason;
-
-  bool get isValid => status == QuarkShareValidationStatus.valid;
-
-  bool get isInvalid => status == QuarkShareValidationStatus.invalid;
-}
+typedef QuarkShareValidationStatus = ShareLinkValidationStatus;
+typedef QuarkShareValidationResult = ShareLinkValidationResult;
 
 class QuarkSharePreview {
   const QuarkSharePreview({
@@ -1548,31 +1277,8 @@ class QuarkConnectionStatus {
 }
 
 /// An entry a save copied in, and the directory it landed in.
-class QuarkSavedEntry {
-  const QuarkSavedEntry({
-    required this.parentFid,
-    required this.name,
-  });
-
-  final String parentFid;
-  final String name;
-}
-
-class QuarkNameSanitizeResult {
-  const QuarkNameSanitizeResult({
-    this.renamedCount = 0,
-    this.listedDirectoryCount = 0,
-    this.failedNames = const [],
-  });
-
-  final int renamedCount;
-
-  /// Number of directory listings issued, i.e. the API cost of the walk.
-  final int listedDirectoryCount;
-  final List<String> failedNames;
-
-  bool get changedAnything => renamedCount > 0;
-}
+typedef QuarkSavedEntry = CloudSavedEntry;
+typedef QuarkNameSanitizeResult = CloudNameSanitizeResult;
 
 class QuarkDeleteResult {
   const QuarkDeleteResult({
@@ -1598,14 +1304,7 @@ class QuarkResolvedDownload {
   final int? fileSizeBytes;
 }
 
-class QuarkSaveException implements Exception {
-  const QuarkSaveException(this.message);
-
-  final String message;
-
-  @override
-  String toString() => message;
-}
+typedef QuarkSaveException = CloudSaveException;
 
 class _ParsedQuarkShare {
   const _ParsedQuarkShare({
@@ -1617,16 +1316,6 @@ class _ParsedQuarkShare {
   final String pwdId;
   final String passcode;
   final String pdirFid;
-}
-
-class _QuarkEnsuredDirectory {
-  const _QuarkEnsuredDirectory({
-    required this.fid,
-    required this.alreadyExists,
-  });
-
-  final String fid;
-  final bool alreadyExists;
 }
 
 class QuarkDirectoryEntry {
@@ -1652,7 +1341,7 @@ class QuarkDirectoryEntry {
   }
 }
 
-class QuarkFileEntry {
+class QuarkFileEntry implements CloudSaveEntry {
   const QuarkFileEntry({
     required this.fid,
     required this.name,
@@ -1665,9 +1354,12 @@ class QuarkFileEntry {
     this.extension = '',
   });
 
+  @override
   final String fid;
+  @override
   final String name;
   final String path;
+  @override
   final bool isDirectory;
   final int? sizeBytes;
   final DateTime? updatedAt;
@@ -1734,22 +1426,7 @@ class QuarkFileEntry {
   }
 }
 
-const Set<String> _quarkVideoExtensions = {
-  'mp4',
-  'm4v',
-  'mov',
-  'mkv',
-  'avi',
-  'ts',
-  'webm',
-  'flv',
-  'wmv',
-  'mpg',
-  'mpeg',
-  'm2ts',
-  'iso',
-  'strm',
-};
+const Set<String> _quarkVideoExtensions = cloudVideoExtensions;
 
 int? _parseQuarkInt(Object? raw) {
   final text = '$raw'.trim();
@@ -1785,7 +1462,7 @@ String _resolveQuarkExtension(String name) {
   return normalized.substring(dotIndex + 1).toLowerCase();
 }
 
-class _QuarkShareEntry {
+class _QuarkShareEntry implements CloudSaveEntry {
   const _QuarkShareEntry({
     required this.fid,
     required this.name,
@@ -1793,9 +1470,12 @@ class _QuarkShareEntry {
     required this.isDirectory,
   });
 
+  @override
   final String fid;
+  @override
   final String name;
   final String shareFidToken;
+  @override
   final bool isDirectory;
 
   static _QuarkShareEntry? fromJson(Map<String, dynamic> json) {
@@ -1814,77 +1494,12 @@ class _QuarkShareEntry {
   }
 }
 
-class _QuarkSaveBatch {
-  const _QuarkSaveBatch({
-    required this.targetDirectoryFid,
-    required this.entries,
-  });
-
-  final String targetDirectoryFid;
-  final List<_QuarkShareEntry> entries;
-}
-
-class _QuarkRecursiveSavePlan {
-  const _QuarkRecursiveSavePlan({
-    this.batches = const [],
-    this.skippedCount = 0,
-  });
-
-  final List<_QuarkSaveBatch> batches;
-  final int skippedCount;
-}
-
-/// Dedup key for saved entries, files and directories alike.
-///
-/// When saved entries get sanitised afterwards, the copy sitting in the drive
-/// no longer carries the share's original name. Comparing raw names would then
-/// treat an already-saved entry as missing and copy it in again, only for the
-/// rename to collide with the sanitised original.
-String _normalizeQuarkSaveMatchKey(String raw, String sanitizedNameCharacters) {
-  if (sanitizedNameCharacters.trim().isEmpty) {
-    return _normalizeQuarkEntryNameKey(raw);
-  }
-  return _normalizeQuarkEntryNameKey(
-    sanitizeQuarkNameForUrl(raw, characters: sanitizedNameCharacters),
-  );
-}
-
 String _normalizeQuarkEntryNameKey(String raw) {
-  return raw.trim().toLowerCase();
+  return cloudSaveNameKey(raw);
 }
 
 String _resolveQuarkTargetFolderPath({
   required String toPdirPath,
   required String saveFolderName,
-}) {
-  final normalizedTargetDirectoryPath = normalizeQuarkDirectoryPath(
-    toPdirPath,
-  );
-  final sanitizedFolderName = sanitizeQuarkDirectoryName(saveFolderName);
-  final currentTargetDirectoryName = sanitizeQuarkDirectoryName(
-    _lastQuarkDirectoryName(normalizedTargetDirectoryPath),
-  );
-  final shouldCreateNamedDirectory = sanitizedFolderName.isNotEmpty &&
-      currentTargetDirectoryName.toLowerCase() !=
-          sanitizedFolderName.toLowerCase();
-  if (!shouldCreateNamedDirectory || sanitizedFolderName.isEmpty) {
-    return normalizedTargetDirectoryPath;
-  }
-  if (normalizedTargetDirectoryPath == '/') {
-    return '/$sanitizedFolderName';
-  }
-  return '$normalizedTargetDirectoryPath/$sanitizedFolderName';
-}
-
-String _lastQuarkDirectoryName(String path) {
-  final normalized = normalizeQuarkDirectoryPath(path);
-  if (normalized == '/') {
-    return '';
-  }
-  final segments = normalized
-      .split('/')
-      .map((item) => item.trim())
-      .where((item) => item.isNotEmpty)
-      .toList(growable: false);
-  return segments.isEmpty ? '' : segments.last;
-}
+}) =>
+    resolveCloudSaveFolderPath(toPdirPath, saveFolderName);

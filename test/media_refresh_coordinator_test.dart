@@ -149,6 +149,13 @@ void main() {
               ),
             ),
           ),
+          webDavDirectoryCacheStoreProvider.overrideWithValue(
+            WebDavDirectoryCacheStore(
+              databaseOpener: () => databaseFactoryMemory.openDatabase(
+                'media-refresh-coordinator-test',
+              ),
+            ),
+          ),
           wmdbMetadataClientProvider.overrideWithValue(
             WmdbMetadataClient(
               MockClient((request) async => http.Response('', 200)),

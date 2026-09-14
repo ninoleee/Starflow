@@ -1,11 +1,106 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_options_dialog.dart';
 
 void main() {
+  testWidgets('TV playback dialogs use remote-focusable close buttons',
+      (tester) async {
+    final player = Player(platformPlayer: _FakePlatformPlayer());
+    addTearDown(player.dispose);
+    await tester.binding.setSurfaceSize(const Size(1280, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        isTelevisionProvider.overrideWithValue(const AsyncData(true))
+      ],
+      child: MaterialApp(
+        theme: ThemeData.dark(),
+        home: Builder(builder: (context) {
+          return TextButton(
+            child: const Text('Open'),
+            onPressed: () => showDialog<void>(
+              context: context,
+              builder: (context) => PlaybackOptionsDialog(
+                player: player,
+                target: const PlaybackTarget(
+                  title: 'Episode',
+                  sourceId: 'nas',
+                  streamUrl: '',
+                  sourceName: 'NAS',
+                  sourceKind: MediaSourceKind.nas,
+                ),
+                isTelevision: true,
+                subtitleDelayLabel: '0s',
+                seriesSkipLabel: 'Off',
+                onSelectSubtitle: (tracks, current) async {},
+                onSelectAudio: (tracks, current) async {},
+                onAdjustSubtitleDelay: () async {},
+                onLoadExternalSubtitle: () async {},
+                onSearchSubtitlesOnline: () async {},
+                onConfigureSeriesSkip: () async {},
+                runtimeSettings: const PlaybackMpvRuntimeSettings(
+                  backgroundPlaybackEnabled: true,
+                  doubleTapToSeekEnabled: true,
+                  swipeToSeekEnabled: true,
+                  longPressSpeedBoostEnabled: true,
+                  stallAutoRecoveryEnabled: true,
+                  aggressiveTuningEnabled: false,
+                  subtitleScale: 32,
+                  primarySubtitlePosition: 80,
+                  secondarySubtitlePosition: 90,
+                  secondarySubtitleScale: 50,
+                ),
+                onApplyRuntimeSettings: (settings) async {},
+              ),
+            ),
+          );
+        }),
+      ),
+    ));
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    Future<void> select(Finder button) async {
+      tester
+          .widget<FocusableActionDetector>(find.descendant(
+            of: button,
+            matching: find.byType(FocusableActionDetector),
+          ))
+          .focusNode!
+          .requestFocus();
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> closeDialog() async {
+      final close = find.descendant(
+        of: find.byType(AlertDialog).last,
+        matching: find.widgetWithText(StarflowButton, '关闭'),
+      );
+      expect(close, findsOneWidget);
+      expect(tester.widget<StarflowButton>(close).variant,
+          StarflowButtonVariant.ghost);
+      await select(close);
+    }
+
+    for (final title in ['字幕', '更多']) {
+      await select(find.widgetWithText(StarflowSelectionTile, title));
+      await closeDialog();
+      expect(find.text('播放设置'), findsOneWidget);
+    }
+    await closeDialog();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets(
       'MPV playback settings keep subtitle layout and MPV options under More',
       (tester) async {

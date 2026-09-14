@@ -334,22 +334,16 @@ extension _PlayerPageStateControls on _PlayerPageState {
             final height = heightSnapshot.data ?? 0;
             final aspectRatio =
                 width > 0 && height > 0 ? width / height : 16 / 9;
-            final viewportSize = MediaQuery.sizeOf(context);
-            final expandEmbeddedMpvSurfaceInPortrait =
-                !isTelevision && viewportSize.height > viewportSize.width;
             return ColoredBox(
               color: Colors.black,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  expandEmbeddedMpvSurfaceInPortrait
-                      ? Positioned.fill(child: embeddedVideo)
-                      : Center(
-                          child: AspectRatio(
-                            aspectRatio: aspectRatio,
-                            child: embeddedVideo,
-                          ),
-                        ),
+                  PlayerEmbeddedSurface(
+                    isTelevision: isTelevision,
+                    aspectRatio: aspectRatio,
+                    child: embeddedVideo,
+                  ),
                   _buildEmbeddedMpvSurfaceOverlay(
                     player,
                     isTelevision: isTelevision,
@@ -532,57 +526,32 @@ extension _PlayerPageStateControls on _PlayerPageState {
     VideoState state, {
     required AppSettings settings,
   }) {
-    final materialThemeData = _buildAdaptiveMaterialControlsThemeData(
-      state.context,
-      settings: settings,
-      fullscreen: false,
+    return PlayerAdaptiveControlsLayout(
       state: state,
-    );
-    final materialFullscreenThemeData = _buildAdaptiveMaterialControlsThemeData(
-      state.context,
-      settings: settings,
-      fullscreen: true,
-      state: state,
-    );
-    final desktopThemeData = _buildAdaptiveDesktopControlsThemeData(
-      state.context,
-      settings: settings,
-      fullscreen: false,
-      state: state,
-    );
-    final desktopFullscreenThemeData = _buildAdaptiveDesktopControlsThemeData(
-      state.context,
-      settings: settings,
-      fullscreen: true,
-      state: state,
-    );
-    return MaterialVideoControlsTheme(
-      normal: materialThemeData,
-      fullscreen: materialFullscreenThemeData,
-      child: MaterialDesktopVideoControlsTheme(
-        normal: desktopThemeData,
-        fullscreen: desktopFullscreenThemeData,
-        child: KeyedSubtree(
-          key: ValueKey('adaptive-controls-$_adaptiveGestureLevelsRevision'),
-          child: AdaptiveVideoControls(state),
-        ),
+      controlsKey:
+          ValueKey('adaptive-controls-$_adaptiveGestureLevelsRevision'),
+      materialThemeBuilder: (padding) =>
+          _buildAdaptiveMaterialControlsThemeData(
+        settings: settings,
+        state: state,
+        padding: padding,
+      ),
+      desktopThemeBuilder: (padding) => _buildAdaptiveDesktopControlsThemeData(
+        settings: settings,
+        state: state,
+        padding: padding,
       ),
     );
   }
 
-  MaterialVideoControlsThemeData _buildAdaptiveMaterialControlsThemeData(
-    BuildContext context, {
+  MaterialVideoControlsThemeData _buildAdaptiveMaterialControlsThemeData({
     required AppSettings settings,
-    required bool fullscreen,
     required VideoState state,
+    required EdgeInsets padding,
   }) {
     final materialTopButtonBar = _buildAdaptiveMaterialTopButtonBar(
       state,
       settings: settings,
-    );
-    final controlsPadding = playbackControlsPadding(
-      viewport: MediaQuery.sizeOf(context),
-      safeArea: MediaQuery.viewPaddingOf(context),
     );
     final enableVerticalGestureControls = _supportsAdaptiveVerticalGestures;
     return MaterialVideoControlsThemeData(
@@ -602,38 +571,44 @@ extension _PlayerPageStateControls on _PlayerPageState {
           ? _handleAdaptiveBrightnessGestureChanged
           : null,
       initialBrightness: _adaptiveGestureBrightness,
-      padding: controlsPadding,
-      primaryButtonBar: _buildAdaptiveMaterialPrimaryButtonBar(),
+      backdropColor: const Color(0x33000000),
+      padding: EdgeInsets.zero,
+      buttonBarHeight: playbackButtonBarHeight,
+      primaryButtonBar: [
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(left: padding.left, right: padding.right),
+            child: Row(children: _buildAdaptiveMaterialPrimaryButtonBar()),
+          ),
+        ),
+      ],
       topButtonBar: materialTopButtonBar,
-      topButtonBarMargin: EdgeInsets.zero,
-      bottomButtonBarMargin: EdgeInsets.zero,
-      seekBarMargin: playbackSeekBarMargin,
+      topButtonBarMargin: padding.copyWith(bottom: 0),
+      bottomButtonBarMargin: padding.copyWith(top: 0),
+      seekBarMargin: padding.copyWith(top: 0) + playbackSeekBarMargin,
     );
   }
 
-  MaterialDesktopVideoControlsThemeData _buildAdaptiveDesktopControlsThemeData(
-    BuildContext context, {
+  MaterialDesktopVideoControlsThemeData _buildAdaptiveDesktopControlsThemeData({
     required AppSettings settings,
-    required bool fullscreen,
     required VideoState state,
+    required EdgeInsets padding,
   }) {
     final desktopTopButtonBar = _buildAdaptiveDesktopTopButtonBar(
       state,
       settings: settings,
     );
-    final controlsPadding = playbackControlsPadding(
-      viewport: MediaQuery.sizeOf(context),
-      safeArea: MediaQuery.viewPaddingOf(context),
-    );
     return MaterialDesktopVideoControlsThemeData(
       automaticallyImplySkipNextButton: false,
       automaticallyImplySkipPreviousButton: false,
-      padding: controlsPadding,
+      padding: EdgeInsets.zero,
+      buttonBarHeight: playbackButtonBarHeight,
       topButtonBar: desktopTopButtonBar,
-      topButtonBarMargin: EdgeInsets.zero,
-      bottomButtonBarMargin: EdgeInsets.zero,
+      topButtonBarMargin: padding.copyWith(bottom: 0),
+      bottomButtonBarMargin: padding.copyWith(top: 0),
       bottomButtonBar: _buildAdaptiveDesktopBottomButtonBar(),
-      seekBarMargin: playbackSeekBarMargin,
+      seekBarMargin: EdgeInsets.only(left: padding.left, right: padding.right) +
+          playbackSeekBarMargin,
     );
   }
 
@@ -1271,6 +1246,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
     List<SubtitleTrack> tracks,
     SubtitleTrack current,
   ) async {
+    final target = _resolvedTarget ?? widget.target;
+    final externalSubtitleStreams = target.subtitleStreams
+        .where((stream) => stream.isExternal && stream.id.trim().isNotEmpty)
+        .toList(growable: false);
     final selection = await showDialog<Object>(
       context: context,
       builder: (dialogContext) {
@@ -1305,6 +1284,14 @@ extension _PlayerPageStateControls on _PlayerPageState {
                       : formatPlaybackSubtitleTrackLabel(track),
                 ),
               ),
+            for (final stream in externalSubtitleStreams)
+              TvDialogOption(
+                isTelevision: _isTelevisionPlaybackDevice,
+                onPressed: () => Navigator.of(dialogContext).pop(
+                  _ServerSubtitleSelection(stream),
+                ),
+                child: Text(_formatServerSubtitleStreamLabel(stream)),
+              ),
           ],
         );
       },
@@ -1327,6 +1314,20 @@ extension _PlayerPageStateControls on _PlayerPageState {
       );
       if (applied) {
         _showMessage('已使用全局默认字幕');
+      }
+      return;
+    }
+    if (selection is _ServerSubtitleSelection) {
+      final applied = await _runPlayerCommand(
+        () => _applyServerExternalSubtitle(
+          player,
+          target,
+          selection.stream,
+        ),
+        failureMessage: '加载飞牛字幕失败',
+      );
+      if (applied) {
+        await _persistMpvSeriesSubtitlePreference(target, null);
       }
       return;
     }
@@ -1484,6 +1485,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     List<AudioTrack> tracks,
     AudioTrack current,
   ) async {
+    final target = _resolvedTarget ?? widget.target;
     final selection = await showDialog<AudioTrack>(
       context: context,
       builder: (dialogContext) {
@@ -1497,8 +1499,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
                 onPressed: () => Navigator.of(dialogContext).pop(track),
                 child: Text(
                   track == current
-                      ? '${formatPlaybackAudioTrackLabel(track)}  当前'
-                      : formatPlaybackAudioTrackLabel(track),
+                      ? '${_formatServerAudioTrackLabel(target, tracks, track)}  当前'
+                      : _formatServerAudioTrackLabel(target, tracks, track),
                 ),
               ),
           ],

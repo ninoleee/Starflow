@@ -44,13 +44,19 @@ void main() {
   test('resolves a single episode and posts only its id to recycle deletion',
       () async {
     final requests = <http.Request>[];
+    var deleted = false;
     final client = Cloud115SaveClient(MockClient((request) async {
       requests.add(request);
       if (request.method == 'POST') {
         expect(request.url.path, '/rb/delete');
         expect(
             Uri.splitQueryString(request.body), {'pid': '20', 'fid[0]': '30'});
+        deleted = true;
         return http.Response('{"state":true}', 200);
+      }
+      if (deleted) {
+        expect(request.url.queryParameters['cid'], '20');
+        return http.Response('{"state":true,"count":0,"data":[]}', 200);
       }
       final root = request.url.queryParameters['cid'] == '10';
       return http.Response(
@@ -71,8 +77,33 @@ void main() {
     expect(plan!.entry.fid, '30');
     expect(requests.every((r) => r.method == 'GET'), isTrue);
     await service.execute(plan);
-    expect(requests.length, 3);
+    expect(requests.length, 4);
   });
+  for (final outcome in ['still-exists', 'read-failed']) {
+    test('delete confirmation fails without retrying the write: $outcome',
+        () async {
+      var writes = 0;
+      final client = Cloud115SaveClient(MockClient((request) async {
+        if (request.method == 'POST') {
+          writes++;
+          return http.Response('{"state":true}', 200);
+        }
+        if (outcome == 'read-failed') return http.Response('', 503);
+        return http.Response(
+            '{"state":true,"count":1,"data":[{"cid":"20","n":"Show"}]}', 200);
+      }));
+      await expectLater(
+        Cloud115SyncDeleteService(client).execute(const Cloud115DeletePlan(
+          cookie: 'cookie',
+          parentId: '10',
+          entry: QuarkFileEntry(
+              fid: '20', name: 'Show', path: '/Show', isDirectory: true),
+        )),
+        throwsA(isA<QuarkSaveException>()),
+      );
+      expect(writes, 1);
+    });
+  }
   test('wrong source and disabled configuration never access the drive',
       () async {
     final service = Cloud115SyncDeleteService(Cloud115SaveClient(
@@ -101,6 +132,55 @@ void main() {
             sourceId: 'nas',
             resourcePath: '${scope.directoryId}/Movie'),
         throwsA(isA<QuarkSaveException>()));
+  });
+  for (final directories in [
+    <NetworkStorageWebDavDirectory>[],
+    [
+      const NetworkStorageWebDavDirectory(sourceId: 'nas', directoryId: ' '),
+      const NetworkStorageWebDavDirectory(
+          sourceId: ' ', directoryId: 'https://nas.test/strm/115'),
+    ],
+  ]) {
+    test('enabled deletion requires a configured scope: ${directories.length}',
+        () async {
+      final service = Cloud115SyncDeleteService(Cloud115SaveClient(
+          MockClient((_) async => fail('No network expected'))));
+      final incomplete =
+          config.copyWith(syncDelete115WebDavDirectories: directories);
+      await expectLater(
+        service.prepare(
+          config: incomplete,
+          sourceId: 'nas',
+          resourcePath: '${scope.directoryId}/Movie',
+        ),
+        throwsA(isA<QuarkSaveException>().having(
+          (error) => error.toString(),
+          'message',
+          contains('未选择 WebDAV 删除监听目录'),
+        )),
+      );
+      expect(
+        await service.prepare(
+          config: incomplete.copyWith(syncDelete115Enabled: false),
+          sourceId: 'nas',
+          resourcePath: '${scope.directoryId}/Movie',
+        ),
+        isNull,
+      );
+    });
+  }
+  test('configured scopes still leave unrelated resources outside deletion',
+      () async {
+    final service = Cloud115SyncDeleteService(Cloud115SaveClient(
+        MockClient((_) async => fail('No network expected'))));
+    expect(
+      await service.prepare(
+        config: config,
+        sourceId: 'nas',
+        resourcePath: 'https://nas.test/strm/other/Movie',
+      ),
+      isNull,
+    );
   });
   for (final rows in [
     <Map<String, String>>[],

@@ -1,7 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
+import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
+import 'package:starflow/features/search/domain/cloud_save_rules.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -20,6 +23,20 @@ class DetailFavoriteSearchResourceMatch {
   final SearchResult result;
   final String folderName;
   final int score;
+
+  CloudSaveDrive get drive =>
+      switch (detectSearchCloudTypeFromUrl(result.resourceUrl)) {
+        SearchCloudType.quark => CloudSaveDrive.quark,
+        SearchCloudType.cloud115 => CloudSaveDrive.cloud115,
+        _ => throw const CloudSaveException('此网盘暂不支持检查更新'),
+      };
+
+  bool hasConfiguredCookie(NetworkStorageConfig config) =>
+      (drive == CloudSaveDrive.cloud115
+              ? config.cloud115Cookie
+              : config.quarkCookie)
+          .trim()
+          .isNotEmpty;
 }
 
 class DetailOnlineResourceUpdateResult {
@@ -45,12 +62,14 @@ class DetailOnlineResourceUpdateResult {
     final lines = <String>[
       if (favoriteMatch.result.providerName.trim().isNotEmpty)
         '来源：${favoriteMatch.result.providerName.trim()}',
-      '夸克目录：$targetFolderPath',
+      '${favoriteMatch.drive.label}目录：$targetFolderPath',
       '在线视频：$onlineVideoCount',
       '本地视频：$localVideoCount',
     ];
     if (!hasUpdates) {
-      lines.add(localFolderExists ? '没有更新。' : '夸克目录为空，没有可对比的已保存文件。');
+      lines.add(localFolderExists
+          ? '没有更新。'
+          : '${favoriteMatch.drive.label}目录不存在，分享中没有可保存的视频。');
       return lines.join('\n');
     }
     lines.add('发现更新 ${updatedEpisodeLabels.length} 条：');
@@ -66,8 +85,17 @@ class DetailOnlineResourceUpdateService {
     required MediaDetailTarget target,
     required Iterable<SearchResult> favorites,
   }) {
+    final matches =
+        resolveFavoriteMatches(target: target, favorites: favorites);
+    return matches.isEmpty ? null : matches.first;
+  }
+
+  List<DetailFavoriteSearchResourceMatch> resolveFavoriteMatches({
+    required MediaDetailTarget target,
+    required Iterable<SearchResult> favorites,
+  }) {
     if (!_supportsTarget(target)) {
-      return null;
+      return const [];
     }
 
     final folderName = _preferredFolderName(target);
@@ -78,16 +106,16 @@ class DetailOnlineResourceUpdateService {
       targetKeys.add(folderNameKey);
     }
     if (targetExternalIds.isEmpty && targetKeys.isEmpty) {
-      return null;
+      return const [];
     }
 
-    DetailFavoriteSearchResourceMatch? bestMatch;
+    final matches = <DetailFavoriteSearchResourceMatch>[];
     for (final favorite in favorites) {
       if (favorite.detailTarget != null) {
         continue;
       }
-      if (detectSearchCloudTypeFromUrl(favorite.resourceUrl) !=
-          SearchCloudType.quark) {
+      if (!const {SearchCloudType.quark, SearchCloudType.cloud115}
+          .contains(detectSearchCloudTypeFromUrl(favorite.resourceUrl))) {
         continue;
       }
       final score = _scoreFavorite(
@@ -100,18 +128,17 @@ class DetailOnlineResourceUpdateService {
         continue;
       }
       final current = DetailFavoriteSearchResourceMatch(
-        result: favorite,
+        result: prepareSearchResultShareCredentials(favorite),
         folderName: _resolveFavoriteFolderName(
           favorite,
           fallback: folderName,
         ),
         score: score,
       );
-      if (bestMatch == null || current.score > bestMatch.score) {
-        bestMatch = current;
-      }
+      final index = matches.indexWhere((match) => match.score < current.score);
+      matches.insert(index < 0 ? matches.length : index, current);
     }
-    return bestMatch;
+    return matches;
   }
 
   Future<DetailOnlineResourceUpdateResult> checkForUpdates({
@@ -119,61 +146,54 @@ class DetailOnlineResourceUpdateService {
     required DetailFavoriteSearchResourceMatch favoriteMatch,
     required NetworkStorageConfig networkStorage,
     required QuarkSaveClient quarkSaveClient,
+    Cloud115SaveClient? cloud115SaveClient,
   }) async {
-    final cookie = networkStorage.quarkCookie.trim();
-    if (cookie.isEmpty) {
-      throw const QuarkSaveException('请先在搜索设置里填写夸克 Cookie');
+    final drive = favoriteMatch.drive;
+    if (!favoriteMatch.hasConfiguredCookie(networkStorage)) {
+      throw CloudSaveException('请先在网盘与转存设置中配置${drive.label} Cookie');
     }
-
-    final sharePreview = await quarkSaveClient.previewShareLink(
-      shareUrl: favoriteMatch.result.resourceUrl,
-      cookie: cookie,
-      toPdirPath: networkStorage.quarkSaveFolderPath,
-      saveFolderName: favoriteMatch.folderName,
-    );
-    final localDirectory = await quarkSaveClient.resolveDirectoryByPath(
-      cookie: cookie,
-      path: sharePreview.targetFolderPath,
-    );
-    final localEntries = localDirectory == null
-        ? const <QuarkFileEntry>[]
-        : await quarkSaveClient.listEntriesRecursively(
-            cookie: cookie,
-            parentFid: localDirectory.fid,
-          );
-    final localRelativePathKeys = localEntries
-        .where((entry) => entry.isVideo)
-        .map(
-          (entry) => _normalizePathKey(
-            _relativePathFromRoot(
-              rootPath: sharePreview.targetFolderPath,
-              entryPath: entry.path,
-            ),
-          ),
-        )
-        .where((entry) => entry.isNotEmpty)
-        .toSet();
-    final updatedEpisodeLabels = sharePreview.videoEntries
-        .where(
-          (entry) => !localRelativePathKeys.contains(
-            _normalizePathKey(entry.relativePath),
-          ),
-        )
-        .map((entry) => _formatEpisodeLabel(entry.relativePath))
-        .fold<List<String>>(<String>[], (list, label) {
-      if (!list.contains(label)) {
-        list.add(label);
+    final share = prepareSearchResultShareCredentials(favoriteMatch.result);
+    final CloudSavePreview preview;
+    if (drive == CloudSaveDrive.cloud115) {
+      if (cloud115SaveClient == null) {
+        throw const CloudSaveException('115 更新客户端未配置');
       }
-      return list;
-    });
+      preview = await cloud115SaveClient.previewSave(
+        shareUrl: share.resourceUrl,
+        password: searchResultSharePassword(share),
+        cookie: networkStorage.cloud115Cookie,
+        folderId: networkStorage.cloud115SaveFolderId,
+        folderPath: networkStorage.cloud115SaveFolderPath,
+        saveFolderName: favoriteMatch.folderName,
+        sanitizedNameCharacters:
+            networkStorage.cloud115SanitizeSavedNamesEnabled
+                ? networkStorage.cloud115SanitizedNameCharacters
+                : '',
+      );
+    } else {
+      preview = await quarkSaveClient.previewSave(
+        shareUrl: share.resourceUrl,
+        cookie: networkStorage.quarkCookie,
+        folderId: networkStorage.quarkSaveFolderId,
+        folderPath: networkStorage.quarkSaveFolderPath,
+        saveFolderName: favoriteMatch.folderName,
+        sanitizedNameCharacters: networkStorage.quarkSanitizeSavedNamesEnabled
+            ? networkStorage.quarkSanitizedNameCharacters
+            : '',
+      );
+    }
 
     return DetailOnlineResourceUpdateResult(
       favoriteMatch: favoriteMatch,
-      targetFolderPath: sharePreview.targetFolderPath,
-      updatedEpisodeLabels: updatedEpisodeLabels,
-      onlineVideoCount: sharePreview.videoEntries.length,
-      localVideoCount: localRelativePathKeys.length,
-      localFolderExists: localDirectory != null,
+      targetFolderPath: preview.targetFolderPath,
+      updatedEpisodeLabels: preview.missingVideos
+          .map((entry) => entry.relativePath)
+          .toList(growable: false),
+      onlineVideoCount:
+          preview.onlineEntries.where((entry) => entry.isVideo).length,
+      localVideoCount:
+          preview.localEntries.where((entry) => entry.isVideo).length,
+      localFolderExists: preview.localFolderExists,
     );
   }
 
@@ -405,35 +425,4 @@ Map<String, String> _normalizedExternalIds({
   add('tvdb', tvdbId);
   add('wikidata', wikidataId.toUpperCase());
   return values;
-}
-
-String _relativePathFromRoot({
-  required String rootPath,
-  required String entryPath,
-}) {
-  final normalizedRoot = normalizeQuarkDirectoryPath(rootPath);
-  final normalizedEntry = normalizeQuarkDirectoryPath(entryPath);
-  if (normalizedRoot == '/') {
-    return normalizedEntry.replaceFirst(RegExp(r'^/+'), '');
-  }
-  if (normalizedEntry == normalizedRoot) {
-    return '';
-  }
-  final normalizedPrefix = '$normalizedRoot/';
-  if (!normalizedEntry.startsWith(normalizedPrefix)) {
-    return normalizedEntry.replaceFirst(RegExp(r'^/+'), '');
-  }
-  return normalizedEntry.substring(normalizedPrefix.length);
-}
-
-String _normalizePathKey(String value) {
-  return value.trim().replaceAll('\\', '/').toLowerCase();
-}
-
-String _formatEpisodeLabel(String relativePath) {
-  final normalized = relativePath.replaceAll('\\', '/').trim();
-  if (normalized.isEmpty) {
-    return relativePath.trim();
-  }
-  return normalized;
 }

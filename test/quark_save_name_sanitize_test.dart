@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
+import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -637,7 +638,7 @@ void main() {
 
     test('sanitises before triggering SmartStrm', () async {
       final calls = <String>[];
-      final progressStages = <QuarkSaveWorkflowStage>[];
+      final progressStages = <CloudSaveStage>[];
       final progressMessages = <String>[];
       final service = buildService(calls: calls);
 
@@ -665,8 +666,8 @@ void main() {
       expect(
         progressStages,
         [
-          QuarkSaveWorkflowStage.saving,
-          QuarkSaveWorkflowStage.sanitizingNames,
+          CloudSaveStage.saving,
+          CloudSaveStage.sanitizingNames,
         ],
       );
       expect(progressMessages.first, '夸克保存中...');
@@ -737,10 +738,11 @@ void main() {
 
       expect(
         calls,
-        ['save', 'smartstrm'],
-        reason: '条目还不可列举时改名只会静默失败，不如跳过并记警告',
+        ['save'],
+        reason: '开启改名后必须确认转存落地，不能在旧路径上触发 STRM',
       );
       expect(result.sanitizeResult, isNull);
+      expect(result.buildSuccessMessage(), contains('未触发 STRM'));
     });
 
     test('skips sanitising when the option is off', () async {

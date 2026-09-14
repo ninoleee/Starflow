@@ -14,6 +14,12 @@ import 'package:starflow/features/storage/data/local_storage_cache_repository.da
 class HomeHeroPrefetchCoordinator {
   int _refreshSessionId = 0;
   final Set<String> _scheduledRefreshKeys = <String>{};
+  bool _disposed = false;
+
+  void dispose() {
+    _disposed = true;
+    reset();
+  }
 
   void reset() {
     _refreshSessionId += 1;
@@ -30,7 +36,7 @@ class HomeHeroPrefetchCoordinator {
     required bool Function() isPageActive,
     bool forceMetadataRefresh = false,
   }) {
-    if (!isPageActive()) {
+    if (_disposed || !isPageActive()) {
       return;
     }
     final sessionId = _refreshSessionId;
@@ -74,7 +80,7 @@ class HomeHeroPrefetchCoordinator {
     required int sessionId,
     required bool Function() isPageActive,
   }) {
-    return isPageActive() && _refreshSessionId == sessionId;
+    return !_disposed && isPageActive() && _refreshSessionId == sessionId;
   }
 
   Future<void> _refreshMetadataInBackground({
@@ -122,7 +128,7 @@ class HomeHeroPrefetchCoordinator {
               forceMetadataRefresh: forceMetadataRefresh,
             ),
           );
-          await Future<void>.delayed(Duration.zero);
+          await Future<void>.value();
         }
       }
 

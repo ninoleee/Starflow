@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/settings/domain/app_accent.dart';
@@ -7,9 +10,85 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/media_source_cache_lifecycle.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
+import 'package:starflow/features/settings/data/webdav_sync_service.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  late Directory logDirectory;
+  setUpAll(() async {
+    logDirectory =
+        await Directory.systemTemp.createTemp('starflow-settings-test-');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'),
+            (call) async => logDirectory.path);
+  });
+  tearDownAll(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+            const MethodChannel('plugins.flutter.io/path_provider'), null);
+    await logDirectory.delete(recursive: true);
+  });
+  const syncConfig = WebDavSyncConfig(
+    url: 'https://example.com/dav/',
+    directory: 'Backups/Starflow',
+    username: 'test-user',
+    password: 'test-password',
+    settings: false,
+    favorites: true,
+    autoFavorites: true,
+  );
+
+  test(
+      'sync connection is saved with application settings and survives restart',
+      () async {
+    final repository = _OutOfOrderSettingsRepository(SeedData.defaultSettings);
+    final container = ProviderContainer(overrides: [
+      appSettingsRepositoryProvider.overrideWithValue(repository),
+    ]);
+    final preferences = container.read(webDavSyncPreferencesProvider);
+    await preferences.save(syncConfig);
+    expect(repository.settings.toJson()['webDavSync'], syncConfig.toJson());
+    final exported = AppSettings.fromCurrentJson(repository.settings.toJson());
+    expect(exported.webDavSync!.toJson(), syncConfig.toJson());
+    container.dispose();
+    final restarted = ProviderContainer(overrides: [
+      appSettingsRepositoryProvider.overrideWithValue(repository),
+    ]);
+    addTearDown(restarted.dispose);
+    expect(
+        (await restarted.read(webDavSyncPreferencesProvider).load()).toJson(),
+        syncConfig.toJson());
+  });
+
+  test('old imports preserve sync connection and explicit imports replace it',
+      () async {
+    final repository = _OutOfOrderSettingsRepository(
+        SeedData.defaultSettings.copyWith(webDavSync: syncConfig));
+    final container = ProviderContainer(overrides: [
+      appSettingsRepositoryProvider.overrideWithValue(repository),
+      mediaSourceCacheLifecycleProvider
+          .overrideWithValue(_RecordingMediaSourceCacheLifecycle()),
+    ]);
+    addTearDown(container.dispose);
+    final preferences = container.read(webDavSyncPreferencesProvider);
+    await preferences.load();
+    final controller = container.read(settingsControllerProvider.notifier);
+    await controller.replaceAllSettings(SeedData.defaultSettings);
+    expect(repository.settings.webDavSync!.toJson(), syncConfig.toJson());
+    const imported = WebDavSyncConfig(
+        url: 'https://new.example.com/dav/', password: 'new-password');
+    final change = preferences.changes.first;
+    await controller.replaceAllSettings(
+        SeedData.defaultSettings.copyWith(webDavSync: imported));
+    await change;
+    expect((await preferences.load()).toJson(), imported.toJson());
+    await controller.replaceAllSettings(SeedData.defaultSettings
+        .copyWith(webDavSync: const WebDavSyncConfig()));
+    expect((await preferences.load()).url, isEmpty);
+  });
+
   test('accent changes are saved by the existing settings repository',
       () async {
     final repository = _OutOfOrderSettingsRepository(SeedData.defaultSettings);

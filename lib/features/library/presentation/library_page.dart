@@ -30,6 +30,7 @@ import 'package:starflow/features/storage/data/local_storage_cache_repository.da
 enum LibraryFilter {
   all,
   emby,
+  fntv,
   nas,
   quark,
 }
@@ -41,6 +42,8 @@ extension LibraryFilterX on LibraryFilter {
         return '全部';
       case LibraryFilter.emby:
         return 'Emby';
+      case LibraryFilter.fntv:
+        return '飞牛影视';
       case LibraryFilter.nas:
         return 'WebDAV';
       case LibraryFilter.quark:
@@ -54,6 +57,8 @@ extension LibraryFilterX on LibraryFilter {
         return null;
       case LibraryFilter.emby:
         return MediaSourceKind.emby;
+      case LibraryFilter.fntv:
+        return MediaSourceKind.fntv;
       case LibraryFilter.nas:
         return MediaSourceKind.nas;
       case LibraryFilter.quark:
@@ -69,6 +74,11 @@ List<LibraryFilter> visibleLibraryFiltersForSources(
   final filters = <LibraryFilter>[LibraryFilter.all];
   if (sources.any(_showsEmbyLibraryFilter)) {
     filters.add(LibraryFilter.emby);
+  }
+  if (sources.any((source) =>
+      source.kind == MediaSourceKind.fntv &&
+      source.canAppearInLibraryNavigation)) {
+    filters.add(LibraryFilter.fntv);
   }
   if (sources.any(_showsWebDavLibraryFilter)) {
     filters.add(LibraryFilter.nas);
@@ -925,10 +935,11 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           kind: _LibraryRefreshSourceKind.quark,
           sourceIds: sourceIds,
         );
+      case LibraryFilter.fntv:
       case LibraryFilter.emby:
         final sourceIds = _refreshableSourceIds(
           mediaSources,
-          kind: MediaSourceKind.emby,
+          kind: filter.kind!,
         );
         if (sourceIds.isEmpty) {
           return null;
@@ -965,7 +976,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           (source) =>
               source.enabled &&
               source.kind == kind &&
-              (kind != MediaSourceKind.emby || source.hasActiveSession) &&
+              (!kind.isMediaServer || source.hasActiveSession) &&
               (kind != MediaSourceKind.quark ||
                   source.hasConfiguredQuarkFolder),
         )
@@ -991,7 +1002,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
           mediaSources,
           kind: MediaSourceKind.quark,
         ).toSet(),
-      LibraryFilter.emby => const <String>{},
+      LibraryFilter.emby || LibraryFilter.fntv => const <String>{},
     };
     if (enabledVisibleSourceIds.isEmpty) {
       return const [];
@@ -1066,6 +1077,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
   }
 
   Future<void> _confirmForceRescan(_LibraryRefreshScope scope) async {
+    final isTelevision = ref.read(isTelevisionProvider).value ?? false;
     final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -1078,6 +1090,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
             actions: [
               StarflowButton(
                 label: '取消',
+                autofocus: isTelevision,
                 onPressed: () => Navigator.of(context).pop(false),
                 variant: StarflowButtonVariant.ghost,
                 compact: true,
@@ -1276,7 +1289,7 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
             title: Text(isDirectory ? '删除目录' : '删除文件'),
             content: Text(
               isDirectory
-                  ? '将从 ${_managedSourceLabel(item)} 删除“${item.title}”对应目录，并从本地索引中移除相关条目。'
+                  ? '将从 ${_managedSourceLabel(item)} 删除“${item.title}”对应目录及其中全部内容（含图片、字幕和 NFO），并从本地索引中移除相关条目。'
                   : '将从 ${_managedSourceLabel(item)} 删除“${item.title}”对应文件，并从本地索引中移除该条目。',
             ),
             actions: [

@@ -5,7 +5,9 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
+import 'package:starflow/features/search/domain/cloud_save_rules.dart';
 import 'package:starflow/features/settings/domain/app_accent.dart';
+import 'package:starflow/features/settings/domain/webdav_sync_config.dart';
 
 enum HomeModuleType {
   hero,
@@ -868,7 +870,10 @@ class HomeModuleConfig {
 /// Characters stripped from saved entry names when name sanitising is on.
 /// `#` is the one confirmed to break signed playback URLs; `%` and `?` carry
 /// the same class of risk.
-const String kDefaultQuarkSanitizedNameCharacters = '#%?';
+const String kDefaultCloudSanitizedNameCharacters =
+    kCloudUnsafeUrlNameCharacters;
+const String kDefaultQuarkSanitizedNameCharacters =
+    kDefaultCloudSanitizedNameCharacters;
 
 class NetworkStorageConfig {
   const NetworkStorageConfig({
@@ -878,6 +883,8 @@ class NetworkStorageConfig {
     this.cloud115SmartStrmTaskName = '',
     this.cloud115SaveFolderId = '0',
     this.cloud115SaveFolderPath = '/',
+    this.cloud115SanitizeSavedNamesEnabled = false,
+    this.cloud115SanitizedNameCharacters = kDefaultCloudSanitizedNameCharacters,
     this.quarkCookie = '',
     this.quarkSaveFolderId = '0',
     this.quarkSaveFolderPath = '/',
@@ -898,6 +905,8 @@ class NetworkStorageConfig {
   final String cloud115SmartStrmTaskName;
   final String cloud115SaveFolderId;
   final String cloud115SaveFolderPath;
+  final bool cloud115SanitizeSavedNamesEnabled;
+  final String cloud115SanitizedNameCharacters;
   final String quarkCookie;
   final String quarkSaveFolderId;
   final String quarkSaveFolderPath;
@@ -921,6 +930,7 @@ class NetworkStorageConfig {
         cloud115SmartStrmTaskName.trim().isNotEmpty ||
         cloud115SaveFolderId != '0' ||
         cloud115SaveFolderPath != '/' ||
+        cloud115SanitizeSavedNamesEnabled ||
         quarkCookie.trim().isNotEmpty ||
         smartStrmWebhookUrl.trim().isNotEmpty ||
         smartStrmTaskName.trim().isNotEmpty ||
@@ -941,6 +951,8 @@ class NetworkStorageConfig {
     String? cloud115SmartStrmTaskName,
     String? cloud115SaveFolderId,
     String? cloud115SaveFolderPath,
+    bool? cloud115SanitizeSavedNamesEnabled,
+    String? cloud115SanitizedNameCharacters,
     String? quarkCookie,
     String? quarkSaveFolderId,
     String? quarkSaveFolderPath,
@@ -964,6 +976,10 @@ class NetworkStorageConfig {
       cloud115SaveFolderId: cloud115SaveFolderId ?? this.cloud115SaveFolderId,
       cloud115SaveFolderPath:
           cloud115SaveFolderPath ?? this.cloud115SaveFolderPath,
+      cloud115SanitizeSavedNamesEnabled: cloud115SanitizeSavedNamesEnabled ??
+          this.cloud115SanitizeSavedNamesEnabled,
+      cloud115SanitizedNameCharacters: cloud115SanitizedNameCharacters ??
+          this.cloud115SanitizedNameCharacters,
       quarkCookie: quarkCookie ?? this.quarkCookie,
       quarkSaveFolderId: quarkSaveFolderId ?? this.quarkSaveFolderId,
       quarkSaveFolderPath: quarkSaveFolderPath ?? this.quarkSaveFolderPath,
@@ -987,13 +1003,14 @@ class NetworkStorageConfig {
 
   Map<String, dynamic> toJson() {
     return {
-      'cloud115Cookie': cloud115Cookie,
       'syncDelete115Enabled': syncDelete115Enabled,
       'syncDelete115WebDavDirectories':
           syncDelete115WebDavDirectories.map((item) => item.toJson()).toList(),
       'cloud115SmartStrmTaskName': cloud115SmartStrmTaskName,
       'cloud115SaveFolderId': cloud115SaveFolderId,
       'cloud115SaveFolderPath': cloud115SaveFolderPath,
+      'cloud115SanitizeSavedNamesEnabled': cloud115SanitizeSavedNamesEnabled,
+      'cloud115SanitizedNameCharacters': cloud115SanitizedNameCharacters,
       'quarkCookie': quarkCookie,
       'quarkSaveFolderId': quarkSaveFolderId,
       'quarkSaveFolderPath': quarkSaveFolderPath,
@@ -1018,7 +1035,6 @@ class NetworkStorageConfig {
         (json['smartStrmDelaySeconds'] as num?)?.toInt() ??
             resolvedRefreshDelaySeconds;
     return NetworkStorageConfig(
-      cloud115Cookie: json['cloud115Cookie'] as String? ?? '',
       syncDelete115Enabled: json['syncDelete115Enabled'] as bool? ?? false,
       syncDelete115WebDavDirectories:
           (json['syncDelete115WebDavDirectories'] as List? ?? const [])
@@ -1026,10 +1042,16 @@ class NetworkStorageConfig {
               .map((item) => NetworkStorageWebDavDirectory.fromJson(
                   Map<String, dynamic>.from(item)))
               .toList(),
+      cloud115Cookie: json['cloud115Cookie'] as String? ?? '',
       cloud115SmartStrmTaskName:
           json['cloud115SmartStrmTaskName'] as String? ?? '',
       cloud115SaveFolderId: json['cloud115SaveFolderId'] as String? ?? '0',
       cloud115SaveFolderPath: json['cloud115SaveFolderPath'] as String? ?? '/',
+      cloud115SanitizeSavedNamesEnabled:
+          json['cloud115SanitizeSavedNamesEnabled'] as bool? ?? false,
+      cloud115SanitizedNameCharacters:
+          json['cloud115SanitizedNameCharacters'] as String? ??
+              kDefaultCloudSanitizedNameCharacters,
       quarkCookie: json['quarkCookie'] as String? ?? '',
       quarkSaveFolderId: json['quarkSaveFolderId'] as String? ?? '0',
       quarkSaveFolderPath: json['quarkSaveFolderPath'] as String? ?? '/',
@@ -1160,6 +1182,7 @@ class AppSettings {
     required this.homeModules,
     this.networkStorage = const NetworkStorageConfig(),
     this.networkProxy = const NetworkProxyConfig(),
+    this.webDavSync,
     this.homeHeroSourceModuleId = '',
     this.homeHeroDisplayMode = HomeHeroDisplayMode.normal,
     this.homeHeroStyle = HomeHeroStyle.composite,
@@ -1241,6 +1264,8 @@ class AppSettings {
   final List<HomeModuleConfig> homeModules;
   final NetworkStorageConfig networkStorage;
   final NetworkProxyConfig networkProxy;
+  // Absent in older backups: importing them must preserve this device's connection.
+  final WebDavSyncConfig? webDavSync;
   final String homeHeroSourceModuleId;
   final HomeHeroDisplayMode homeHeroDisplayMode;
   final HomeHeroStyle homeHeroStyle;
@@ -1315,6 +1340,7 @@ class AppSettings {
     List<HomeModuleConfig>? homeModules,
     NetworkStorageConfig? networkStorage,
     NetworkProxyConfig? networkProxy,
+    WebDavSyncConfig? webDavSync,
     String? homeHeroSourceModuleId,
     HomeHeroDisplayMode? homeHeroDisplayMode,
     HomeHeroStyle? homeHeroStyle,
@@ -1388,6 +1414,7 @@ class AppSettings {
       homeModules: homeModules ?? this.homeModules,
       networkStorage: networkStorage ?? this.networkStorage,
       networkProxy: networkProxy ?? this.networkProxy,
+      webDavSync: webDavSync ?? this.webDavSync,
       homeHeroSourceModuleId:
           homeHeroSourceModuleId ?? this.homeHeroSourceModuleId,
       homeHeroDisplayMode: homeHeroDisplayMode ?? this.homeHeroDisplayMode,
@@ -1555,6 +1582,7 @@ class AppSettings {
       'homeModules': homeModules.map((item) => item.toJson()).toList(),
       'networkStorage': networkStorage.toJson(),
       'networkProxy': networkProxy.toJson(),
+      if (webDavSync != null) 'webDavSync': webDavSync!.toJson(),
       'homeHeroSourceModuleId': homeHeroSourceModuleId,
       'homeHeroDisplayMode': homeHeroDisplayMode.name,
       'homeHeroStyle': homeHeroStyle.name,
@@ -1676,6 +1704,11 @@ class AppSettings {
       networkProxy: NetworkProxyConfig.fromJson(
         Map<String, dynamic>.from((json['networkProxy'] as Map?) ?? const {}),
       ),
+      webDavSync: json['webDavSync'] == null
+          ? null
+          : WebDavSyncConfig.fromJson(
+              Map<String, dynamic>.from(json['webDavSync'] as Map),
+            ),
       homeHeroSourceModuleId: json['homeHeroSourceModuleId'] as String? ?? '',
       homeHeroDisplayMode: HomeHeroDisplayModeX.fromName(
         json['homeHeroDisplayMode'] as String? ?? '',

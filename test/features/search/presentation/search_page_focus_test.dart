@@ -10,9 +10,11 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/mock_search_repository.dart';
+import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
@@ -227,132 +229,246 @@ void main() {
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'search-query');
   });
 
-  testWidgets('other results show while Quark links are still validating',
-      (tester) async {
-    SharedPreferences.setMockInitialValues(const {});
-    final repository = _PendingSearchRepository();
-    final validationStarted = Completer<void>();
-    final validationResponse = Completer<http.Response>();
-    final quarkClient = QuarkSaveClient(
-      MockClient((request) {
-        if (request.url.path == '/1/clouddrive/share/sharepage/token') {
-          return Future.value(
+  for (final television in [false, true]) {
+    for (final validating115 in [false, true]) {
+      for (final validation in ['valid', 'cancelled', 'rate-limited']) {
+        testWidgets(
+            'cloud options follow validation: $validation 115=$validating115 TV=$television',
+            (tester) async {
+          SharedPreferences.setMockInitialValues(const {});
+          tester.view.physicalSize = const Size(1280, 900);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final repository = _PendingSearchRepository();
+          final validationStarted = Completer<void>();
+          final validationResponse = Completer<http.Response>();
+          final pendingType = validating115 ? '115 网盘' : '夸克网盘';
+          final readyType = validating115 ? '夸克网盘' : '115 网盘';
+          final readyCode = validating115 ? 'quark' : '115';
+          final quarkClient = QuarkSaveClient(
+            MockClient((request) {
+              if (request.url.path == '/1/clouddrive/share/sharepage/token') {
+                return Future.value(
+                  http.Response.bytes(
+                    utf8.encode(
+                      jsonEncode({
+                        'code': 0,
+                        'data': {'stoken': 'st-valid'},
+                      }),
+                    ),
+                    200,
+                    headers: const {
+                      'content-type': 'application/json; charset=utf-8',
+                    },
+                  ),
+                );
+              }
+              if (validating115) {
+                return Future.value(http.Response(
+                    jsonEncode({
+                      'code': 0,
+                      'data': {
+                        'list': [
+                          {'fid': '1'}
+                        ]
+                      }
+                    }),
+                    200));
+              }
+              if (!validationStarted.isCompleted) {
+                validationStarted.complete();
+              }
+              return validationResponse.future;
+            }),
+          );
+          final cloud115Client = Cloud115SaveClient(MockClient((request) {
+            expect(request.method, 'GET');
+            expect(request.url.path, '/share/snap');
+            expect(request.url.queryParameters['receive_code'], 'abcd');
+            if (!validating115) {
+              return Future.value(http.Response(
+                  jsonEncode({
+                    'state': true,
+                    'data': {
+                      'count': 1,
+                      'list': [
+                        {'fid': '1'}
+                      ]
+                    },
+                  }),
+                  200));
+            }
+            if (!validationStarted.isCompleted) validationStarted.complete();
+            return validationResponse.future;
+          }));
+
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                isTelevisionProvider.overrideWith((ref) => television),
+                searchRepositoryProvider.overrideWithValue(repository),
+                quarkSaveClientProvider.overrideWithValue(quarkClient),
+                cloud115SaveClientProvider.overrideWithValue(cloud115Client),
+                appSettingsProvider.overrideWithValue(
+                  const AppSettings(
+                    mediaSources: <MediaSourceConfig>[],
+                    searchProviders: <SearchProviderConfig>[
+                      SearchProviderConfig(
+                        id: 'online',
+                        name: 'Online',
+                        kind: SearchProviderKind.panSou,
+                        endpoint: 'https://example.com',
+                        enabled: true,
+                        allowedCloudTypes: ['quark', '115'],
+                      ),
+                    ],
+                    doubanAccount: DoubanAccountConfig(enabled: false),
+                    homeModules: <HomeModuleConfig>[],
+                    networkStorage: NetworkStorageConfig(
+                      quarkCookie: 'kps=test;',
+                      cloud115Cookie: 'UID=test;',
+                    ),
+                  ),
+                ),
+              ],
+              child: const MaterialApp(
+                home: SearchPage(initialQuery: '测试电影'),
+              ),
+            ),
+          );
+
+          for (var i = 0;
+              i < 10 && !repository.onlineStarted.isCompleted;
+              i++) {
+            await tester.pump(const Duration(milliseconds: 20));
+          }
+          repository.onlineResult.complete(
+            SearchFetchResult(
+              filteredCount: 0,
+              items: [
+                SearchResult(
+                  id: '115-1',
+                  title: validating115 ? '待验证电影' : '立即显示的电影',
+                  posterUrl: '',
+                  providerId: 'online',
+                  providerName: 'Online',
+                  quality: '4K',
+                  sizeLabel: '10GB',
+                  seeders: 0,
+                  summary: 'online result',
+                  resourceUrl: 'https://115cdn.com/s/abc123',
+                  password: 'abcd',
+                ),
+                SearchResult(
+                  id: 'quark-1',
+                  title: validating115 ? '立即显示的电影' : '待验证电影',
+                  posterUrl: '',
+                  providerId: 'online',
+                  providerName: 'Online',
+                  quality: '4K',
+                  sizeLabel: '10GB',
+                  seeders: 0,
+                  summary: 'online result',
+                  resourceUrl: 'https://pan.quark.cn/s/abc123',
+                ),
+              ],
+            ),
+          );
+
+          for (var i = 0; i < 10 && !validationStarted.isCompleted; i++) {
+            await tester.pump(const Duration(milliseconds: 20));
+          }
+          expect(validationStarted.isCompleted, isTrue);
+          await tester.pump(const Duration(milliseconds: 150));
+          expect(find.text('立即显示的电影'), findsOneWidget);
+          if (!television && !validating115) {
+            expect(find.byTooltip('保存到 115'), findsOneWidget);
+          }
+          expect(find.text('待验证电影'), findsNothing);
+          expect(find.textContaining('正在验证链接'), findsOneWidget);
+          expect(find.text(readyType), findsOneWidget);
+          expect(find.text(pendingType), findsNothing);
+          expect(find.text('全部类型'), findsNothing);
+
+          Future<void> selectType(String label) async {
+            if (television) {
+              final action = tester.widget<TvFocusableAction>(find.ancestor(
+                of: find.text(label),
+                matching: find.byType(TvFocusableAction),
+              ));
+              action.focusNode!.requestFocus();
+              await tester.pump();
+              await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+            } else {
+              await tester.tap(find.text(label));
+            }
+          }
+
+          await selectType(readyType);
+          await tester.pump(const Duration(milliseconds: 150));
+          final selectedFocus = FocusManager.instance.primaryFocus;
+
+          validationResponse.complete(
             http.Response.bytes(
               utf8.encode(
-                jsonEncode({
-                  'code': 0,
-                  'data': {'stoken': 'st-valid'},
-                }),
+                jsonEncode(validation == 'valid'
+                    ? {
+                        'state': true,
+                        'code': 0,
+                        'data': {
+                          'count': 1,
+                          'list': [
+                            {
+                              'fid': 'file-1',
+                              'dir': false,
+                              'file_name': 'movie.mkv'
+                            },
+                          ],
+                        },
+                      }
+                    : {
+                        'state': false,
+                        'code': validation == 'cancelled' ? 41001 : 429,
+                        'message': validation == 'cancelled'
+                            ? '好友已取消了分享'
+                            : '请求过于频繁，请稍后再试',
+                      }),
               ),
               200,
               headers: const {
-                'content-type': 'application/json; charset=utf-8',
+                'content-type': 'application/json; charset=utf-8'
               },
             ),
           );
-        }
-        if (!validationStarted.isCompleted) {
-          validationStarted.complete();
-        }
-        return validationResponse.future;
-      }),
-    );
+          await tester.pumpAndSettle();
 
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          isTelevisionProvider.overrideWith((ref) => false),
-          searchRepositoryProvider.overrideWithValue(repository),
-          quarkSaveClientProvider.overrideWithValue(quarkClient),
-          appSettingsProvider.overrideWithValue(
-            const AppSettings(
-              mediaSources: <MediaSourceConfig>[],
-              searchProviders: <SearchProviderConfig>[
-                SearchProviderConfig(
-                  id: 'online',
-                  name: 'Online',
-                  kind: SearchProviderKind.panSou,
-                  endpoint: 'https://example.com',
-                  enabled: true,
-                ),
-              ],
-              doubanAccount: DoubanAccountConfig(enabled: false),
-              homeModules: <HomeModuleConfig>[],
-              networkStorage: NetworkStorageConfig(quarkCookie: 'kps=test;'),
-            ),
-          ),
-        ],
-        child: const MaterialApp(
-          home: SearchPage(initialQuery: '测试电影'),
-        ),
-      ),
-    );
-
-    for (var i = 0; i < 10 && !repository.onlineStarted.isCompleted; i++) {
-      await tester.pump(const Duration(milliseconds: 20));
+          expect(find.text('待验证电影'), findsNothing);
+          expect(find.text('立即显示的电影'), findsOneWidget);
+          expect(find.textContaining('结果 1 条'), findsOneWidget);
+          expect(find.text('全部类型'), findsNothing);
+          expect(find.byType(LinearProgressIndicator), findsNothing);
+          if (television) {
+            expect(FocusManager.instance.primaryFocus, same(selectedFocus));
+            expect(selectedFocus?.debugLabel,
+                contains('search:cloud-type:$readyCode'));
+          }
+          if (validation == 'cancelled') {
+            expect(find.text(pendingType), findsNothing);
+            expect(find.textContaining('过滤 1 条'), findsOneWidget);
+          } else {
+            expect(find.text(pendingType), findsOneWidget);
+            await selectType(pendingType);
+            await tester.pumpAndSettle();
+            expect(find.text('待验证电影'), findsOneWidget);
+            expect(find.text('立即显示的电影'), findsNothing);
+            expect(find.text('链接暂未验证'),
+                validation == 'rate-limited' ? findsOneWidget : findsNothing);
+          }
+        });
+      }
     }
-    repository.onlineResult.complete(
-      SearchFetchResult(
-        filteredCount: 0,
-        items: const [
-          SearchResult(
-            id: 'baidu-1',
-            title: '立即显示的电影',
-            posterUrl: '',
-            providerId: 'online',
-            providerName: 'Online',
-            quality: '4K',
-            sizeLabel: '10GB',
-            seeders: 0,
-            summary: 'online result',
-            resourceUrl: 'https://pan.baidu.com/s/abc123',
-          ),
-          SearchResult(
-            id: 'quark-1',
-            title: '待验证电影',
-            posterUrl: '',
-            providerId: 'online',
-            providerName: 'Online',
-            quality: '4K',
-            sizeLabel: '10GB',
-            seeders: 0,
-            summary: 'online result',
-            resourceUrl: 'https://pan.quark.cn/s/abc123',
-          ),
-        ],
-      ),
-    );
-
-    for (var i = 0; i < 10 && !validationStarted.isCompleted; i++) {
-      await tester.pump(const Duration(milliseconds: 20));
-    }
-    expect(validationStarted.isCompleted, isTrue);
-    await tester.pump(const Duration(milliseconds: 150));
-    expect(find.text('立即显示的电影'), findsOneWidget);
-    expect(find.text('待验证电影'), findsNothing);
-    expect(find.textContaining('正在验证链接'), findsOneWidget);
-
-    validationResponse.complete(
-      http.Response.bytes(
-        utf8.encode(
-          jsonEncode({
-            'code': 0,
-            'data': {
-              'list': [
-                {'fid': 'file-1', 'dir': false, 'file_name': 'movie.mkv'},
-              ],
-            },
-          }),
-        ),
-        200,
-        headers: const {'content-type': 'application/json; charset=utf-8'},
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 150));
-
-    expect(find.text('待验证电影'), findsOneWidget);
-  });
+  }
 
   for (final isTelevision in [false, true]) {
     testWidgets('search page hides favorites entry (TV: $isTelevision)',

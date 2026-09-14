@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:starflow/features/details/application/detail_page_actions.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +12,67 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('directory entry preference beats a sibling on the same NAS', () {
+    final first =
+        _target(itemType: 'series').copyWith(itemId: 'webdav-series|first');
+    final second = first.copyWith(itemId: 'webdav-series|first(1)');
+    final choices = [second, first];
+    expect(
+        prioritizeDetailLibraryMatchChoices(
+                pageSeedTarget: first, choices: choices)
+            .selectedIndex,
+        1);
+    expect(
+        prioritizeDetailLibraryMatchChoices(
+                pageSeedTarget: second,
+                choices: choices,
+                fallbackSelectedIndex: 1)
+            .selectedIndex,
+        0);
+  });
+
+  test(
+      'same-title directory series retain independent detail and resource choices',
+      () async {
+    final repository = await _repository();
+    final first = _target(itemType: 'series')
+        .copyWith(itemId: 'webdav-series|structure:first', title: '不良执念清除师');
+    final second = first.copyWith(itemId: 'webdav-series|structure:first(1)');
+    for (final target in [first, second]) {
+      await repository.saveDetailTarget(
+          seedTarget: target,
+          resolvedTarget: target,
+          libraryMatchChoices: [target]);
+    }
+    final reloaded = await _repository();
+    for (final target in [first, second]) {
+      final state =
+          await reloaded.loadDetailState(target, allowStructuralMismatch: true);
+      expect(state?.target.itemId, target.itemId);
+      expect(state?.libraryMatchChoices.single.itemId, target.itemId);
+    }
+  });
+
+  test(
+      'legacy aliases pointing to a sibling directory cannot restore its target',
+      () async {
+    final repository = await _repository();
+    final first = _target(itemType: 'series')
+        .copyWith(itemId: 'webdav-series|structure:first');
+    final second = first.copyWith(itemId: 'webdav-series|structure:first(1)');
+    // Reproduce the old merged record: first directory aliases, second target.
+    await repository.saveDetailTarget(
+        seedTarget: first,
+        resolvedTarget: second,
+        libraryMatchChoices: [second]);
+    expect(
+        await repository.loadDetailState(first, allowStructuralMismatch: true),
+        isNull);
+    await repository.saveDetailTarget(seedTarget: first, resolvedTarget: first);
+    expect((await repository.loadDetailTarget(first))?.itemId, first.itemId);
+    expect((await repository.loadDetailTarget(second))?.itemId, second.itemId);
+  });
 
   test('lookup keys distinguish seasons and episodes sharing series metadata',
       () {

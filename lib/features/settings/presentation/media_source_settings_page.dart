@@ -28,28 +28,12 @@ class MediaSourceSettingsPage extends ConsumerWidget {
       ),
       children: [
         Text('媒体源管理', style: theme.textTheme.headlineSmall),
-        const SettingsSectionTitle(label: '匹配范围'),
-        SettingsSelectionTile(
-          title: '详情页匹配来源',
-          subtitle: _libraryMatchSourceSummary(
-            mediaSources: sources,
-            selectedIds: libraryMatchSourceIds,
-          ),
-          value: '',
-          autofocus: true,
-          focusId: 'media-sources:match-sources',
-          onPressed: () => _openLibraryMatchSourcePicker(
-            context,
-            ref,
-            mediaSources: sources,
-            selectedIds: libraryMatchSourceIds,
-          ),
-        ),
         const SettingsSectionTitle(label: '媒体源'),
         if (sources.isEmpty)
           SettingsActionButton(
             label: '新增媒体源',
             icon: Icons.add_rounded,
+            autofocus: true,
             focusId: 'media-sources:add-empty',
             onPressed: () => _openEditor(context),
           )
@@ -58,7 +42,7 @@ class MediaSourceSettingsPage extends ConsumerWidget {
             SettingsManagementItem(
               title: sources[index].name,
               enabled: sources[index].enabled,
-              autofocus: false,
+              autofocus: index == 0,
               focusIdPrefix: 'media-sources:${sources[index].id}',
               onChanged: (enabled) =>
                   controller.toggleMediaSource(sources[index].id, enabled),
@@ -66,6 +50,22 @@ class MediaSourceSettingsPage extends ConsumerWidget {
             ),
             if (index < sources.length - 1) const SizedBox(height: 10),
           ],
+        const SettingsSectionTitle(label: '匹配范围'),
+        SettingsSelectionTile(
+          title: '详情页匹配来源',
+          subtitle: _libraryMatchSourceSummary(
+            mediaSources: sources,
+            selectedIds: libraryMatchSourceIds,
+          ),
+          value: '',
+          focusId: 'media-sources:match-sources',
+          onPressed: () => _openLibraryMatchSourcePicker(
+            context,
+            ref,
+            mediaSources: sources,
+            selectedIds: libraryMatchSourceIds,
+          ),
+        ),
       ],
     );
   }
@@ -92,7 +92,7 @@ class MediaSourceSettingsPage extends ConsumerWidget {
         .toList(growable: false);
     if (availableSources.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先添加 NAS / WebDAV 或夸克媒体源')),
+        const SnackBar(content: Text('请先添加并启用媒体源')),
       );
       return;
     }
@@ -156,6 +156,6 @@ bool _isSelectableLocalMediaSource(MediaSourceConfig source) {
   if (source.kind == MediaSourceKind.quark) {
     return source.hasConfiguredQuarkFolder;
   }
-  return source.kind == MediaSourceKind.emby ||
+  return source.kind.isMediaServer ||
       source.kind == MediaSourceKind.nas;
 }

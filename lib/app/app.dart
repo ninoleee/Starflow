@@ -6,6 +6,7 @@ import 'package:starflow/app/theme/app_theme.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/application/playback_runtime_priority_binding.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
+import 'package:starflow/features/search/application/favorite_auto_sync.dart';
 
 final TvSafeDirectionalFocusAction _tvSafeDirectionalFocusAction =
     TvSafeDirectionalFocusAction();
@@ -16,6 +17,7 @@ class StarflowApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(playbackRuntimePriorityBindingProvider);
+    ref.watch(favoriteAutoSyncProvider);
     final accent = ref.watch(
       appSettingsProvider.select((settings) => settings.appAccent),
     );

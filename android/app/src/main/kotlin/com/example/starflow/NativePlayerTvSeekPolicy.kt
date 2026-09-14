@@ -1,6 +1,6 @@
 package com.example.starflow
 
-internal class NativePlayerTvSeekPolicy(private val now: () -> Long = System::currentTimeMillis) {
+internal class NativePlayerTvSeekPolicy(private val now: () -> Long = { System.nanoTime() / 1_000_000L }) {
     private var keyCode: Int? = null
     private var startedAtMs: Long? = null
     private var repeatCount = 0

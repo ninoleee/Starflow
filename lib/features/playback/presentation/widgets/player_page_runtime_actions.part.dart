@@ -15,6 +15,12 @@ class _PreparedNextEpisode {
   final DateTime preparedAt;
 }
 
+class _ServerSubtitleSelection {
+  const _ServerSubtitleSelection(this.stream);
+
+  final PlaybackSubtitleStream stream;
+}
+
 extension _PlayerPageStateRuntimeActions on _PlayerPageState {
   Future<void> _applyStartupPlaybackPreferences(
     Player player,
@@ -113,6 +119,178 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       player,
       configuredLanguages: defaultSubtitle.preferredLanguages,
     );
+  }
+
+  Future<void> _applyStartupServerTracks(
+    Player player,
+    PlaybackTarget target,
+  ) async {
+    try {
+      final preferredAudio = preferredPlaybackAudioStream(target);
+      if (preferredAudio != null) {
+        final tracks = await _awaitAvailableAudioTracks(player);
+        final audioTrack = resolvePlaybackAudioTrack(
+          target: target,
+          tracks: tracks,
+          preferred: preferredAudio,
+        );
+        if (audioTrack != null && player.state.track.audio != audioTrack) {
+          await player.setAudioTrack(audioTrack);
+        }
+      }
+
+      final settings = _providerContainer.read(appSettingsProvider);
+      final preferredSubtitle = preferredPlaybackSubtitleStream(target);
+      final shouldApplySubtitle = preferredSubtitle != null &&
+          _subtitleSessionPreference == null &&
+          settings.playbackSubtitlePreference != PlaybackSubtitlePreference.off;
+      if (!shouldApplySubtitle) {
+        return;
+      }
+      if (preferredSubtitle.isExternal) {
+        await _applyServerExternalSubtitle(player, target, preferredSubtitle);
+        return;
+      }
+      final tracks = await _awaitAvailableSubtitleTracks(player);
+      final subtitleTrack = resolveEmbeddedPlaybackSubtitleTrack(
+        target: target,
+        tracks: tracks,
+        preferred: preferredSubtitle,
+      );
+      if (subtitleTrack != null &&
+          player.state.track.subtitle != subtitleTrack) {
+        await _disableMpvDualSubtitle(player);
+        await player.setSubtitleTrack(subtitleTrack);
+      }
+    } catch (error, stackTrace) {
+      appLogWarning(
+        'playback.tracks',
+        'FNTV startup track selection failed',
+        fields: {
+          'audioStreams': target.audioStreams.length,
+          'subtitleStreams': target.subtitleStreams.length,
+          'sourceKind': target.sourceKind.name,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  Future<List<AudioTrack>> _awaitAvailableAudioTracks(
+    Player player, {
+    Duration timeout = const Duration(seconds: 4),
+  }) async {
+    List<AudioTrack> current() => player.state.tracks.audio
+        .where((track) =>
+            track.id != 'auto' && track.id != 'no' && track.uri == false)
+        .toList(growable: false);
+    final available = current();
+    if (available.isNotEmpty) {
+      return available;
+    }
+    final completer = Completer<List<AudioTrack>>();
+    late final StreamSubscription<Tracks> subscription;
+    final timer = Timer(timeout, () {
+      if (!completer.isCompleted) {
+        completer.complete(current());
+      }
+    });
+    subscription = player.stream.tracks.listen(
+      (tracks) {
+        final resolved = tracks.audio
+            .where((track) =>
+                track.id != 'auto' && track.id != 'no' && track.uri == false)
+            .toList(growable: false);
+        if (resolved.isNotEmpty && !completer.isCompleted) {
+          completer.complete(resolved);
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!completer.isCompleted) {
+          completer.completeError(error, stackTrace);
+        }
+      },
+    );
+    try {
+      return await completer.future;
+    } finally {
+      timer.cancel();
+      await subscription.cancel();
+    }
+  }
+
+  Future<void> _applyServerExternalSubtitle(
+    Player player,
+    PlaybackTarget target,
+    PlaybackSubtitleStream stream,
+  ) async {
+    if (!target.sourceKind.isMediaServer || stream.id.isEmpty) {
+      return;
+    }
+    final client = _providerContainer.read(
+      mediaServerClientProvider(target.sourceKind),
+    );
+    final content = await client.downloadExternalSubtitle(
+      source: _sourceForTarget(target),
+      subtitleId: stream.id,
+    );
+    if (!mounted || !identical(_player, player) || content.trim().isEmpty) {
+      return;
+    }
+    await _disableMpvDualSubtitle(player);
+    await player.setSubtitleTrack(SubtitleTrack.no());
+    await player.setSubtitleTrack(
+      SubtitleTrack.data(
+        content,
+        title: stream.title.isEmpty ? null : stream.title,
+        language: stream.language.isEmpty ? null : stream.language,
+      ),
+    );
+    _subtitleSessionPreference = null;
+    _showMessage('已加载飞牛字幕：${stream.title.isEmpty ? '未命名字幕' : stream.title}');
+  }
+
+  MediaSourceConfig _sourceForTarget(PlaybackTarget target) {
+    final settings = _providerContainer.read(appSettingsProvider);
+    for (final source in settings.mediaSources) {
+      if (source.id == target.sourceId) {
+        return source;
+      }
+    }
+    throw StateError('媒体源不存在或已被移除');
+  }
+
+  String _formatServerAudioTrackLabel(
+    PlaybackTarget target,
+    List<AudioTrack> tracks,
+    AudioTrack track,
+  ) {
+    final stream = matchPlaybackAudioStreamForTrack(
+      target: target,
+      tracks: tracks,
+      track: track,
+    );
+    if (stream == null) {
+      return formatPlaybackAudioTrackLabel(track);
+    }
+    final label = [
+      if (stream.title.trim().isNotEmpty) stream.title.trim(),
+      if (stream.language.trim().isNotEmpty) stream.language.trim(),
+      if (stream.codec.trim().isNotEmpty) stream.codec.trim(),
+      if (stream.channels > 0) '${stream.channels} 声道',
+    ].join(' · ');
+    return label.isEmpty ? formatPlaybackAudioTrackLabel(track) : label;
+  }
+
+  String _formatServerSubtitleStreamLabel(PlaybackSubtitleStream stream) {
+    final label = [
+      if (stream.title.trim().isNotEmpty) stream.title.trim(),
+      if (stream.language.trim().isNotEmpty) stream.language.trim(),
+      if (stream.codec.trim().isNotEmpty) stream.codec.trim(),
+      '外挂',
+    ].join(' · ');
+    return label.isEmpty ? '飞牛外挂字幕' : label;
   }
 
   Future<PlaybackSubtitleSessionPreference?> _loadMpvSeriesSubtitlePreference(

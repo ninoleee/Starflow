@@ -16,7 +16,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const int _detailCacheBackgroundRecordThreshold = 16;
 const int _detailCacheBackgroundDecodeThreshold = 64 * 1024;
-const Duration _detailCachePersistenceMergeWindow = Duration(milliseconds: 16);
 const int _embyCacheBackgroundEntryThreshold = 16;
 const int _embyCacheBackgroundDecodeThreshold = 64 * 1024;
 const int _embySourceSummaryItemLimit = 400;
@@ -453,6 +452,8 @@ class LocalStorageCacheRepository {
   final List<_PendingDetailTargetSaveBatch> _pendingDetailTargetSaveBatches =
       <_PendingDetailTargetSaveBatch>[];
   bool _detailTargetSaveFlushScheduled = false;
+  Timer? _detailTargetSaveFlushTimer;
+  bool _isDisposed = false;
   _EmbyCacheManifest? _embyManifestCache;
   Future<_EmbyCacheManifest>? _embyManifestLoadFuture;
   final Map<String, CachedEmbyLibrarySnapshot> _embySnapshotCache =
@@ -466,8 +467,18 @@ class LocalStorageCacheRepository {
   Future<void> _embyMutationTail = Future<void>.value();
 
   void dispose() {
+    _isDisposed = true;
     _detailCacheChangeNotificationTimer?.cancel();
     _detailCacheChangeNotificationTimer = null;
+    _detailTargetSaveFlushTimer?.cancel();
+    _detailTargetSaveFlushTimer = null;
+    for (final batch in _pendingDetailTargetSaveBatches) {
+      if (!batch.completer.isCompleted) {
+        batch.completer.complete();
+      }
+    }
+    _pendingDetailTargetSaveBatches.clear();
+    _detailTargetSaveFlushScheduled = false;
     _pendingDetailCacheChangedSourceIds.clear();
     _pendingDetailCacheChangedLookupKeys.clear();
     _pendingDetailCacheChangedRecordIds.clear();
@@ -887,40 +898,53 @@ class LocalStorageCacheRepository {
     List<DetailTargetCacheSaveRequest> requests,
   ) {
     final pending = _PendingDetailTargetSaveBatch(requests);
+    if (_isDisposed) {
+      pending.completer.complete();
+      return pending.completer.future;
+    }
     _pendingDetailTargetSaveBatches.add(pending);
     if (!_detailTargetSaveFlushScheduled) {
       _detailTargetSaveFlushScheduled = true;
-      unawaited(
-        _runSerializedDetailMutation(() async {
-          await Future<void>.delayed(_detailCachePersistenceMergeWindow);
-          final pendingBatches = List<_PendingDetailTargetSaveBatch>.of(
-            _pendingDetailTargetSaveBatches,
-          );
-          _pendingDetailTargetSaveBatches.clear();
-          _detailTargetSaveFlushScheduled = false;
-          try {
-            await _saveDetailTargetsBatchUnlocked(
-              pendingBatches
-                  .expand((batch) => batch.requests)
-                  .toList(growable: false),
-              persistToStorage: true,
-            );
-            for (final batch in pendingBatches) {
-              if (!batch.completer.isCompleted) {
-                batch.completer.complete();
-              }
-            }
-          } catch (error, stackTrace) {
-            for (final batch in pendingBatches) {
-              if (!batch.completer.isCompleted) {
-                batch.completer.completeError(error, stackTrace);
-              }
-            }
-          }
-        }).catchError((Object _) {}),
-      );
+      scheduleMicrotask(() => unawaited(_flushMergedDetailTargetSaves()));
     }
     return pending.completer.future;
+  }
+
+  Future<void> _flushMergedDetailTargetSaves() async {
+    final pendingBatches = List<_PendingDetailTargetSaveBatch>.of(
+      _pendingDetailTargetSaveBatches,
+    );
+    _pendingDetailTargetSaveBatches.clear();
+    _detailTargetSaveFlushScheduled = false;
+    if (_isDisposed) {
+      for (final batch in pendingBatches) {
+        if (!batch.completer.isCompleted) {
+          batch.completer.complete();
+        }
+      }
+      return;
+    }
+    try {
+      await _runSerializedDetailMutation(
+        () => _saveDetailTargetsBatchUnlocked(
+          pendingBatches
+              .expand((batch) => batch.requests)
+              .toList(growable: false),
+          persistToStorage: true,
+        ),
+      );
+      for (final batch in pendingBatches) {
+        if (!batch.completer.isCompleted) {
+          batch.completer.complete();
+        }
+      }
+    } catch (error, stackTrace) {
+      for (final batch in pendingBatches) {
+        if (!batch.completer.isCompleted) {
+          batch.completer.completeError(error, stackTrace);
+        }
+      }
+    }
   }
 
   Future<void> _saveDetailTargetsBatchUnlocked(
@@ -1171,6 +1195,7 @@ class LocalStorageCacheRepository {
         final sourceKind =
             target.sourceKind ?? target.playbackTarget?.sourceKind;
         if (sourceKind != MediaSourceKind.emby &&
+            sourceKind != MediaSourceKind.fntv &&
             sourceKind != MediaSourceKind.nas &&
             sourceKind != MediaSourceKind.quark) {
           continue;
@@ -2226,6 +2251,9 @@ bool _canShareDetailCacheRecord({
   required MediaDetailTarget left,
   required MediaDetailTarget right,
 }) {
+  if (_hasConflictingDirectorySeriesIdentity(left, right)) {
+    return false;
+  }
   final leftKind = _detailLookupKind(left);
   final rightKind = _detailLookupKind(right);
   if (_isTopLevelDetailKind(leftKind) && _isNestedEpisodicKind(rightKind)) {
@@ -2272,6 +2300,9 @@ bool _canRestoreStructuralMismatchRecord({
   required _CachedDetailRecord record,
   required String matchedLookupKey,
 }) {
+  if (_hasConflictingDirectorySeriesIdentity(seedTarget, record.target)) {
+    return false;
+  }
   final seedKind = _detailLookupKind(seedTarget);
   final recordKind = _detailLookupKind(record.target);
   final isCrossKindPair = (_isTopLevelDetailKind(seedKind) &&
@@ -2291,6 +2322,19 @@ bool _canRestoreStructuralMismatchRecord({
     return true;
   }
   return record.libraryMatchChoices.isNotEmpty;
+}
+
+bool _hasConflictingDirectorySeriesIdentity(
+  MediaDetailTarget left,
+  MediaDetailTarget right,
+) {
+  final leftId = left.itemId.trim();
+  final rightId = right.itemId.trim();
+  if (!leftId.startsWith('webdav-series|') ||
+      !rightId.startsWith('webdav-series|')) {
+    return false;
+  }
+  return left.sourceId.trim() != right.sourceId.trim() || leftId != rightId;
 }
 
 bool _isStrongStructuralLookupKey(String lookupKey) {

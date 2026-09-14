@@ -150,6 +150,20 @@ DetailLibraryMatchPreferenceResult prioritizeDetailLibraryMatchChoices({
     0,
     effectiveChoices.length - 1,
   );
+  final entryId = pageSeedTarget.itemId.trim();
+  if (entryId.startsWith('webdav-series|')) {
+    final exactEntryIndex = effectiveChoices.indexWhere((choice) =>
+        choice.sourceId.trim() == pageSeedTarget.sourceId.trim() &&
+        (choice.itemId.trim() == entryId ||
+            choice.playbackTarget?.seriesId.trim() == entryId));
+    if (exactEntryIndex >= 0) {
+      return DetailLibraryMatchPreferenceResult(
+        choices: effectiveChoices,
+        selectedIndex: exactEntryIndex,
+        matchedPreferredSource: true,
+      );
+    }
+  }
   final preferredMatches = effectiveChoices
       .where(
         (choice) => _matchesDetailTargetPreferredSource(

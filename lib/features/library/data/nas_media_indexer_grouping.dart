@@ -300,9 +300,7 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       sourceName: base.item.sourceName,
       sourceKind: base.item.sourceKind,
       streamUrl: '',
-      actualAddress: _commonDirectoryPath(
-        records.map((record) => record.resourcePath),
-      ),
+      actualAddress: _seriesDirectoryPath(records),
       streamHeaders: const {},
       imdbId: imdbId,
       tmdbId: tmdbId,
@@ -831,6 +829,28 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
 
   String _buildSeriesItemId(String seriesKey) {
     return '${NasMediaIndexer._seriesGroupPrefix}|${Uri.encodeComponent(seriesKey)}';
+  }
+
+  String _seriesDirectoryPath(List<NasMediaIndexRecord> records) {
+    final keywords = _webDavSeriesTitleFilterKeywordsForRecords(records);
+    String? directory;
+    for (final record in records) {
+      final resolution = _resolveSeriesRootForRecord(
+        record,
+        seriesTitleFilterKeywords: keywords,
+      );
+      final candidate =
+          resolution.directoryPathForResource(record.resourcePath);
+      if (!_prefersStructureRootSeriesGrouping(record, resolution) ||
+          candidate.isEmpty ||
+          (directory != null && directory != candidate)) {
+        return _commonDirectoryPath(
+            records.map((record) => record.resourcePath));
+      }
+      directory = candidate;
+    }
+    // A one-season series still owns its title directory and root sidecars.
+    return directory ?? '';
   }
 
   String _commonDirectoryPath(Iterable<String> paths) {

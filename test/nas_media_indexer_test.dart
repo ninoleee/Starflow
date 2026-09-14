@@ -221,7 +221,10 @@ void main() {
     );
 
     expect(series.sectionId, sectionId);
+    expect(series.actualAddress, '/dav/strm/quark/Nested Show');
     expect(seasons.single.sectionId, sectionId);
+    expect(
+        seasons.single.actualAddress, '/dav/strm/quark/Nested Show/Season 1');
     expect(episodes, hasLength(2));
     expect(episodes.every((item) => item.sectionId == sectionId), isTrue);
   });
@@ -299,6 +302,7 @@ void main() {
     final series = library.single;
     expect(series.itemType, 'series');
     expect(series.title, 'Lost');
+    expect(series.actualAddress, 'Lost');
 
     final seasons = await indexer.loadChildren(
       source,
@@ -312,6 +316,7 @@ void main() {
     expect(seasons.map((item) => item.seasonNumber), containsAll([1, 2]));
 
     final seasonTwo = seasons.firstWhere((item) => item.seasonNumber == 2);
+    expect(seasonTwo.actualAddress, 'Lost/Season 02');
     final episodes = await indexer.loadChildren(
       source,
       parentId: seasonTwo.id,

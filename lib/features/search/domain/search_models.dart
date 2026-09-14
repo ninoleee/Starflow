@@ -369,6 +369,9 @@ class SearchResult {
 
   SearchResult copyWith({
     String? title,
+    String? resourceUrl,
+    String? password,
+    String? sizeLabel,
     String? posterUrl,
     Map<String, String>? posterHeaders,
     MediaDetailTarget? detailTarget,
@@ -389,11 +392,11 @@ class SearchResult {
       providerId: providerId,
       providerName: providerName,
       quality: quality,
-      sizeLabel: sizeLabel,
+      sizeLabel: sizeLabel ?? this.sizeLabel,
       seeders: seeders,
       summary: summary,
-      resourceUrl: resourceUrl,
-      password: password,
+      resourceUrl: resourceUrl ?? this.resourceUrl,
+      password: password ?? this.password,
       cloudType: cloudType,
       source: source,
       publishedAt: publishedAt,
@@ -565,6 +568,144 @@ List<String> parseSearchBlockedKeywords(String raw) {
       .toList(growable: false);
 }
 
+String searchResultDeduplicationKey(SearchResult result) {
+  if (result.detailTarget == null) {
+    final share = _searchShareIdentity(result.resourceUrl);
+    if (share != null) return 'share:${share.type.code}:${share.code}';
+  }
+  final normalized = normalizeSearchResourceUrl(result.resourceUrl);
+  final fragment =
+      Uri.tryParse(sanitizeSearchResourceUrl(result.resourceUrl))?.fragment ??
+          '';
+  final scopedFragment =
+      fragment.startsWith('/') || fragment.startsWith('!') ? '#$fragment' : '';
+  return normalized.isEmpty
+      ? 'id:${result.id}'
+      : 'url:$normalized$scopedFragment';
+}
+
+({SearchCloudType type, String code})? _searchShareIdentity(String rawUrl) {
+  final sanitized = sanitizeSearchResourceUrl(rawUrl);
+  final uri = Uri.tryParse(sanitized.startsWith('//')
+      ? 'https:$sanitized'
+      : sanitized.contains('://')
+          ? sanitized
+          : 'https://$sanitized');
+  if (uri == null ||
+      !const ['http', 'https'].contains(uri.scheme) ||
+      uri.userInfo.isNotEmpty ||
+      (uri.hasPort && uri.port != 80 && uri.port != 443)) {
+    return null;
+  }
+  final type = switch (uri.host.toLowerCase()) {
+    '115.com' ||
+    'www.115.com' ||
+    '115cdn.com' ||
+    'www.115cdn.com' ||
+    'anxia.com' ||
+    'www.anxia.com' =>
+      SearchCloudType.cloud115,
+    'pan.quark.cn' => SearchCloudType.quark,
+    'www.alipan.com' ||
+    'alipan.com' ||
+    'www.aliyundrive.com' ||
+    'aliyundrive.com' =>
+      SearchCloudType.aliyun,
+    'pan.baidu.com' => SearchCloudType.baidu,
+    'drive.uc.cn' => SearchCloudType.uc,
+    'www.123pan.com' ||
+    '123pan.com' ||
+    'www.123684.com' ||
+    '123684.com' ||
+    'www.123865.com' ||
+    '123865.com' ||
+    'www.123912.com' ||
+    '123912.com' =>
+      SearchCloudType.cloud123,
+    'pan.xunlei.com' => SearchCloudType.xunlei,
+    _ => null,
+  };
+  if (type == null) return null;
+  // Folder/file-scoped URLs may identify a different selection within a share.
+  if (uri.fragment.startsWith('/') ||
+      uri.fragment.startsWith('!') ||
+      uri.queryParameters.keys.any((key) => const {
+            'cid',
+            'fid',
+            'file_id',
+            'folder_id',
+            'pdir_fid',
+            'pdirfid',
+            'path',
+          }.contains(key.toLowerCase()))) {
+    return null;
+  }
+  final match = RegExp(r'^/s/([a-zA-Z0-9_-]+)/?$').firstMatch(uri.path);
+  if (match == null) return null;
+  return (type: type, code: match.group(1)!);
+}
+
+String searchResultSharePassword(SearchResult result) {
+  final uri = Uri.tryParse(sanitizeSearchResourceUrl(result.resourceUrl));
+  final preferredKey =
+      _searchShareIdentity(result.resourceUrl)?.type == SearchCloudType.quark
+          ? 'pwd'
+          : 'password';
+  for (final key in [
+    preferredKey,
+    'password',
+    'pwd',
+    'passcode',
+    'extractcode',
+    'code'
+  ]) {
+    final value = uri?.queryParameters[key]?.trim() ?? '';
+    if (value.isNotEmpty) return value;
+  }
+  return result.password.trim();
+}
+
+SearchResult prepareSearchResultShareCredentials(SearchResult result) {
+  if (result.detailTarget != null) return result;
+  final share = _searchShareIdentity(result.resourceUrl);
+  if (share == null) return result;
+  final password = searchResultSharePassword(result);
+  if (password.isEmpty) return result;
+  final uri = Uri.tryParse(sanitizeSearchResourceUrl(result.resourceUrl));
+  if (uri == null || !const ['http', 'https'].contains(uri.scheme)) {
+    return result;
+  }
+  final passwordKey =
+      share.type == SearchCloudType.cloud115 ? 'password' : 'pwd';
+  if (uri.queryParameters[passwordKey]?.trim().isNotEmpty ?? false) {
+    return result;
+  }
+  return result.copyWith(
+    resourceUrl: uri.replace(queryParameters: {
+      ...uri.queryParameters,
+      passwordKey: password,
+    }).toString(),
+    password: password,
+    sizeLabel: '提取码 $password',
+  );
+}
+
+SearchResult mergeSearchResultShareCredentials(
+    SearchResult first, SearchResult duplicate) {
+  final share = _searchShareIdentity(first.resourceUrl);
+  if (share == null ||
+      searchResultDeduplicationKey(first) !=
+          searchResultDeduplicationKey(duplicate) ||
+      searchResultSharePassword(first).isNotEmpty) {
+    return first;
+  }
+  final password = searchResultSharePassword(duplicate);
+  if (password.isEmpty) return first;
+  // Keep the original URL and metadata, adding only the missing credential.
+  return prepareSearchResultShareCredentials(
+      first.copyWith(password: password, sizeLabel: '提取码 $password'));
+}
+
 String normalizeSearchResourceUrl(String rawUrl) {
   final trimmed = sanitizeSearchResourceUrl(rawUrl);
   if (trimmed.isEmpty) {
@@ -617,6 +758,21 @@ String sanitizeSearchResourceUrl(String rawUrl) {
 
   sanitized = sanitized.replaceAll(RegExp(r'[，。；、]+$'), '').trim();
   return sanitized;
+}
+
+Map<String, int> countSearchResultsByCloudType(Iterable<SearchResult> results) {
+  final counts = <String, int>{};
+  for (final result in results) {
+    final type = result.detailTarget != null
+        ? 'local'
+        : resolveSearchCloudTypeCode(
+              rawUrl: result.resourceUrl,
+              hints: [result.cloudType],
+            ) ??
+            'unknown';
+    counts.update(type, (count) => count + 1, ifAbsent: () => 1);
+  }
+  return counts;
 }
 
 SearchCloudType? detectSearchCloudTypeFromUrl(String rawUrl) {
@@ -681,7 +837,10 @@ bool _looksLike115Url(String normalizedRaw) {
   if (raw.isEmpty) {
     return false;
   }
-  return raw.contains('115.com/') ||
+  final uri = Uri.tryParse(raw.contains('://') ? raw : 'https://$raw');
+  return uri?.host == '115cdn.com' ||
+      uri?.host == 'www.115cdn.com' ||
+      raw.contains('115.com/') ||
       raw.contains('.115.com/') ||
       raw.contains('anxia.com/') ||
       raw.contains('.anxia.com/') ||

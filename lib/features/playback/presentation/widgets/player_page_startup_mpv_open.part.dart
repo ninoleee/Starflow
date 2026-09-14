@@ -74,7 +74,9 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         appLogInfo('playback.reliability', 'Playback error', fields: {
           'engine': 'mpv',
           'policyVersion': PlaybackPolicyValues.version,
-          'phase': willRetry ? PlaybackPhase.recovering.name : PlaybackPhase.failed.name,
+          'phase': willRetry
+              ? PlaybackPhase.recovering.name
+              : PlaybackPhase.failed.name,
           'failureKind': failureKind.name,
           'httpStatus': error is MpvOpenFailure ? error.httpStatus : null,
           'action': willRetry ? 'retry' : 'stop',
@@ -210,8 +212,8 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       );
       if (awaitingStartup) {
         startupErrorGate ??= createStartupErrorGate();
-        startupErrorGate!.report(normalized,
-            httpStatus: httpEvidence.statusFor(normalized));
+        startupErrorGate!
+            .report(normalized, httpStatus: httpEvidence.statusFor(normalized));
         return;
       }
       if (!mounted || _player != player) {
@@ -367,6 +369,8 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         await playback.cancelSubscriptions();
         throw const _PlayerOpenException('Playback startup cancelled');
       }
+      await scope
+          .wait(_applyStartupServerTracks(playback.player, resolvedTarget));
       await scope
           .wait(_applyStartupExternalSubtitle(playback.player, resolvedTarget));
       return playback;

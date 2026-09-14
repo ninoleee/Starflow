@@ -1,3 +1,4 @@
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -40,14 +41,67 @@ class Cloud115SyncDeleteService {
       {required NetworkStorageConfig config,
       required String sourceId,
       required String resourcePath}) async {
-    if (!config.syncDelete115Enabled) return null;
-    final matches = config.syncDelete115WebDavDirectories
+    try {
+      return await _prepare(
+        config: config,
+        sourceId: sourceId,
+        resourcePath: resourcePath,
+      );
+    } catch (error) {
+      appLogWarning(
+        '115.sync-delete',
+        '115 sync deletion preflight failed; no deletion submitted',
+        fields: {
+          'sourceId': sourceId,
+          'errorType': error.runtimeType.toString()
+        },
+      );
+      rethrow;
+    }
+  }
+
+  Future<Cloud115DeletePlan?> _prepare(
+      {required NetworkStorageConfig config,
+      required String sourceId,
+      required String resourcePath}) async {
+    if (!config.syncDelete115Enabled) {
+      appLogInfo('115.sync-delete', '115 sync deletion skipped', fields: {
+        'sourceId': sourceId,
+        'reason': 'setting_disabled',
+      });
+      return null;
+    }
+    final directories = config.syncDelete115WebDavDirectories
+        .where((scope) =>
+            scope.sourceId.trim().isNotEmpty &&
+            scope.directoryId.trim().isNotEmpty)
+        .toList(growable: false);
+    if (directories.isEmpty) {
+      appLogWarning('115.sync-delete', '115 deletion scope is not configured',
+          fields: {
+            'sourceId': sourceId,
+            'reason': 'no_directories_configured',
+            'scopeCount': 0,
+          });
+      throw const QuarkSaveException(
+          '115 同步删除已开启，但未选择 WebDAV 删除监听目录；请先在 115 网盘设置中添加监听目录或关闭同步删除，本次未执行删除');
+    }
+    final matches = directories
         .where((scope) => scope.sourceId == sourceId)
         .map((scope) =>
             cloud115RelativeDeletePath(resourcePath, scope.directoryId))
         .whereType<List<String>>()
         .toList();
-    if (matches.isEmpty) return null;
+    if (matches.isEmpty) {
+      appLogInfo('115.sync-delete', '115 sync deletion skipped', fields: {
+        'sourceId': sourceId,
+        'reason': 'resource_outside_selected_scope',
+        'scopeCount': directories.length,
+        'sourceScopeCount':
+            directories.where((scope) => scope.sourceId == sourceId).length,
+      });
+      return null;
+    }
     if (config.syncDeleteQuarkEnabled &&
         config.syncDeleteQuarkWebDavDirectories.any((scope) =>
             cloud115RelativeDeletePath(resourcePath, scope.directoryId) !=
@@ -56,6 +110,10 @@ class Cloud115SyncDeleteService {
     }
     matches.sort((a, b) => a.length.compareTo(b.length));
     final relative = matches.first;
+    appLogInfo('115.sync-delete', '115 deletion scope matched', fields: {
+      'sourceId': sourceId,
+      'relativeDepth': relative.length,
+    });
     if (relative.isEmpty) throw const QuarkSaveException('不能同步删除 115 保存根目录');
     if (config.cloud115Cookie.trim().isEmpty) {
       throw const QuarkSaveException('115 同步删除需要配置 Cookie');
@@ -85,6 +143,12 @@ class Cloud115SyncDeleteService {
         return false;
       }).toList();
       if (candidates.length != 1) {
+        appLogWarning('115.sync-delete', '115 deletion target is not unique',
+            fields: {
+              'sourceId': sourceId,
+              'pathDepth': i + 1,
+              'candidateCount': candidates.length,
+            });
         throw const QuarkSaveException('115 同步删除未找到唯一对应路径，未执行删除');
       }
       final entry = candidates.single;
@@ -93,6 +157,11 @@ class Cloud115SyncDeleteService {
         throw const QuarkSaveException('115 返回无效删除目标，未执行删除');
       }
       if (last) {
+        appLogInfo('115.sync-delete', '115 deletion target prepared', fields: {
+          'sourceId': sourceId,
+          'isDirectory': entry.isDirectory,
+          'relativeDepth': relative.length,
+        });
         return Cloud115DeletePlan(
             cookie: config.cloud115Cookie, parentId: parentId, entry: entry);
       }
@@ -102,6 +171,29 @@ class Cloud115SyncDeleteService {
     return null;
   }
 
-  Future<void> execute(Cloud115DeletePlan plan) => client.deleteEntries(
-      cookie: plan.cookie, parentId: plan.parentId, fids: [plan.entry.fid]);
+  Future<void> execute(Cloud115DeletePlan plan) async {
+    final stopwatch = Stopwatch()..start();
+    appLogInfo('115.sync-delete', '115 recycle deletion started', fields: {
+      'isDirectory': plan.entry.isDirectory,
+    });
+    try {
+      await client.deleteEntries(
+          cookie: plan.cookie, parentId: plan.parentId, fids: [plan.entry.fid]);
+      final remaining = await client.listEntries(
+          cookie: plan.cookie, parentFid: plan.parentId);
+      if (remaining.any((entry) => entry.fid == plan.entry.fid)) {
+        throw const QuarkSaveException('115 删除未生效：远端文件或目录仍然存在');
+      }
+      appLogInfo('115.sync-delete', '115 recycle deletion confirmed', fields: {
+        'durationMs': stopwatch.elapsedMilliseconds,
+      });
+    } catch (error) {
+      appLogWarning('115.sync-delete', '115 recycle deletion not confirmed',
+          fields: {
+            'durationMs': stopwatch.elapsedMilliseconds,
+            'errorType': error.runtimeType.toString(),
+          });
+      rethrow;
+    }
+  }
 }

@@ -32,10 +32,12 @@ class EmbyRefreshSourceProgress {
   const EmbyRefreshSourceProgress({
     required this.sourceId,
     required this.sourceName,
+    this.sourceKind = MediaSourceKind.emby,
   });
 
   final String sourceId;
   final String sourceName;
+  final MediaSourceKind sourceKind;
 }
 
 class EmbyRefreshProgressState {
@@ -83,13 +85,15 @@ class EmbyRefreshProgressState {
   }
 
   String get title {
+    final kinds = sources.map((source) => source.sourceKind).toSet();
+    final label = kinds.length == 1 ? kinds.single.label : '媒体服务器';
     switch (status) {
       case EmbyRefreshTaskStatus.running:
-        return 'Emby 后台更新';
+        return '$label 后台更新';
       case EmbyRefreshTaskStatus.succeeded:
-        return 'Emby 更新完成';
+        return '$label 更新完成';
       case EmbyRefreshTaskStatus.failed:
-        return 'Emby 更新失败';
+        return '$label 更新失败';
     }
   }
 
@@ -147,6 +151,7 @@ class EmbyRefreshProgressController
         .map(
           (source) => EmbyRefreshSourceProgress(
             sourceId: source.id.trim(),
+            sourceKind: source.kind,
             sourceName:
                 source.name.trim().isEmpty ? source.id.trim() : source.name,
           ),

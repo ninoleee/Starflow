@@ -20,12 +20,30 @@ class NasSeriesRootResolution {
     required this.rootSegments,
     required this.pathContext,
     required this.hasPublicBoundary,
+    this.directoryDepth = 0,
   });
 
   final String title;
   final List<String> rootSegments;
   final NasMediaPathContext pathContext;
   final bool hasPublicBoundary;
+  final int directoryDepth;
+
+  String directoryPathForResource(String resourcePath) {
+    final normalized = resourcePath.trim().replaceAll('\\', '/');
+    final uri = Uri.tryParse(normalized);
+    final isUri = uri != null && uri.hasScheme;
+    final path = isUri ? uri.path : normalized;
+    final segments = path.split('/').where((part) => part.isNotEmpty).toList();
+    if (directoryDepth <= 0 ||
+        directoryDepth >= segments.length ||
+        pathContext.resourceSegments.length != segments.length) {
+      return '';
+    }
+    final directory = '${path.startsWith('/') ? '/' : ''}'
+        '${segments.take(directoryDepth).join('/')}';
+    return isUri ? uri.replace(path: directory).toString() : directory;
+  }
 
   static NasSeriesRootResolution empty(NasMediaPathContext context) {
     return NasSeriesRootResolution(
@@ -209,6 +227,11 @@ class NasMediaPathPolicy {
           sectionRoot,
           configuredKeywords: configuredKeywords,
         );
+    final sectionDepth = context.sectionSegments.length;
+    final sectionContainsResource = sectionDepth > 0 &&
+        context.resourceSegments.length > sectionDepth &&
+        context.sectionSegments.asMap().entries.every(
+            (entry) => entry.value == context.resourceSegments[entry.key]);
     if (directories.isEmpty) {
       final fallback = sectionIsPublic
           ? cleanTitleLabel(fileFallbackTitle)
@@ -219,6 +242,10 @@ class NasMediaPathPolicy {
             fallback.isEmpty || sectionIsPublic ? const [] : [sectionRoot],
         pathContext: context,
         hasPublicBoundary: sectionIsPublic,
+        directoryDepth:
+            fallback.isNotEmpty && !sectionIsPublic && sectionContainsResource
+                ? sectionDepth
+                : 0,
       );
     }
 
@@ -260,6 +287,8 @@ class NasMediaPathPolicy {
         rootSegments: [rawDirectory],
         pathContext: context,
         hasPublicBoundary: lastBoundaryIndex >= 0 || sectionIsPublic,
+        directoryDepth:
+            context.resourceSegments.length - directories.length + index,
       );
     }
 
@@ -274,6 +303,12 @@ class NasMediaPathPolicy {
           : [sectionRoot],
       pathContext: context,
       hasPublicBoundary: hitRelativeBoundary || sectionIsPublic,
+      directoryDepth: fallback.isNotEmpty &&
+              !hitRelativeBoundary &&
+              !sectionIsPublic &&
+              sectionContainsResource
+          ? sectionDepth
+          : 0,
     );
   }
 

@@ -1,8 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "maxPlayerAttempts": 3,
   "maxRuntimeRecoveries": 2,
   "startupHardLimitMs": 120000,
+  "exoStartupHardLimitMs": 60000,
+  "exoStartupNoProgressTimeoutMs": 30000,
   "bufferAdvanceMs": 1000,
   "bufferAdvancePercent": 1,
   "positionAdvanceMs": 250,

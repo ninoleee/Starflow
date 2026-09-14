@@ -151,10 +151,18 @@ class PlaybackOptionsDialog extends StatelessWidget {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('关闭'),
-          ),
+          if (isTelevision)
+            StarflowButton(
+              label: '关闭',
+              variant: StarflowButtonVariant.ghost,
+              compact: true,
+              onPressed: () => Navigator.of(context).pop(),
+            )
+          else
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('关闭'),
+            ),
         ],
       ),
     );
@@ -707,10 +715,18 @@ class _PlaybackMoreOptionsDialogState
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('关闭'),
-          ),
+          if (widget.isTelevision)
+            StarflowButton(
+              label: '关闭',
+              variant: StarflowButtonVariant.ghost,
+              compact: true,
+              onPressed: () => Navigator.of(context).pop(),
+            )
+          else
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('关闭'),
+            ),
         ],
       ),
     );
@@ -779,10 +795,18 @@ class _PlaybackSubtitleOptionsDialog extends StatelessWidget {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('关闭'),
-          ),
+          if (isTelevision)
+            StarflowButton(
+              label: '关闭',
+              variant: StarflowButtonVariant.ghost,
+              compact: true,
+              onPressed: () => Navigator.of(context).pop(),
+            )
+          else
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('关闭'),
+            ),
         ],
       ),
     );

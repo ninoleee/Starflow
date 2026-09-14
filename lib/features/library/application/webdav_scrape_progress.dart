@@ -249,6 +249,9 @@ class WebDavScrapeProgressController
     required bool allowThrottle,
     bool forceEmit = false,
   }) {
+    if (!mounted) {
+      return;
+    }
     final normalizedSourceId = progress.sourceId.trim();
     if (normalizedSourceId.isEmpty) {
       return;
@@ -313,6 +316,9 @@ class WebDavScrapeProgressController
   }
 
   void _emitProgress(WebDavScrapeProgress progress) {
+    if (!mounted) {
+      return;
+    }
     _lastProgressEmissionAt = DateTime.now();
     state = {
       ...state,
@@ -323,7 +329,7 @@ class WebDavScrapeProgressController
   void _flushPendingProgress() {
     _pendingFlushTimer?.cancel();
     _pendingFlushTimer = null;
-    if (_pendingProgressBySourceId.isEmpty) {
+    if (!mounted || _pendingProgressBySourceId.isEmpty) {
       return;
     }
     _lastProgressEmissionAt = DateTime.now();

@@ -166,6 +166,8 @@ class _HomePageState extends ConsumerState<HomePage>
       ValueNotifier<_HomeHeroSelection>(const _HomeHeroSelection.empty());
   final HomeHeroPrefetchCoordinator _heroPrefetchCoordinator =
       HomeHeroPrefetchCoordinator();
+  late final MetadataPrefetchConcurrencyLimiter
+      _metadataPrefetchConcurrencyLimiter;
   final GlobalKey<_FeaturedHeroState> _featuredHeroKey =
       GlobalKey<_FeaturedHeroState>();
   final Map<String, FocusNode> _contentFocusNodes = <String, FocusNode>{};
@@ -209,11 +211,15 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void initState() {
     super.initState();
+    _metadataPrefetchConcurrencyLimiter =
+        ref.read(metadataPrefetchConcurrencyLimiterProvider);
     _scrollController.addListener(_deferPrefetchForForegroundInteraction);
   }
 
   @override
   void dispose() {
+    _heroPrefetchCoordinator.dispose();
+    _metadataPrefetchConcurrencyLimiter.cancelIdleResetTimer();
     _scrollController.dispose();
     for (final focusNode in _contentFocusNodes.values) {
       focusNode.dispose();

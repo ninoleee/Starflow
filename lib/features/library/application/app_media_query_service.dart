@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/library/application/empty_library_auto_rebuild_scheduler.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
+import 'package:starflow/features/library/data/fntv_api_client.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/data/quark_external_storage_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
@@ -30,6 +32,10 @@ class AppMediaQueryService {
 
   final Ref ref;
   final EmbyApiClient _embyApiClient;
+  MediaServerClient _serverClient(MediaSourceConfig source) =>
+      source.kind == MediaSourceKind.emby
+          ? _embyApiClient
+          : ref.read(mediaServerClientProvider(source.kind));
   final WebDavNasClient _webDavNasClient;
   final NasMediaIndexer _nasMediaIndexer;
   final QuarkExternalStorageClient _quarkExternalStorageClient;
@@ -181,11 +187,11 @@ class AppMediaQueryService {
     final stopwatch = Stopwatch()..start();
     try {
       late final List<MediaItem> items;
-      if (source.kind == MediaSourceKind.emby) {
+      if (source.kind.isMediaServer) {
         if (!source.hasActiveSession) {
           return const [];
         }
-        items = await _embyApiClient.fetchChildren(
+        items = await _serverClient(source).fetchChildren(
           source,
           parentId: normalizedParentId,
           sectionId: sectionId,
@@ -254,7 +260,7 @@ class AppMediaQueryService {
     String wikidataId = '',
     int limit = 2000,
   }) async {
-    if (source.kind != MediaSourceKind.emby || !source.hasActiveSession) {
+    if (!source.kind.isMediaServer || !source.hasActiveSession) {
       return const <MediaItem>[];
     }
     final snapshot = await _loadCachedEmbySnapshot(source);
@@ -299,7 +305,7 @@ class AppMediaQueryService {
 
   Future<void> refreshEmbySourceCache(MediaSourceConfig source) async {
     final normalizedSourceId = source.id.trim();
-    if (source.kind != MediaSourceKind.emby ||
+    if (!source.kind.isMediaServer ||
         normalizedSourceId.isEmpty ||
         !source.hasActiveSession) {
       return;
@@ -349,7 +355,7 @@ class AppMediaQueryService {
     MediaSourceConfig source,
     CachedEmbyLibrarySnapshot snapshot,
   ) {
-    if (source.kind != MediaSourceKind.emby || !source.hasActiveSession) {
+    if (!source.kind.isMediaServer || !source.hasActiveSession) {
       return false;
     }
     if (snapshot.hasData) {
@@ -368,17 +374,19 @@ class AppMediaQueryService {
     var collections = const <MediaCollection>[];
     var fallbackItems = const <MediaItem>[];
     var itemsBySection = const <String, List<MediaItem>>{};
+    var completed = false;
 
     try {
-      collections = await _embyApiClient.fetchCollections(source);
+      collections = await _serverClient(source).fetchCollections(source);
       final settings = ref.read(appSettingsProvider);
       final maxConcurrency = settings.taskMaxConcurrency;
       final limiter = ref.read(metadataPrefetchConcurrencyLimiterProvider);
       appLogInfo(
         'library.refresh',
-        'Emby source section refresh started',
+        'Media server section refresh started',
         fields: <String, Object?>{
           'sourceId': source.id,
+          'sourceKind': source.kind.name,
           'sectionCount': collections.length,
           'maxConcurrency': maxConcurrency,
         },
@@ -409,28 +417,31 @@ class AppMediaQueryService {
             itemsBySection,
           ).values,
         );
-        if (fallbackItems.isEmpty) {
+        if (fallbackItems.isEmpty && source.kind != MediaSourceKind.fntv) {
           fallbackItems = await _loadEmbyRootLibraryFallback(source);
         }
       }
+      completed = true;
     } catch (_) {
       rethrow;
     } finally {
       _embyLibraryMatchIndexes.remove(source.id.trim());
-      await cacheRepository.saveEmbyLibrarySnapshot(
-        sourceId: source.id,
-        refreshedAt: refreshedAt,
-        collections: collections,
-        fallbackItems: fallbackItems
-            .map(_stripArtworkForEmbyCache)
-            .toList(growable: false),
-        itemsBySection: itemsBySection.map(
-          (key, value) => MapEntry(
-            key,
-            value.map(_stripArtworkForEmbyCache).toList(growable: false),
+      if (completed || source.kind != MediaSourceKind.fntv) {
+        await cacheRepository.saveEmbyLibrarySnapshot(
+          sourceId: source.id,
+          refreshedAt: refreshedAt,
+          collections: collections,
+          fallbackItems: fallbackItems
+              .map(_stripArtworkForEmbyCache)
+              .toList(growable: false),
+          itemsBySection: itemsBySection.map(
+            (key, value) => MapEntry(
+              key,
+              value.map(_stripArtworkForEmbyCache).toList(growable: false),
+            ),
           ),
-        ),
-      );
+        );
+      }
     }
   }
 
@@ -439,13 +450,16 @@ class AppMediaQueryService {
     required MediaCollection collection,
   }) async {
     try {
-      return await _embyApiClient.fetchLibrary(
-        source,
+      return await _serverClient(source).fetchLibrary(
+        source.kind == MediaSourceKind.fntv
+            ? source.copyWith(featuredSectionIds: const [])
+            : source,
         limit: 200,
         sectionId: collection.id,
         sectionName: collection.title,
       );
     } catch (error, stackTrace) {
+      if (source.kind == MediaSourceKind.fntv) rethrow;
       appLogWarning(
         'library.query',
         'Emby section could not be loaded',
@@ -464,7 +478,7 @@ class AppMediaQueryService {
     MediaSourceConfig source,
   ) async {
     try {
-      return await _embyApiClient.fetchLibrary(
+      return await _serverClient(source).fetchLibrary(
         source,
         limit: 200,
       );
@@ -503,6 +517,13 @@ class AppMediaQueryService {
     required int limit,
   }) {
     final normalizedSectionId = sectionId?.trim() ?? '';
+    if (source.kind == MediaSourceKind.fntv &&
+        (source.hasExplicitNoSectionsSelected ||
+            (normalizedSectionId.isNotEmpty &&
+                source.selectedSectionIds.isNotEmpty &&
+                !source.selectedSectionIds.contains(normalizedSectionId)))) {
+      return const [];
+    }
     if (normalizedSectionId.isNotEmpty) {
       final scopedItems = snapshot.itemsBySection[normalizedSectionId];
       final resolved = scopedItems == null || scopedItems.isEmpty
@@ -524,6 +545,10 @@ class AppMediaQueryService {
     MediaSourceConfig source,
     CachedEmbyLibrarySnapshot snapshot,
   ) {
+    if (source.kind == MediaSourceKind.fntv &&
+        source.hasExplicitNoSectionsSelected) {
+      return const [];
+    }
     final visibleItemsBySection = _resolveVisibleEmbyItemsBySection(
       source,
       snapshot.itemsBySection,
@@ -531,7 +556,12 @@ class AppMediaQueryService {
     final resolved = visibleItemsBySection.isEmpty
         ? snapshot.fallbackItems
         : _mergeAndSortEmbyItems(visibleItemsBySection.values);
-    return _rehydrateCachedEmbyItems(source, resolved);
+    final selected = source.selectedSectionIds;
+    return _rehydrateCachedEmbyItems(
+        source,
+        source.kind == MediaSourceKind.fntv && selected.isNotEmpty
+            ? resolved.where((item) => selected.contains(item.sectionId))
+            : resolved);
   }
 
   Map<String, List<MediaItem>> _resolveVisibleEmbyItemsBySection(
@@ -576,6 +606,9 @@ class AppMediaQueryService {
   }
 
   MediaItem _stripArtworkForEmbyCache(MediaItem item) {
+    if (item.sourceKind == MediaSourceKind.fntv) {
+      return item.copyWith(posterHeaders: const {}, backdropHeaders: const {});
+    }
     return item.copyWith(
       posterUrl: '',
       posterHeaders: const <String, String>{},
@@ -603,6 +636,12 @@ class AppMediaQueryService {
     MediaSourceConfig source,
     MediaItem item,
   ) {
+    if (source.kind == MediaSourceKind.fntv) {
+      return item.copyWith(
+          posterHeaders: FntvApiClient.imageHeaders(source, item.posterUrl),
+          backdropHeaders:
+              FntvApiClient.imageHeaders(source, item.backdropUrl));
+    }
     if (item.posterUrl.trim().isNotEmpty || item.id.trim().isEmpty) {
       return item;
     }
@@ -634,7 +673,7 @@ class AppMediaQueryService {
     bool applySelection = true,
   }) async {
     late final List<MediaCollection> collections;
-    if (source.kind == MediaSourceKind.emby) {
+    if (source.kind.isMediaServer) {
       if (!source.hasActiveSession) {
         return const [];
       }
@@ -665,7 +704,7 @@ class AppMediaQueryService {
   }) async {
     try {
       final hasScopedSections = _hasScopedSections(source);
-      if (source.kind == MediaSourceKind.emby) {
+      if (source.kind.isMediaServer) {
         if (!source.hasActiveSession) {
           return const _SourceFetchResult(items: <MediaItem>[]);
         }
