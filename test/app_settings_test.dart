@@ -772,21 +772,14 @@ void main() {
     );
   });
 
-  test('legacy secondary subtitle default migrates once from 75 to 50', () {
-    final migrated = AppSettings.fromJson(
+  test('secondary subtitle scale preserves an explicit value', () {
+    final settings = AppSettings.fromJson(
       const {'playbackSecondarySubtitleScale': 75},
     );
-    expect(migrated.playbackSecondarySubtitleScale, 50);
-
-    final explicitAfterUpgrade = AppSettings.fromJson(const {
-      'playbackSecondarySubtitleScale': 75,
-      'playbackSubtitleStyleDefaultsVersion':
-          kPlaybackSubtitleStyleDefaultsVersion,
-    });
-    expect(explicitAfterUpgrade.playbackSecondarySubtitleScale, 75);
+    expect(settings.playbackSecondarySubtitleScale, 75);
     expect(
-      migrated.toJson()['playbackSubtitleStyleDefaultsVersion'],
-      kPlaybackSubtitleStyleDefaultsVersion,
+      settings.toJson(),
+      isNot(contains('playbackSubtitleStyleDefaultsVersion')),
     );
   });
 

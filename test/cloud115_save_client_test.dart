@@ -155,7 +155,7 @@ void main() {
         throwsA(isA<QuarkSaveException>()));
   });
 
-  test('settings round trip and legacy defaults preserve both providers', () {
+  test('settings round trip preserves non-secret provider settings', () {
     final config = NetworkStorageConfig.fromJson({}).copyWith(
       cloud115Cookie: 'test',
       cloud115SmartStrmTaskName: '115-movies',
@@ -166,7 +166,7 @@ void main() {
     );
     final restored = NetworkStorageConfig.fromJson(config.toJson());
     expect(restored.cloud115SaveFolderId, '42');
-    expect(restored.copyWith(quarkCookie: 'new').cloud115Cookie, 'test');
+    expect(restored.cloud115Cookie, isEmpty);
     expect(restored.quarkCookie, 'quark');
     expect(restored.cloud115SmartStrmTaskName, '115-movies');
     expect(

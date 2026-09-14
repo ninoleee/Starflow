@@ -21,49 +21,6 @@ String mediaSourceResourceIdentity(MediaSourceConfig source) {
   };
 }
 
-bool legacyIndexScopeMatchesSource({
-  required String scopeKey,
-  required MediaSourceConfig source,
-}) {
-  final normalizedScopeKey = scopeKey.trim();
-  if (normalizedScopeKey.isEmpty) {
-    return false;
-  }
-  if (normalizedScopeKey.startsWith('root|')) {
-    final markerIndex = normalizedScopeKey.indexOf('|structure:');
-    final rawRoot = markerIndex < 0
-        ? normalizedScopeKey.substring('root|'.length)
-        : normalizedScopeKey.substring('root|'.length, markerIndex);
-    final expectedRoot = source.libraryPath.trim().isNotEmpty
-        ? source.libraryPath
-        : source.endpoint;
-    return _normalizeLocation(rawRoot) == _normalizeLocation(expectedRoot);
-  }
-  if (!normalizedScopeKey.startsWith('collections|')) {
-    return false;
-  }
-  final markerIndex = normalizedScopeKey.indexOf('|structure:');
-  if (markerIndex < 0) {
-    return false;
-  }
-  final rawIds = normalizedScopeKey.substring(
-    'collections|'.length,
-    markerIndex,
-  );
-  final storedIds = rawIds
-      .split(',')
-      .map(_normalizeLocation)
-      .where((item) => item.isNotEmpty)
-      .toSet();
-  final selectedIds = source.selectedSectionIds
-      .map(_normalizeLocation)
-      .where((item) => item.isNotEmpty)
-      .toSet();
-  return storedIds.isNotEmpty &&
-      storedIds.length == selectedIds.length &&
-      storedIds.containsAll(selectedIds);
-}
-
 String remapMediaSourceLocation(
   String value, {
   required MediaSourceConfig previous,

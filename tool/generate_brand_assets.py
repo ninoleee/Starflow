@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw, ImageFilter
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_DIR = ROOT / "build" / "brand_assets"
 LOGO_SOURCE = ROOT / "assets" / "branding" / "starflow_logo_source.png"
+IOS_DARK_ICON_SOURCE = ROOT / "assets" / "branding" / "starflow_ios_dark_icon_source.png"
 TV_BANNER_HTML = ROOT / "docs" / "starflow_tv_banner.html"
 
 APP_ICON_VIEWPORT = (1024, 1024)
@@ -60,6 +61,10 @@ APP_ICON_TARGETS: dict[Path, tuple[int, int]] = {
     ROOT / "web/icons/Icon-512.png": (512, 512),
     ROOT / "web/icons/Icon-maskable-192.png": (192, 192),
     ROOT / "web/icons/Icon-maskable-512.png": (512, 512),
+}
+
+IOS_DARK_ICON_TARGETS: dict[Path, tuple[int, int]] = {
+    ROOT / "ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-Dark-1024x1024@1x.png": (1024, 1024),
 }
 
 TV_BANNER_TARGETS: dict[Path, tuple[int, int]] = {
@@ -861,6 +866,26 @@ def resize_image(source: Path, destination: Path, size: tuple[int, int]) -> None
     print(f"Generated {destination.relative_to(ROOT)}")
 
 
+def resize_macos_icon(source: Path, destination: Path, size: tuple[int, int]) -> None:
+    """Render macOS icons with platform-appropriate breathing room and corners."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(source) as image:
+        canvas = Image.new("RGBA", size, (0, 0, 0, 0))
+        inset = round(size[0] * 0.11)
+        content_size = (size[0] - inset * 2, size[1] - inset * 2)
+        rendered = image.convert("RGBA").resize(content_size, Image.Resampling.LANCZOS)
+        mask = Image.new("L", content_size, 0)
+        radius = round(content_size[0] * 0.22)
+        ImageDraw.Draw(mask).rounded_rectangle(
+            (0, 0, content_size[0] - 1, content_size[1] - 1),
+            radius=radius,
+            fill=255,
+        )
+        canvas.paste(rendered, (inset, inset), mask)
+        canvas.save(destination)
+    print(f"Generated {destination.relative_to(ROOT)}")
+
+
 def copy_png(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with Image.open(source) as image:
@@ -913,7 +938,13 @@ def main() -> int:
     )
 
     for path, size in APP_ICON_TARGETS.items():
-        resize_image(app_icon_master, path, size)
+        if "/macos/Runner/Assets.xcassets/AppIcon.appiconset/" in path.as_posix():
+            resize_macos_icon(app_icon_master, path, size)
+        else:
+            resize_image(app_icon_master, path, size)
+
+    for path, size in IOS_DARK_ICON_TARGETS.items():
+        resize_image(IOS_DARK_ICON_SOURCE, path, size)
 
     for path, size in TV_BANNER_TARGETS.items():
         resize_image(tv_banner_master, path, size)

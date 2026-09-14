@@ -235,8 +235,7 @@ class _NetworkStorageEditorPageState
     _scheduleAutoSave();
   }
 
-  String _draftFingerprint(NetworkStorageConfig draft) =>
-      jsonEncode({
+  String _draftFingerprint(NetworkStorageConfig draft) => jsonEncode({
         ...draft.toJson(),
         if (_is115) '_localCloud115Cookie': draft.cloud115Cookie,
       });

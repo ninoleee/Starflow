@@ -20,6 +20,7 @@ import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
+import 'package:starflow/features/search/domain/favorite_sync_document.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -184,9 +185,16 @@ class _Harness {
           'resourceUrl': 'https://pan.quark.cn/s/abc'
         }),
     ];
+    var favoriteDocument = FavoriteSyncDocument();
+    for (final favorite in favorites) {
+      favoriteDocument = favoriteDocument.setFavorite(
+        searchResultFavoriteKey(favorite),
+        favorite,
+      );
+    }
     SharedPreferences.setMockInitialValues({
       SearchPreferencesRepository.favoriteResultsPreferenceKey:
-          jsonEncode(favorites.map((e) => e.toJson()).toList()),
+          favoriteDocument.encode(),
     });
     final store = SharedPreferencesStore(await SharedPreferences.getInstance());
     final preferences = SearchPreferencesRepository(preferences: store);

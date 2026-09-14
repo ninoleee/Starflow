@@ -143,9 +143,7 @@ class FavoriteAutoSync extends ChangeNotifier with WidgetsBindingObserver {
       if (!current()) return;
       var merged = local.mergeAll(remote.documents);
       if (merged.entries.isNotEmpty &&
-          (remote.deviceNeedsCompaction ||
-              merged.encodeForSync() !=
-                  remote.deviceDocument?.encodeForSync())) {
+          merged.encodeForSync() != remote.deviceDocument?.encodeForSync()) {
         if (remote.deviceDocument == null) {
           phase = 'createDirectory';
           await service.ensureDirectory(config);

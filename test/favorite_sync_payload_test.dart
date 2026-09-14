@@ -123,6 +123,14 @@ SearchResult richFavorite([String id = 'one']) => SearchResult(
       ),
     );
 
+FavoriteSyncDocument documentWithFavorites(List<SearchResult> items) {
+  var result = FavoriteSyncDocument();
+  for (final item in items) {
+    result = result.setFavorite(searchResultFavoriteKey(item), item);
+  }
+  return result;
+}
+
 FavoriteSyncDocument documentOf(SearchResult result) =>
     FavoriteSyncDocument().setFavorite(searchResultFavoriteKey(result), result);
 
@@ -339,8 +347,8 @@ void main() {
   });
 
   test('rich sample is materially smaller without discarding records', () {
-    final original = FavoriteSyncDocument.fromLegacy(
-        List.generate(50, (i) => richFavorite('$i')));
+    final original =
+        documentWithFavorites(List.generate(50, (i) => richFavorite('$i')));
     final fullBytes = utf8.encode(original.encode()).length;
     final compactBytes = utf8.encode(original.encodeForSync()).length;
     expect(compactBytes, lessThan(fullBytes * 0.4));

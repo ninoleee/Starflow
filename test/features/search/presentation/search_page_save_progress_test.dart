@@ -19,6 +19,7 @@ import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
+import 'package:starflow/features/search/domain/favorite_sync_document.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -77,7 +78,9 @@ class _SaveHarness {
     SharedPreferences.setMockInitialValues({
       if (favorites)
         SearchPreferencesRepository.favoriteResultsPreferenceKey:
-            jsonEncode([result.toJson()]),
+            FavoriteSyncDocument()
+                .setFavorite(searchResultFavoriteKey(result), result)
+                .encode(),
     });
     final preferences = SearchPreferencesRepository(
       preferences:

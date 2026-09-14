@@ -390,7 +390,6 @@ const double kPlaybackSecondarySubtitleScaleMin = 50.0;
 const double kPlaybackSecondarySubtitleScaleMax = 120.0;
 const double kPlaybackSecondarySubtitleScaleStep = 5.0;
 const double kPlaybackSecondarySubtitleScaleDefault = 50.0;
-const int kPlaybackSubtitleStyleDefaultsVersion = 1;
 const int kSubtitleSearchMaxValidatedCandidatesMin = 1;
 const int kSubtitleSearchMaxValidatedCandidatesMax = 20;
 const int kSubtitleSearchMaxValidatedCandidatesDefault = 5;
@@ -1032,8 +1031,7 @@ class NetworkStorageConfig {
     final resolvedRefreshDelaySeconds =
         (json['refreshDelaySeconds'] as num?)?.toInt() ?? 1;
     final resolvedSmartStrmDelaySeconds =
-        (json['smartStrmDelaySeconds'] as num?)?.toInt() ??
-            resolvedRefreshDelaySeconds;
+        (json['smartStrmDelaySeconds'] as num?)?.toInt() ?? 1;
     return NetworkStorageConfig(
       syncDelete115Enabled: json['syncDelete115Enabled'] as bool? ?? false,
       syncDelete115WebDavDirectories:
@@ -1042,7 +1040,6 @@ class NetworkStorageConfig {
               .map((item) => NetworkStorageWebDavDirectory.fromJson(
                   Map<String, dynamic>.from(item)))
               .toList(),
-      cloud115Cookie: json['cloud115Cookie'] as String? ?? '',
       cloud115SmartStrmTaskName:
           json['cloud115SmartStrmTaskName'] as String? ?? '',
       cloud115SaveFolderId: json['cloud115SaveFolderId'] as String? ?? '0',
@@ -1634,8 +1631,6 @@ class AppSettings {
       'playbackPrimarySubtitlePosition': playbackPrimarySubtitlePosition,
       'playbackSecondarySubtitlePosition': playbackSecondarySubtitlePosition,
       'playbackSecondarySubtitleScale': playbackSecondarySubtitleScale,
-      'playbackSubtitleStyleDefaultsVersion':
-          kPlaybackSubtitleStyleDefaultsVersion,
       'onlineSubtitleSources':
           onlineSubtitleSources.map((item) => item.name).toList(),
       'assrtToken': assrtToken,
@@ -1892,14 +1887,10 @@ class AppSettings {
 }
 
 double _parseSecondarySubtitleScale(Map<String, dynamic> json) {
-  final version =
-      (json['playbackSubtitleStyleDefaultsVersion'] as num?)?.toInt() ?? 0;
-  final raw = (json['playbackSecondarySubtitleScale'] as num?)?.toDouble() ??
-      kPlaybackSecondarySubtitleScaleDefault;
-  if (version < kPlaybackSubtitleStyleDefaultsVersion && raw == 75.0) {
-    return kPlaybackSecondarySubtitleScaleDefault;
-  }
-  return clampPlaybackSecondarySubtitleScale(raw);
+  return clampPlaybackSecondarySubtitleScale(
+    (json['playbackSecondarySubtitleScale'] as num?)?.toDouble() ??
+        kPlaybackSecondarySubtitleScaleDefault,
+  );
 }
 
 extension AppSettingsPerformanceX on AppSettings {

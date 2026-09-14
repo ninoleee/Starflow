@@ -82,14 +82,14 @@ void main() {
         client.exchange(token), throwsA(isA<Cloud115LoginException>()));
   });
 
-  test('cookie remains in exported configuration and survives import', () {
+  test('cookie is excluded from exported configuration', () {
     const settings =
         NetworkStorageConfig(cloud115Cookie: 'UID=u; CID=c; SEID=s');
     final json = settings.toJson();
-    expect(json['cloud115Cookie'], settings.cloud115Cookie);
+    expect(json, isNot(contains('cloud115Cookie')));
     expect(
         NetworkStorageConfig.fromJson(jsonDecode(jsonEncode(json)))
             .cloud115Cookie,
-        settings.cloud115Cookie);
+        isEmpty);
   });
 }

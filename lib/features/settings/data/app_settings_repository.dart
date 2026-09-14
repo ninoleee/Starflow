@@ -7,7 +7,6 @@ import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_source_identity.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
-import 'package:starflow/features/settings/domain/webdav_sync_config.dart';
 
 abstract class AppSettingsRepository {
   Future<AppSettings> load();
@@ -33,8 +32,7 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
   Future<AppSettings> load() async {
     final raw = await _preferences.getString(_settingsKey);
     if (raw == null || raw.isEmpty) {
-      final fallback =
-          await _withLegacyWebDavSync(await _loadBundledOrDefaultSettings());
+      final fallback = await _loadBundledOrDefaultSettings();
       await save(fallback);
       return fallback;
     }
@@ -42,27 +40,20 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
     try {
       final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
       final parsed = AppSettings.fromCurrentJson(decoded);
-      final networkStorageJson = decoded['networkStorage'];
-      final legacyCookie = networkStorageJson is Map
-          ? networkStorageJson['cloud115Cookie'] as String?
-          : null;
-      final storedCookie = await _preferences.getString(_cloud115CookieKey);
-      final cookie = storedCookie ?? legacyCookie ?? '';
+      final cookie =
+          await _preferences.getString(_cloud115CookieKey) ?? '';
       final settings = parsed.copyWith(
         networkStorage: parsed.networkStorage.copyWith(
           cloud115Cookie: cookie,
         ),
       );
-      final reconciled = await _withLegacyWebDavSync(
-          reconcileSettingsMediaSourceReferences(settings));
-      if (jsonEncode(settings.toJson()) != jsonEncode(reconciled.toJson()) ||
-          (legacyCookie != null && storedCookie == null)) {
+      final reconciled = reconcileSettingsMediaSourceReferences(settings);
+      if (jsonEncode(settings.toJson()) != jsonEncode(reconciled.toJson())) {
         await save(reconciled);
       }
       return reconciled;
     } catch (_) {
-      final fallback =
-          await _withLegacyWebDavSync(await _loadBundledOrDefaultSettings());
+      final fallback = await _loadBundledOrDefaultSettings();
       await save(fallback);
       return fallback;
     }
@@ -77,20 +68,6 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
       await _preferences.setString(_cloud115CookieKey, cookie);
     }
     await _preferences.setString(_settingsKey, jsonEncode(settings.toJson()));
-  }
-
-  Future<AppSettings> _withLegacyWebDavSync(AppSettings settings) async {
-    if (settings.webDavSync != null) return settings;
-    final raw = await _preferences.getString('starflow.webdavSync.v1');
-    if (raw == null || raw.isEmpty) return settings;
-    try {
-      return settings.copyWith(
-          webDavSync: WebDavSyncConfig.fromJson(
-              Map<String, dynamic>.from(jsonDecode(raw) as Map)));
-    } catch (_) {
-      // Preserve the legacy bytes if they cannot be migrated.
-      return settings;
-    }
   }
 
   Future<AppSettings> _loadBundledOrDefaultSettings() async {

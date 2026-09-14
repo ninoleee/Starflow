@@ -91,12 +91,7 @@ class DefaultMediaSourceCacheLifecycle implements MediaSourceCacheLifecycle {
       }
       final currentIdentity = mediaSourceResourceIdentity(source);
       final storedIdentity = state.sourceIdentity.trim();
-      final identityMatches = storedIdentity.isNotEmpty
-          ? storedIdentity == currentIdentity
-          : legacyIndexScopeMatchesSource(
-              scopeKey: state.scopeKey,
-              source: source,
-            );
+      final identityMatches = storedIdentity == currentIdentity;
       if (!identityMatches) {
         sourceIdsToClear.add(sourceId);
       }

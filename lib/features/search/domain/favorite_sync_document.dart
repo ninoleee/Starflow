@@ -224,23 +224,4 @@ class FavoriteSyncDocument {
     return result;
   }
 
-  factory FavoriteSyncDocument.fromLegacy(List<SearchResult> favorites) {
-    final entries = <String, FavoriteSyncEntry>{};
-    for (var index = 0; index < favorites.length; index++) {
-      final favorite = favorites[index];
-      final key = searchResultFavoriteKey(favorite);
-      entries.putIfAbsent(
-          key,
-          () => FavoriteSyncEntry(
-              key: key,
-              generation: 0,
-              revision: favorites.length - index,
-              operation: 'legacy',
-              position: favorites.length - index,
-              result: favorite));
-    }
-    final result = FavoriteSyncDocument(entries);
-    result.validateCapacity();
-    return result;
-  }
 }

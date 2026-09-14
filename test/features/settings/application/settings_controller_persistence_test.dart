@@ -62,8 +62,7 @@ void main() {
         syncConfig.toJson());
   });
 
-  test('old imports preserve sync connection and explicit imports replace it',
-      () async {
+  test('imports replace the sync connection', () async {
     final repository = _OutOfOrderSettingsRepository(
         SeedData.defaultSettings.copyWith(webDavSync: syncConfig));
     final container = ProviderContainer(overrides: [
@@ -76,7 +75,7 @@ void main() {
     await preferences.load();
     final controller = container.read(settingsControllerProvider.notifier);
     await controller.replaceAllSettings(SeedData.defaultSettings);
-    expect(repository.settings.webDavSync!.toJson(), syncConfig.toJson());
+    expect(repository.settings.webDavSync, isNull);
     const imported = WebDavSyncConfig(
         url: 'https://new.example.com/dav/', password: 'new-password');
     final change = preferences.changes.first;

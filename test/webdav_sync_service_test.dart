@@ -4,12 +4,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/search/domain/favorite_sync_document.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
-import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/data/settings_transfer_service_io.dart';
 import 'package:starflow/features/settings/data/webdav_sync_service.dart';
 
@@ -74,11 +71,9 @@ void main() {
     test('device files sync independently of ETag $header', () async {
       final original = favoriteDocument('own');
       final other = favoriteDocument('other');
-      final legacy = favoriteDocument('legacy');
       final files = {
         ownUri: original,
         otherUri: other,
-        config.favoritesFileUri: legacy
       };
       final requests = <String>[];
       final service = WebDavSyncService(MockClient((request) async {
@@ -109,16 +104,14 @@ void main() {
       }));
       final remote = await service.readFavorites(config, deviceId: deviceId);
       expect(remote.deviceDocument!.encode(), original.encode());
-      expect(remote.deviceNeedsCompaction, isTrue);
       expect(remote.deviceCount, 2);
       final merged = FavoriteSyncDocument().mergeAll(remote.documents);
       expect(merged.favorites.map((e) => e.id).toSet(),
-          {'own', 'other', 'legacy'});
+          {'own', 'other'});
       await service.writeFavorites(config, merged, deviceId: deviceId);
       await service.verifyFavoritesWrite(config, merged, deviceId: deviceId);
       expect(files[otherUri]!.encode(), other.encode());
-      expect(files[config.favoritesFileUri]!.encode(), legacy.encode());
-      expect(requests, ['PROPFIND', 'GET', 'GET', 'GET', 'PUT', 'GET']);
+      expect(requests, ['PROPFIND', 'GET', 'GET', 'PUT', 'GET']);
     });
   }
 
@@ -150,8 +143,7 @@ void main() {
     final remote = await service.readFavorites(config, deviceId: deviceId);
     expect(remote.documents.single.favorites.single.id, 'other');
     expect(remote.deviceDocument, isNull);
-    expect(remote.deviceNeedsCompaction, isFalse);
-    expect(gets, [config.favoritesFileUri, ownUri, otherUri]);
+    expect(gets, [ownUri, otherUri]);
   });
 
   test('own device file is loaded even when missing from cached listing',
@@ -319,7 +311,6 @@ void main() {
     expect(verified.encodeForSync(), sent.encodeForSync());
     expect(verified.favorites.single.posterUrl, isEmpty);
     final remote = await service.readFavorites(config, deviceId: deviceId);
-    expect(remote.deviceNeedsCompaction, isFalse);
     expect(remote.deviceDocument!.encodeForSync(), sent.encodeForSync());
   });
 
@@ -372,41 +363,6 @@ void main() {
             .webDavSync!
             .toJson(),
         config.toJson());
-  });
-
-  test('legacy standalone sync settings migrate into exported app settings',
-      () async {
-    SharedPreferences.setMockInitialValues({
-      'starflow.settings.v2': jsonEncode(SeedData.defaultSettings.toJson()),
-      'starflow.webdavSync.v1': jsonEncode(config.toJson()),
-    });
-    final store = SharedPreferencesStore(await SharedPreferences.getInstance());
-    final repository = LocalAppSettingsRepository(preferences: store);
-    final migrated = await repository.load();
-    expect(migrated.webDavSync!.toJson(), config.toJson());
-    expect(
-        jsonDecode(
-            (await store.getString('starflow.settings.v2'))!)['webDavSync'],
-        config.toJson());
-    await repository
-        .save(migrated.copyWith(webDavSync: const WebDavSyncConfig()));
-    expect((await repository.load()).webDavSync!.url, isEmpty);
-  });
-
-  test('invalid legacy connection cannot discard otherwise valid app settings',
-      () async {
-    SharedPreferences.setMockInitialValues({
-      'starflow.settings.v2': jsonEncode(SeedData.defaultSettings
-          .copyWith(playbackDefaultSpeed: 1.5)
-          .toJson()),
-      'starflow.webdavSync.v1': '{broken',
-    });
-    final store = SharedPreferencesStore(await SharedPreferences.getInstance());
-    final restored =
-        await LocalAppSettingsRepository(preferences: store).load();
-    expect(restored.playbackDefaultSpeed, 1.5);
-    expect(restored.webDavSync, isNull);
-    expect(await store.getString('starflow.webdavSync.v1'), '{broken');
   });
 
   test('encodes directory segments and preserves server base path', () {

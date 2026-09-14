@@ -50,7 +50,6 @@ class WebDavSyncConfig {
       );
 
   Uri get fileUri => directoryUri.resolve('starflow-sync.json');
-  Uri get favoritesFileUri => directoryUri.resolve('starflow-favorites.json');
 
   Uri favoriteDeviceFileUri(String deviceId) {
     if (RegExp(r'^[a-f0-9]{32}$').stringMatch(deviceId) != deviceId) {

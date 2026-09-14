@@ -35,6 +35,13 @@ SearchResult favorite(String id) => SearchResult(
 String key(String id) => searchResultFavoriteKey(favorite(id));
 FavoriteSyncDocument document(String id) =>
     FavoriteSyncDocument().setFavorite(key(id), favorite(id));
+FavoriteSyncDocument documentWithFavorites(List<SearchResult> items) {
+  var result = FavoriteSyncDocument();
+  for (final item in items) {
+    result = result.setFavorite(searchResultFavoriteKey(item), item);
+  }
+  return result;
+}
 
 class MemoryStore implements PreferencesStore {
   final values = <String, Object>{};
@@ -67,15 +74,16 @@ class SyncPreferences extends WebDavSyncPreferences {
 }
 
 class Server {
-  FavoriteSyncDocument? legacy;
+  FavoriteSyncDocument? remoteDocument;
   final deviceFiles = <String, FavoriteSyncDocument>{};
   final compactDevicePaths = <String>{};
   final putPaths = <String>[];
   final putBodies = <String>[];
-  FavoriteSyncDocument? get remote => legacy == null && deviceFiles.isEmpty
+  FavoriteSyncDocument? get remote =>
+      remoteDocument == null && deviceFiles.isEmpty
       ? null
-      : (legacy ?? FavoriteSyncDocument()).mergeAll(deviceFiles.values);
-  set remote(FavoriteSyncDocument? value) => legacy = value;
+      : (remoteDocument ?? FavoriteSyncDocument()).mergeAll(deviceFiles.values);
+  set remote(FavoriteSyncDocument? value) => remoteDocument = value;
   int reads = 0;
   int writes = 0;
   bool offline = false;
@@ -104,9 +112,7 @@ class Server {
     if (request.method == 'GET') {
       reads++;
       await hold?.future;
-      final document = request.url.path.endsWith('/starflow-favorites.json')
-          ? legacy
-          : deviceFiles[request.url.path];
+      final document = deviceFiles[request.url.path] ?? remoteDocument;
       if (document == null) return http.Response('', 404);
       return http.Response.bytes(
           utf8.encode(document.encode(
@@ -161,7 +167,7 @@ void main() {
     await tester.pump();
     expect(server.requests, 0);
     await sync.onFavoritesPageEntered();
-    expect(server.reads, 2);
+    expect(server.reads, 1);
     await container
         .read(webDavSyncPreferencesProvider)
         .save(const WebDavSyncConfig(
@@ -170,7 +176,7 @@ void main() {
         ));
     await tester.pump();
     await sync.onFavoritesPageEntered();
-    expect(server.reads, 2);
+    expect(server.reads, 1);
   });
 
   Future<void> tick(WidgetTester tester) async {
@@ -215,8 +221,8 @@ void main() {
 
   test('multi-device capacity is checked after applying all deletion records',
       () {
-    final full = FavoriteSyncDocument.fromLegacy(
-        List.generate(200, (i) => favorite('$i')));
+    final full =
+        documentWithFavorites(List.generate(200, (i) => favorite('$i')));
     final extra = document('extra');
     final deletion = document('0').setFavorite(key('0'), null);
     final merged = FavoriteSyncDocument().mergeAll([full, extra, deletion]);
@@ -281,25 +287,11 @@ void main() {
         '{broken');
   });
 
-  test(
-      'legacy migration is deterministic and over-capacity merge refuses truncation',
-      () {
-    final items = List.generate(200, (index) => favorite('$index'));
-    final legacy = FavoriteSyncDocument.fromLegacy(items);
-    expect(legacy.favorites.first.id, '0');
-    expect(legacy.encode(), FavoriteSyncDocument.fromLegacy(items).encode());
-    expect(() => legacy.merge(document('extra')), throwsStateError);
-    expect(legacy.favorites.length, 200);
-  });
-
-  test(
-      'repository atomically migrates old list and serializes merge with edits',
-      () async {
+  test('repository serializes merge with edits', () async {
     final store = MemoryStore();
-    store.values[SearchPreferencesRepository.favoriteResultsPreferenceKey] =
-        jsonEncode([favorite('a').toJson()]);
     final repo = SearchPreferencesRepository(preferences: store);
     addTearDown(repo.dispose);
+    await repo.mergeFavoriteSyncDocument(document('a'));
     expect((await repo.loadFavoriteResults()).single.id, 'a');
     await Future.wait([
       repo.mergeFavoriteSyncDocument(document('b')),
@@ -308,8 +300,7 @@ void main() {
     ]);
     final restarted = SearchPreferencesRepository(preferences: store);
     addTearDown(restarted.dispose);
-    await restarted.mergeFavoriteSyncDocument(
-        FavoriteSyncDocument.fromLegacy([favorite('a')]));
+    await restarted.mergeFavoriteSyncDocument(document('a'));
     expect((await restarted.loadFavoriteResults()).map((e) => e.id), ['b']);
     await restarted.mergeFavoriteSyncDocument(document('obsolete'),
         shouldApply: () => false);
@@ -384,53 +375,6 @@ void main() {
     expect(updated.posterHeaders, enriched.posterHeaders);
     expect(updated.imageUrls, result.imageUrls);
     expect(server.putBodies.last, isNot(contains('image-only-secret')));
-  });
-
-  testWidgets('existing full device file is compacted once on a valid trigger',
-      (tester) async {
-    final server = Server();
-    final repo = SearchPreferencesRepository(preferences: MemoryStore());
-    final prefs = SyncPreferences();
-    final result = SearchResult.fromJson({
-      ...favorite('local').toJson(),
-      'summary': 'Local description',
-      'posterUrl': 'https://images.example.com/local.jpg',
-    });
-    await repo.setFavorite(key('local'), result);
-    await repo.setFavorite(key('deleted'), favorite('deleted'));
-    await repo.setFavorite(key('deleted'), null);
-    final original = await repo.loadFavoriteSyncDocument();
-    final path = prefs.config
-        .favoriteDeviceFileUri(await repo.loadFavoriteSyncDeviceId())
-        .path;
-    server.deviceFiles[path] = original;
-    final otherPath = prefs.config
-        .favoriteDeviceFileUri('abcdef0123456789abcdef0123456789')
-        .path;
-    server.deviceFiles[otherPath] = original;
-    server.legacy = original;
-    final sync = FavoriteAutoSync(
-        repository: repo,
-        preferences: prefs,
-        service: WebDavSyncService(MockClient(server.respond)));
-    addTearDown(sync.dispose);
-    addTearDown(repo.dispose);
-    addTearDown(prefs.dispose);
-    sync.start();
-    sync.didChangeAppLifecycleState(AppLifecycleState.resumed);
-    await tick(tester);
-    expect(server.requests, 0);
-    await sync.onFavoritesPageEntered();
-    expect(sync.lastSuccess, isNotNull);
-    expect(server.putPaths, [path]);
-    expect(server.putBodies.single, original.encodeForSync());
-    expect(server.deviceFiles[path]!.entries[key('deleted')]!.deleted, isTrue);
-    expect((await repo.loadFavoriteSyncDocument()).encode(), original.encode());
-    expect(server.deviceFiles[otherPath]!.encode(), original.encode());
-    expect(server.legacy!.encode(), original.encode());
-    await sync.synchronize(manual: true);
-    await sync.synchronize(manual: true);
-    expect(server.putPaths, [path]);
   });
 
   testWidgets(
@@ -632,7 +576,7 @@ void main() {
   });
 
   testWidgets(
-      'device file imports legacy favorites read only and syncs deletions and clear',
+      'device file imports another device read only and syncs deletions and clear',
       (tester) async {
     final server = Server()
       ..remote = document('remote').merge(document('remove'))
@@ -658,7 +602,7 @@ void main() {
     expect(sync.lastSuccess, isNotNull);
     expect(server.writes, 1);
     expect(server.deviceFiles.length, 1);
-    expect(server.legacy!.favorites.map((e) => e.id).toSet(),
+    expect(server.remoteDocument!.favorites.map((e) => e.id).toSet(),
         {'remote', 'remove'});
     expect(
         server.remote!.favorites.map((e) => e.id).toSet(), {'remote', 'local'});
@@ -729,11 +673,13 @@ void main() {
       final prefs = SyncPreferences();
       await repo.setFavorite(key('local'), favorite('local'));
       final holdPreflight = Completer<void>();
+      var holdFirstRead = true;
       final sync = FavoriteAutoSync(
           repository: repo,
           preferences: prefs,
           service: WebDavSyncService(MockClient((request) async {
-            if (request.method == 'GET' && server.reads == 1) {
+            if (request.method == 'GET' && holdFirstRead) {
+              holdFirstRead = false;
               await holdPreflight.future;
             }
             return server.respond(request);
@@ -746,7 +692,8 @@ void main() {
       final pending = sync.onFavoritesPageEntered();
       await tick(tester);
       expect(sync.running, isTrue);
-      expect(server.reads, 1);
+      expect(server.reads, 0);
+      expect(server.requests, 1);
       if (cancelBy == 'background') {
         sync.didChangeAppLifecycleState(AppLifecycleState.paused);
       } else {
@@ -906,7 +853,7 @@ void main() {
     await sync.onFavoritesPageEntered();
     expect(server.requests, 0);
     await sync.synchronize(manual: true);
-    expect(server.reads, 2);
+    expect(server.reads, 1);
     sync.dispose();
 
     final restarted = FavoriteAutoSync(
@@ -914,12 +861,12 @@ void main() {
     restarted.start();
     restarted.didChangeAppLifecycleState(AppLifecycleState.resumed);
     await tick(tester);
-    expect(server.reads, 2);
+    expect(server.reads, 1);
     await Future.wait([
       restarted.onFavoritesPageEntered(),
       restarted.onFavoritesPageEntered(),
     ]);
-    expect(server.reads, 4);
+    expect(server.reads, 2);
     restarted.dispose();
     repo.dispose();
     prefs.dispose();
@@ -1004,7 +951,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(sync.running, isFalse);
         expect(FocusManager.instance.primaryFocus, same(expectedFocus));
-        expect(server.reads, succeeds ? 3 : 1);
+        expect(server.reads, succeeds ? 2 : 1);
         if (moveAway) {
           await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
           await tester.pumpAndSettle();
@@ -1107,7 +1054,7 @@ void main() {
       expect(server.reads, startupReads);
       visible.value = true;
       await tester.pumpAndSettle();
-      expect(server.reads, startupReads + 2);
+      expect(server.reads, startupReads + 1);
       final buttonFinder = find.byWidgetPredicate((widget) =>
           widget is StarflowIconButton && widget.focusId == 'favorites:sync');
       final initialRect = tester.getRect(buttonFinder);
@@ -1137,7 +1084,7 @@ void main() {
       server.hold!.complete();
       await tester.pumpAndSettle();
       if (syncNode != null) expect(syncNode.hasPrimaryFocus, isTrue);
-      expect(server.reads, startupReads + 4);
+      expect(server.reads, startupReads + 2);
       expect(find.text('收藏已同步'), findsOneWidget);
       final reads = server.reads;
       await tester.pump(const Duration(hours: 1));

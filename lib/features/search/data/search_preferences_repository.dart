@@ -72,12 +72,8 @@ class SearchPreferencesRepository {
       return FavoriteSyncDocument();
     }
     final decoded = jsonDecode(raw);
-    if (decoded is List) {
-      return FavoriteSyncDocument.fromLegacy(decoded
-          .map((item) =>
-              SearchResult.fromJson(Map<String, dynamic>.from(item as Map)))
-          .where((item) => item.title.trim().isNotEmpty)
-          .toList());
+    if (decoded is! Map) {
+      throw const FormatException('Invalid favorite sync document');
     }
     return FavoriteSyncDocument.decode(raw);
   }

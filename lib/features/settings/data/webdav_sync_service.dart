@@ -142,7 +142,6 @@ class WebDavSyncService {
           ({
             List<FavoriteSyncDocument> documents,
             FavoriteSyncDocument? deviceDocument,
-            bool deviceNeedsCompaction,
             int deviceCount
           })>
       readFavorites(WebDavSyncConfig config, {required String deviceId}) async {
@@ -154,16 +153,14 @@ class WebDavSyncService {
       return (
         documents: <FavoriteSyncDocument>[],
         deviceDocument: null,
-        deviceNeedsCompaction: false,
         deviceCount: 0
       );
     }
     final devices = _favoriteDevices(listing, config.directoryUri);
     // Read our own file even if a gateway has not refreshed its directory listing.
-    final files = {config.favoritesFileUri, ownUri, ...devices};
+    final files = {ownUri, ...devices};
     final documents = <FavoriteSyncDocument>[];
     FavoriteSyncDocument? own;
-    var deviceNeedsCompaction = false;
     var totalBytes = 0;
     var deviceCount = 0;
     for (final uri in files) {
@@ -186,17 +183,12 @@ class WebDavSyncService {
       documents.add(document);
       if (uri == ownUri) {
         own = document;
-        // Full v1 results always include posterUrl, even when it is empty.
-        deviceNeedsCompaction = (json['entries'] as List).any((entry) =>
-            entry['result'] is Map &&
-            (entry['result'] as Map).containsKey('posterUrl'));
       }
-      if (uri != config.favoritesFileUri) deviceCount++;
+      deviceCount++;
     }
     return (
       documents: documents,
       deviceDocument: own,
-      deviceNeedsCompaction: deviceNeedsCompaction,
       deviceCount: deviceCount
     );
   }

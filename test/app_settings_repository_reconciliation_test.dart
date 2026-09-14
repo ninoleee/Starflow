@@ -1,10 +1,45 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  test('keeps the 115 cookie outside the settings JSON', () async {
+    final preferences = _MemoryPreferencesStore();
+    final repository = LocalAppSettingsRepository(preferences: preferences);
+    final settings = SeedData.defaultSettings.copyWith(
+      networkStorage: const NetworkStorageConfig(
+        cloud115Cookie: 'UID=current; CID=current; SEID=current',
+      ),
+    );
+
+    await repository.save(settings);
+    final loaded = await repository.load();
+    expect(
+      loaded.networkStorage.cloud115Cookie,
+      'UID=current; CID=current; SEID=current',
+    );
+
+    final persisted = jsonDecode(
+      (await preferences.getString('starflow.settings.v2'))!,
+    ) as Map<String, dynamic>;
+    expect(
+      (persisted['networkStorage'] as Map<String, dynamic>),
+      isNot(contains('cloud115Cookie')),
+    );
+    expect(
+      await preferences.getString(
+        'starflow.local-credentials.cloud115-cookie.v1',
+      ),
+      loaded.networkStorage.cloud115Cookie,
+    );
+    expect(jsonEncode(loaded.toJson()), isNot(contains('UID=current')));
+  });
+
   test('reconciles old WebDAV references to the current media source root', () {
     const source = MediaSourceConfig(
       id: 'nas-main',
@@ -131,4 +166,30 @@ void main() {
       isEmpty,
     );
   });
+}
+
+class _MemoryPreferencesStore implements PreferencesStore {
+  final values = <String, Object>{};
+
+  @override
+  Future<String?> getString(String key) async => values[key] as String?;
+
+  @override
+  Future<List<String>?> getStringList(String key) async =>
+      values[key] as List<String>?;
+
+  @override
+  Future<void> setString(String key, String value) async {
+    values[key] = value;
+  }
+
+  @override
+  Future<void> setStringList(String key, List<String> value) async {
+    values[key] = value;
+  }
+
+  @override
+  Future<void> remove(String key) async {
+    values.remove(key);
+  }
 }

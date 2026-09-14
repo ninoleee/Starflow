@@ -539,7 +539,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 115 对已有命名目录预先构建递归转存计划：完整分页读取目标目录，去首尾空白且不区分大小写匹配文件名，同名文件跳过、同名目录下钻，缺失项按目标父目录分批转存。所有读取和冲突检查结束才开始提交；新建目标不额外扫描空目录，无有效保存名时维持直接转存分享顶层结构。多候选、文件/目录冲突、标识缺失或重复、目录名缺失、分页不完整均停止；创建目录必须返回有效 ID，不回退根目录。多批次中途失败显示已确认保存数量，当前批次不确定结果要求先检查远端且不自动重试。全部重复不触发 STRM 或刷新，不以内容哈希或集号去重，不整理历史 `(1)` 目录；也不改变 SmartStrm 的输出命名规则。
 
-115 扫码登录由 `Cloud115LoginClient` 和 `Cloud115LoginPage` 负责：获取二维码、串行轮询、确认后换取 Cookie；页面关闭或刷新时废弃旧请求结果并停止定时器。Cookie 返回网盘编辑器，仍复用普通自动保存链触发保存，但 `NetworkStorageConfig.toJson()` 不输出该字段；本机仓储将 Cookie 写入独立的本地凭据项。普通配置导出、导入、局域网传输和 WebDAV 同步均不携带 115 Cookie，导入配置也不会覆盖当前设备凭据；读取旧配置时会一次性迁移旧字段并清除配置 JSON 中的副本。登录请求不使用记录 HTTP 错误的包装客户端，异常提示不输出响应、二维码令牌或 Cookie。
+115 扫码登录由 `Cloud115LoginClient` 和 `Cloud115LoginPage` 负责：获取二维码、串行轮询、确认后换取 Cookie；页面关闭或刷新时废弃旧请求结果并停止定时器。Cookie 返回网盘编辑器，仍复用普通自动保存链触发保存，但 `NetworkStorageConfig.toJson()` 不输出该字段；本机仓储将 Cookie 写入独立的本地凭据项。普通配置导出、导入、局域网传输和 WebDAV 同步均不携带 115 Cookie，导入配置也不会覆盖当前设备凭据。登录请求不使用记录 HTTP 错误的包装客户端，异常提示不输出响应、二维码令牌或 Cookie。
 
 115 删除由 `Cloud115SyncDeleteService` 独立预检和执行，接入媒体库 WebDAV 删除链。`syncDelete115Enabled / syncDelete115WebDavDirectories` 独立持久化，默认关闭。只匹配精确 sourceId 与 URI 路径段范围，逐层解析监听目录到保存目录的相对路径；STRM 可映射到唯一同名视频。不允许根目录、多个候选或跨网盘重叠，预检失败不会删除 WebDAV。WebDAV 成功后才调用 115 回收站接口，115 失败提示部分完成并保留本地索引。115 不复用夸克的模糊目录匹配、监听路径自动迁移或 403/405 回退。两种网盘的同步删除配置和目录管理均位于各自设置页；目录管理复用现有确认交互，115 使用自己的客户端。直接管理网盘不会清理 STRM 或触发生成任务。
 
@@ -547,7 +547,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全部图片、字幕、NFO 等附属内容。`WebDavNasClient.deleteResource` 对文件和目录均直接读取父目录确认，不复用扫描缓存或排除关键词过滤，也不吞掉读取失败；目录 URI 比较忽略末尾斜杠。`Cloud115SyncDeleteService.execute` 在回收站接口返回成功后完整读取父目录，确认目标 ID 消失才报告成功，未确认不重发写操作。确认弹窗说明整目录及附属文件范围；回归测试在 `test/features/library/data/` 覆盖单季整剧、单季删除、单集删除、特殊字符、独立 `(1)` 路径及远端结果未确认。
 
-115 分享转存由 `Cloud115SaveClient` 与 `Cloud115SaveWorkflowService` 适配公共规则，不作为新的直连媒体源。网盘与转存配置保存独立的 `cloud115Cookie / cloud115SaveFolderId / cloud115SaveFolderPath / cloud115SmartStrmTaskName`，旧配置默认根目录、未登录、无 115 STRM 任务。目录选择器通过可选加载回调复用现有 TV 焦点及面包屑交互。搜索及收藏结果按链接类型分流保存。115 转存有新增内容后先完成可选名称修正，再复用 `SmartStrmWebhookClient` 和公共 Webhook、延迟配置，使用独立 115 任务名及本次实际保存路径（根目录省略路径覆盖），最后调用媒体源刷新协调器安排后台刷新；115 任务名留空时不触发，也不回退到夸克 `smartStrmTaskName`。各自网盘设置页承载自己的任务名与测试按钮，测试使用该页当前草稿中的任务名和默认保存目录；公共 SmartStrm 页只包含 Webhook 和延迟。STRM 失败仍尝试刷新，后续失败保留保存成功状态，后台刷新失败单独提示。Webhook 应答仅表示触发已受理，不等待远端生成任务完成。不调用夸克同步删除；若 STRM 重命名导致相对路径与 115 不同，独立删除预检仍拒绝猜测映射。
+115 分享转存由 `Cloud115SaveClient` 与 `Cloud115SaveWorkflowService` 适配公共规则，不作为新的直连媒体源。网盘与转存配置保存 `cloud115SaveFolderId / cloud115SaveFolderPath / cloud115SmartStrmTaskName` 等非敏感选项；`cloud115Cookie` 只作为当前设备的本地凭据参与运行，不进入配置 JSON。旧配置默认根目录、未登录、无 115 STRM 任务。目录选择器通过可选加载回调复用现有 TV 焦点及面包屑交互。搜索及收藏结果按链接类型分流保存。115 转存有新增内容后先完成可选名称修正，再复用 `SmartStrmWebhookClient` 和公共 Webhook、延迟配置，使用独立 115 任务名及本次实际保存路径（根目录省略路径覆盖），最后调用媒体源刷新协调器安排后台刷新；115 任务名留空时不触发，也不回退到夸克 `smartStrmTaskName`。各自网盘设置页承载自己的任务名与测试按钮，测试使用该页当前草稿中的任务名和默认保存目录；公共 SmartStrm 页只包含 Webhook 和延迟。STRM 失败仍尝试刷新，后续失败保留保存成功状态，后台刷新失败单独提示。Webhook 应答仅表示触发已受理，不等待远端生成任务完成。不调用夸克同步删除；若 STRM 重命名导致相对路径与 115 不同，独立删除预检仍拒绝猜测映射。
 
 115 同步删除预检的 `resourcePath` 由 `WebDavNasClient.resolveResourceUri` 从实际删除入口解析，与 DELETE、STRM 读取及 sidecar 地址解析共用同一方法；不使用索引中仅供显示及缓存清理的 `record.resourcePath` 匹配绝对 URI。已入库文件保留原资源 URI，目录和分区相对路径按原 WebDAV 规则补齐域名及路径，不放宽跨域或根目录限制。`115.sync-delete` 记录配置跳过原因、来源范围数量、匹配深度、目标类型和接口确认，异常只记录类型、不写路径正文或凭据。
 
@@ -908,7 +908,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - Android `NativePlaybackMemoryStore` 复用内容未变的已解析快照；每次读取仍核对 SharedPreferences 原始字符串，外部写入、清空和非法内容替换会失效。所有本地写入成功后回填缓存，失败时丢弃已变更对象，跳过偏好返回小对象副本，避免调用方污染快照；持久化键、20 条裁剪和 commit/apply 语义不变。
 - 系统媒体会话发布先用位置、时长、播放/缓冲状态和队列边界这些便宜字段判断是否需要发布，命中后才构建标题、副标题和封面候选；所有会改变这些元数据的路径都会带 `force` 触发一次同步
 - Android `PlaybackSystemSessionManager` 继续每次发布 PlaybackState，`PlaybackSystemSessionUpdatePolicy` 将标题/副标题/时长变化与通知按钮变化分开去重；仅位置、缓冲或速度变化不重建元数据和通知。图标每个管理器最多解码一次，将现有 `1024×1024` 资源以 `inSampleSize=4` 解码；停用/重新激活清空发布状态，通知权限不可用时不标记已发布，恢复后重发。策略与管理器分别有 JVM 回归测试，MPV 共用此 Android 系统媒体去重逻辑。
-- Android / iOS 播放记忆仓库使用带 `reload()` 的 legacy SharedPreferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v1`；首次读取会按 `updatedAt` 合并并迁移旧异步存储快照，返回前台时递增播放历史 revision 使首页和详情页重新读取
+- Android / iOS 播放记忆仓库使用带 `reload()` 的 shared preferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v1`；返回前台时递增播放历史 revision 使首页和详情页重新读取
 - Android 原生播放器每 `10s` 记录一次位置、时长、缓冲位置、缓冲比例、播放态、首帧状态与视频尺寸；位置不连续事件单独记录旧/新位置和 Media3 原因码
 - Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 的 `native_network_speed` 不设置独立背景，直接使用所在顶栏的背景，保留原文字样式和间距。手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
 - Exo 手机 / TV 布局的 `exo_play_pause` 直接放在 `exo_bottom_bar` 左侧、播放时间前面，时间行预留按钮宽度及间距，使用 48dp 按钮及无描边的圆形半透明背景，并随底栏收起。TV 在 XML 和运行时均禁用该按钮焦点，保留状态显示及点击；`PRIMARY` 改为 `exo_progress`，不可聚焦时回退播放器容器。手机中央控制组仅保留快退/快进，播放/暂停仍加入底栏横向焦点链并保留焦点高亮。
@@ -966,20 +966,20 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 ### WebDAV 配置与收藏同步
 
 - `WebDavSyncSettingsPage` 提供独立网络同步入口，复用 TV 输入、按钮和设置页面骨架。连接及开关复用 `SettingsAutoSaveCoordinator` 自动本地保存，以 JSON 指纹去重，250ms 合并连续输入，返回／销毁前冲刷；网络操作等待保存队列完成，保存失败则停止。载入与下载后的表单回填不反向保存旧草稿。移除独立保存按钮，上传 / 下载前仍确认覆盖范围，操作期间禁止重复提交和返回。自动保存不触发 WebDAV 请求。
-- `WebDavSyncConfig` 位于 domain 层，作为可选 `AppSettings.webDavSync` 子对象持久化到统一配置；地址、目录、Basic 账号、范围和自动开关随 JSON 导出及导入恢复。`WebDavSyncPreferences` 的应用内实例委托 `SettingsController` 读写并发布连接变更事件，不再单独写旧键。`LocalAppSettingsRepository` 在配置缺少该字段时将旧 `starflow.webdavSync.v1` 懒迁入，已有新字段（含显式空配置）优先；损坏的旧数据保留且不覆盖有效应用设置。`replaceAllSettings` 保留旧 JSON 未携带的本机连接，显式字段则覆盖。密码以明文随备份导出，不是系统钥匙串；收藏文档仍不包含配置。
+- `WebDavSyncConfig` 位于 domain 层，作为可选 `AppSettings.webDavSync` 子对象持久化到统一配置；地址、目录、Basic 账号、范围和自动开关随 JSON 导出及导入恢复。`WebDavSyncPreferences` 的应用内实例委托 `SettingsController` 读写并发布连接变更事件，不单独写额外键。导入按当前配置直接替换。密码以明文随备份导出，不是系统钥匙串；收藏文档仍不包含配置。
 - `WebDavSyncService` 只负责 WebDAV 协议及快照编解码，复用统一 HTTP 客户端。版本 1 的 `starflow-sync.json` 包含可选的配置和收藏；配置继续校验当前 schema，收藏最多 200 条。
 - 连接测试返回 `WebDavConnectionTestResult`，区分同步目录可访问与子目录待创建。仅当子目录 PROPFIND 返回 404 时再探测基础地址；基础地址 404 提示 WebDAV 接口地址无效，认证／重定向／服务端错误继续失败，不降级为“待创建”。测试不 MKCOL、不上传文件，也不承诺写权限。实际上传或收藏首次写入复用 `ensureDirectory`：每级 MKCOL 后以只读 PROPFIND 验证同源、匹配路径的成功 DAV collection 属性，创建成功状态及 405 均需验证，未确认目录则停止后续文件操作；不创建配置基础地址之外的父目录。协议层记录不含凭据和正文的 `sync.webdav` 响应日志，并在失败提示中区分目录创建、验证及文件读写阶段。
 - 下载先完整解析、校验所选数据，再经 `SettingsController.replaceAllSettings` 应用配置及其缓存清理逻辑，经 `SearchPreferencesRepository` 保存收藏。两个存储写入不是跨仓库事务，设备写入失败可能部分完成；错误会显示，用户可重新下载。搜索及收藏页重新激活时读取最新收藏。
 - 手动上传先读取远端，保留未勾选部分；ETag 可用时使用 `If-Match`，新文件使用 `If-None-Match: *`。手动模式服务器未提供 ETag 时无法保证多设备并发覆盖检测。配置仍只手动定向覆盖。
 - `FavoriteSyncDocument` 定义独立版本 1 收藏文档，各设备固定保存为 `starflow-favorites-<设备ID>.json`。条目以既有 `searchResultFavoriteKey` 标识，成员 generation 与关键元数据 revision 分离；合并先比较成员版本、相同版本删除优先，再比较元数据逻辑版本和随机 operation ID，最终相等时仅比较精简字段。显式重新收藏递增成员版本；海报和其他展示缓存补全保留 generation、revision、operation 与排序位置，只更新本机数据。`mergeAll` 对全部设备及本机记录合并后才验证总容量，避免中间结果尚未应用删除记录就误报超限。删除记录保留且暂不回收，活跃条目超 200 或总记录超 20000 则拒绝写入，不静默截断。
 - `favorite_sync_payload.dart` 以白名单定义同步结果：标题、链接／提取码、收藏文件夹、来源与媒体 ID，以及精简的 `MediaDetailTarget / PlaybackTarget` 导航标识、路径、季集、播放地址和实际播放鉴权头；容器、音视频编码、尺寸、码率及文件大小参与播放选择、缓冲预算或字幕匹配，因此保留。海报／背景／Logo／图片列表及图片鉴权、简介、评分、演职员和本机字幕路径等不在云端载荷中。空字段省略，字符串映射按键排序但保留显式空 header 值；无链接且无详情入口的旧收藏摘要是现有 key 的组成部分，不能省略。`encodeForSync` 用于上传、差异比较和读回验证；默认 `encode` 继续保存完整本地文档，版本 1 读取同时接受完整及精简字段，不更改手动 `starflow-sync.json` 备份格式。搜索／收藏条目隐藏空简介与空标签，精简条目无需伪造展示数据。
-- `SearchPreferencesRepository` 将原 `search.favoriteResults` 数组懒迁移为上述文档；列表和删除记录用同一个偏好键原子保存。写入队列串行处理单条增删、海报更新和远端合并；同步提交时再次读取最新本地记录，避免请求期间的修改丢失。合并后用 `withLocalPresentation` 为仍存活的条目保留本机展示缓存，关键字段仍采用获胜记录（含显式清空）；嵌套详情身份不匹配或播放地址变化时不复用对应旧缓存，删除条目不会恢复。新设备缺图复用既有 `SearchFavoriteMetadataService`，不为同步增加元数据请求。清空收藏也记录删除。格式损坏不回退空列表后上传，读取失败会阻止同步。
+- `SearchPreferencesRepository` 使用上述文档；列表和删除记录用同一个偏好键原子保存。写入队列串行处理单条增删、海报更新和远端合并；同步提交时再次读取最新本地记录，避免请求期间的修改丢失。合并后用 `withLocalPresentation` 为仍存活的条目保留本机展示缓存，关键字段仍采用获胜记录（含显式清空）；嵌套详情身份不匹配或播放地址变化时不复用对应旧缓存，删除条目不会恢复。新设备缺图复用既有 `SearchFavoriteMetadataService`，不为同步增加元数据请求。清空收藏也记录删除。格式损坏不回退空列表后上传，读取失败会阻止同步。
 - 同一仓库通过 `loadFavoriteSyncDeviceId` 在写入队列中加载／生成 128 位随机设备 ID，以 `search.favoriteSyncDeviceId` 单独持久化；仅实际同步时使用，保存失败会停止同步。该 ID 不属于应用配置或收藏正文，导出／导入配置不复制设备身份，清空收藏也不重置；卸载／清除应用数据可能产生新 ID。此为安装身份，不是硬件识别或多进程锁，整份应用数据克隆及同一存储的并行客户端不具备独立写入身份。
 - `FavoriteAutoSync` 只依赖收藏仓库、同步连接偏好与 WebDAV 服务，绝不调用 `SettingsController`。由 `StarflowApp` 保持运行，启动只加载连接偏好和订阅事件，不发起同步。收藏页导航进入调用 `onFavoritesPageEntered`，服务内的运行期标记在首次进入时、异步等待之前置位，之后重进／页面重建／配置重载均不重置；首次未开启或失败也算已进入。新一次 App 运行才重新获得首次进入机会。仓库成功增删的 `favoriteMembershipChanges` 仍触发自动同步。`favoriteChanges` 仅供列表刷新，海报／元数据写入和远端合并不触发同步。没有计时器、延迟防抖、轮询或失败自动重试，连接设置保存只重载配置，恢复前台不触发同步。
 - 同步采用单飞任务，进入页面或手动重复调用复用在途任务；同步期间新发生的增删最多合并为一次立即后续同步。配置变更或离开前台后旧请求结果不再应用，已发出的请求可能完成。失败保留本地修改并等待新的有效事件或手动点击，不安排定时重试。
-- 自动同步开关默认为关且独立于手动收藏范围；启用需确认并保存。自动模式下 UI 禁止手动覆盖收藏，以免旧快照影响合并。原共享 `starflow-favorites.json` 作为只读兼容来源，不删除、不继续上传，旧版本不能读取新设备文件，需升级参与设备；不隐式导入 `starflow-sync.json` 手动备份。更换服务器／目录会将当前本机文档（含删除记录）与新位置合并，不重置本机收藏或设备 ID。
-- 收藏按设备单写者同步：`readFavorites` 返回各设备文档、本设备远端文档与 `deviceNeedsCompaction`；旧完整 v1 结果始终带有 `posterUrl` 键，以此识别本设备文件是否待精简。调用方将所有文档与本机合并，只有非空记录的关键内容不同或本设备旧文件待精简才上传；已精简文件不因本地海报变化反复写入。精简只随原有有效触发执行，不改写其他设备和旧共享文件。设备文件缺失时先 `ensureDirectory`，随后只 PUT 本设备路径，不使用 ETag 或条件头。每次 PUT 后通过 `verifyFavoritesWrite` 重新 GET，按精简编码检查读回文档能涵盖本次上传记录，不要求云端包含本机展示缓存，通过后才合并本机并记录成功。缺失文件、无效内容或丢失变更均失败并保留本地数据。成功同步后的仓库事件实时刷新活跃搜索／收藏页，后台页面激活时重载；状态及本次运行上次成功时间供设置页显示。收藏页右上角使用固定尺寸 `StarflowIconButton` 显示手动同步（含 tooltip、TV focusId、忙碌禁用与完成消息）；自动开关关闭时也可手动合并，不改变开关值。页面导航可见性与 App 生命周期分开判断，避免恢复前台冒充进入收藏页。
-- 设备发现使用同步目录 `PROPFIND Depth: 1`，只接受同源、直接子路径、严格设备文件名及成功 DAV 属性；目录本身也须确认为 collection。目录 404 可等待首次写入创建；列出的设备文件 GET 404、认证失败、无效正文／属性则停止，不将失败当空收藏。即使目录缓存遗漏，仍直接 GET 本设备文件及旧共享文件；最多列出 100 份设备文件，本次读取正文合计上限 16 MB。不会用共享索引文件、DELETE、ETag 探测或新增定时重试；每次同步读取并合并已有设备文件，只更新本机那一份，旧设备与删除记录暂不自动清理。分离路径避免不同安装同时覆盖，服务器保存可靠性及目录／正文的最终可见性仍是必要前提；其他设备新变更等下一次触发再收敛，不承诺实时一致。
+- 自动同步开关默认为关且独立于手动收藏范围；启用需确认并保存。自动模式下 UI 禁止手动覆盖收藏，以免旧快照影响合并。同步只读取当前设备文件格式，不隐式导入 `starflow-sync.json` 手动备份。更换服务器／目录会将当前本机文档（含删除记录）与新位置合并，不重置本机收藏或设备 ID。
+- 收藏按设备单写者同步：`readFavorites` 只列举和读取当前设备文件格式，返回各设备文档与本设备远端文档。调用方将所有文档与本机合并，只有非空记录的关键编码不同才上传；已同步文件不因本地海报变化反复写入。设备文件缺失时先 `ensureDirectory`，随后只 PUT 本设备路径，不使用 ETag 或条件头。每次 PUT 后通过 `verifyFavoritesWrite` 重新 GET，按同步编码检查读回文档能涵盖本次上传记录，不要求云端包含本机展示缓存，通过后才合并本机并记录成功。缺失文件、无效内容或丢失变更均失败并保留本地数据。成功同步后的仓库事件实时刷新活跃搜索／收藏页，后台页面激活时重载；状态及本次运行上次成功时间供设置页显示。收藏页右上角使用固定尺寸 `StarflowIconButton` 显示手动同步（含 tooltip、TV focusId、忙碌禁用与完成消息）；自动开关关闭时也可手动合并，不改变开关值。页面导航可见性与 App 生命周期分开判断，避免恢复前台冒充进入收藏页。
+- 设备发现使用同步目录 `PROPFIND Depth: 1`，只接受同源、直接子路径、严格设备文件名及成功 DAV 属性；目录本身也须确认为 collection。目录 404 可等待首次写入创建；列出的设备文件 GET 404、认证失败、无效正文／属性则停止，不将失败当空收藏。即使目录缓存遗漏，仍直接 GET 本设备文件；最多列出 100 份设备文件，本次读取正文合计上限 16 MB。不会使用 DELETE、ETag 探测或新增定时重试；每次同步读取并合并已有设备文件，只更新本机那一份，其他设备与删除记录暂不自动清理。分离路径避免不同安装同时覆盖，服务器保存可靠性及目录／正文的最终可见性仍是必要前提；其他设备新变更等下一次触发再收敛，不承诺实时一致。
 - `FavoriteSyncTrigger` 区分 `firstEntry / membershipChange / manual / requested`，只记录既有调用来源，不添加新触发。`sync.favorites` 记录开始、成功、失败阶段（含 `device / verify`）、读取的设备数量或过期结果丢弃；`sync.webdav` 为设备文件 PUT 记录 `writeMode: device`，验证失败记录 `readbackMismatch`，不记录收藏正文、账号密码或任意异常正文。
 - 收藏同步图标显式开启 `StarflowIconButton.focusableWhenDisabled`，通过描边控件传给 `TvFocusableAction`：TV 忙碌期间保持原焦点节点可聚焦，但 `onPressed` 仍为 null，不响应重复确认；方向导航继续生效，完成不主动 requestFocus。该选项默认 false，其他按钮及非 TV 触摸禁用行为不变。
 
@@ -1035,7 +1035,6 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 字幕收拢到独立的“字幕”一级页：字幕默认状态、默认字幕、主字幕大小、主/副字幕位置、副字幕大小、在线字幕来源与凭据、在线字幕优先语言、单次最多验证条数
 - 主字幕大小、主字幕位置、副字幕位置和副字幕大小属于全局字段；设置页的步进项每次点击立即入有序保存队列，MPV 播放内修改走 `savePlaybackRuntimePreferences(...)`，Android 原生播放内修改经 Flutter 回调走 `savePlaybackSubtitleStylePreferences(...)`，三条路径最终写同一组 `AppSettings` 字段
 - 主/副字幕位置统一使用 `50%–100%` 范围；设置页使用 `1%` 精细步进，MPV 播放内“更多”和 Android 原生位置选择器使用 `5%` 快速步进。副字幕大小继续使用 `5%` 步进
-- `playbackSubtitleStyleDefaultsVersion` 只负责一次性把旧版未标记的副字幕 `75%` 默认值迁到 `50%`；新版本中用户明确保存的 `75%` 不再被重写
 - 内置 MPV 的触屏交互、卡顿自动恢复和激进性能调优保留在全局设置的独立“MPV”一级页；播放器内的播放设置一级只提供“更多”入口，二级页复用同一组持久化字段，并额外集中提供后台播放与主/副字幕布局
 - 三个页面都不再维护需要手动提交的页面草稿：选择、开关和步进项修改后立即排入持久化队列，文本输入使用 `250ms` 合并窗口；返回时会先把最后草稿加入有序写入队列，再立即关闭页面，不再显示保存确认框或工具栏提交按钮
 - 三个全局设置页各自只写自己那段字段：播放页走 `savePlaybackPreferences(...)`、字幕页走 `savePlaybackSubtitlePreferences(...)`、MPV 页走 `savePlaybackMpvPreferences(...)`；播放器内二级“更多”使用 `savePlaybackRuntimePreferences(...)` 原子保存其当前完整快照，避免连续操作互相覆盖
@@ -1202,7 +1201,7 @@ Android TV 下的设置页还额外做了遥控器适配：
 - Android TV Banner 也由同一脚本生成
 - 启动页首帧图标、Android 启动页主图与 iOS 原生 LaunchImage 也由同一脚本同步生成，保留原图完整构图
 - Android 启动器小图标与 TV 横幅里的 Logo 复用同一份 `assets/branding/starflow_logo_source.png`
-- 小尺寸外部图标采用 Lanczos 缩放，不额外锐化；iOS App Icon 使用无透明通道的 RGB
+- 小尺寸外部图标采用 Lanczos 缩放，不额外锐化；iOS 默认与深色模式 App Icon 都使用无透明通道的 RGB，深色外观由 `assets/branding/starflow_ios_dark_icon_source.png` 生成并在 Asset Catalog 中绑定
 - 旧版品牌文件和生成脚本保存在 `backups/branding/2026-09-07-before-logo-replacement.zip`，不参与运行时资源打包
 - 当前约定以 `build/brand_assets/starflow_app_icon_master.png` 作为统一母版，再缩放到各平台资源，避免手工替换时出现偏移或不对称
 

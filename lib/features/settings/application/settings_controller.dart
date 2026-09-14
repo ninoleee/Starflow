@@ -415,7 +415,6 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     final current = state.value ?? await _repository.load();
     final reconciledSettings = reconcileSettingsMediaSourceReferences(
       settings.copyWith(
-        webDavSync: settings.webDavSync ?? current.webDavSync,
         networkStorage: settings.networkStorage.copyWith(
           // 115 login credentials belong to this device, never to an import.
           cloud115Cookie: current.networkStorage.cloud115Cookie,
