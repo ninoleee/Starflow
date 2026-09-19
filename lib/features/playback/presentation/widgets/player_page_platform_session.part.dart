@@ -111,22 +111,10 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     }
   }
 
-  Future<void> _bindPlaybackSystemSession() async {
-    if (!PlaybackSystemSessionController.isSupportedPlatform ||
-        _playbackSystemSessionBound) {
-      return;
-    }
-    await PlaybackSystemSessionController.attach(_handlePlaybackRemoteCommand);
-    _playbackSystemSessionBound = true;
-  }
+  Future<void> _bindPlaybackSystemSession() =>
+      _platformSession.bind(_handlePlaybackRemoteCommand);
 
-  Future<void> _teardownPlaybackSystemSession() async {
-    if (PlaybackSystemSessionController.isSupportedPlatform) {
-      await PlaybackSystemSessionController.setActive(false);
-      await PlaybackSystemSessionController.detach();
-    }
-    _playbackSystemSessionBound = false;
-  }
+  Future<void> _teardownPlaybackSystemSession() => _platformSession.detach();
 
   Future<void> _syncPlaybackSystemSession({bool force = false}) async {
     if (!PlaybackSystemSessionController.isSupportedPlatform) {
@@ -136,14 +124,14 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
       isForeground: _playbackPageInForeground,
       backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
     )) {
-      await PlaybackSystemSessionController.setActive(false);
+      await _platformSession.deactivate();
       return;
     }
 
     final player = _player;
     if (!_isReady || player == null) {
       if (force) {
-        await PlaybackSystemSessionController.setActive(false);
+        await _platformSession.deactivate();
       }
       return;
     }
@@ -157,70 +145,46 @@ extension _PlayerPageStatePlatformSession on _PlayerPageState {
     final hasPrevious = _episodeQueue?.hasPrevious ?? false;
     final hasNext = _episodeQueue?.hasNext ?? false;
 
-    // Decide with the cheap fields first: while playing this runs on every
-    // position event, and building title/artwork for a tick that publishes
-    // nothing is pure garbage. Every metadata change is paired with a forced
-    // sync, so nothing is lost by gating first.
-    final positionChanged =
-        (position - _lastPlaybackSystemSessionPosition).inSeconds != 0;
-    final hasNonPositionChange =
-        duration != _lastPlaybackSystemSessionDuration ||
-            playing != _lastPlaybackSystemSessionPlaying ||
-            buffering != _lastPlaybackSystemSessionBuffering ||
-            speed != _lastPlaybackSystemSessionSpeed ||
-            hasEpisodeQueue != _lastPlaybackSystemSessionHasEpisodeQueue ||
-            hasPrevious != _lastPlaybackSystemSessionHasPrevious ||
-            hasNext != _lastPlaybackSystemSessionHasNext;
-    final now = DateTime.now();
-    if (!shouldPublishPlaybackSystemSessionUpdate(
+    await _platformSession.publish(
+      progress: (
+        position: position,
+        duration: duration,
+        playing: playing,
+        buffering: buffering,
+        speed: speed,
+        hasEpisodeQueue: hasEpisodeQueue,
+        hasPrevious: hasPrevious,
+        hasNext: hasNext,
+      ),
       force: force,
       isForeground: _playbackPageInForeground,
-      positionChanged: positionChanged,
-      hasNonPositionChange: hasNonPositionChange,
-      lastPublishedAt: _lastPlaybackSystemSessionPublishedAt,
-      now: now,
-    )) {
-      return;
-    }
-
-    final state = PlaybackSystemSessionState(
-      title: _buildPlaybackSystemSessionTitle(),
-      subtitle: _buildPlaybackSystemSessionSubtitle(),
-      position: position,
-      duration: duration,
-      playing: playing,
-      buffering: buffering,
-      speed: speed,
-      artworkCandidates: _buildPlaybackSystemSessionArtworkCandidates(),
-      canSeek: true,
-      hasEpisodeQueue: hasEpisodeQueue,
-      hasPrevious: hasPrevious,
-      hasNext: hasNext,
+      buildState: () => PlaybackSystemSessionState(
+        title: _buildPlaybackSystemSessionTitle(),
+        subtitle: _buildPlaybackSystemSessionSubtitle(),
+        position: position,
+        duration: duration,
+        playing: playing,
+        buffering: buffering,
+        speed: speed,
+        artworkCandidates: _buildPlaybackSystemSessionArtworkCandidates(),
+        canSeek: true,
+        hasEpisodeQueue: hasEpisodeQueue,
+        hasPrevious: hasPrevious,
+        hasNext: hasNext,
+      ),
     );
-
-    _lastPlaybackSystemSessionPosition = state.position;
-    _lastPlaybackSystemSessionDuration = state.duration;
-    _lastPlaybackSystemSessionPlaying = state.playing;
-    _lastPlaybackSystemSessionBuffering = state.buffering;
-    _lastPlaybackSystemSessionSpeed = state.speed;
-    _lastPlaybackSystemSessionHasEpisodeQueue = state.hasEpisodeQueue;
-    _lastPlaybackSystemSessionHasPrevious = state.hasPrevious;
-    _lastPlaybackSystemSessionHasNext = state.hasNext;
-    _lastPlaybackSystemSessionPublishedAt = now;
-
-    await PlaybackSystemSessionController.setActive(true);
-    await PlaybackSystemSessionController.update(state);
   }
 
   Future<void> _handlePlaybackRemoteCommand(
     PlaybackRemoteCommand command,
   ) async {
+    if (!mounted || _player == null) return;
     if (!shouldExposePlaybackSystemSession(
       isForeground: _playbackPageInForeground,
       backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
     )) {
       await _setPlayWhenReady(false);
-      await PlaybackSystemSessionController.setActive(false);
+      await _platformSession.deactivate();
       return;
     }
     switch (command.type) {

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
+import 'package:starflow/core/storage/persistent_image_cache.dart';
 import 'package:starflow/features/home/application/home_feed_load_scheduler.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
@@ -71,11 +72,13 @@ class _AppRuntimeRecoveryBoundaryState
 
   @override
   void didHaveMemoryPressure() {
+    persistentImageCache.clearMemory();
     appLogWarning(
       'app.memory-pressure',
       'Runtime memory pressure received; background work was softened',
       fields: const <String, Object?>{
         'flutterImageCacheClearedByFramework': true,
+        'compressedImageCacheCleared': true,
         'persistentCacheCleared': false,
         'activeRequestsCancelled': false,
       },

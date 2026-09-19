@@ -584,7 +584,8 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
     final latestState = await _store.loadSourceState(normalizedSourceId);
     if (latestState == null ||
         _sourceStateSignature(latestState) != _sourceStateSignature(state) ||
-        (_readInvalidationRevision?.call(normalizedSourceId) ?? 0) != revision) {
+        (_readInvalidationRevision?.call(normalizedSourceId) ?? 0) !=
+            revision) {
       return;
     }
     _libraryMatchCaches[normalizedSourceId] = nextCache;
@@ -608,16 +609,25 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
     try {
       return await load;
     } finally {
-      if (identical(_libraryMatchLoads[key], load)) _libraryMatchLoads.remove(key);
+      if (identical(_libraryMatchLoads[key], load)) {
+        _libraryMatchLoads.remove(key);
+      }
     }
   }
 
-  Future<_NasLibraryMatchCache> _loadLibraryMatchCacheUnshared(String sourceId) async {
+  Future<_NasLibraryMatchCache> _loadLibraryMatchCacheUnshared(
+      String sourceId) async {
     final normalizedSourceId = sourceId.trim();
     final state = await _store.loadSourceState(normalizedSourceId);
     if (state == null) {
       _dropLibraryMatchCache(normalizedSourceId);
-      return _buildLibraryMatchCache(const <NasMediaIndexRecord>[]);
+      return const _NasLibraryMatchCache(
+        records: [],
+        libraryItems: [],
+        itemsByLookupKey: {},
+        seriesGroupsByItemId: {},
+        seriesGroupsBySectionId: {},
+      );
     }
     final invalidationRevision =
         _readInvalidationRevision?.call(normalizedSourceId) ?? 0;
@@ -634,7 +644,8 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
     final nextCache = await _buildLibraryMatchCacheAsync(records);
     final latestState = await _store.loadSourceState(normalizedSourceId);
     if (latestState == null ||
-        (_readInvalidationRevision?.call(normalizedSourceId) ?? 0) != invalidationRevision ||
+        (_readInvalidationRevision?.call(normalizedSourceId) ?? 0) !=
+            invalidationRevision ||
         _sourceStateSignature(latestState) != stateSignature) {
       return _loadLibraryMatchCacheUnshared(sourceId);
     }
@@ -656,65 +667,65 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
     return '${state.lastIndexedAt.toIso8601String()}|${state.recordCount}|${state.scopeKey}|${state.sourceIdentity}';
   }
 
-  Future<_NasLibraryMatchCache> _buildLibraryMatchCacheAsync(List<NasMediaIndexRecord> records) {
+  Future<_NasLibraryMatchCache> _buildLibraryMatchCacheAsync(
+      List<NasMediaIndexRecord> records) {
     final input = (records: records, settings: _readSettingsForRefresh());
     return records.length >= 128
         ? compute(_buildNasLibraryMatchCache, input)
         : Future.value(_buildNasLibraryMatchCache(input));
   }
-
-  _NasLibraryMatchCache _buildLibraryMatchCache(
-    List<NasMediaIndexRecord> records,
-  ) => _buildNasLibraryMatchCache((records: records, settings: _readSettingsForRefresh()));
 }
 
 _NasLibraryMatchCache _buildNasLibraryMatchCache(
     ({List<NasMediaIndexRecord> records, AppSettings settings}) input) {
-    final records = List<NasMediaIndexRecord>.of(input.records)
-      ..sort((left, right) => right.item.addedAt.compareTo(left.item.addedAt));
-    final grouping = _NasMediaIndexerGroupingSupportX(input.settings);
-    final normalizedRecords = List<NasMediaIndexRecord>.unmodifiable(records);
-    final seriesGroups = List<_SeriesRecordGroup>.unmodifiable(
-      grouping.groupSeriesRecords(normalizedRecords),
-    );
-    final recordsBySectionId = <String, List<NasMediaIndexRecord>>{};
-    for (final record in normalizedRecords) {
-      recordsBySectionId
-          .putIfAbsent(record.sectionId.trim(), () => <NasMediaIndexRecord>[])
-          .add(record);
-    }
-    final seriesGroupsBySectionId = <String, Map<String, _SeriesRecordGroup>>{};
-    for (final entry in recordsBySectionId.entries) {
-      seriesGroupsBySectionId[entry.key] = <String, _SeriesRecordGroup>{
-        for (final group in grouping.groupSeriesRecords(entry.value))
-          group.seriesItemId: group,
-      };
-    }
-    final libraryItems = List<MediaItem>.unmodifiable(
-      grouping.materializeLibraryItemsFromGroups(normalizedRecords, seriesGroups),
-    );
-    final itemsByLookupKey = <String, List<MediaItem>>{};
-    for (final item in libraryItems) {
-      for (final lookupKey in <String>[
-        if (item.doubanId.trim().isNotEmpty) 'douban|${item.doubanId.trim()}',
-        if (item.imdbId.trim().isNotEmpty) 'imdb|${item.imdbId.trim().toLowerCase()}',
-        if (item.tmdbId.trim().isNotEmpty) 'tmdb|${item.tmdbId.trim()}',
-        if (grouping._resolveLibraryMatchTvdbId(item).isNotEmpty) 'tvdb|${grouping._resolveLibraryMatchTvdbId(item)}',
-        if (grouping._resolveLibraryMatchWikidataId(item).isNotEmpty) 'wikidata|${grouping._resolveLibraryMatchWikidataId(item).toUpperCase()}',
-      ]) {
-        itemsByLookupKey.putIfAbsent(lookupKey, () => <MediaItem>[]).add(item);
-      }
-    }
-    return _NasLibraryMatchCache(
-      records: normalizedRecords,
-      libraryItems: libraryItems,
-      itemsByLookupKey: itemsByLookupKey,
-      seriesGroupsByItemId: <String, _SeriesRecordGroup>{
-        for (final group in seriesGroups) group.seriesItemId: group,
-      },
-      seriesGroupsBySectionId: seriesGroupsBySectionId,
-    );
+  final records = List<NasMediaIndexRecord>.of(input.records)
+    ..sort((left, right) => right.item.addedAt.compareTo(left.item.addedAt));
+  final grouping = _NasMediaIndexerGroupingSupportX(input.settings);
+  final normalizedRecords = List<NasMediaIndexRecord>.unmodifiable(records);
+  final seriesGroups = List<_SeriesRecordGroup>.unmodifiable(
+    grouping.groupSeriesRecords(normalizedRecords),
+  );
+  final recordsBySectionId = <String, List<NasMediaIndexRecord>>{};
+  for (final record in normalizedRecords) {
+    recordsBySectionId
+        .putIfAbsent(record.sectionId.trim(), () => <NasMediaIndexRecord>[])
+        .add(record);
   }
+  final seriesGroupsBySectionId = <String, Map<String, _SeriesRecordGroup>>{};
+  for (final entry in recordsBySectionId.entries) {
+    seriesGroupsBySectionId[entry.key] = <String, _SeriesRecordGroup>{
+      for (final group in grouping.groupSeriesRecords(entry.value))
+        group.seriesItemId: group,
+    };
+  }
+  final libraryItems = List<MediaItem>.unmodifiable(
+    grouping.materializeLibraryItemsFromGroups(normalizedRecords, seriesGroups),
+  );
+  final itemsByLookupKey = <String, List<MediaItem>>{};
+  for (final item in libraryItems) {
+    for (final lookupKey in <String>[
+      if (item.doubanId.trim().isNotEmpty) 'douban|${item.doubanId.trim()}',
+      if (item.imdbId.trim().isNotEmpty)
+        'imdb|${item.imdbId.trim().toLowerCase()}',
+      if (item.tmdbId.trim().isNotEmpty) 'tmdb|${item.tmdbId.trim()}',
+      if (grouping._resolveLibraryMatchTvdbId(item).isNotEmpty)
+        'tvdb|${grouping._resolveLibraryMatchTvdbId(item)}',
+      if (grouping._resolveLibraryMatchWikidataId(item).isNotEmpty)
+        'wikidata|${grouping._resolveLibraryMatchWikidataId(item).toUpperCase()}',
+    ]) {
+      itemsByLookupKey.putIfAbsent(lookupKey, () => <MediaItem>[]).add(item);
+    }
+  }
+  return _NasLibraryMatchCache(
+    records: normalizedRecords,
+    libraryItems: libraryItems,
+    itemsByLookupKey: itemsByLookupKey,
+    seriesGroupsByItemId: <String, _SeriesRecordGroup>{
+      for (final group in seriesGroups) group.seriesItemId: group,
+    },
+    seriesGroupsBySectionId: seriesGroupsBySectionId,
+  );
+}
 
 class _NasLibraryMatchCache {
   const _NasLibraryMatchCache({

@@ -29,6 +29,8 @@ import 'package:starflow/features/playback/application/active_playback_cleanup.d
 import 'package:starflow/features/playback/application/fntv_session_owner.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
 import 'package:starflow/features/playback/application/mpv_startup_scope.dart';
+import 'package:starflow/features/playback/application/mpv_playback_lifecycle.dart';
+import 'package:starflow/features/playback/application/playback_platform_session_owner.dart';
 import 'package:starflow/features/playback/application/mpv_buffer_progress.dart';
 import 'package:starflow/features/playback/application/playback_subtitle_session_preference.dart';
 import 'package:starflow/features/playback/application/native_playback_episode_queue_policy.dart';
@@ -151,21 +153,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   Player? _player;
   VideoController? _videoController;
-  StreamSubscription<String>? _playerErrorSubscription;
-  StreamSubscription<Track>? _playerSubtitleRenderSubscription;
-  StreamSubscription<Tracks>? _playerSubtitleTracksSubscription;
-  MpvSubtitleRenderBinding? _subtitleRenderBinding;
-  Future<void> Function()? _unobserveSubtitleSid;
+  MpvPlaybackLifecycle _mpvLifecycle = MpvPlaybackLifecycle();
   bool _mpvBitmapSubtitle = false;
-  StreamSubscription<PlayerLog>? _playerLogSubscription;
-  StreamSubscription<bool>? _playerPlayingSubscription;
-  StreamSubscription<bool>? _playerCompletedSubscription;
-  StreamSubscription<Duration>? _playerPositionSubscription;
-  StreamSubscription<Duration>? _playerDurationSubscription;
-  StreamSubscription<int?>? _playerWidthSubscription;
-  StreamSubscription<int?>? _playerHeightSubscription;
-  StreamSubscription<bool>? _playerBufferingSubscription;
-  StreamSubscription<double>? _playerBufferingPercentageSubscription;
   PlaybackTarget? _resolvedTarget;
   PlaybackEpisodeQueue? _episodeQueue;
   _PlaybackNetworkEstimate _networkEstimate =
@@ -175,7 +164,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _isReady = false;
   bool _pictureInPictureSupported = false;
   bool _isInPictureInPictureMode = false;
-  bool _playbackSystemSessionBound = false;
+  final _platformSession = PlaybackPlatformSessionOwner(
+    supported: PlaybackSystemSessionController.isSupportedPlatform,
+    attach: PlaybackSystemSessionController.attach,
+    detach: PlaybackSystemSessionController.detach,
+    setActive: PlaybackSystemSessionController.setActive,
+    update: PlaybackSystemSessionController.update,
+  );
   bool _subtitleDelaySupported = false;
   double _subtitleDelaySeconds = 0;
   bool _mpvDualSubtitleEnabled = false;
@@ -294,15 +289,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           source: _sourceForTarget(target), target: target);
     }
   });
-  Duration _lastPlaybackSystemSessionPosition = Duration.zero;
-  Duration _lastPlaybackSystemSessionDuration = Duration.zero;
-  bool _lastPlaybackSystemSessionPlaying = false;
-  bool _lastPlaybackSystemSessionBuffering = false;
-  double _lastPlaybackSystemSessionSpeed = 1.0;
-  bool _lastPlaybackSystemSessionHasEpisodeQueue = false;
-  bool _lastPlaybackSystemSessionHasPrevious = false;
-  bool _lastPlaybackSystemSessionHasNext = false;
-  DateTime? _lastPlaybackSystemSessionPublishedAt;
   bool _iosBackgroundAudioOnlyRequested = false;
   Player? _iosBackgroundAudioOnlyPlayer;
   VideoTrack? _iosBackgroundPreviousVideoTrack;
@@ -400,14 +386,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     super.dispose();
   }
 
-  Player? _detachActivePlayerState({
+  _DetachedPlayback _detachActivePlayerState({
     bool clearStallRecoveryFlag = true,
   }) {
     _startupGeneration++;
     _startupScope.cancel();
     _stopMpvPerformanceSampling();
     final player = _player;
-    unawaited(_subtitleRenderBinding?.close());
+    final resourcesClosed = _mpvLifecycle.close().catchError((Object error,
+        StackTrace stack) {
+      appLogWarning('playback.dispose', 'MPV resource cleanup failed',
+          error: error, stackTrace: stack);
+    });
+    // Install a fresh owner synchronously; delayed shutdown cannot close it.
+    _mpvLifecycle = MpvPlaybackLifecycle();
+    _mpvBitmapSubtitle = false;
     _player = null;
     _videoController = null;
     _isReady = false;
@@ -418,16 +411,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _runtimeMpvErrorBurstCount = 0;
     _runtimeMpvErrorRecoveryAttempts = 0;
     _runtimeMpvErrorRecoveryInProgress = false;
-    return player;
+    return _DetachedPlayback(player, resourcesClosed, _resolvedTarget);
   }
 
   Future<void> _shutdownDetachedPlayer(
-    Player? player, {
+    _DetachedPlayback detached, {
     required String reason,
     required bool persistProgress,
     required bool teardownPlatformState,
   }) async {
-    final sessionTarget = _resolvedTarget;
+    final player = detached.player;
+    final sessionTarget = detached.target;
     await _finishMpvPerformanceSession(reason: reason, player: player);
     if (persistProgress) {
       await _persistPlaybackProgress(
@@ -435,7 +429,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         playerOverride: player,
       );
     }
-    await _cancelPlayerSubscriptions();
+    await detached.resourcesClosed;
     if (teardownPlatformState) {
       await _teardownPictureInPicture();
       await _teardownPlaybackSystemSession();
@@ -448,55 +442,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     } else if (!_fntvSwitchInProgress && sessionTarget != null) {
       await _fntvSessions.release(sessionTarget);
     }
-  }
-
-  Future<void> _cancelPlayerSubscriptions() async {
-    final subtitleRenderSubscription = _playerSubtitleRenderSubscription;
-    _playerSubtitleRenderSubscription = null;
-    final subtitleTracksSubscription = _playerSubtitleTracksSubscription;
-    _playerSubtitleTracksSubscription = null;
-    final binding = _subtitleRenderBinding;
-    _subtitleRenderBinding = null;
-    final unobserve = _unobserveSubtitleSid;
-    _unobserveSubtitleSid = null;
-    _mpvBitmapSubtitle = false;
-    final errorSubscription = _playerErrorSubscription;
-    final logSubscription = _playerLogSubscription;
-    final playingSubscription = _playerPlayingSubscription;
-    final completedSubscription = _playerCompletedSubscription;
-    final positionSubscription = _playerPositionSubscription;
-    final durationSubscription = _playerDurationSubscription;
-    final widthSubscription = _playerWidthSubscription;
-    final heightSubscription = _playerHeightSubscription;
-    final bufferingSubscription = _playerBufferingSubscription;
-    final bufferingPercentageSubscription =
-        _playerBufferingPercentageSubscription;
-
-    _playerErrorSubscription = null;
-    _playerLogSubscription = null;
-    _playerPlayingSubscription = null;
-    _playerCompletedSubscription = null;
-    _playerPositionSubscription = null;
-    _playerDurationSubscription = null;
-    _playerWidthSubscription = null;
-    _playerHeightSubscription = null;
-    _playerBufferingSubscription = null;
-    _playerBufferingPercentageSubscription = null;
-
-    await binding?.close();
-    await unobserve?.call();
-    await subtitleTracksSubscription?.cancel();
-    await errorSubscription?.cancel();
-    await subtitleRenderSubscription?.cancel();
-    await logSubscription?.cancel();
-    await playingSubscription?.cancel();
-    await completedSubscription?.cancel();
-    await positionSubscription?.cancel();
-    await durationSubscription?.cancel();
-    await widthSubscription?.cancel();
-    await heightSubscription?.cancel();
-    await bufferingSubscription?.cancel();
-    await bufferingPercentageSubscription?.cancel();
   }
 
   Future<void> _handleExternalPlaybackCleanup(String reason) async {
@@ -521,7 +466,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
     if (!_backgroundPlaybackEnabled) {
       unawaited(_setPlayWhenReady(false));
-      unawaited(PlaybackSystemSessionController.setActive(false));
+      unawaited(_platformSession.deactivate());
       return;
     }
     if (_isActivelyPlaying) {
@@ -743,11 +688,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       );
     }
 
-    final player = _detachActivePlayerState();
+    final detached = _detachActivePlayerState();
     _platformStateTornDownBeforePop = true;
     if (!mounted) {
       await _shutdownDetachedPlayer(
-        player,
+        detached,
         reason: reason,
         persistProgress: true,
         teardownPlatformState: true,
@@ -755,12 +700,13 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return;
     }
 
+    final player = detached.player;
     if (player != null) {
       unawaited(player.pause().catchError((_) {}));
     }
     context.pop();
     await _shutdownDetachedPlayer(
-      player,
+      detached,
       reason: reason,
       persistProgress: true,
       teardownPlatformState: true,
@@ -1132,6 +1078,14 @@ class _PictureInPictureAspectRatio {
 
   final int width;
   final int height;
+}
+
+class _DetachedPlayback {
+  const _DetachedPlayback(this.player, this.resourcesClosed, this.target);
+
+  final Player? player;
+  final Future<void> resourcesClosed;
+  final PlaybackTarget? target;
 }
 
 class _OpenedPlayback {

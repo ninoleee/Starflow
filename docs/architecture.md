@@ -20,6 +20,17 @@
 
 ## 1. 总体定位
 
+### 性能实现边界（2026-09-20）
+
+- `bounded_http_request.dart` 管理单请求总期限、正文上限与中止；`AsyncWorkPool` 管理整段异步操作名额。图片传输四路，UI 放行不等于网络完成；IO 缓存使用持有者计数取消共享请求。
+- 详情缓存使用真实 16ms Timer 批量入串行写链；清理先排完已接受更新，dispose 冲刷已接受批次。评分人数 mutation 串行且只写变化 shard，全量保存也跳过字节相同的 shard/manifest。
+- NAS 冷读共享 Future，128 条起在 compute 中排序、全源/分区分组与构建查找表，回填前验证来源状态/revision；尚不是增量按系列重建。搜索 128 条起后台打分/排序，列表筛选按结果引用缓存；来源完成仍增量显示。
+- 首页 seed 按模块类型订阅库修订；豆瓣模块不订阅 NAS/库 revision，最近播放继续订阅历史。集合分页 provider autoDispose。构建信息不再阻塞 runApp，启动阶段移除合计 150ms 人工等待，身份协调与全部模块等待契约保留。
+- 播放记忆共享冷读，大 JSON/较多 series 编码走 compute；不裁剪用户历史/偏好。iOS 仅在 UserDefaults 原文不变时复用解析对象，外部写入仍失效。
+- TMDB/WMDB 已解析结果各最多 512 项 LRU；图片压缩字节仍 256 项/72 MiB，内存压力时只清该内存层。磁盘成功写后最多每小时维护一次，按修改时间淘汰超过 30 天或超过 512 MiB 的文件，最近五分钟文件受保护，故为软上限，不是访问 LRU。字幕过期扫描最多每小时一次。
+- Android 普通日志为单线程后台写、256 条有界队列、配置缓存 1s；满文件保留约半容量完整尾行，崩溃同步写与会话标记保留。Dart 普通日志 16ms 批量、待写最多 256 条/约 1M 字符，超量计数在后续日志报告；关键错误、flush、清理维持串行顺序。预览每文件最多 2 MiB 尾部，在 isolate 解析；导出按块收集，但接口仍返回完整 bytes，不是恒定内存流式导出。
+- 帧监测按约 600 帧或有新帧时满 30 秒汇总 build/raster p50/p95 与超 16.667/33.333ms 数量，250ms 严重长帧告警保留。不能把 Flutter 帧统计当视频首帧或解码掉帧。
+
 Starflow 不是单一播放器，而是一个面向个人影音库的统一入口，把这些能力放进同一个 App：
 
 - 本地媒体源：`Emby`、`飞牛影视`、`WebDAV`、`Quark`
@@ -64,6 +75,17 @@ Starflow 不是单一播放器，而是一个面向个人影音库的统一入�
 `BootstrapController` 的 10 秒总上限不包含上述 `main()` 的前置读取、日志初始化或原生初始化，不能描述为从进程启动到首页的绝对上限。
 
 ## 3. 代码组织
+
+### 组件所有权整理（2026-09-20）
+
+本轮按详情、搜索与转存、缓存、播放器与 iOS 四组推进，验证记录独立见 [重构记录](refactoring-2026-09-20.md)。拆分以任务和资源所有权为边界，不以新增 `part` 文件或主文件行数下降证明解耦与性能收益。
+
+- `DetailLibraryMatchCoordinator` 拥有多来源匹配执行流程，复用 `DetailLibraryMatchService` 的候选模型、评分及合并规则。优先来源阶段结束后才进入后备来源；并发、结果上限和取消检查保持原契约。详情页保留缓存恢复、交互和结果提交。
+- `SearchRequest` 捕获来源选择与查询，`SearchSession` 拥有请求代次、搜索/验链排队、去重及批量发布的不可变视图状态；`SearchShareValidator` 适配两种分享协议。输入、TV 焦点、收藏入口和提示仍在 presentation 层。
+- `CloudSaveDispatcher` 统一搜索、收藏与详情的保存分发、分享凭据准备及错误结果映射；原有 Quark / 115 工作流保留协议差异、零新增行为和 STRM 后处理，页面复用反馈 session。未知 115 失败显示保存未确认，客户端已有的批次未确认提示原样保留，不自动重试。
+- 公共存储仓库保留调用兼容性；`DetailCacheStore` 持有详情数据、串行写链和 revision 通知，`MediaServerCacheStore` 持有媒体服务器分片、manifest、读复用与写队列。公共模型由旧仓库入口导出；持久化 key 与数据格式不变，不因文件拆分触发缓存迁移或远端刷新。
+- `MpvPlaybackLifecycle` 持有实例订阅并组合 `MpvSubtitleSession`，detach 同步隔离旧所有者，清理 Future 随旧播放器传递；字幕 sid 注册迟到时仍由旧所有者移除。`PlaybackPlatformSessionOwner` 持有系统会话绑定、代次和发布快照。页面级自动恢复预算不移入单个实例，也不合并 Dart、Media3 与 AVPlayer 能力；现有 `part` 仍属于页面 library，不能称为全部运行逻辑已独立。
+- iOS `AppDelegate` 保留通道与宿主装配；`NativePlaybackModels / NativePlaybackMemoryStore / NativePlaybackViewController / SettingsDocumentExporter` 分别负责模型、存储、容器和文档导出。Swift 纯模型/存储测试不替代 AVPlayer 真机操作。
 
 ### 2026-09 代码整理
 
@@ -566,7 +588,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 对 `2.巴以 / 5.美国 / 9.韩国` 这类“数字 + 标题”的专题目录，会额外要求同级里存在多个同类兄弟目录，避免把普通数字目录误判成季
 - 明确剧名下面的多个年份分组目录（如 `2025 / 2026（4K）`）保留原目录名作为季名，索引与在线系列查询都继承上级剧名；`4K 12集` 这类只表达画质、版本或总集数且看不出季名的目录会折叠为包装层，文件有明确季号时按文件季号归组，否则进入默认季；媒体源顶层的纯年份目录不会因此被强制吞并
 - 当年份已经作为独立字段识别时，WMDB / TMDB 客户端会从查询标题末尾移除同一个年份；纯年份标题不会被清空，标题中不同年份也不会被误删
-- `LocalStorageCacheRepository._enqueueMergedDetailTargetSave` 用 `scheduleMicrotask` 合并本次 flush 前进入队列的详情目标，再通过 mutation tail 串行写入；不是固定 `16ms` 计时窗，跨事件循环的保存可能分别落盘。编码结果与最后落盘内容完全一致时跳过写入；清理及其他详情变更仍遵守同一串行边界
+- `DetailCacheStore._enqueueMergedDetailTargetSave` 用 `16ms` Timer 合并待保存详情目标，再通过 mutation tail 串行写入；`LocalStorageCacheRepository` 保留公共入口并委托给该组件。编码结果与最后落盘内容完全一致时跳过写入；清理先排完已接受批次，dispose 冲刷批次并停止通知。这保留了组件拆分期间已有的批量写入优化，不再是历史 `scheduleMicrotask` 实现。
 - 一旦当前层被识别为季目录，上一级目录就会作为剧名；像 `怪奇物语/Season 1/Season 2`、`怪奇物语/Stranger.Things.S02.2160p.BluRay.REMUX` 都会把 `怪奇物语` 当剧名
 - 当路径里已经确认存在显式季目录时，即使当前只有一季，也会继续保留“剧 -> 季 -> 集”层级，不再因为单季而直接拍平成集列表
 - 当前实现上，`NasMediaIndexer` 已拆成 grouping / refresh flow / storage access / indexing / refresh support 多个 part 文件；并发预算在 indexer 内按 `source / collection / enrichment item` 三层收口，三层与首页、元数据调度统一读取同一个最大并发设置，并分别受来源最多 `2`、集合和单源补全最多 `4` 的内部保护。同一来源的 sidecar / 在线补全由固定 worker pool 处理，每个条目同时进入全局元数据并发预算；用户主动全量重建的条目使用 maintenance permit，绕过普通后台批次与交互静默等待但仍受并发上限约束；每轮任务开始前读取最新持久化设置，修改后无需重启

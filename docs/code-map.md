@@ -84,10 +84,13 @@ HomePage -> HomePageController -> HomeFeedRepository -> 来源 / 豆瓣 seed
                                                    -> 批量详情缓存装饰
 MediaDetailPage -> DetailPageController -> DetailTargetResolver
                                        -> resolveDetailMetadata
-                                       -> 本地匹配 / 评分 / 季集 / 版本
+                                       -> DetailLibraryMatchCoordinator
+                                       -> 评分 / 季集 / 版本
 ```
 
 详情缓存 revision 只驱动装饰层本地重算，不应重新抓取整轮首页来源。详情被播放器覆盖时保留剧集组件、季选择和滚动，活动状态控制订阅及新增任务。
+
+`detail_library_match_coordinator.dart` 负责优先来源与后备来源两阶段读取、最多两路并发、逐批候选和取消检查；`detail_library_match_service.dart` 提供候选类型、评分与合并规则。页面不再维护另一套同构候选模型，焦点、弹窗和缓存恢复仍属于页面生命周期。
 
 ### 媒体库与存储
 
@@ -103,13 +106,18 @@ AppMediaRepository -> AppMediaQueryService -> MediaServerClient / 本地索引
 - `webdav_nas_client.dart` 的 structure / sidecar / background 文件也是同一 Dart library。普通页面优先读索引，不实时扫全目录。
 - `resource_path_identity.dart` 与 `media_source_identity.dart` 分别处理资源路径和来源身份；不要因元数据身份相同复用不同资源的直链或鉴权头。
 - `library/data/nfo_metadata.dart` 共享 WebDAV / 夸克 XML 字段解析，`details/domain/cached_artwork.dart` 共享图片 URL 与 headers 配对合并；`library/presentation/library_resource_deletion.dart` 复用两级媒体库页面的删除确认。
-- 详情缓存按下一次 microtask flush 前的队列批量写入，不是固定 16ms 窗口；相同编码内容跳过重复持久化。这是本地优化，不改变服务器请求协议。
+- 详情缓存按 16ms Timer 收集批次后进入串行写链；相同编码内容跳过重复持久化。这是本地优化，不改变服务器请求协议。
+
+`local_storage_cache_repository.dart` 保留 provider 和公共兼容入口；`detail_cache_store.dart` 与 `media_server_cache_store.dart` 分别持有详情及分片缓存的读取复用、修改队列和内存状态，`local_storage_cache_models.dart` 保存公共类型并由旧入口导出。重构不改变存储 key 或缓存格式，并保留整理期间已落地的 Timer 批量写入。
 
 ### 搜索、转存与收藏
 
 ```text
-SearchRepository -> 多来源搜索 -> 分享去重 / 验证 -> SearchPage
-用户确认保存 -> QuarkSaveWorkflowService / Cloud115SaveWorkflowService
+SearchPage -> SearchRequest -> SearchSession -> SearchRepository
+                                           -> SearchShareValidator
+           <- 不可变结果快照 / 验证状态 / 进度
+用户确认保存 -> CloudSaveDispatcher
+             -> QuarkSaveWorkflowService / Cloud115SaveWorkflowService
              -> CloudSavePlanner -> 可选名称清理 -> SmartStrmWebhookClient
              -> MediaRefreshCoordinator
 ```
@@ -117,6 +125,8 @@ SearchRepository -> 多来源搜索 -> 分享去重 / 验证 -> SearchPage
 公共规划器负责目录复用、单层展开、递归去重和新增范围；协议客户端只负责各自 API。`CloudSavedNameSanitizer` 仅处理本次新增内容，不能为改名扫描并改写旧内容。115 Cookie 不进入配置 JSON，也不是已接入的直连媒体源。
 
 `cloud_save_postprocessing.dart` 共享 STRM 触发、延迟规范化和保存后刷新失败反馈。来源修改 / 导入时，settings 层通过公共来源路径规则协调夸克与 115 监听目录，删除来源时清理两者引用；不因此放宽实际同步删除的匹配范围。
+
+搜索、收藏与详情在线更新统一经 `cloud_save_dispatcher.dart` 分发到原有两种工作流；共享入口规范化分享凭据、验证网盘配置并返回 `CloudSaveOutcome`。页面只持有忙碌状态和反馈 session；未知 115 转存结果提示先检查网盘，不自动重试写操作。
 
 收藏由 `search_preferences_repository.dart` 持久化，`favorite_auto_sync.dart` 控制可选同步触发，`favorite_sync_document / favorite_sync_payload` 定义版本与精简传输，`settings/data/webdav_sync_service.dart` 负责 WebDAV IO。手动配置快照与每设备收藏文件是不同协议，收藏没有启动定时同步或轮询。
 
@@ -130,6 +140,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 ```
 
 - `player_page.dart` 是页面壳；`presentation/widgets/player_page_*.part.dart` 共享该 library 的状态，分别承载 MPV 启动、调参、恢复、控制、系统会话、运行动作和性能采集。
+- `MpvPlaybackLifecycle` 持有单实例订阅及 `MpvSubtitleSession`，关闭时先失效回调并捕获旧资源的清理 Future；页面级恢复预算不随实例重建重置。`PlaybackPlatformSessionOwner` 持有系统媒体会话绑定、发布快照与生命周期代次，页面继续提供播放状态及遥控命令适配。
 - 非 TV 控件基于 media_kit Adaptive Material / MaterialDesktop，TV 使用专用遥控层；Web 的 `embeddedMpv` 枚举值实际路由浏览器后端，不是浏览器里运行 libmpv。
 - `playback_engine_support.dart` 是平台选项边界；`native_playback_launcher_io.dart` 桥接 Android Exo / iOS AVPlayer，`system_playback_launcher_io.dart` 负责外部应用 / 系统打开。
 - `FntvSessionOwner` 与 `native_fntv_service.dart` 负责转码会话所有权和原生回调，失败 / 迟到的新会话也需释放；Exo 不另写一套 Authx 客户端。
@@ -168,7 +179,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 
 ### iOS 与桌面
 
-- `ios/Runner/AppDelegate.swift` 承载通道和 AVPlayer 容器；`PlaybackSystemSessionBridge.swift` 管共享音频会话、Now Playing、封面及远程控制。
+- `ios/Runner/AppDelegate.swift` 承载 Flutter 通道和宿主装配；`NativePlaybackViewController.swift` 管 AVPlayer 容器，`NativePlaybackModels.swift` 管请求、剧集队列及字幕偏好模型，`NativePlaybackMemoryStore.swift` 管播放记忆，`SettingsDocumentExporter.swift` 管文档导出。`PlaybackSystemSessionBridge.swift` 继续管共享音频会话、Now Playing、封面及远程控制。
 - `NativePlaybackStartupGate / BufferingTuning / StallRecovery / Metrics` 分别管 AVPlayer 启动、缓冲、卡顿和指标；`NativeSubtitleLanguagePolicy.swift` 与 Dart / Kotlin 共用语言 fixture。
 - `ios/Runner/SceneDelegate.swift`、storyboard、Info.plist 和 Xcode 工程属于宿主配置。原生启动页只有深色底，Flutter Logo 是另一层。
 - macOS 的 AppDelegate / MainFlutterWindow、Windows runner、Linux runner 主要负责 Flutter 宿主，不能据目录存在推断有 Android 同等原生播放器或后台会话能力。
@@ -188,6 +199,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 | `scripts/run_web_with_proxy.ps1`、`tool/web_dev_proxy.dart` | 本机 Web 开发转发；无身份验证，CORS 白名单尚未覆盖全部功能 |
 | `scripts/rebuild_media3_audio.sh` | 固定源码重建 ARM 音频 JNI，需已有 AAR 提供 Java 类；非日常启动步骤 |
 | `scripts/test_subtitle_language_contract.swift` | macOS 上独立编译的 Swift 语言契约 runner |
+| `scripts/test_native_playback_storage.swift` | 使用隔离 UserDefaults 验证提取后的 iOS 队列、字幕偏好、续播、裁剪及外部写入失效；不是 AVPlayer 真机测试 |
 | `tool/perf/run_perf_baselines.dart` | 五场景主机子进程计时，跨平台显式提供 `--output` |
 | `tool/generate_brand_assets.py`、`generate_app_icons.swift` | Python 是统一资源导出入口，Swift 是转发兼容入口；使用 PNG 母版及 Edge 横幅渲染 |
 | `tool/debug/manual_nas_grouping_test.dart` | 手动分组诊断，不属于默认 `flutter test` 回归集合 |

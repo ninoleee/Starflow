@@ -24,7 +24,8 @@ class TmdbMetadataClient {
 
   final http.Client _client;
   final MetadataNetworkGuard _networkGuard;
-  final Map<String, TmdbMetadataMatch?> _resolvedMatches = BoundedMemoryMap(512);
+  final Map<String, TmdbMetadataMatch?> _resolvedMatches =
+      BoundedMemoryMap(512);
   final Map<String, Future<TmdbMetadataMatch?>> _inflightMatches = {};
 
   void clearCache() {

@@ -38,6 +38,8 @@ MPV 文本使用 Flutter 字幕层，ASS 样式/动画不完整保留；位图�
 
 `MpvSubtitleRenderBinding` 同时响应所选轨道、完整轨道列表和原生 `sid` 变化，以最新列表补全 codec/image；`auto` 不当作文本轨。元数据尚未到达时暂保留原生显示，识别出文本后再交给 Flutter。属性写入串行合并，关闭后不提交迟到状态，失败写结构化日志并在下次变化时重试。渲染、双字幕候选、剧集偏好及飞牛外挂拒绝共用位图类型判断，兼容仅有 codec 的轨道。
 
+2026-09-20 组件整理后，`MpvSubtitleSession` 统一持有该绑定、轨道订阅和原生 sid 观察器，并归属于单实例的 `MpvPlaybackLifecycle`。detach 先关闭旧所有者，新实例使用新所有者；旧 sid 注册迟到仍需完成反注册，清理不转而操作新实例。选轨规则、字幕解码和渲染策略不因所有权拆分改变。iOS 的字幕偏好模型移到 `NativePlaybackModels.swift`，实际 AVPlayer 选轨仍在 `NativePlaybackViewController.swift`。
+
 Android 使用 `NativeSubtitleRenderer / NativeSubtitleOutput` 合并过时 UI 更新；PGS/VobSub/DVB 积压每轮最多追赶 32 条，只交付追赶后的当前状态，跨轮追赶期间保留最后状态但不补播旧字幕。`BitmapSubtitleSampleStream` 限制 resolver 最多持有一条未来样本，但每帧仍推进 Media3 的呈现/清屏时钟；不限制 extractor 的媒体缓冲。清屏参与同一 UI 队列，seek/换轨/释放使旧更新失效，disable 通过公开 position reset 清空 resolver。时间轴仍由 Media3 管理，不通过固定字幕偏移补偿卡顿，也不保证修复网络未到达或设备解码能力不足造成的延迟。
 
 ## Android 位图解码

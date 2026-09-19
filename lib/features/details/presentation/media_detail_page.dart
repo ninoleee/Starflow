@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 export 'package:starflow/features/details/presentation/detail_page_providers.dart'
     show enrichedDetailTargetProvider;
@@ -20,6 +19,7 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
 import 'package:starflow/features/details/application/detail_external_episode_variant_service.dart';
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
+import 'package:starflow/features/details/application/detail_library_match_coordinator.dart';
 import 'package:starflow/features/details/application/detail_online_resource_update_service.dart';
 import 'package:starflow/features/details/application/detail_page_actions.dart';
 import 'package:starflow/features/details/application/detail_page_controller.dart';
@@ -46,14 +46,12 @@ import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/application/playback_engine_support.dart';
-import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
-import 'package:starflow/features/search/application/cloud115_save_workflow_service.dart';
+import 'package:starflow/features/search/application/cloud_save_dispatcher.dart';
 import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
 import 'package:starflow/features/search/presentation/cloud_save_feedback_controller.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
-import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -278,449 +276,24 @@ Future<MetadataMatchResult?> _tryPreferredMetadataMatch({
   }
 }
 
-List<MediaSourceConfig> _resolvePreferredLibraryMatchSources({
-  required MediaDetailTarget pageSeedTarget,
-  required List<MediaSourceConfig> allowedSources,
-}) {
-  final preferredSourceId = pageSeedTarget.sourceId.trim();
-  if (preferredSourceId.isNotEmpty) {
-    return allowedSources
-        .where((source) => source.id == preferredSourceId)
-        .toList(growable: false);
-  }
-
-  final preferredKind = pageSeedTarget.sourceKind;
-  final preferredSourceName = pageSeedTarget.sourceName.trim().toLowerCase();
-  if (preferredKind == null && preferredSourceName.isEmpty) {
-    return const <MediaSourceConfig>[];
-  }
-
-  return allowedSources.where((source) {
-    if (preferredKind != null && source.kind != preferredKind) {
-      return false;
-    }
-    if (preferredSourceName.isEmpty) {
-      return true;
-    }
-    return source.name.trim().toLowerCase() == preferredSourceName;
-  }).toList(growable: false);
-}
-
-String _libraryMatchSourceKey(MediaSourceConfig source) {
-  return '${source.kind.name}|${source.id}|${source.name.trim().toLowerCase()}';
-}
-
-int _preferredManualMatchItemBoost(
-  MediaItem item,
-  MediaDetailTarget pageSeedTarget,
-) {
-  final preferredSourceId = pageSeedTarget.sourceId.trim();
-  if (preferredSourceId.isNotEmpty &&
-      item.sourceId.trim() != preferredSourceId) {
-    return 0;
-  }
-
-  final preferredSectionId = pageSeedTarget.sectionId.trim();
-  if (preferredSectionId.isNotEmpty &&
-      item.sectionId.trim() == preferredSectionId) {
-    return 100000;
-  }
-
-  final preferredSectionName = pageSeedTarget.sectionName.trim().toLowerCase();
-  if (preferredSectionName.isEmpty) {
-    return 0;
-  }
-  final sectionLabel =
-      '${item.sectionName} ${item.actualAddress}'.trim().toLowerCase();
-  if (item.sectionName.trim().toLowerCase() == preferredSectionName ||
-      sectionLabel.contains(preferredSectionName)) {
-    return 50000;
-  }
-  return 0;
-}
-
-Future<List<Future<List<_LibraryMatchCandidate>> Function()>>
-    _buildLibraryMatchTaskFactories({
-  required MediaRepository mediaRepository,
-  required NasMediaIndexer nasMediaIndexer,
-  required List<MediaSourceConfig> sources,
-  required _LibraryMatchTaskController controller,
-  required MediaDetailTarget pageSeedTarget,
-  required MediaDetailTarget target,
-  required MetadataMatchResult? metadataMatch,
-  required List<_LibraryMatchCandidate> Function(List<MediaItem> items)
-      buildCandidates,
-}) async {
-  const detailLibraryMatchLimit = 2000;
-  final taskFactories = <Future<List<_LibraryMatchCandidate>> Function()>[];
-  final titles = _buildManualMatchTitles(
-    target: target,
-    query: _detailMetadataQuery(target),
-    metadataMatch: metadataMatch,
-  );
-  final year = _resolveManualMatchYear(target, metadataMatch);
-  final doubanId = _resolveManualMatchDoubanId(target, metadataMatch);
-  final imdbId = _resolveManualMatchImdbId(target, metadataMatch);
-  final tmdbId = _resolveManualMatchTmdbId(target, metadataMatch);
-  final tvdbId = _resolveManualMatchTvdbId(target);
-  final wikidataId = _resolveManualMatchWikidataId(target);
-
-  final embySources = sources
-      .where((source) => source.kind.isMediaServer)
-      .toList(growable: false);
-  for (final source in embySources) {
-    controller.throwIfCancelled();
-    taskFactories.add(() async {
-      controller.throwIfCancelled();
-      try {
-        final items = await mediaRepository.loadLibraryMatchItems(
-          source: source,
-          titles: titles,
-          year: year,
-          doubanId: doubanId,
-          imdbId: imdbId,
-          tmdbId: tmdbId,
-          tvdbId: tvdbId,
-          wikidataId: wikidataId,
-          limit: detailLibraryMatchLimit,
-        );
-        controller.throwIfCancelled();
-        return buildCandidates(items);
-      } on _LibraryMatchCancelledException {
-        rethrow;
-      } catch (error, stackTrace) {
-        detailResourceSwitchTrace(
-          'resource.match.source.emby.library.error',
-          fields: {
-            'sourceId': source.id,
-            'sourceName': source.name,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
-        return const <_LibraryMatchCandidate>[];
-      }
-    });
-  }
-
-  final nasSources = sources
-      .where((source) => source.kind == MediaSourceKind.nas)
-      .toList(growable: false);
-  for (final source in nasSources) {
-    taskFactories.add(() async {
-      controller.throwIfCancelled();
-      try {
-        final nasLibrary = await nasMediaIndexer.loadCachedLibraryMatchItems(
-          source,
-          doubanId: _resolveManualMatchDoubanId(target, metadataMatch),
-          imdbId: _resolveManualMatchImdbId(target, metadataMatch),
-          tmdbId: _resolveManualMatchTmdbId(target, metadataMatch),
-          tvdbId: _resolveManualMatchTvdbId(target),
-          wikidataId: _resolveManualMatchWikidataId(target),
-        );
-        controller.throwIfCancelled();
-        return buildCandidates(nasLibrary);
-      } on _LibraryMatchCancelledException {
-        rethrow;
-      } catch (error, stackTrace) {
-        detailResourceSwitchTrace(
-          'resource.match.source.nas.error',
-          fields: {
-            'sourceId': source.id,
-            'sourceName': source.name,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
-        return const <_LibraryMatchCandidate>[];
-      }
-    });
-  }
-
-  final quarkSources = sources
-      .where((source) => source.kind == MediaSourceKind.quark)
-      .toList(growable: false);
-  for (final source in quarkSources) {
-    taskFactories.add(() async {
-      controller.throwIfCancelled();
-      try {
-        final items = await mediaRepository.fetchLibrary(
-          kind: MediaSourceKind.quark,
-          sourceId: source.id,
-          limit: detailLibraryMatchLimit,
-        );
-        controller.throwIfCancelled();
-        return buildCandidates(items);
-      } on _LibraryMatchCancelledException {
-        rethrow;
-      } catch (error, stackTrace) {
-        detailResourceSwitchTrace(
-          'resource.match.source.quark.error',
-          fields: {
-            'sourceId': source.id,
-            'sourceName': source.name,
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
-        return const <_LibraryMatchCandidate>[];
-      }
-    });
-  }
-
-  return taskFactories;
-}
-
-Future<void> _runLibraryMatchTaskFactories({
-  required List<Future<List<_LibraryMatchCandidate>> Function()> taskFactories,
-  required _LibraryMatchTaskController controller,
-  required void Function(_LibraryMatchCandidate candidate) upsert,
-  required List<_LibraryMatchCandidate> Function() snapshot,
-  void Function(List<_LibraryMatchCandidate> matches)? onProgress,
-}) async {
-  const maxConcurrentTasks = 2;
-  var nextTaskIndex = 0;
-
-  Future<void> runWorker() async {
-    while (true) {
-      controller.throwIfCancelled();
-      if (nextTaskIndex >= taskFactories.length) {
-        return;
-      }
-      final taskIndex = nextTaskIndex++;
-      final matches = await taskFactories[taskIndex]();
-      controller.throwIfCancelled();
-      if (matches.isEmpty) {
-        continue;
-      }
-      for (final match in matches) {
-        upsert(match);
-      }
-      onProgress?.call(snapshot());
-    }
-  }
-
-  final workerCount = math.min(maxConcurrentTasks, taskFactories.length);
-  await Future.wait(List.generate(workerCount, (_) => runWorker()));
-}
-
-Future<List<_LibraryMatchCandidate>> _findAllLibraryMatchCandidates({
-  required MediaRepository mediaRepository,
-  required NasMediaIndexer nasMediaIndexer,
-  required List<MediaSourceConfig> allowedSources,
-  required _LibraryMatchTaskController controller,
-  required MediaDetailTarget pageSeedTarget,
-  required MediaDetailTarget target,
-  required String query,
-  required bool skipPreferredSourceSearch,
-  MetadataMatchResult? metadataMatch,
-  void Function(List<_LibraryMatchCandidate> matches)? onProgress,
-}) async {
-  const maxMatches = 32;
-  final titles = _buildManualMatchTitles(
-    target: target,
-    query: query,
-    metadataMatch: metadataMatch,
-  );
-  final year = _resolveManualMatchYear(target, metadataMatch);
-
-  final byId = <String, _LibraryMatchCandidate>{};
-  void upsert(_LibraryMatchCandidate c) {
-    final key = _libraryMatchCandidateKey(c.item);
-    final ex = byId[key];
-    if (ex == null || c.score > ex.score) {
-      byId[key] = c;
-    }
-  }
-
-  List<_LibraryMatchCandidate> snapshot() {
-    final out = byId.values.toList()
-      ..sort((a, b) => b.score.compareTo(a.score));
-    if (out.length <= maxMatches) {
-      return out;
-    }
-    return out.take(maxMatches).toList(growable: false);
-  }
-
-  List<_LibraryMatchCandidate> buildCandidates(List<MediaItem> items) {
-    controller.throwIfCancelled();
-    final matches = _detailLibraryMatchService.buildManualMatchCandidates(
-      target: target,
-      items: items,
-      titles: titles,
-      year: year,
-      metadataMatch: metadataMatch,
-      maxResults: maxMatches,
-    );
-    return matches
-        .map(
-          (candidate) => _LibraryMatchCandidate(
-            item: candidate.item,
-            matchReason: candidate.matchReason,
-            score: candidate.score +
-                _preferredManualMatchItemBoost(
-                  candidate.item,
-                  pageSeedTarget,
-                ),
-          ),
-        )
-        .toList(growable: false);
-  }
-
-  final preferredSources = _resolvePreferredLibraryMatchSources(
-    pageSeedTarget: pageSeedTarget,
-    allowedSources: allowedSources,
-  );
-  final preferredSourceKeys =
-      preferredSources.map(_libraryMatchSourceKey).toSet();
-  final fallbackSources = preferredSourceKeys.isEmpty
-      ? allowedSources
-      : allowedSources
-          .where(
-            (source) =>
-                !preferredSourceKeys.contains(_libraryMatchSourceKey(source)),
-          )
-          .toList(growable: false);
-  final preferredTaskFactories = skipPreferredSourceSearch
-      ? const <Future<List<_LibraryMatchCandidate>> Function()>[]
-      : await _buildLibraryMatchTaskFactories(
-          mediaRepository: mediaRepository,
-          nasMediaIndexer: nasMediaIndexer,
-          sources: preferredSources,
-          controller: controller,
-          pageSeedTarget: pageSeedTarget,
-          target: target,
-          metadataMatch: metadataMatch,
-          buildCandidates: buildCandidates,
-        );
-  final fallbackTaskFactories = await _buildLibraryMatchTaskFactories(
-    mediaRepository: mediaRepository,
-    nasMediaIndexer: nasMediaIndexer,
-    sources: fallbackSources,
-    controller: controller,
-    pageSeedTarget: pageSeedTarget,
-    target: target,
-    metadataMatch: metadataMatch,
-    buildCandidates: buildCandidates,
-  );
-
-  if (preferredTaskFactories.isEmpty && fallbackTaskFactories.isEmpty) {
-    detailResourceSwitchTrace(
-      'resource.match.sources.empty',
-      fields: {
-        'allowedSources': allowedSources
-            .map((item) => '${item.kind.name}:${item.id}')
-            .join(' || '),
-        'preferredSources': preferredSources
-            .map((item) => '${item.kind.name}:${item.id}')
-            .join(' || '),
-        'skipPreferredSourceSearch': skipPreferredSourceSearch,
-      },
-    );
-    return snapshot();
-  }
-
-  if (preferredTaskFactories.isNotEmpty) {
-    await _runLibraryMatchTaskFactories(
-      taskFactories: preferredTaskFactories,
-      controller: controller,
-      upsert: upsert,
-      snapshot: snapshot,
-      onProgress: onProgress,
-    );
-  }
-  if (fallbackTaskFactories.isNotEmpty) {
-    await _runLibraryMatchTaskFactories(
-      taskFactories: fallbackTaskFactories,
-      controller: controller,
-      upsert: upsert,
-      snapshot: snapshot,
-      onProgress: onProgress,
-    );
-  }
-  return snapshot();
-}
-
-class _LibraryMatchTaskController {
-  bool _isCancelled = false;
-
-  bool get cancelled => _isCancelled;
-
-  void cancel() {
-    _isCancelled = true;
-  }
-
-  void throwIfCancelled() {
-    if (_isCancelled) {
-      throw const _LibraryMatchCancelledException();
-    }
-  }
-}
-
-class _LibraryMatchCancelledException implements Exception {
-  const _LibraryMatchCancelledException();
-}
-
 List<MediaSourceConfig> _resolveLibraryMatchSources(AppSettings settings) {
   return _detailLibraryMatchService.resolveLibraryMatchSources(settings);
 }
 
 List<MediaDetailTarget> _candidatesToMergedTargets(
   MediaDetailTarget current,
-  List<_LibraryMatchCandidate> candidates,
+  List<DetailLibraryMatchCandidate> candidates,
   String query,
 ) {
-  final mappedCandidates = candidates
-      .map(
-        (item) => DetailLibraryMatchCandidate(
-          item: item.item,
-          matchReason: item.matchReason,
-          score: item.score,
-        ),
-      )
-      .toList(growable: false);
   return _detailLibraryMatchService.candidatesToMergedTargets(
     current,
-    mappedCandidates,
+    candidates,
     query,
   );
 }
 
-class _LibraryMatchCandidate {
-  const _LibraryMatchCandidate({
-    required this.item,
-    required this.matchReason,
-    required this.score,
-  });
-
-  final MediaItem item;
-  final String matchReason;
-  final double score;
-}
-
-String _libraryMatchCandidateKey(MediaItem item) {
-  final normalizedAddress = _normalizeLibraryMatchPath(item.actualAddress);
-  final normalizedStreamUrl = _normalizeLibraryMatchPath(item.streamUrl);
-  final variantIdentity =
-      normalizedAddress.isNotEmpty ? normalizedAddress : normalizedStreamUrl;
-  return [
-    item.sourceKind.name,
-    item.sourceId.trim(),
-    item.id.trim(),
-    item.playbackItemId.trim(),
-    item.preferredMediaSourceId.trim(),
-    variantIdentity,
-  ].join('|');
-}
-
 String _normalizeLibraryMatchPath(String value) {
-  final trimmed = value.trim();
-  if (trimmed.isEmpty) {
-    return '';
-  }
-  final uri = Uri.tryParse(trimmed);
-  final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
-  return rawPath.replaceAll('\\', '/').trim();
+  return _detailLibraryMatchService.normalizeLibraryMatchPath(value);
 }
 
 List<MediaDetailTarget> _mergeExpandedLibraryChoices(
@@ -892,66 +465,6 @@ String _libraryMatchTargetKey(MediaDetailTarget target) {
   ].join('|');
 }
 
-List<String> _buildManualMatchTitles({
-  required MediaDetailTarget target,
-  required String query,
-  MetadataMatchResult? metadataMatch,
-}) {
-  return _detailLibraryMatchService.buildManualMatchTitles(
-    target: target,
-    query: query,
-    metadataMatch: metadataMatch,
-  );
-}
-
-int _resolveManualMatchYear(
-  MediaDetailTarget target,
-  MetadataMatchResult? metadataMatch,
-) {
-  return _detailLibraryMatchService.resolveManualMatchYear(
-    target,
-    metadataMatch,
-  );
-}
-
-String _resolveManualMatchDoubanId(
-  MediaDetailTarget target,
-  MetadataMatchResult? metadataMatch,
-) {
-  return _detailLibraryMatchService.resolveManualMatchDoubanId(
-    target,
-    metadataMatch,
-  );
-}
-
-String _resolveManualMatchImdbId(
-  MediaDetailTarget target,
-  MetadataMatchResult? metadataMatch,
-) {
-  return _detailLibraryMatchService.resolveManualMatchImdbId(
-    target,
-    metadataMatch,
-  );
-}
-
-String _resolveManualMatchTmdbId(
-  MediaDetailTarget target,
-  MetadataMatchResult? metadataMatch,
-) {
-  return _detailLibraryMatchService.resolveManualMatchTmdbId(
-    target,
-    metadataMatch,
-  );
-}
-
-String _resolveManualMatchTvdbId(MediaDetailTarget target) {
-  return _detailLibraryMatchService.resolveManualMatchTvdbId(target);
-}
-
-String _resolveManualMatchWikidataId(MediaDetailTarget target) {
-  return _detailLibraryMatchService.resolveManualMatchWikidataId(target);
-}
-
 bool _sameMaps(Map<String, String> left, Map<String, String> right) {
   if (left.length != right.length) {
     return false;
@@ -994,7 +507,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   DetailSeriesBrowserRequest? _selectedSeasonRequest;
   bool _deferredDetailContentScheduled = false;
   List<SearchResult> _favoriteSearchResults = const <SearchResult>[];
-  _LibraryMatchTaskController? _activeLibraryMatchController;
+  DetailLibraryMatchTaskController? _activeLibraryMatchController;
   late final DetailPageController _pageController;
   final ValueNotifier<String> _selectedSeasonIdNotifier =
       ValueNotifier<String>('');
@@ -1468,27 +981,25 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           'folderName': favoriteMatch.folderName,
         },
       );
-      final share = prepareSearchResultShareCredentials(favoriteMatch.result);
-      final String message;
-      if (drive == CloudSaveDrive.cloud115) {
-        message = await ref.read(cloud115SaveWorkflowProvider).save(
-              shareUrl: share.resourceUrl,
-              password: searchResultSharePassword(share),
-              saveFolderName: favoriteMatch.folderName,
-              config: networkStorage,
-              onProgress: feedback.showProgress,
-              onBackgroundRefreshFailure: feedback.showRefreshFailure,
-            );
-      } else {
-        final response =
-            await ref.read(quarkSaveWorkflowServiceProvider).saveToQuark(
-                  shareUrl: share.resourceUrl,
-                  saveFolderName: favoriteMatch.folderName,
-                  networkStorage: networkStorage,
-                  onProgress: feedback.showProgress,
-                  onBackgroundRefreshFailure: feedback.showRefreshFailure,
-                );
-        message = response.buildSuccessMessage();
+      final outcome = await ref.read(cloudSaveDispatcherProvider).save(
+            result: favoriteMatch.result,
+            saveFolderName: favoriteMatch.folderName,
+            networkStorage: networkStorage,
+            onProgress: feedback.showProgress,
+            onBackgroundRefreshFailure: feedback.showRefreshFailure,
+          );
+      if (!outcome.isSuccess) {
+        detailResourceSwitchTrace(
+          'online-update.save.error',
+          fields: <String, Object?>{
+            'favoriteId': favoriteMatch.result.id,
+            'errorType': outcome.failureKind?.name,
+          },
+          error: outcome.error,
+          stackTrace: outcome.stackTrace,
+        );
+        feedback.fail(outcome.message);
+        return;
       }
       detailResourceSwitchTrace(
         'online-update.save.done',
@@ -1497,29 +1008,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           'folderName': favoriteMatch.folderName,
         },
       );
-      feedback.complete(message);
-    } on QuarkSaveException catch (error) {
-      detailResourceSwitchTrace(
-        'online-update.save.error',
-        fields: <String, Object?>{
-          'favoriteId': favoriteMatch.result.id,
-          'errorType': 'cloud-save',
-        },
-        error: error,
-      );
-      feedback.fail(error.message);
-    } on SmartStrmWebhookException catch (error) {
-      detailResourceSwitchTrace(
-        'online-update.save.error',
-        fields: <String, Object?>{
-          'favoriteId': favoriteMatch.result.id,
-          'errorType': 'strm-webhook',
-        },
-        error: error,
-      );
-      feedback.fail(
-        drive.smartStrmFailureMessage(error.message),
-      );
+      feedback.complete(outcome.message);
     } catch (error, stackTrace) {
       detailResourceSwitchTrace(
         'online-update.save.error',
@@ -1785,7 +1274,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
   bool _isLibraryMatchActive(
     int sessionId,
-    _LibraryMatchTaskController controller,
+    DetailLibraryMatchTaskController controller,
   ) {
     return _isSessionActive(sessionId) &&
         identical(_activeLibraryMatchController, controller) &&
@@ -2052,7 +1541,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       return;
     }
 
-    final controller = _LibraryMatchTaskController();
+    final controller = DetailLibraryMatchTaskController();
     _cancelActiveLibraryMatch(reason: 'match.restart');
     _activeLibraryMatchController = controller;
     _updateLibraryMatchView(
@@ -2098,10 +1587,11 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             'sessionId': activeSessionId,
           },
         );
-        throw const _LibraryMatchCancelledException();
+        throw const DetailLibraryMatchCancelledException();
       }
       final allowedSources = _resolveLibraryMatchSources(settings);
-      final preferredSources = _resolvePreferredLibraryMatchSources(
+      final preferredSources =
+          DetailLibraryMatchCoordinator.resolvePreferredSources(
         pageSeedTarget: widget.target,
         allowedSources: allowedSources,
       );
@@ -2126,14 +1616,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         },
       );
 
-      final candidates = await _findAllLibraryMatchCandidates(
+      final coordinator = DetailLibraryMatchCoordinator(
         mediaRepository: ref.read(mediaRepositoryProvider),
         nasMediaIndexer: ref.read(nasMediaIndexerProvider),
+      );
+      final candidates = await coordinator.findCandidates(
         allowedSources: allowedSources,
         controller: controller,
         pageSeedTarget: widget.target,
         target: currentTarget,
         query: query,
+        sourceQuery: _detailMetadataQuery(currentTarget),
         skipPreferredSourceSearch: skipPreferredSourceSearch,
         metadataMatch: metadataMatch,
         onProgress: (partialCandidates) {
@@ -2188,7 +1681,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             'candidateCount': candidates.length,
           },
         );
-        throw const _LibraryMatchCancelledException();
+        throw const DetailLibraryMatchCancelledException();
       }
 
       final merged = prioritizeDetailLibraryMatchChoices(
@@ -2303,7 +1796,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           content: Text('匹配到 ${effectiveChoices.length} 个本地资源，可在下方选择'),
         ),
       );
-    } on _LibraryMatchCancelledException {
+    } on DetailLibraryMatchCancelledException {
       detailResourceSwitchTrace(
         'resource.match.cancelled',
         fields: {

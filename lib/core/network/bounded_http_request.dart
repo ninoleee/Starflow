@@ -20,7 +20,8 @@ Future<http.Response> sendBoundedRequest(
       if (!abort.isCompleted) abort.complete();
     }));
   }
-  final request = http.AbortableRequest(method, uri, abortTrigger: abort.future);
+  final request =
+      http.AbortableRequest(method, uri, abortTrigger: abort.future);
   if (headers != null) request.headers.addAll(headers);
   if (body != null) request.body = body;
   final watch = Stopwatch()..start();

@@ -5,20 +5,35 @@ class _NasMediaIndexerGroupingSupportX {
 
   final AppSettings settings;
 
-  List<String> _pathSegments(String value) => NasMediaPathPolicy.pathSegments(value);
-  String _cleanIndexedTitleLabel(String value) => NasMediaPathPolicy.cleanTitleLabel(value);
-  bool _looksLikeSeasonFolderLabel(String value) => looksLikeSeasonFolderLabel(value);
-  bool _looksLikeNumericTopicSeason(String value) => looksLikeNumericTopicSeason(value);
-  int? _parseSeasonNumberFromLabel(String value) => parseSeasonNumberFromFolderLabel(value);
+  List<String> _pathSegments(String value) =>
+      NasMediaPathPolicy.pathSegments(value);
+  String _cleanIndexedTitleLabel(String value) =>
+      NasMediaPathPolicy.cleanTitleLabel(value);
+  bool _looksLikeSeasonFolderLabel(String value) =>
+      looksLikeSeasonFolderLabel(value);
+  bool _looksLikeNumericTopicSeason(String value) =>
+      looksLikeNumericTopicSeason(value);
+  int? _parseSeasonNumberFromLabel(String value) =>
+      parseSeasonNumberFromFolderLabel(value);
   String _normalizeMetadataQueryToken(String value) =>
-      _cleanIndexedTitleLabel(value).toLowerCase().replaceAll(
-        RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'), '');
-  String _resolveLibraryMatchTvdbId(MediaItem item) => item.tvdbId.trim().isNotEmpty
-      ? item.tvdbId.trim() : item.providerIds['Tvdb']?.trim() ??
-          item.providerIds['TVDb']?.trim() ?? item.providerIds['tvdb']?.trim() ?? '';
-  String _resolveLibraryMatchWikidataId(MediaItem item) => item.wikidataId.trim().isNotEmpty
-      ? item.wikidataId.trim() : item.providerIds['Wikidata']?.trim() ??
-          item.providerIds['WikiData']?.trim() ?? item.providerIds['wikidata']?.trim() ?? '';
+      _cleanIndexedTitleLabel(value)
+          .toLowerCase()
+          .replaceAll(RegExp(r'[\s\-_.,:;!?/\\|()\[\]{}<>《》【】"“”·]+'), '');
+  String _resolveLibraryMatchTvdbId(
+          MediaItem item) =>
+      item.tvdbId.trim().isNotEmpty
+          ? item.tvdbId.trim()
+          : item.providerIds['Tvdb']?.trim() ??
+              item.providerIds['TVDb']?.trim() ??
+              item.providerIds['tvdb']?.trim() ??
+              '';
+  String _resolveLibraryMatchWikidataId(MediaItem item) =>
+      item.wikidataId.trim().isNotEmpty
+          ? item.wikidataId.trim()
+          : item.providerIds['Wikidata']?.trim() ??
+              item.providerIds['WikiData']?.trim() ??
+              item.providerIds['wikidata']?.trim() ??
+              '';
   Map<String, String> _mergeProviderIdMaps(Iterable<Map<String, String>> maps) {
     final result = <String, String>{};
     for (final map in maps) {
@@ -30,6 +45,7 @@ class _NasMediaIndexerGroupingSupportX {
     }
     return result;
   }
+
   List<MediaItem> materializeLibraryItems(List<NasMediaIndexRecord> records) {
     final groups = groupSeriesRecords(records);
     return materializeLibraryItemsFromGroups(records, groups);

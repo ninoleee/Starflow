@@ -3,9 +3,18 @@ import 'dart:collection';
 
 /// Slots belong to the operation, not to the lifetime of the calling widget.
 class AsyncWorkPool {
-  AsyncWorkPool(this.capacity) : assert(capacity > 0);
+  AsyncWorkPool(int capacity)
+      : _capacity = capacity,
+        assert(capacity > 0);
 
-  final int capacity;
+  int _capacity;
+  int get capacity => _capacity;
+  set capacity(int value) {
+    if (value < 1) throw ArgumentError.value(value, 'capacity');
+    _capacity = value;
+    _admitWaiting();
+  }
+
   final Queue<Completer<void>> _waiting = Queue();
   int _active = 0;
 
@@ -20,11 +29,15 @@ class AsyncWorkPool {
     try {
       return await operation();
     } finally {
-      if (_waiting.isNotEmpty) {
-        _waiting.removeFirst().complete();
-      } else {
-        _active--;
-      }
+      _active--;
+      _admitWaiting();
+    }
+  }
+
+  void _admitWaiting() {
+    while (_active < capacity && _waiting.isNotEmpty) {
+      _active++;
+      _waiting.removeFirst().complete();
     }
   }
 }

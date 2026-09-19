@@ -61,6 +61,7 @@ class _Harness {
       this.tv = false,
       this.delayCheck = false,
       this.delaySave = false,
+      this.unconfirmedSave = false,
       this.saveFails = false});
 
   final CloudSaveDrive drive;
@@ -70,6 +71,7 @@ class _Harness {
   final bool tv;
   final bool delayCheck;
   final bool delaySave;
+  final bool unconfirmedSave;
   final bool saveFails;
   final pendingCheck = Completer<http.Response>();
   final pendingSave = Completer<void>();
@@ -170,6 +172,7 @@ class _Harness {
     if (is115) expect(body['receive_code'], 'abcd');
     saves.add(provider);
     if (delaySave) await pendingSave.future;
+    if (unconfirmedSave) throw StateError('unknown transfer outcome');
     if (saveFails) return http.Response('blocked', 405);
     saved = true;
     return _response(is115 ? {'state': true} : {'code': 0});
@@ -420,6 +423,21 @@ void main() {
     expect(harness.strmTasks, isEmpty);
     expect(harness.refreshes, isEmpty);
     expect(find.textContaining('HTTP 405'), findsOneWidget);
+  });
+
+  testWidgets('unconfirmed 115 save preserves the warning without retry',
+      (tester) async {
+    final harness = _Harness(unconfirmedSave: true);
+    await harness.pump(tester);
+    await harness.check(tester);
+    await tester.tap(find.text(harness.saveLabel));
+    await tester.pumpAndSettle();
+    expect(harness.saves, [CloudSaveDrive.cloud115]);
+    expect(harness.strmTasks, isEmpty);
+    expect(harness.refreshes, isEmpty);
+    expect(find.textContaining('当前批次结果未确认，请先检查网盘再重试'), findsOneWidget);
+    expect(find.textContaining('unknown transfer outcome'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(

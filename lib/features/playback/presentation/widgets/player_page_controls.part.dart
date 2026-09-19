@@ -985,13 +985,13 @@ extension _PlayerPageStateControls on _PlayerPageState {
         player.state.buffering,
         percentage: player.state.bufferingPercentage,
       );
-      _playerWidthSubscription = player.stream.width.listen((width) {
+      _mpvLifecycle.listen(player.stream.width, (width) {
         _traceWindowsMpvVideoDimensions(
           width: width,
           height: player.state.height,
         );
       });
-      _playerHeightSubscription = player.stream.height.listen((height) {
+      _mpvLifecycle.listen(player.stream.height, (height) {
         _traceWindowsMpvVideoDimensions(
           width: player.state.width,
           height: height,
@@ -999,15 +999,14 @@ extension _PlayerPageStateControls on _PlayerPageState {
       });
     }
     _mpvPerformanceTracker?.onBufferingChanged(player.state.buffering);
-    _playerBufferingSubscription = player.stream.buffering.listen((buffering) {
+    _mpvLifecycle.listen(player.stream.buffering, (buffering) {
       _mpvPerformanceTracker?.onBufferingChanged(buffering);
       _traceWindowsMpvBufferingState(
         buffering,
         percentage: player.state.bufferingPercentage,
       );
     });
-    _playerBufferingPercentageSubscription =
-        player.stream.bufferingPercentage.listen((percentage) {
+    _mpvLifecycle.listen(player.stream.bufferingPercentage, (percentage) {
       final bucket = _bufferingTraceBucket(percentage);
       if (bucket == null || bucket == _lastTracedBufferingBucket) {
         return;

@@ -225,8 +225,8 @@ class AppSearchRepository implements SearchRepository {
       final dedupeKey = searchResultDeduplicationKey(item);
       final previousIndex = seen[dedupeKey];
       if (previousIndex != null) {
-        filtered[previousIndex] = mergeSearchResultShareCredentials(
-            filtered[previousIndex], item);
+        filtered[previousIndex] =
+            mergeSearchResultShareCredentials(filtered[previousIndex], item);
         exclude('duplicate');
         continue;
       }
@@ -251,7 +251,8 @@ class AppSearchRepository implements SearchRepository {
         'allowedCloudTypes': allowedCloudTypes.isEmpty
             ? ['all']
             : allowedCloudTypes
-                .map((code) => SearchCloudTypeX.fromCode(code)?.code ?? 'unknown')
+                .map((code) =>
+                    SearchCloudTypeX.fromCode(code)?.code ?? 'unknown')
                 .toSet()
                 .toList(growable: false),
         'strongMatchEnabled': provider.strongMatchEnabled,

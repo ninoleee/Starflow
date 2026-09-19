@@ -291,9 +291,13 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     late final http.Response response;
     try {
       response = await sendBoundedRequest(
-        _client, request.method, request.url,
-        headers: request.headers, body: request.body,
-        timeout: const Duration(seconds: 30), maxBytes: 32 * 1024 * 1024,
+        _client,
+        request.method,
+        request.url,
+        headers: request.headers,
+        body: request.body,
+        timeout: const Duration(seconds: 30),
+        maxBytes: 32 * 1024 * 1024,
       );
     } catch (_) {
       rethrow;

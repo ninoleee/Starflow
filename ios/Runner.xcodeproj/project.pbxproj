@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A1F0C0712F10100100A0BEEF /* SettingsDocumentExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C0702F10100100A0BEEF /* SettingsDocumentExporter.swift */; };
+		A1F0C0732F10100100A0BEEF /* NativePlaybackModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C0722F10100100A0BEEF /* NativePlaybackModels.swift */; };
+		A1F0C0752F10100100A0BEEF /* NativePlaybackMemoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C0742F10100100A0BEEF /* NativePlaybackMemoryStore.swift */; };
+		A1F0C0772F10100100A0BEEF /* NativePlaybackViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C0762F10100100A0BEEF /* NativePlaybackViewController.swift */; };
         A1F0C0612F10100100A0BEEF /* PlaybackMemoryPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C0602F10100100A0BEEF /* PlaybackMemoryPolicy.swift */; };
         A1F0C0632F10100100A0BEEF /* PlaybackPolicyValues.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C0622F10100100A0BEEF /* PlaybackPolicyValues.swift */; };
         A1F0C0512F10100100A0BEEF /* NativeSubtitleLanguagePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1F0C0502F10100100A0BEEF /* NativeSubtitleLanguagePolicy.swift */; };
@@ -51,6 +55,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A1F0C0702F10100100A0BEEF /* SettingsDocumentExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsDocumentExporter.swift; sourceTree = "<group>"; };
+		A1F0C0722F10100100A0BEEF /* NativePlaybackModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlaybackModels.swift; sourceTree = "<group>"; };
+		A1F0C0742F10100100A0BEEF /* NativePlaybackMemoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlaybackMemoryStore.swift; sourceTree = "<group>"; };
+		A1F0C0762F10100100A0BEEF /* NativePlaybackViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePlaybackViewController.swift; sourceTree = "<group>"; };
         A1F0C0602F10100100A0BEEF /* PlaybackMemoryPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackMemoryPolicy.swift; sourceTree = "<group>"; };
         A1F0C0622F10100100A0BEEF /* PlaybackPolicyValues.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackPolicyValues.swift; sourceTree = "<group>"; };
         A1F0C0502F10100100A0BEEF /* NativeSubtitleLanguagePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSubtitleLanguagePolicy.swift; sourceTree = "<group>"; };
@@ -166,6 +174,10 @@
 				1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */,
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
+				A1F0C0702F10100100A0BEEF /* SettingsDocumentExporter.swift */,
+				A1F0C0722F10100100A0BEEF /* NativePlaybackModels.swift */,
+				A1F0C0742F10100100A0BEEF /* NativePlaybackMemoryStore.swift */,
+				A1F0C0762F10100100A0BEEF /* NativePlaybackViewController.swift */,
                 A1F0C0502F10100100A0BEEF /* NativeSubtitleLanguagePolicy.swift */,
                 A1F0C0602F10100100A0BEEF /* PlaybackMemoryPolicy.swift */,
                 A1F0C0622F10100100A0BEEF /* PlaybackPolicyValues.swift */,
@@ -424,6 +436,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
+				A1F0C0712F10100100A0BEEF /* SettingsDocumentExporter.swift in Sources */,
+				A1F0C0732F10100100A0BEEF /* NativePlaybackModels.swift in Sources */,
+				A1F0C0752F10100100A0BEEF /* NativePlaybackMemoryStore.swift in Sources */,
+				A1F0C0772F10100100A0BEEF /* NativePlaybackViewController.swift in Sources */,
                 A1F0C0512F10100100A0BEEF /* NativeSubtitleLanguagePolicy.swift in Sources */,
                 A1F0C0612F10100100A0BEEF /* PlaybackMemoryPolicy.swift in Sources */,
                 A1F0C0632F10100100A0BEEF /* PlaybackPolicyValues.swift in Sources */,

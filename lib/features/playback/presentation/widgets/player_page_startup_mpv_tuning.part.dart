@@ -66,12 +66,13 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
   }
 
   void _syncMpvSubtitleRendering(Player player) {
-    if (mounted && identical(_player, player)) _subtitleRenderBinding?.refresh();
+    if (mounted && identical(_player, player)) _mpvLifecycle.subtitles.refresh();
   }
 
   Future<void> _bindMpvSubtitleRendering(Player player) async {
     final native = player.platform;
     if (kIsWeb || native == null) return;
+    final subtitles = _mpvLifecycle.subtitles;
     final binding = MpvSubtitleRenderBinding(
       selected: () => player.state.track.subtitle,
       tracks: () => player.state.tracks.subtitle,
@@ -85,29 +86,24 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
       onError: (error, stack) => appLogWarning('subtitle.render.failed',
           'MPV subtitle visibility update failed', error: error, stackTrace: stack),
     );
-    _subtitleRenderBinding = binding;
-    try {
-      await (native as dynamic).observeProperty('sid', (String _) async {
-        binding.refresh();
-      });
-      Future<void> unobserve() async {
+    await subtitles.bind(
+      binding: binding,
+      observe: (refresh) async {
+        await (native as dynamic).observeProperty('sid', (String _) async {
+          refresh();
+        });
+      },
+      unobserve: () async {
         try {
           await (native as dynamic).unobserveProperty('sid');
         } catch (_) {
           // Disposal can finish before the observer registration is cancelled.
         }
-      }
-      if (!mounted || !identical(_player, player) || !identical(_subtitleRenderBinding, binding)) {
-        await binding.close();
-        await unobserve();
-        return;
-      }
-      _unobserveSubtitleSid = unobserve;
-    } catch (error, stack) {
-      appLogWarning('subtitle.observe.failed', 'MPV sid observation unavailable',
-          error: error, stackTrace: stack);
-    }
-    binding.refresh();
+      },
+      onObservationError: (error, stack) => appLogWarning(
+          'subtitle.observe.failed', 'MPV sid observation unavailable',
+          error: error, stackTrace: stack),
+    );
   }
 
   Future<void> _applyMpvNetworkProxy(

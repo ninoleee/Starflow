@@ -212,18 +212,15 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         return;
       }
 
-      _playerErrorSubscription = playback.errorSubscription;
-      _playerLogSubscription = playback.logSubscription;
+      final lifecycle = _mpvLifecycle;
+      lifecycle.retain(playback.errorSubscription);
+      lifecycle.retain(playback.logSubscription);
       await _bindMpvSubtitleRendering(playback.player);
       if (!_isCurrentStartup(generation)) return;
-      _playerSubtitleRenderSubscription = playback.player.stream.track.listen((_) {
-        _syncMpvSubtitleRendering(playback.player);
-      });
-      _playerSubtitleTracksSubscription = playback.player.stream.tracks.listen((_) {
-        _syncMpvSubtitleRendering(playback.player);
-      });
+      lifecycle.subtitles.listen(playback.player.stream.track);
+      lifecycle.subtitles.listen(playback.player.stream.tracks);
       _syncMpvSubtitleRendering(playback.player);
-      _playerPlayingSubscription = playback.player.stream.playing.listen((
+      lifecycle.listen(playback.player.stream.playing, (
         playing,
       ) {
         _traceWindowsMpv(
@@ -246,7 +243,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
           unawaited(_persistPlaybackProgress(force: true));
         }
       });
-      _playerCompletedSubscription = playback.player.stream.completed.listen((
+      lifecycle.listen(playback.player.stream.completed, (
         completed,
       ) {
         if (!completed || !mounted || _player != playback.player) {
@@ -259,7 +256,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
           ),
         );
       });
-      _playerDurationSubscription = playback.player.stream.duration.listen((
+      lifecycle.listen(playback.player.stream.duration, (
         duration,
       ) {
         _latestDuration = duration;
@@ -269,7 +266,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         }
         unawaited(_syncPlaybackSystemSession());
       });
-      _playerPositionSubscription = playback.player.stream.position.listen((
+      lifecycle.listen(playback.player.stream.position, (
         position,
       ) {
         _latestPosition = position;
@@ -320,6 +317,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         },
       );
       unawaited(_syncBackgroundPlayback(enabled: true));
+      unawaited(_bindPlaybackSystemSession());
       if (!_playbackPageInForeground) {
         unawaited(_setIosBackgroundAudioOnly(true));
       }

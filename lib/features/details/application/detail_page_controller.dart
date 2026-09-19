@@ -52,7 +52,6 @@ class DetailPageController {
   int _detailSessionId;
   MediaDetailTarget? _manualOverrideTarget;
   DetailLibraryMatchViewState _libraryMatchView;
-  Object? _activeLibraryMatchToken;
   late final ValueNotifier<MediaDetailTarget?> _manualOverrideTargetNotifier;
   late final ValueNotifier<DetailLibraryMatchViewState>
       _libraryMatchViewNotifier;
@@ -76,7 +75,6 @@ class DetailPageController {
   }
 
   int cancelDetailTasks() {
-    cancelActiveLibraryMatch();
     _detailSessionId += 1;
     return _detailSessionId;
   }
@@ -87,30 +85,6 @@ class DetailPageController {
     required bool isPageVisible,
   }) {
     return isMounted && isPageVisible && _detailSessionId == sessionId;
-  }
-
-  Object startLibraryMatchTask() {
-    final token = Object();
-    _activeLibraryMatchToken = token;
-    return token;
-  }
-
-  void cancelActiveLibraryMatch() {
-    _activeLibraryMatchToken = null;
-  }
-
-  bool isLibraryMatchTaskActive(
-    int sessionId,
-    Object token, {
-    required bool isMounted,
-    required bool isPageVisible,
-  }) {
-    return isSessionActive(
-          sessionId,
-          isMounted: isMounted,
-          isPageVisible: isPageVisible,
-        ) &&
-        identical(_activeLibraryMatchToken, token);
   }
 
   void setManualOverrideTarget(MediaDetailTarget? target) {

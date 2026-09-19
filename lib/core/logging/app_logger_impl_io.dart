@@ -20,9 +20,10 @@ class _IoAppLogService implements AppLogService {
   Future<FileAppLogStorage>? _storageFuture;
   final List<String> _bufferedLines = [];
   int _bufferedChars = 0;
+  int _queuedLines = 0;
+  int _queuedChars = 0;
   int _droppedLines = 0;
   Timer? _batchTimer;
-  bool _drainScheduled = false;
 
   @override
   bool get isEnabled => _enabled;
@@ -78,36 +79,45 @@ class _IoAppLogService implements AppLogService {
       error: error,
       stackTrace: stackTrace,
     );
-    if (_bufferedLines.length >= 256 || _bufferedChars + line.length > 1024 * 1024) {
+    if (_queuedLines + _bufferedLines.length >= 256 ||
+        _queuedChars + _bufferedChars + line.length > 1024 * 1024) {
       _droppedLines++;
       return;
     }
     _bufferedLines.add(line);
     _bufferedChars += line.length;
-    if (!_drainScheduled) {
-      _batchTimer ??= Timer(const Duration(milliseconds: 16), _drainLogs);
-    }
+    _batchTimer ??= Timer(const Duration(milliseconds: 16), _drainLogs);
   }
 
   void _drainLogs() {
     _batchTimer?.cancel();
     _batchTimer = null;
-    if (_drainScheduled || (_bufferedLines.isEmpty && _droppedLines == 0)) return;
-    _drainScheduled = true;
+    if (_bufferedLines.isEmpty && _droppedLines == 0) return;
     final limit = _maxBytes;
+    final lines = _bufferedLines.join();
+    final count = _bufferedLines.length;
+    final chars = _bufferedChars;
+    final dropped = _droppedLines;
+    _queuedLines += count;
+    _queuedChars += chars;
+    _bufferedLines.clear();
+    _bufferedChars = 0;
+    _droppedLines = 0;
     unawaited(_enqueue((storage) async {
-      final lines = _bufferedLines.join();
-      final dropped = _droppedLines;
-      _bufferedLines.clear();
-      _bufferedChars = 0;
-      _droppedLines = 0;
-      _drainScheduled = false;
-      final notice = dropped == 0 ? '' : AppLogFormatter.format(
-        level: AppLogLevel.warning, category: 'app.logging',
-        message: 'Log queue capacity reached', fields: {'droppedRecords': dropped},
-      );
+      final notice = dropped == 0
+          ? ''
+          : AppLogFormatter.format(
+              level: AppLogLevel.warning,
+              category: 'app.logging',
+              message: 'Log queue capacity reached',
+              fields: {'droppedRecords': dropped},
+            );
       await storage.append('$lines$notice', maxBytes: limit);
-    }, swallowErrors: true).catchError((Object _) {}));
+    }, swallowErrors: true)
+        .whenComplete(() {
+      _queuedLines -= count;
+      _queuedChars -= chars;
+    }).catchError((Object _) {}));
   }
 
   @override
@@ -286,7 +296,8 @@ class FileAppLogStorage {
 
   Future<List<AppLogEntry>> read({int limit = 300}) async {
     final path = directory.path;
-    return Isolate.run(() => FileAppLogStorage(Directory(path))._readTail(limit));
+    return Isolate.run(
+        () => FileAppLogStorage(Directory(path))._readTail(limit));
   }
 
   Future<List<AppLogEntry>> _readTail(int limit) async {
@@ -305,7 +316,8 @@ class FileAppLogStorage {
         // A preview is bounded even when a malformed record has no newline.
         final start = (length - 2 * 1024 * 1024).clamp(0, length);
         await handle.setPosition(start);
-        content = utf8.decode(await handle.read(length - start), allowMalformed: true);
+        content = utf8.decode(await handle.read(length - start),
+            allowMalformed: true);
         if (start > 0) {
           final newline = content.indexOf('\n');
           content = newline < 0 ? '' : content.substring(newline + 1);
@@ -344,7 +356,9 @@ class FileAppLogStorage {
       var nonEmpty = false;
       await for (final chunk in file.openRead()) {
         if (chunk.isEmpty) continue;
-        if (!nonEmpty && lastByte != null && lastByte != 0x0A) bytes.addByte(0x0A);
+        if (!nonEmpty && lastByte != null && lastByte != 0x0A) {
+          bytes.addByte(0x0A);
+        }
         nonEmpty = true;
         bytes.add(chunk);
         lastByte = chunk.last;

@@ -25,6 +25,8 @@
 
 应用默认长帧监测阈值为 **250ms**，属于严重长帧告警，不是 60Hz / 120Hz 流畅度达标线。没有 `app.performance` 长帧告警也不能推断没有掉帧，应使用完整帧时间分布。
 
+新增 `Flutter frame sample` 日志提供约 600 帧或新帧到达时满 30 秒窗口的 build/raster p50/p95、超 16.667/33.333ms 计数；此计数不等于屏幕实际漏呈现帧数。性能优化复验应补充：慢正文下图片活动数不超过四路、隐藏后释放且重新进入能出图；日志满容量/连续故障；1千/1万/5万 NAS 条目的重建与回访；长会话内存压力和缓存维护；首次/续播/切集/seek 同样本对照。本轮不修改 blur、豆瓣解码例外、播放器缓冲或解码策略，需设备证据后再调参。
+
 Exo 的播放性能数据来自 Media3 Analytics / BandwidthMeter；MPV 读取现有 libmpv 属性，不额外发测速请求。iOS `NativePlaybackMetrics.firstFrameAtIso8601` 当前在 `timeControlStatus == .playing` 时标记，实际是进入播放状态的近似信号，不是已确认视频像素上屏；严格首帧比较需另有录屏或显示层证据。
 
 ## 通用场景

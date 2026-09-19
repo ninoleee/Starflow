@@ -128,8 +128,8 @@ class _HomeModuleCollectionPageState
   }
 }
 
-final _homeModulePageProvider =
-    FutureProvider.autoDispose.family<_HomeModulePageData, _HomeModulePageRequest>(
+final _homeModulePageProvider = FutureProvider.autoDispose
+    .family<_HomeModulePageData, _HomeModulePageRequest>(
   (ref, request) async {
     final repository = ref.read(discoveryRepositoryProvider);
     final entries = await repository.fetchEntries(

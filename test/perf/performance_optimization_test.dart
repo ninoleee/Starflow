@@ -25,33 +25,41 @@ void main() {
   test('body deadline aborts transport after headers arrive', () async {
     final body = StreamController<List<int>>();
     final client = _StreamingClient(body.stream);
-    await expectLater(sendBoundedRequest(client, 'GET', Uri.parse('https://test.invalid'),
-        timeout: const Duration(milliseconds: 10), maxBytes: 100),
+    await expectLater(
+        sendBoundedRequest(client, 'GET', Uri.parse('https://test.invalid'),
+            timeout: const Duration(milliseconds: 10), maxBytes: 100),
         throwsA(isA<TimeoutException>()));
     expect(client.aborted, isTrue);
     await body.close();
   });
 
   test('chunked bodies enforce actual bytes and abort', () async {
-    final client = _StreamingClient(Stream.fromIterable([[1, 2], [3, 4]]));
-    await expectLater(sendBoundedRequest(client, 'GET', Uri.parse('https://test.invalid'),
-        timeout: const Duration(seconds: 1), maxBytes: 3),
+    final client = _StreamingClient(Stream.fromIterable([
+      [1, 2],
+      [3, 4]
+    ]));
+    await expectLater(
+        sendBoundedRequest(client, 'GET', Uri.parse('https://test.invalid'),
+            timeout: const Duration(seconds: 1), maxBytes: 3),
         throwsA(isA<http.ClientException>()));
     expect(client.aborted, isTrue);
   });
 
-  test('work pool holds slots through completion and releases errors', () async {
+  test('work pool holds slots through completion and releases errors',
+      () async {
     final pool = AsyncWorkPool(2);
     final gate = Completer<void>();
     var active = 0;
     var peak = 0;
-    final jobs = List.generate(8, (index) => pool.run(() async {
-      active++;
-      if (active > peak) peak = active;
-      await gate.future;
-      active--;
-      if (index == 0) throw StateError('expected');
-    }).catchError((Object _) {}));
+    final jobs = List.generate(
+        8,
+        (index) => pool.run(() async {
+              active++;
+              if (active > peak) peak = active;
+              await gate.future;
+              active--;
+              if (index == 0) throw StateError('expected');
+            }).catchError((Object _) {}));
     await Future<void>.delayed(Duration.zero);
     expect(active, 2);
     gate.complete();
@@ -70,13 +78,35 @@ void main() {
     expect(cache.containsKey('b'), isFalse);
   });
 
+  test('lowering pool capacity drains active work before admitting more',
+      () async {
+    final pool = AsyncWorkPool(2);
+    final first = Completer<void>();
+    final second = Completer<void>();
+    final one = pool.run(() => first.future);
+    final two = pool.run(() => second.future);
+    var thirdStarted = false;
+    final three = pool.run(() async {
+      thirdStarted = true;
+    });
+    pool.capacity = 1;
+    first.complete();
+    await one;
+    expect(thirdStarted, isFalse);
+    second.complete();
+    await Future.wait([two, three]);
+    expect(thirdStarted, isTrue);
+  });
+
   test('detail updates across event turns share one merge window', () async {
     final preferences = _MemoryPreferences();
     final repository = LocalStorageCacheRepository(preferences: preferences);
     addTearDown(repository.dispose);
-    final first = repository.saveDetailTarget(seedTarget: _detail(0), resolvedTarget: _detail(0));
+    final first = repository.saveDetailTarget(
+        seedTarget: _detail(0), resolvedTarget: _detail(0));
     await Future<void>.delayed(Duration.zero);
-    final second = repository.saveDetailTarget(seedTarget: _detail(1), resolvedTarget: _detail(1));
+    final second = repository.saveDetailTarget(
+        seedTarget: _detail(1), resolvedTarget: _detail(1));
     await Future.wait([first, second]);
     expect(preferences.writes, 1);
   });
@@ -85,7 +115,8 @@ void main() {
     final preferences = _MemoryPreferences();
     final repository = LocalStorageCacheRepository(preferences: preferences);
     addTearDown(repository.dispose);
-    final save = repository.saveDetailTarget(seedTarget: _detail(0), resolvedTarget: _detail(0));
+    final save = repository.saveDetailTarget(
+        seedTarget: _detail(0), resolvedTarget: _detail(0));
     final clear = repository.clearDetailCache();
     await Future.wait([save, clear]);
     expect(await repository.loadDetailTarget(_detail(0)), isNull);
@@ -94,7 +125,8 @@ void main() {
   test('dispose flushes accepted detail saves', () async {
     final preferences = _MemoryPreferences();
     final repository = LocalStorageCacheRepository(preferences: preferences);
-    final save = repository.saveDetailTarget(seedTarget: _detail(0), resolvedTarget: _detail(0));
+    final save = repository.saveDetailTarget(
+        seedTarget: _detail(0), resolvedTarget: _detail(0));
     repository.dispose();
     await save;
     expect(preferences.writes, 1);
@@ -114,16 +146,25 @@ void main() {
     final preferences = _MemoryPreferences();
     final repository = LocalStorageCacheRepository(preferences: preferences);
     addTearDown(repository.dispose);
-    await repository.saveEmbyLibrarySnapshot(sourceId: 'audit',
-      refreshedAt: DateTime.utc(2026, 9, 20), itemsBySection: {
-        for (var i = 0; i < 2; i++) 'section-$i': [MediaItem.fromJson({
-          'id': 'movie-$i', 'title': 'Audit $i', 'sourceId': 'audit',
-          'sourceKind': 'emby', 'sectionId': 'section-$i',
-          'addedAt': '2026-09-20T00:00:00.000Z',
-        })],
-      });
+    await repository.saveEmbyLibrarySnapshot(
+        sourceId: 'audit',
+        refreshedAt: DateTime.utc(2026, 9, 20),
+        itemsBySection: {
+          for (var i = 0; i < 2; i++)
+            'section-$i': [
+              MediaItem.fromJson({
+                'id': 'movie-$i',
+                'title': 'Audit $i',
+                'sourceId': 'audit',
+                'sourceKind': 'emby',
+                'sectionId': 'section-$i',
+                'addedAt': '2026-09-20T00:00:00.000Z',
+              })
+            ],
+        });
     preferences.writes = 0;
-    await repository.updateMediaItemRatingCount(sourceId: 'audit', itemId: 'movie-0', ratingCount: 100);
+    await repository.updateMediaItemRatingCount(
+        sourceId: 'audit', itemId: 'movie-0', ratingCount: 100);
     expect(preferences.writes, 2);
   });
 
@@ -132,26 +173,40 @@ void main() {
     final media = _BlockedCancellationRepository(cancellation.future);
     final container = ProviderContainer(overrides: [
       mediaRepositoryProvider.overrideWithValue(media),
-      playbackMemoryRepositoryProvider.overrideWithValue(PlaybackMemoryRepository(preferences: _MemoryPreferences())),
+      playbackMemoryRepositoryProvider.overrideWithValue(
+          PlaybackMemoryRepository(preferences: _MemoryPreferences())),
       appSettingsProvider.overrideWithValue(AppSettings.fromJson(const {})),
     ]);
     addTearDown(container.dispose);
-    final coordinator = PlaybackStartupCoordinator(read: container.read,
-      targetResolver: PlaybackTargetResolver(read: container.read),
-      engineRouter: const PlaybackEngineRouter());
-    await coordinator.start(initialTarget: const PlaybackTarget(
-      title: 'Audit', sourceId: 'audit', sourceName: 'Audit',
-      sourceKind: MediaSourceKind.emby, streamUrl: 'https://test.invalid/movie.mp4'),
-      isTelevision: true, isWeb: false, targetAlreadyResolved: true)
-      .timeout(const Duration(seconds: 1));
+    final coordinator = PlaybackStartupCoordinator(
+        read: container.read,
+        targetResolver: PlaybackTargetResolver(read: container.read),
+        engineRouter: const PlaybackEngineRouter());
+    await coordinator
+        .start(
+            initialTarget: const PlaybackTarget(
+                title: 'Audit',
+                sourceId: 'audit',
+                sourceName: 'Audit',
+                sourceKind: MediaSourceKind.emby,
+                streamUrl: 'https://test.invalid/movie.mp4'),
+            isTelevision: true,
+            isWeb: false,
+            targetAlreadyResolved: true)
+        .timeout(const Duration(seconds: 1));
     expect(cancellation.isCompleted, isFalse);
     cancellation.complete();
   });
 }
 
-MediaDetailTarget _detail(int id) => MediaDetailTarget(title: 'Audit $id',
-    posterUrl: '', overview: '', sourceId: 'audit', sourceKind: MediaSourceKind.emby,
-    itemId: 'movie-$id', itemType: 'movie');
+MediaDetailTarget _detail(int id) => MediaDetailTarget(
+    title: 'Audit $id',
+    posterUrl: '',
+    overview: '',
+    sourceId: 'audit',
+    sourceKind: MediaSourceKind.emby,
+    itemId: 'movie-$id',
+    itemType: 'movie');
 
 class _StreamingClient extends http.BaseClient {
   _StreamingClient(this.body);
@@ -169,22 +224,34 @@ class _MemoryPreferences implements PreferencesStore {
   int reads = 0;
   int writes = 0;
   @override
-  Future<String?> getString(String key) async { reads++; return values[key]; }
+  Future<String?> getString(String key) async {
+    reads++;
+    return values[key];
+  }
+
   @override
-  Future<void> setString(String key, String value) async { writes++; values[key] = value; }
+  Future<void> setString(String key, String value) async {
+    writes++;
+    values[key] = value;
+  }
+
   @override
   Future<List<String>?> getStringList(String key) async => null;
   @override
   Future<void> setStringList(String key, List<String> value) async {}
   @override
-  Future<void> remove(String key) async { values.remove(key); }
+  Future<void> remove(String key) async {
+    values.remove(key);
+  }
 }
 
 class _BlockedCancellationRepository implements MediaRepository {
   _BlockedCancellationRepository(this.cancellation);
   final Future<void> cancellation;
   @override
-  Future<void> cancelActiveWebDavRefreshes({bool includeForceFull = false}) => cancellation;
+  Future<void> cancelActiveWebDavRefreshes({bool includeForceFull = false}) =>
+      cancellation;
   @override
-  dynamic noSuchMethod(Invocation invocation) => throw UnsupportedError('${invocation.memberName}');
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnsupportedError('${invocation.memberName}');
 }

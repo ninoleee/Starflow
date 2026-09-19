@@ -46,7 +46,9 @@ class AppFramePerformanceMonitor {
       _buildSamples.sort();
       _rasterSamples.sort();
       double percentile(List<int> values, double fraction) =>
-          values[((values.length * fraction).ceil() - 1).clamp(0, values.length - 1)] / 1000;
+          values[((values.length * fraction).ceil() - 1)
+              .clamp(0, values.length - 1)] /
+          1000;
       if (_buildSamples.isNotEmpty) {
         appLogInfo('app.performance', 'Flutter frame sample', fields: {
           'frameCount': _buildSamples.length,
@@ -55,9 +57,11 @@ class AppFramePerformanceMonitor {
           'rasterP50Ms': percentile(_rasterSamples, 0.5),
           'rasterP95Ms': percentile(_rasterSamples, 0.95),
           'buildOver16ms': _buildSamples.where((value) => value > 16667).length,
-          'rasterOver16ms': _rasterSamples.where((value) => value > 16667).length,
+          'rasterOver16ms':
+              _rasterSamples.where((value) => value > 16667).length,
           'buildOver33ms': _buildSamples.where((value) => value > 33333).length,
-          'rasterOver33ms': _rasterSamples.where((value) => value > 33333).length,
+          'rasterOver33ms':
+              _rasterSamples.where((value) => value > 33333).length,
         });
       }
       _buildSamples.clear();

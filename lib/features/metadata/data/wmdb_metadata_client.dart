@@ -25,7 +25,8 @@ class WmdbMetadataClient {
 
   final http.Client _client;
   final MetadataNetworkGuard _networkGuard;
-  final Map<String, MetadataMatchResult?> _resolvedMatches = BoundedMemoryMap(512);
+  final Map<String, MetadataMatchResult?> _resolvedMatches =
+      BoundedMemoryMap(512);
   final Map<String, Future<MetadataMatchResult?>> _inflightMatches = {};
 
   void clearCache() {

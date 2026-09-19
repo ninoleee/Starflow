@@ -50,9 +50,11 @@ class _IoPersistentImageCache implements PersistentImageCache {
         if (!lease.abort.isCompleted) lease.abort.complete();
       }
     }
+
     if (cancel != null) unawaited(cancel.then((_) => release()));
     return operation(lease.abort.future).whenComplete(release);
   }
+
   final LinkedHashMap<String, _MemoryImageEntry> _memoryCache = LinkedHashMap();
   final Map<String, Future<Uint8List>> _inflight =
       <String, Future<Uint8List>>{};
@@ -89,17 +91,23 @@ class _IoPersistentImageCache implements PersistentImageCache {
       if (age < const Duration(minutes: 5)) continue;
       if (total <= 512 * 1024 * 1024 && age <= _diskEntryMaxAge) continue;
       await _deleteIfExists(entry.file);
-      await _deleteIfExists(File(entry.file.path.replaceFirst(RegExp(r'\.bin$'), '.json')));
+      await _deleteIfExists(
+          File(entry.file.path.replaceFirst(RegExp(r'\.bin$'), '.json')));
       total -= entry.stat.size;
     }
   }
 
   @override
-  Future<void> clear() async {
+  void clearMemory() {
     _memoryCache.clear();
+    _memoryBytes = 0;
+  }
+
+  @override
+  Future<void> clear() async {
+    clearMemory();
     _inflight.clear();
     _rasterProviderInflight.clear();
-    _memoryBytes = 0;
     final directory = await _cacheDirectory();
     if (await directory.exists()) {
       await directory.delete(recursive: true);
@@ -164,9 +172,14 @@ class _IoPersistentImageCache implements PersistentImageCache {
     Map<String, String>? headers,
     bool persist = true,
     Future<void>? cancel,
-  }) => _withLoadLease('bytes:$persist:${_cacheIdentity(url.trim(), headers)}', cancel,
-      (abort) => _loadBytes(url, headers: headers, persist: persist, cancel: abort),
-      () { if (persist) _inflight.remove(_cacheIdentity(url.trim(), headers)); });
+  }) =>
+      _withLoadLease(
+          'bytes:$persist:${_cacheIdentity(url.trim(), headers)}',
+          cancel,
+          (abort) => _loadBytes(url,
+              headers: headers, persist: persist, cancel: abort), () {
+        if (persist) _inflight.remove(_cacheIdentity(url.trim(), headers));
+      });
 
   Future<Uint8List> _loadBytes(
     String url, {
@@ -227,9 +240,16 @@ class _IoPersistentImageCache implements PersistentImageCache {
     Map<String, String>? headers,
     bool persist = true,
     Future<void>? cancel,
-  }) => _withLoadLease('raster:$persist:${_cacheIdentity(url.trim(), headers)}', cancel,
-      (abort) => _resolveRaster(url, headers: headers, persist: persist, cancel: abort),
-      () { if (persist) _rasterProviderInflight.remove(_cacheIdentity(url.trim(), headers)); });
+  }) =>
+      _withLoadLease(
+          'raster:$persist:${_cacheIdentity(url.trim(), headers)}',
+          cancel,
+          (abort) => _resolveRaster(url,
+              headers: headers, persist: persist, cancel: abort), () {
+        if (persist) {
+          _rasterProviderInflight.remove(_cacheIdentity(url.trim(), headers));
+        }
+      });
 
   Future<ImageProvider<Object>> _resolveRaster(
     String url, {
@@ -393,8 +413,12 @@ class _IoPersistentImageCache implements PersistentImageCache {
     return _downloads.run(() async {
       if (cancelled) throw http.RequestAbortedException(Uri.parse(url));
       final response = await sendBoundedRequest(
-        _client, 'GET', Uri.parse(url), headers: headers,
-        timeout: _networkRequestTimeout, maxBytes: 32 * 1024 * 1024,
+        _client,
+        'GET',
+        Uri.parse(url),
+        headers: headers,
+        timeout: _networkRequestTimeout,
+        maxBytes: 32 * 1024 * 1024,
         cancel: cancel,
       );
       return validateNetworkImageHttpResponse(response, url: url);
@@ -505,13 +529,15 @@ class _IoPersistentImageCache implements PersistentImageCache {
     );
   }
 
-  Future<bool> _isDiskEntryFresh(Map<String, dynamic>? metadata, File file) async {
+  Future<bool> _isDiskEntryFresh(
+      Map<String, dynamic>? metadata, File file) async {
     final now = DateTime.now().toUtc();
     final updatedAt = await _resolveEntryUpdatedAt(metadata, file);
     return now.difference(updatedAt) <= _diskEntryMaxAge;
   }
 
-  Future<DateTime> _resolveEntryUpdatedAt(Map<String, dynamic>? metadata, File file) async {
+  Future<DateTime> _resolveEntryUpdatedAt(
+      Map<String, dynamic>? metadata, File file) async {
     final updatedAtMillis = (metadata?['updatedAt'] as num?)?.toInt() ?? 0;
     if (updatedAtMillis > 0) {
       return DateTime.fromMillisecondsSinceEpoch(

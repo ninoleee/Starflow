@@ -20,28 +20,42 @@ import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 
 void main() {
-  test('large cold library grouping shares one load and preserves episodes', () async {
+  test('large cold library grouping shares one load and preserves episodes',
+      () async {
     final store = _MemoryNasMediaIndexStore();
-    const source = MediaSourceConfig(id: 'large-library', name: 'NAS',
-        kind: MediaSourceKind.nas, endpoint: 'https://nas.example/dav/', enabled: true,
+    const source = MediaSourceConfig(
+        id: 'large-library',
+        name: 'NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example/dav/',
+        enabled: true,
         webDavStructureInferenceEnabled: true);
     final client = _FakeWebDavNasClient(scannedItems: [
-      for (var i = 1; i <= 160; i++) _episodeItem(id: 'ep-$i',
-          path: 'Show/Season 1/S01E${i.toString().padLeft(3, '0')}.mkv',
-          title: 'Show', seasonNumber: 1, episodeNumber: i),
+      for (var i = 1; i <= 160; i++)
+        _episodeItem(
+            id: 'ep-$i',
+            path: 'Show/Season 1/S01E${i.toString().padLeft(3, '0')}.mkv',
+            title: 'Show',
+            seasonNumber: 1,
+            episodeNumber: i),
     ]);
-    final initial = _buildStructureGroupingTestIndexer(store: store, client: client, source: source);
+    final initial = _buildStructureGroupingTestIndexer(
+        store: store, client: client, source: source);
     await initial.refreshSource(source);
     await initial.dispose();
-    final cold = _buildStructureGroupingTestIndexer(store: store, client: client, source: source);
+    final cold = _buildStructureGroupingTestIndexer(
+        store: store, client: client, source: source);
     addTearDown(cold.dispose);
     store.sourceRecordReads = 0;
-    final libraries = await Future.wait(List.generate(6, (_) => cold.loadSourceRecords(source.id)));
+    final libraries = await Future.wait(
+        List.generate(6, (_) => cold.loadSourceRecords(source.id)));
     expect(libraries.every((records) => records.length == 160), isTrue);
     expect(store.sourceRecordReads, 1);
     final library = await cold.loadLibrary(source);
-    final seasons = await cold.loadChildren(source, parentId: library.single.id);
-    final episodes = await cold.loadChildren(source, parentId: seasons.single.id);
+    final seasons =
+        await cold.loadChildren(source, parentId: library.single.id);
+    final episodes =
+        await cold.loadChildren(source, parentId: seasons.single.id);
     expect(episodes, hasLength(160));
   });
 

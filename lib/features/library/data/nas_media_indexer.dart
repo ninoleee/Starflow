@@ -540,7 +540,8 @@ class NasMediaIndexer {
   List<_SeriesRecordGroup> _groupSeriesRecords(
     List<NasMediaIndexRecord> records,
   ) {
-    return _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh()).groupSeriesRecords(records);
+    return _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh())
+        .groupSeriesRecords(records);
   }
 
   List<_MovieVariantRecordGroup> _groupMovieVariantRecords(
@@ -556,7 +557,8 @@ class NasMediaIndexer {
   }
 
   MediaItem _buildSeriesItem(_SeriesRecordGroup group) {
-    return _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh()).buildSeriesItem(group);
+    return _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh())
+        .buildSeriesItem(group);
   }
 
   MediaItem _buildSeasonItem(
@@ -1058,7 +1060,8 @@ class NasMediaIndexer {
   Future<_NasLibraryMatchCache> _loadLibraryMatchCache(String sourceId) =>
       _NasMediaIndexerStorageAccessX(this)._loadLibraryMatchCache(sourceId);
 
-  List<String> _webDavSpecialEpisodeKeywordsForRecords(List<NasMediaIndexRecord> records) =>
+  List<String> _webDavSpecialEpisodeKeywordsForRecords(
+          List<NasMediaIndexRecord> records) =>
       _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh())
           ._webDavSpecialEpisodeKeywordsForRecords(records);
 }

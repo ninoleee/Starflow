@@ -21,6 +21,9 @@ class _StubPersistentImageCache implements PersistentImageCache {
   final _downloads = AsyncWorkPool(4);
 
   @override
+  void clearMemory() {}
+
+  @override
   Future<void> clear() async {}
 
   @override
@@ -46,9 +49,14 @@ class _StubPersistentImageCache implements PersistentImageCache {
     Future<void>? cancel,
   }) async {
     final response = await _downloads.run(() => sendBoundedRequest(
-      _client, 'GET', Uri.parse(url), headers: headers, cancel: cancel,
-      timeout: const Duration(seconds: 15), maxBytes: 32 * 1024 * 1024,
-    ));
+          _client,
+          'GET',
+          Uri.parse(url),
+          headers: headers,
+          cancel: cancel,
+          timeout: const Duration(seconds: 15),
+          maxBytes: 32 * 1024 * 1024,
+        ));
     return validateNetworkImageHttpResponse(response, url: url);
   }
 
@@ -59,6 +67,7 @@ class _StubPersistentImageCache implements PersistentImageCache {
     bool persist = true,
     Future<void>? cancel,
   }) async {
-    return MemoryImage(await load(url, headers: headers, persist: persist, cancel: cancel));
+    return MemoryImage(
+        await load(url, headers: headers, persist: persist, cancel: cancel));
   }
 }

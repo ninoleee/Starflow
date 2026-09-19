@@ -92,9 +92,12 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
 
   void _cancelImageRequest() {
     final cancellation = _imageCancellation;
-    if (cancellation != null && !cancellation.isCompleted) cancellation.complete();
+    if (cancellation != null && !cancellation.isCompleted) {
+      cancellation.complete();
+    }
     _imageCancellation = null;
   }
+
   Future<Uint8List>? _resolvedSvgBytesFuture;
   Future<ImageProvider<Object>>? _resolvedRasterProviderFuture;
   _TvRasterImageLoadRequest? _tvRasterLoadRequest;

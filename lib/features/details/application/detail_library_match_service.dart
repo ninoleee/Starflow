@@ -48,6 +48,27 @@ enum DetailManualMatchCategory {
 class DetailLibraryMatchService {
   const DetailLibraryMatchService();
 
+  String libraryMatchCandidateKey(MediaItem item) {
+    final address = normalizeLibraryMatchPath(item.actualAddress);
+    final streamUrl = normalizeLibraryMatchPath(item.streamUrl);
+    return [
+      item.sourceKind.name,
+      item.sourceId.trim(),
+      item.id.trim(),
+      item.playbackItemId.trim(),
+      item.preferredMediaSourceId.trim(),
+      address.isNotEmpty ? address : streamUrl,
+    ].join('|');
+  }
+
+  String normalizeLibraryMatchPath(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    final uri = Uri.tryParse(trimmed);
+    final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
+    return rawPath.replaceAll('\\', '/').trim();
+  }
+
   List<MediaSourceConfig> resolveLibraryMatchSources(AppSettings settings) {
     final availableSources = settings.mediaSources
         .where(

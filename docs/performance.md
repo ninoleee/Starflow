@@ -18,6 +18,24 @@
 
 ## 当前验证记录
 
+### 2026-09-20 组件重构回归
+
+详情、搜索与转存、缓存、MPV 与 iOS 宿主的四组重构验证单独记在 [组件重构记录](refactoring-2026-09-20.md)。主任务的跨模块集成集合 105 项通过，`dart analyze lib test` 无问题；各子任务的定向集合与它有重叠，不能直接累加。本轮是组件职责和行为回归，不是新一次全仓/发布构建或设备性能采样。其他并行任务的性能改动保持原记录边界。
+
+补充主任务新增组件集合 67 项、缓存/焦点/UI 集合 64 项通过；iOS 模型/存储 runner 和既有记忆/字幕契约通过，无签名 arm64、iOS 13.0 目标的 Xcode Debug 构建成功。RunnerTests 仅类型检查，未执行 XCTest 或真机后台/字幕/遥控器验收；既有主线程隔离与图标资源警告保留。
+
+### 2026-09-20 性能审计后实施
+
+逐项状态见 [审计处理表](performance-audit-2026-09-20.md)，具体请求/缓存/日志契约见 architecture 与 development-network。本轮不覆盖历史 smoke 数据，不修改画质/缓冲策略、不裁剪历史，不将代码复杂度下降解释为设备测速结果。
+
+- 性能、图片、日志、搜索和 NAS 定向回归 112 项通过；补充夸克取消、动态并发池、搜索迁移和缓存拆分后的回归 59 项通过。这两组有重叠，不能相加作为独立用例总数。
+- 最终 `flutter test --no-pub --concurrency 2 --reporter expanded`：**1681 项全部通过**，包含同工作区完成的搜索/存储/播放组件拆分；实际运行约 7 分钟，受到同机并行构建影响，仅作功能回归，不作速度基线。前一轮 1639 通过/1 失败的空索引取消问题已在本轮通过。
+- 机制断言覆盖：图片慢正文超时/累计字节中止、共享消费者取消、隐藏超过 UI 租期后释放传输；16ms 跨事件写合并/clear/dispose 顺序；评分人数只写两个变化 shard；12 个冷历史读取只读一次；160 个 NAS 剧集的并发冷读只加载一次；预览跳过超大残行；日志批量/关键 flush/清理及队列背压。
+- 完整回归中发现空 NAS 缓存于容器销毁后读取设置的取消异常，已改为空索引直接返回并通过相关回归。期间搜索/存储/iOS 同工作区拆分曾造成暂态编译错误，不回退其他任务的改动；验证以最后结果为准。
+- `flutter analyze --no-pub` 无问题；Kotlin `:app:compileDebugKotlin` 通过（最终增量跳过 Flutter assemble 单独核对原生代码）；拆分后的 AppDelegate/NativePlaybackMemoryStore/NativePlaybackModels/NativePlaybackViewController/SettingsDocumentExporter 通过 `swiftc -frontend -parse`，这不是 iOS 链接构建或设备运行验证。
+- `NativeAppLoggerTest` JVM 专项 1 项通过，验证调用返回时尚未触碰磁盘、后台单线程按序写入、满容量轮转保持完整 JSON 尾行及最新记录；未等同验证 Android 厂商闪存耗时或崩溃现场。
+- 未连接 TV，未运行发布预设或交付 APK。blur、buffer、解码、首帧及 ARM32/ARM64 峰值内存仍按 performance-device 执行，不声称这些测量项已完成。
+
 ### 2026-09-20 逻辑统一回归
 
 本轮在持续有其他任务修改的同一工作区执行，不能把某次通过当成所有后续修改的证明。未运行发布预设、未递增版本、未生成交付 APK，也未做设备性能采样。
@@ -108,7 +126,7 @@ The latest architecture pass moved several hot paths out of single large files:
 * Detail series browsing starts after local source restoration without waiting for online metadata refresh. History and season reads run concurrently; series completion rebuilds only its Consumer region, and progress badges select their displayed text. Single-season content uses 292 logical pixels; only multi-season content adds the 68-pixel season selector. Errors use their natural height and empty series remain hidden. Validate cold/warm history, slow metadata, season switching and error states on TV; host smoke timings are not device frame measurements.
 * Emby section refreshes enter the same global limiter as NAS metadata items. Maintenance sections have priority, so a large Emby library no longer launches every section request alongside NAS enrichment.
 * Emby library persistence uses the current small manifest plus a source summary and source/section shards. Root-library and collection-only reads share a newest-400-item summary, section-scoped Home loads decode only the requested shard, and full-library matching decodes at most two shards concurrently. Identical snapshot and shard reads share in-flight work. Fallback payloads exclude items already represented by section shards, and large JSON work runs on a background isolate. Loads slower than `500ms` emit an info-level `storage.emby-cache` record. Legacy single-payload caches are not read or migrated.
-* Detail-cache saves are coalesced before the next microtask flush, not across a guaranteed 16 ms window. Calls arriving in separate event-loop turns can still serialize separately. Byte-identical encoded payloads skip the preferences write; measure actual write counts before claiming reduced I/O.
+* Detail-cache saves use a 16 ms timer window across event-loop turns, followed by serialized mutation. Clear queues behind accepted writes and disposal flushes accepted batches. Byte-identical payloads skip writes; rating updates persist only changed shards. These are write-count reductions, not physical fsync or device latency measurements.
 * NAS/WebDAV section reads now apply `sourceId + sectionId` in the Sembast finder instead of loading a whole source into Dart before filtering.
 * Bootstrap and the navigation shell share cold-start refresh completion state, so a baseline should contain at most one automatic Home refresh cycle.
 * Structured logging and the frame monitor are active by default. Keep the same recorded log levels across comparison runs because trace-heavy diagnostics add some I/O.

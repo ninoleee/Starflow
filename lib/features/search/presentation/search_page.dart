@@ -9,7 +9,6 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/scheduling/async_work_pool.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
@@ -17,19 +16,16 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/core/widgets/tv_text_input_launcher.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
-import 'package:starflow/features/search/application/cloud115_save_workflow_service.dart';
+import 'package:starflow/features/search/application/cloud_save_dispatcher.dart';
+import 'package:starflow/features/search/application/search_request.dart';
+import 'package:starflow/features/search/application/search_session.dart';
+import 'package:starflow/features/search/application/search_share_validator.dart';
 import 'package:starflow/features/search/application/search_favorite_metadata_service.dart';
 import 'package:starflow/features/search/application/favorite_auto_sync.dart';
-import 'package:starflow/features/search/data/quark_save_client.dart';
-import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/search_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
-import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
-import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
 import 'package:starflow/features/search/presentation/cloud_save_feedback_controller.dart';
-import 'package:starflow/features/search/domain/share_link_validation.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -146,7 +142,6 @@ class SearchPage extends ConsumerStatefulWidget {
 
 class _SearchPageState extends ConsumerState<SearchPage>
     with PageActivityMixin<SearchPage> {
-  static const Duration _searchUiCommitInterval = Duration(milliseconds: 120);
   static const String _emptySelectionSentinel = '__empty__';
 
   late final TextEditingController _controller;
@@ -154,42 +149,32 @@ class _SearchPageState extends ConsumerState<SearchPage>
   final FocusNode _queryFocusNode = FocusNode(debugLabel: 'search-query');
   final FocusNode _favoriteSyncFocusNode =
       FocusNode(debugLabel: 'favorites-sync');
-  List<SearchResult> _results = const [];
+  late final _searchSession = SearchSession(onChanged: _onSearchStateChanged);
+  SearchPresentationState _searchState = SearchPresentationState();
+  List<SearchResult> get _results => _searchState.results;
   List<SearchResult> _favoriteResults = const [];
   List<String> _recentQueries = const [];
-  bool _isSearching = false;
+  bool get _isSearching => _searchState.isSearching;
   late bool _showFavoriteResults;
   Set<String> _selectedTargetIds = const {_SearchTarget.allId};
   SearchCloudType? _selectedCloudType;
   Set<String> _favoriteResultKeys = const <String>{};
-  String? _errorMessage;
-  int _activeSearchRequestId = 0;
-  int _totalSearchTaskCount = 0;
-  int _completedSearchTaskCount = 0;
-  int _filteredResultCount = 0;
+  String? get _errorMessage => _searchState.errorMessage;
+  int get _activeSearchRequestId => _searchState.generation;
+  int get _totalSearchTaskCount => _searchState.totalCount;
+  int get _completedSearchTaskCount => _searchState.completedCount;
+  int get _filteredResultCount => _searchState.filteredCount;
   final Set<String> _savingResultIds = <String>{};
   late final _saveFeedback = CloudSaveFeedbackController(
     () => mounted ? context : null,
     isActive: () => isPageActive,
   );
-  final Map<String, _ShareLinkValidationState> _shareLinkValidationStates = {};
-  final List<_ShareLinkValidationJob> _shareLinkValidationQueue = [];
-  final Set<String> _queuedOrRunningShareValidationJobs = {};
-  int _activeShareLinkValidationCount = 0;
-  int _shareLinkValidationMaxConcurrency = kTaskMaxConcurrencyDefault;
   String? _pendingAutoSearchQuery;
   bool _searchPreferencesLoaded = false;
   int _searchPreferencesLoadId = 0;
   bool _loadingFavoritePosters = false;
   int _favoritePosterSession = 0;
   final Set<String> _attemptedFavoritePosters = {};
-  Timer? _searchUiCommitTimer;
-  int _pendingSearchRequestId = 0;
-  List<SearchResult>? _pendingSearchResults;
-  List<String>? _pendingSearchErrors;
-  int _pendingSearchTotalCount = 0;
-  int _pendingSearchCompletedCount = 0;
-  int _pendingSearchFilteredCount = 0;
   bool _initialTelevisionFocusScheduled = false;
   bool _initialTelevisionFocusRequested = false;
   bool _televisionFocusRecoveryScheduled = false;
@@ -246,8 +231,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   @override
   void dispose() {
     _favoriteChanges?.cancel();
-    _cancelPendingSearchUiCommit(clearState: true);
-    _cancelShareLinkValidations(clearStates: true);
+    _searchSession.dispose();
     _saveFeedback.dispose();
     _queryFocusNode.dispose();
     _favoriteSyncFocusNode.dispose();
@@ -540,48 +524,11 @@ class _SearchPageState extends ConsumerState<SearchPage>
     unawaited(_performSearch());
   }
 
-  void _cancelPendingSearchUiCommit({bool clearState = false}) {
-    _searchUiCommitTimer?.cancel();
-    _searchUiCommitTimer = null;
-    if (!clearState) {
-      return;
-    }
-    _pendingSearchRequestId = 0;
-    _pendingSearchResults = null;
-    _pendingSearchErrors = null;
-    _pendingSearchTotalCount = 0;
-    _pendingSearchCompletedCount = 0;
-    _pendingSearchFilteredCount = 0;
-  }
-
-  void _flushPendingSearchUiCommit() {
-    _searchUiCommitTimer = null;
-    if (!mounted || _pendingSearchRequestId != _activeSearchRequestId) {
-      return;
-    }
-    final aggregated = _pendingSearchResults;
-    final errors = _pendingSearchErrors;
-    if (aggregated == null || errors == null) {
-      return;
-    }
-    final completed = _pendingSearchCompletedCount;
-    final totalCount = _pendingSearchTotalCount;
-    final hasPendingValidations = _shareLinkValidationStates.values.any(
-      (state) => state == _ShareLinkValidationState.pending,
-    );
-    final hasFinished = completed >= totalCount && !hasPendingValidations;
-    final sortedResults = _sortResults(aggregated);
-    setState(() {
-      _completedSearchTaskCount = completed;
-      _filteredResultCount = _pendingSearchFilteredCount;
-      _results = sortedResults;
-      _isSearching = !hasFinished;
-      _errorMessage = sortedResults.isEmpty && errors.isNotEmpty && hasFinished
-          ? errors.join('\n')
-          : null;
-    });
+  void _onSearchStateChanged(SearchPresentationState state) {
+    if (!mounted) return;
+    setState(() => _searchState = state);
     _scheduleTelevisionFocusRecoveryIfLost();
-    if (hasFinished) {
+    if (!state.isSearching && state.totalCount > 0) {
       _logSearchResultVisibility();
     }
   }
@@ -601,217 +548,12 @@ class _SearchPageState extends ConsumerState<SearchPage>
     );
   }
 
-  void _scheduleSearchUiCommit({
-    required int requestId,
-    required List<SearchResult> aggregated,
-    required List<String> errors,
-    required int totalCount,
-    required int completedCount,
-    required int filteredCount,
-    bool force = false,
-  }) {
-    if (!mounted || requestId != _activeSearchRequestId) {
-      return;
-    }
-    _pendingSearchRequestId = requestId;
-    _pendingSearchResults = aggregated;
-    _pendingSearchErrors = errors;
-    _pendingSearchTotalCount = totalCount;
-    _pendingSearchCompletedCount = completedCount;
-    _pendingSearchFilteredCount = filteredCount;
-    if (force) {
-      _cancelPendingSearchUiCommit();
-      _flushPendingSearchUiCommit();
-      return;
-    }
-    if (_searchUiCommitTimer != null) {
-      return;
-    }
-    _searchUiCommitTimer = Timer(
-      _searchUiCommitInterval,
-      _flushPendingSearchUiCommit,
-    );
-  }
-
   void _cancelSearchTasks({bool clearResults = false}) {
-    _activeSearchRequestId += 1;
-    _cancelPendingSearchUiCommit(clearState: true);
-    _cancelShareLinkValidations(clearStates: true);
-    if (!mounted) {
-      return;
-    }
-    final shouldUpdateState = _isSearching ||
-        _totalSearchTaskCount > 0 ||
-        _completedSearchTaskCount > 0 ||
-        (clearResults &&
-            (_results.isNotEmpty ||
-                _errorMessage != null ||
-                _filteredResultCount > 0));
-    if (!shouldUpdateState) {
-      return;
-    }
-    setState(() {
-      _isSearching = false;
-      _totalSearchTaskCount = 0;
-      _completedSearchTaskCount = 0;
-      if (clearResults) {
-        _results = const [];
-        _errorMessage = null;
-        _filteredResultCount = 0;
-      }
-    });
+    _searchSession.cancel(clearResults: clearResults);
   }
 
-  void _cancelShareLinkValidations({required bool clearStates}) {
-    for (final job in _shareLinkValidationQueue) {
-      if (!job.completer.isCompleted) {
-        job.completer.complete(
-          const ShareLinkValidationResult.unavailable('验证已取消'),
-        );
-      }
-    }
-    _shareLinkValidationQueue.clear();
-    _queuedOrRunningShareValidationJobs.removeWhere((identity) {
-      final separator = identity.indexOf('|');
-      if (separator < 0) {
-        return true;
-      }
-      final requestId = int.tryParse(identity.substring(0, separator));
-      return requestId != _activeSearchRequestId;
-    });
-    if (clearStates) {
-      _shareLinkValidationStates.clear();
-    }
-  }
-
-  String _shareValidationKey(SearchResult result) {
-    return searchResultDeduplicationKey(result);
-  }
-
-  _ShareLinkValidationState? _shareValidationStateFor(SearchResult result) {
-    return _shareLinkValidationStates[_shareValidationKey(result)];
-  }
-
-  Future<ShareLinkValidationResult>? _enqueueShareLinkValidation({
-    required int requestId,
-    required SearchResult result,
-    required NetworkStorageConfig networkStorage,
-    required int maxConcurrency,
-  }) {
-    if (result.detailTarget != null) {
-      return null;
-    }
-    final cloudType = detectSearchCloudTypeFromUrl(result.resourceUrl);
-    late final Future<ShareLinkValidationResult> Function() validate;
-    if (cloudType == SearchCloudType.quark) {
-      if (networkStorage.quarkCookie.trim().isEmpty) return null;
-      final client = ref.read(quarkSaveClientProvider);
-      validate = () => client.validateShareLink(
-            shareUrl: result.resourceUrl,
-            cookie: networkStorage.quarkCookie,
-          );
-    } else if (cloudType == SearchCloudType.cloud115) {
-      final client = ref.read(cloud115SaveClientProvider);
-      validate = () => client.validateShareLink(
-            shareUrl: result.resourceUrl,
-            cookie: networkStorage.cloud115Cookie,
-            password: result.password,
-          );
-    } else {
-      return null;
-    }
-    final key = _shareValidationKey(result);
-    final identity = '$requestId|$key';
-    if (!_queuedOrRunningShareValidationJobs.add(identity)) {
-      return null;
-    }
-    _shareLinkValidationMaxConcurrency = maxConcurrency.clamp(
-      kTaskMaxConcurrencyMin,
-      kTaskMaxConcurrencyMax,
-    );
-    _shareLinkValidationStates[key] = _ShareLinkValidationState.pending;
-    final job = _ShareLinkValidationJob(
-      requestId: requestId,
-      identity: identity,
-      key: key,
-      result: result,
-      cloudType: cloudType!,
-      validate: validate,
-    );
-    _shareLinkValidationQueue.add(job);
-    _drainShareLinkValidationQueue();
-    return job.completer.future;
-  }
-
-  void _drainShareLinkValidationQueue() {
-    while (
-        _activeShareLinkValidationCount < _shareLinkValidationMaxConcurrency &&
-            _shareLinkValidationQueue.isNotEmpty) {
-      final job = _shareLinkValidationQueue.removeAt(0);
-      if (job.requestId != _activeSearchRequestId) {
-        _queuedOrRunningShareValidationJobs.remove(job.identity);
-        continue;
-      }
-      _activeShareLinkValidationCount += 1;
-      unawaited(_runShareLinkValidation(job));
-    }
-  }
-
-  Future<void> _runShareLinkValidation(_ShareLinkValidationJob job) async {
-    try {
-      final validation = await job.validate();
-      if (!mounted || job.requestId != _activeSearchRequestId) {
-        return;
-      }
-      switch (validation.status) {
-        case ShareLinkValidationStatus.valid:
-          _shareLinkValidationStates[job.key] = _ShareLinkValidationState.valid;
-          break;
-        case ShareLinkValidationStatus.invalid:
-          _shareLinkValidationStates.remove(job.key);
-          break;
-        case ShareLinkValidationStatus.unavailable:
-          _shareLinkValidationStates[job.key] =
-              _ShareLinkValidationState.unavailable;
-          break;
-      }
-      if (!job.completer.isCompleted) {
-        job.completer.complete(validation);
-      }
-      final cloudLabel =
-          job.cloudType == SearchCloudType.quark ? 'Quark' : '115';
-      if (validation.isInvalid) {
-        appLogInfo(
-          'search.${job.cloudType.code}-validation',
-          'Invalid $cloudLabel search result filtered',
-          fields: {
-            'providerId': job.result.providerId,
-            'reason': validation.reason,
-          },
-        );
-      } else if (validation.status == ShareLinkValidationStatus.unavailable) {
-        appLogWarning(
-          'search.${job.cloudType.code}-validation',
-          '$cloudLabel search result could not be validated',
-          fields: {
-            'providerId': job.result.providerId,
-            'reason': validation.reason,
-          },
-        );
-      }
-    } finally {
-      if (!job.completer.isCompleted) {
-        job.completer.complete(
-          const ShareLinkValidationResult.unavailable('验证未完成'),
-        );
-      }
-      if (_activeShareLinkValidationCount > 0) {
-        _activeShareLinkValidationCount -= 1;
-      }
-      _queuedOrRunningShareValidationJobs.remove(job.identity);
-      _drainShareLinkValidationQueue();
-    }
-  }
+  SearchValidationState? _shareValidationStateFor(SearchResult result) =>
+      _searchState.validationFor(result);
 
   Future<void> _performSearch() async {
     final keyword = _controller.text.trim();
@@ -824,7 +566,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _cancelSearchTasks(clearResults: true);
       return;
     }
+    final generation = _searchSession.begin();
     await _rememberQuery(keyword);
+    if (!mounted || !_searchSession.isCurrent(generation)) return;
     final enabledProviders =
         ref.read(_searchPageVisibleSearchProvidersProvider);
     final localSources = ref.read(_searchPageVisibleLocalSourcesProvider);
@@ -843,75 +587,30 @@ class _SearchPageState extends ConsumerState<SearchPage>
     final selectionChanged =
         normalizedSelectedTargetIds.length != _selectedTargetIds.length ||
             !normalizedSelectedTargetIds.containsAll(_selectedTargetIds);
-    _cancelPendingSearchUiCommit(clearState: true);
-
     setState(() {
       _showFavoriteResults = false;
       _selectedTargetIds = normalizedSelectedTargetIds;
-      _isSearching = true;
-      _results = const [];
-      _errorMessage = null;
-      _totalSearchTaskCount = 0;
-      _completedSearchTaskCount = 0;
-      _filteredResultCount = 0;
     });
     if (selectionChanged) {
       unawaited(_persistSelectedTargets());
     }
 
-    final repository = ref.read(searchRepositoryProvider);
-    final requestId = ++_activeSearchRequestId;
-    _cancelShareLinkValidations(clearStates: true);
-    final operations = _buildSearchOperations(
-      repository: repository,
-      keyword: keyword,
-      targets: selectedTargets,
-      localSources: localSources,
-      enabledProviders: enabledProviders,
+    final settings = ref.read(appSettingsProvider);
+    final validator = ref.read(searchShareValidatorProvider);
+    _searchSession.start(
+      generation: generation,
+      request: SearchRequest.fromSelection(
+        repository: ref.read(searchRepositoryProvider),
+        keyword: keyword,
+        selectedTargetIds: normalizedSelectedTargetIds,
+        localSources: localSources,
+        providers: enabledProviders,
+      ),
+      resolveValidation: (result) =>
+          validator.resolve(result, settings.networkStorage),
+      maxConcurrency: settings.taskMaxConcurrency,
+      emptyMessage: selectedTargets.isEmpty ? '当前没有启用搜索目标。' : null,
     );
-
-    if (operations.isEmpty) {
-      if (!mounted || requestId != _activeSearchRequestId) {
-        return;
-      }
-      setState(() {
-        _isSearching = false;
-        _errorMessage = selectedTargets.isEmpty ? '当前没有启用搜索目标。' : null;
-      });
-      return;
-    }
-
-    setState(() {
-      _totalSearchTaskCount = operations.length;
-      _completedSearchTaskCount = 0;
-    });
-
-    final aggregated = <SearchResult>[];
-    final searchCandidates = <String, _SearchCandidate>{};
-    final errors = <String>[];
-    var completed = 0;
-    var filteredCount = 0;
-
-    final pool = AsyncWorkPool(ref.read(appSettingsProvider).taskMaxConcurrency);
-    for (final operation in operations) {
-      unawaited(
-        pool.run(() async {
-          if (!mounted || requestId != _activeSearchRequestId) return;
-          await _runSearchOperation(
-          requestId: requestId,
-          operation: operation,
-          aggregated: aggregated,
-          errors: errors,
-          totalCount: operations.length,
-          searchCandidates: searchCandidates,
-          onCompleted: () => completed += 1,
-          getCompleted: () => completed,
-          onFiltered: (count) => filteredCount += count,
-          getFiltered: () => filteredCount,
-          );
-        }),
-      );
-    }
   }
 
   @override
@@ -925,8 +624,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
     final enabledProviders =
         ref.watch(_searchPageVisibleSearchProvidersProvider);
     final localSources = ref.watch(_searchPageVisibleLocalSourcesProvider);
-    final pendingLinkValidationCount = _shareLinkValidationStates.values
-        .where((state) => state == _ShareLinkValidationState.pending)
+    final pendingLinkValidationCount = _searchState.validations.values
+        .where((state) => state == SearchValidationState.pending)
         .length;
     final targets = _buildTargets(
       localSources: localSources,
@@ -1285,11 +984,10 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 networkStorage: networkStorage,
                               ),
                               isLinkValidationPending: validationState ==
-                                  _ShareLinkValidationState.pending,
+                                  SearchValidationState.pending,
                               linkValidationLabel: switch (validationState) {
-                                _ShareLinkValidationState.pending => '链接验证中',
-                                _ShareLinkValidationState.unavailable =>
-                                  '链接暂未验证',
+                                SearchValidationState.pending => '链接验证中',
+                                SearchValidationState.unavailable => '链接暂未验证',
                                 _ => '',
                               },
                               onSave: () => _saveResultToQuark(
@@ -1473,194 +1171,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
     }
   }
 
-  List<_SearchOperation> _buildSearchOperations({
-    required SearchRepository repository,
-    required String keyword,
-    required List<_SearchTarget> targets,
-    required List<MediaSourceConfig> localSources,
-    required List<SearchProviderConfig> enabledProviders,
-  }) {
-    final operations = <_SearchOperation>[];
-    for (final target in targets) {
-      switch (target.kind) {
-        case _SearchTargetKind.all:
-          operations.addAll([
-            ...localSources.map(
-              (source) => _SearchOperation(
-                label: source.name,
-                run: () => repository.searchLocal(
-                  keyword,
-                  sourceId: source.id,
-                  limit: 80,
-                ),
-              ),
-            ),
-            ...enabledProviders.map(
-              (provider) => _SearchOperation(
-                label: provider.name,
-                run: () => repository.searchOnline(
-                  keyword,
-                  provider: provider,
-                ),
-              ),
-            ),
-          ]);
-          break;
-        case _SearchTargetKind.mediaSource:
-          operations.add(
-            _SearchOperation(
-              label: target.mediaSource!.name,
-              run: () => repository.searchLocal(
-                keyword,
-                sourceId: target.mediaSource!.id,
-                limit: 80,
-              ),
-            ),
-          );
-          break;
-        case _SearchTargetKind.provider:
-          operations.add(
-            _SearchOperation(
-              label: target.provider!.name,
-              run: () => repository.searchOnline(
-                keyword,
-                provider: target.provider!,
-              ),
-            ),
-          );
-          break;
-      }
-    }
-    return operations;
-  }
-
-  Future<void> _runSearchOperation({
-    required int requestId,
-    required _SearchOperation operation,
-    required List<SearchResult> aggregated,
-    required List<String> errors,
-    required int totalCount,
-    required Map<String, _SearchCandidate> searchCandidates,
-    required VoidCallback onCompleted,
-    required int Function() getCompleted,
-    required ValueChanged<int> onFiltered,
-    required int Function() getFiltered,
-  }) async {
-    void commitResults() {
-      _scheduleSearchUiCommit(
-        requestId: requestId,
-        aggregated: aggregated,
-        errors: errors,
-        totalCount: totalCount,
-        completedCount: getCompleted(),
-        filteredCount: getFiltered(),
-      );
-    }
-
-    void validateCandidate(_SearchCandidate candidate) {
-      final item = candidate.result;
-      final settings = ref.read(appSettingsProvider);
-      final future = _enqueueShareLinkValidation(
-        requestId: requestId,
-        result: item,
-        networkStorage: settings.networkStorage,
-        maxConcurrency: settings.taskMaxConcurrency,
-      );
-      if (future == null) {
-        aggregated.add(item);
-        return;
-      }
-      candidate.validating = true;
-      unawaited(future.then((validation) {
-        if (!mounted || requestId != _activeSearchRequestId) return;
-        candidate.validating = false;
-        // A later source may have supplied the previously missing passcode.
-        if (!identical(candidate.result, item)) {
-          validateCandidate(candidate);
-          commitResults();
-          return;
-        }
-        if (validation.isInvalid) {
-          candidate.invalid = true;
-          onFiltered(1);
-        } else {
-          aggregated.add(item);
-        }
-        commitResults();
-      }));
-    }
-
-    try {
-      final result = await operation.run();
-      if (!mounted || requestId != _activeSearchRequestId) {
-        return;
-      }
-      var duplicateCount = 0;
-      final candidatesToValidate = <_SearchCandidate>{};
-      for (final item in result.items) {
-        final key = searchResultDeduplicationKey(item);
-        final previous = searchCandidates[key];
-        if (previous != null) {
-          duplicateCount += 1;
-          final merged =
-              mergeSearchResultShareCredentials(previous.result, item);
-          if (!identical(merged, previous.result)) {
-            aggregated.remove(previous.result);
-            previous.result = merged;
-            if (previous.invalid) {
-              previous.invalid = false;
-              onFiltered(-1);
-            }
-            if (!previous.validating) candidatesToValidate.add(previous);
-          }
-          continue;
-        }
-        final candidate =
-            _SearchCandidate(prepareSearchResultShareCredentials(item));
-        searchCandidates[key] = candidate;
-        candidatesToValidate.add(candidate);
-      }
-      onFiltered(result.filteredCount + duplicateCount);
-      for (final candidate in candidatesToValidate) {
-        validateCandidate(candidate);
-      }
-      _scheduleSearchUiCommit(
-        requestId: requestId,
-        aggregated: aggregated,
-        errors: errors,
-        totalCount: totalCount,
-        completedCount: getCompleted(),
-        filteredCount: getFiltered(),
-      );
-    } catch (error) {
-      if (!mounted || requestId != _activeSearchRequestId) {
-        return;
-      }
-      errors.add('${operation.label}: $error');
-    } finally {
-      if (mounted && requestId == _activeSearchRequestId) {
-        onCompleted();
-        final completed = getCompleted();
-        final hasFinished = completed >= totalCount;
-        if (hasFinished) {
-          _scheduleSearchUiCommit(
-            requestId: requestId,
-            aggregated: aggregated,
-            errors: errors,
-            totalCount: totalCount,
-            completedCount: completed,
-            filteredCount: getFiltered(),
-            force: true,
-          );
-        } else {
-          setState(() {
-            _completedSearchTaskCount = completed;
-          });
-        }
-      }
-    }
-  }
-
   List<_SearchTarget> _buildTargets({
     required List<MediaSourceConfig> localSources,
     required List<SearchProviderConfig> providers,
@@ -1720,64 +1230,23 @@ class _SearchPageState extends ConsumerState<SearchPage>
     unawaited(_persistSelectedTargets());
   }
 
-  List<SearchResult> _sortResults(List<SearchResult> items) {
-    final sorted = [...items];
-    sorted.sort((left, right) {
-      final localBoost = (right.detailTarget != null ? 1 : 0) -
-          (left.detailTarget != null ? 1 : 0);
-      if (localBoost != 0) {
-        return localBoost;
-      }
-      return left.title.compareTo(right.title);
-    });
-    return sorted;
-  }
-
   bool _canSaveResultToQuark({
     required SearchResult result,
     required NetworkStorageConfig networkStorage,
-  }) {
-    if (result.detailTarget != null) {
-      return false;
-    }
-    final cloudType = detectSearchCloudTypeFromUrl(result.resourceUrl);
-    if (cloudType == SearchCloudType.cloud115) {
-      return networkStorage.cloud115Cookie.trim().isNotEmpty;
-    }
-    if (cloudType != SearchCloudType.quark) {
-      return false;
-    }
-    return networkStorage.quarkCookie.trim().isNotEmpty;
-  }
+  }) =>
+      CloudSaveDispatcher.canSave(result, networkStorage);
 
   Future<void> _saveResultToQuark({
     required SearchResult result,
     required NetworkStorageConfig networkStorage,
   }) async {
     if (_savingResultIds.contains(result.id)) return;
-    if (_shareValidationStateFor(result) == _ShareLinkValidationState.pending) {
+    if (_shareValidationStateFor(result) == SearchValidationState.pending) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('链接正在验证，请稍候')),
       );
       return;
     }
-    final is115 = detectSearchCloudTypeFromUrl(result.resourceUrl) ==
-        SearchCloudType.cloud115;
-    final storage = networkStorage;
-    final cookie =
-        (is115 ? storage.cloud115Cookie : storage.quarkCookie).trim();
-    if (cookie.isEmpty) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(
-                is115 ? '请先在网盘与转存设置里填写 115 Cookie' : '请先在网盘与转存设置里填写夸克 Cookie')),
-      );
-      return;
-    }
-
     setState(() {
       _savingResultIds.add(result.id);
     });
@@ -1785,44 +1254,22 @@ class _SearchPageState extends ConsumerState<SearchPage>
     final feedback = _saveFeedback.start();
 
     try {
-      final String message;
-      final saveFolderName = resolveSearchSaveFolderName(
-        result: result,
-        isFavoriteResultsView: _showFavoriteResults,
-        searchQuery: _controller.text.trim(),
-      );
-      if (is115) {
-        message = await ref.read(cloud115SaveWorkflowProvider).save(
-              shareUrl: result.resourceUrl,
-              config: storage,
-              password: result.password,
-              saveFolderName: saveFolderName,
-              onProgress: feedback.showProgress,
-              onBackgroundRefreshFailure: feedback.showRefreshFailure,
-            );
+      final outcome = await ref.read(cloudSaveDispatcherProvider).save(
+            result: result,
+            networkStorage: networkStorage,
+            saveFolderName: resolveSearchSaveFolderName(
+              result: result,
+              isFavoriteResultsView: _showFavoriteResults,
+              searchQuery: _controller.text.trim(),
+            ),
+            onProgress: feedback.showProgress,
+            onBackgroundRefreshFailure: feedback.showRefreshFailure,
+          );
+      if (outcome.isSuccess) {
+        feedback.complete(outcome.message);
       } else {
-        final response =
-            await ref.read(quarkSaveWorkflowServiceProvider).saveToQuark(
-                  shareUrl: result.resourceUrl,
-                  saveFolderName: saveFolderName,
-                  networkStorage: storage,
-                  onProgress: feedback.showProgress,
-                  onBackgroundRefreshFailure: feedback.showRefreshFailure,
-                );
-        message = response.buildSuccessMessage();
+        feedback.fail(outcome.message);
       }
-      feedback.complete(message);
-    } on QuarkSaveException catch (error) {
-      feedback.fail(error.message);
-    } on SmartStrmWebhookException catch (error) {
-      feedback.fail(
-        (is115 ? CloudSaveDrive.cloud115 : CloudSaveDrive.quark)
-            .smartStrmFailureMessage(error.message),
-      );
-    } catch (error) {
-      feedback.fail(
-        is115 ? '115 保存未确认，请检查网盘后再重试' : '保存失败：$error',
-      );
     } finally {
       feedback.closeProgress();
       if (mounted) {
@@ -2544,40 +1991,6 @@ class _MetaChip extends StatelessWidget {
   }
 }
 
-enum _ShareLinkValidationState {
-  pending,
-  valid,
-  unavailable,
-}
-
-class _ShareLinkValidationJob {
-  _ShareLinkValidationJob({
-    required this.requestId,
-    required this.identity,
-    required this.key,
-    required this.result,
-    required this.cloudType,
-    required this.validate,
-  });
-
-  final int requestId;
-  final String identity;
-  final String key;
-  final SearchResult result;
-  final SearchCloudType cloudType;
-  final Future<ShareLinkValidationResult> Function() validate;
-  final Completer<ShareLinkValidationResult> completer =
-      Completer<ShareLinkValidationResult>();
-}
-
-class _SearchCandidate {
-  _SearchCandidate(this.result);
-
-  SearchResult result;
-  bool validating = false;
-  bool invalid = false;
-}
-
 enum _SearchTargetKind {
   all,
   mediaSource,
@@ -2611,14 +2024,4 @@ class _SearchTarget {
   final _SearchTargetKind kind;
   final MediaSourceConfig? mediaSource;
   final SearchProviderConfig? provider;
-}
-
-class _SearchOperation {
-  const _SearchOperation({
-    required this.label,
-    required this.run,
-  });
-
-  final String label;
-  final Future<SearchFetchResult> Function() run;
 }
