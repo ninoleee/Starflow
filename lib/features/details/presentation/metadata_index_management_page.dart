@@ -959,6 +959,7 @@ bool _hasMetadataChanged(
       current.year != next.year ||
       current.durationLabel != next.durationLabel ||
       !_sameStrings(current.ratingLabels, next.ratingLabels) ||
+      current.ratingCount != next.ratingCount ||
       !_sameStrings(current.genres, next.genres) ||
       !_sameStrings(current.directors, next.directors) ||
       !_samePeople(current.directorProfiles, next.directorProfiles) ||

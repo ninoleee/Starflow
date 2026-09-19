@@ -125,6 +125,40 @@ class DoubanApiClient {
     throw const DoubanApiException('暂不支持这个豆瓣片单地址');
   }
 
+  Future<DoubanSubjectRatingStats?> fetchSubjectRatingStats({
+    required String doubanId,
+    String cookie = '',
+  }) async {
+    final normalizedId = doubanId.trim();
+    if (normalizedId.isEmpty) {
+      return null;
+    }
+    final uri = Uri.parse(
+      'https://m.douban.com/rexxar/api/v2/movie/'
+      '${Uri.encodeComponent(normalizedId)}?for_mobile=1',
+    );
+    final payload = await _getJson(
+      uri,
+      headers: {
+        'Referer': 'https://m.douban.com/movie/subject/$normalizedId/',
+        if (cookie.trim().isNotEmpty) 'Cookie': cookie.trim(),
+      },
+    );
+    final rating = payload['rating'];
+    if (rating is! Map) {
+      return null;
+    }
+    final value = _numberValue(rating['value'])?.toDouble() ?? 0;
+    final ratingCount = _numberValue(rating['count'])?.toInt() ?? 0;
+    if (value <= 0 && ratingCount <= 0) {
+      return null;
+    }
+    return DoubanSubjectRatingStats(
+      value: value,
+      ratingCount: ratingCount,
+    );
+  }
+
   Future<List<DoubanCarouselEntry>> fetchCarouselItems() async {
     final response = await _networkGuard.get(
       _client,
@@ -510,6 +544,13 @@ class DoubanApiClient {
     return '豆瓣 ${parsed.toStringAsFixed(1)}';
   }
 
+  num? _numberValue(Object? raw) {
+    if (raw is num) {
+      return raw;
+    }
+    return num.tryParse('$raw'.trim());
+  }
+
   String _resolveString(Map<String, dynamic> map, List<String> keys) {
     for (final key in keys) {
       final raw = map[key];
@@ -629,4 +670,16 @@ class DoubanApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+class DoubanSubjectRatingStats {
+  const DoubanSubjectRatingStats({
+    required this.value,
+    required this.ratingCount,
+  });
+
+  final double value;
+  final int ratingCount;
+
+  bool get hasRating => value > 0;
 }

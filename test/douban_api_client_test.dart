@@ -186,7 +186,8 @@ void main() {
       expect(items, hasLength(1));
       expect(items.first.id, '1292052');
       expect(items.first.posterUrl, cover);
-      expect(items.first.sourceUrl, 'https://movie.douban.com/subject/1292052/');
+      expect(
+          items.first.sourceUrl, 'https://movie.douban.com/subject/1292052/');
     });
 
     test('normalizes protocol-relative poster urls', () async {
@@ -219,6 +220,30 @@ void main() {
 
       expect(items.first.posterUrl,
           'https://img9.doubanio.com/view/photo/l/public/p1.jpg');
+    });
+
+    test('loads the rating count from subject details', () async {
+      final client = DoubanApiClient(
+        MockClient((request) async {
+          expect(request.url.path, '/rexxar/api/v2/movie/24697949');
+          expect(request.url.queryParameters['for_mobile'], '1');
+          expect(request.headers['Referer'],
+              'https://m.douban.com/movie/subject/24697949/');
+          return http.Response.bytes(
+            utf8.encode(jsonEncode({
+              'rating': {'value': 9.2, 'count': 315946},
+            })),
+            200,
+            headers: const {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+
+      final stats = await client.fetchSubjectRatingStats(doubanId: '24697949');
+
+      expect(stats, isNotNull);
+      expect(stats!.value, 9.2);
+      expect(stats.ratingCount, 315946);
     });
   });
 }

@@ -9,6 +9,7 @@ import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/home/presentation/home_page.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -406,6 +407,43 @@ void main() {
 
     expect(find.byIcon(Icons.movie_creation_outlined), findsNothing);
   });
+
+  testWidgets('recent playback card shows source media library badge',
+      (tester) async {
+    const section = HomeSectionViewModel(
+      id: 'layout-test',
+      title: '最近播放',
+      subtitle: '',
+      emptyMessage: '暂无最近播放',
+      layout: HomeSectionLayout.posterRail,
+      items: [
+        HomeCardViewModel(
+          id: 'recent-1',
+          title: '最近播放影片',
+          subtitle: '27:15 / 1:42:00',
+          posterUrl: '',
+          detailTarget: MediaDetailTarget(
+            title: '最近播放影片',
+            posterUrl: '',
+            overview: '',
+            sourceName: '家庭影音库',
+            sourceKind: MediaSourceKind.nas,
+          ),
+        ),
+      ],
+    );
+    await tester.pumpWidget(_heroTestApp(
+      mode: HomeHeroDisplayMode.normal,
+      television: false,
+      section: section,
+    ));
+    await tester.pumpAndSettle();
+
+    final poster = tester.widget<MediaPosterTile>(
+      find.byType(MediaPosterTile).first,
+    );
+    expect(poster.imageTopRightBadgeText, '家庭影音库');
+  });
 }
 
 Widget _heroTestApp({
@@ -416,6 +454,7 @@ Widget _heroTestApp({
   bool simplified = false,
   bool television = true,
   StateProvider<HomeResolvedSectionsState>? state,
+  HomeSectionViewModel section = _heroSection,
 }) {
   return ProviderScope(
     overrides: [
@@ -443,9 +482,9 @@ Widget _heroTestApp({
         ],
       )),
       homeResolvedSectionsProvider.overrideWith((ref) => state == null
-          ? const HomeResolvedSectionsState(sections: [_heroSection])
+          ? HomeResolvedSectionsState(sections: [section])
           : ref.watch(state)),
-      homeSectionProvider.overrideWith((ref, id) async => _heroSection),
+      homeSectionProvider.overrideWith((ref, id) async => section),
     ],
     child: MaterialApp(
       home: Builder(

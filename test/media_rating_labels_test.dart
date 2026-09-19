@@ -2,6 +2,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 
 void main() {
+  group('rating count label', () {
+    test('formats rating counts with Chinese compact units', () {
+      expect(formatRatingCountLabel(999), '999');
+      expect(formatRatingCountLabel(10000), '1万');
+      expect(formatRatingCountLabel(315946), '31.6万');
+      expect(formatRatingCountLabel(100000000), '1亿');
+      expect(buildRatingCountLabel(315946), '☆31.6万');
+      expect(buildRatingCountLabel(0), isEmpty);
+    });
+  });
+
   group('resolvePreferredPosterRatingLabel', () {
     test('prefers douban over imdb and tmdb', () {
       expect(

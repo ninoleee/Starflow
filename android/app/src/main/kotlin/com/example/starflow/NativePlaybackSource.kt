@@ -6,6 +6,26 @@ import java.util.Locale
 import org.json.JSONObject
 
 internal object NativePlaybackSource {
+    fun buildRequestHeaders(headersJson: String): Map<String, String> {
+        val headers = linkedMapOf<String, String>()
+        if (headersJson.isNotBlank()) {
+            try {
+                val json = JSONObject(headersJson)
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    headers[key] = json.optString(key)
+                }
+            } catch (_: Throwable) {
+                // Fall back to the app user agent below.
+            }
+        }
+        if (headers.keys.none { it.equals("User-Agent", ignoreCase = true) }) {
+            headers["User-Agent"] = "Starflow"
+        }
+        return headers
+    }
+
     fun summarizeHeaderKeys(headersJson: String): String {
         if (headersJson.isBlank()) {
             return "-"

@@ -236,6 +236,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
             override fun onTracksChanged(tracks: Tracks) {
                 diagnostics.logAudioTracks(tracks)
                 diagnostics.logVideoTracks(tracks)
+                diagnostics.logSubtitleTracks(tracks)
                 recovery.fallbackToTranscodedVideoIfNeeded(tracks)
                 fntv.onTracksReady()
                 subtitles.applyAutomaticSubtitleSelection(tracks)

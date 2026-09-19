@@ -257,6 +257,26 @@ String _resolveHomePosterBadgeText({
   );
 }
 
+String _resolveHomePosterSourceBadgeText({
+  required HomeModuleConfig module,
+  required HomeCardViewModel item,
+}) {
+  if (module.type != HomeModuleType.recentPlayback) {
+    return '';
+  }
+  final target = item.detailTarget;
+  final playbackTarget = target.playbackTarget;
+  final playbackSourceName = playbackTarget?.sourceName.trim() ?? '';
+  if (playbackSourceName.isNotEmpty) {
+    return playbackSourceName;
+  }
+  final sourceName = target.sourceName.trim();
+  if (sourceName.isNotEmpty) {
+    return sourceName;
+  }
+  return playbackTarget?.sourceKind.label ?? target.sourceKind?.label ?? '';
+}
+
 class _HomePosterTile extends StatelessWidget {
   const _HomePosterTile({
     super.key,
@@ -293,6 +313,10 @@ class _HomePosterTile extends StatelessWidget {
       width: width,
       imageAspectRatio: imageAspectRatio,
       imageBadgeText: _resolveHomePosterBadgeText(
+        module: module,
+        item: item,
+      ),
+      imageTopRightBadgeText: _resolveHomePosterSourceBadgeText(
         module: module,
         item: item,
       ),

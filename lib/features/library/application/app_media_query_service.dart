@@ -223,6 +223,21 @@ class AppMediaQueryService {
       );
       return items;
     } catch (error, stackTrace) {
+      if (source.kind == MediaSourceKind.fntv &&
+          error is FntvApiException &&
+          error.isMissingItem) {
+        try {
+          await ref.read(localStorageCacheRepositoryProvider)
+              .clearDetailCacheForResource(
+            sourceId: source.id,
+            resourceId: normalizedParentId,
+            resourcePath: '',
+          );
+        } catch (cacheError, cacheStack) {
+          appLogWarning('library.query', 'Missing item cache cleanup failed',
+              error: cacheError, stackTrace: cacheStack);
+        }
+      }
       appLogError(
         'library.query',
         'Library child items could not be loaded',

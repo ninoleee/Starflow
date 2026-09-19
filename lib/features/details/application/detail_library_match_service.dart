@@ -829,6 +829,7 @@ class DetailLibraryMatchService {
       year: normalizedResolved.year,
       durationLabel: normalizedResolved.durationLabel,
       ratingLabels: normalizedResolved.ratingLabels,
+      ratingCount: normalizedResolved.ratingCount,
       genres: normalizedResolved.genres,
       directors: normalizedResolved.directors,
       directorProfiles: normalizedResolved.directorProfiles,

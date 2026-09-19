@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
+import 'package:starflow/features/details/application/douban_rating_stats_service.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/discovery/data/douban_api_client.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
+import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
@@ -10,6 +15,7 @@ import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 final detailTargetResolverProvider =
@@ -161,6 +167,12 @@ class DetailTargetResolver {
           ? target
           : _mergeCachedDetailTarget(target, cachedTarget),
     );
+    final initialDoubanId = nextTarget.doubanId.trim();
+    if (initialDoubanId.isNotEmpty && nextTarget.ratingCount <= 0) {
+      nextTarget = await _enrichDoubanRatingStats(
+        target: nextTarget,
+      );
+    }
     final metadataNeeds = _resolveAutomaticMetadataNeeds(
       target: nextTarget,
       settings: _settings,
@@ -197,6 +209,12 @@ class DetailTargetResolver {
     } else {
       DebugTraceOnce.logMetadata(traceKey, 'auto-enrich', 'skipped');
     }
+    final resolvedDoubanId = nextTarget.doubanId.trim();
+    if (resolvedDoubanId.isNotEmpty && resolvedDoubanId != initialDoubanId) {
+      nextTarget = await _enrichDoubanRatingStats(
+        target: nextTarget,
+      );
+    }
 
     DebugTraceOnce.logMetadata(
       traceKey,
@@ -207,6 +225,38 @@ class DetailTargetResolver {
           'ratings=${nextTarget.ratingLabels.join(' | ')}',
     );
     return nextTarget;
+  }
+
+  String get _doubanSessionCookie {
+    final account = _ref.read(appSettingsProvider).doubanAccount;
+    return account.enabled ? account.sessionCookie.trim() : '';
+  }
+
+  Future<MediaDetailTarget> _enrichDoubanRatingStats({
+    required MediaDetailTarget target,
+  }) async {
+    final previousCount = target.ratingCount;
+    final enriched = await enrichDetailTargetWithDoubanRatingStats(
+      target: target,
+      doubanApiClient: _ref.read(doubanApiClientProvider),
+      cookie: _doubanSessionCookie,
+    );
+    if (enriched.ratingCount > previousCount &&
+        enriched.sourceId.trim().isNotEmpty &&
+        enriched.itemId.trim().isNotEmpty) {
+      unawaited(
+        _ref
+            .read(mediaRepositoryProvider)
+            .updateRatingCount(
+              sourceId: enriched.sourceId,
+              itemId: enriched.itemId,
+              resourcePath: enriched.resourcePath,
+              ratingCount: enriched.ratingCount,
+            )
+            .catchError((_) {}),
+      );
+    }
+    return enriched;
   }
 
   Future<void> _persistResolvedTarget(
@@ -715,6 +765,8 @@ MediaDetailTarget _mergeCachedDetailTarget(
         ? current.durationLabel
         : cached.durationLabel,
     ratingLabels: _mergeLabels(current.ratingLabels, cached.ratingLabels),
+    ratingCount:
+        current.ratingCount > 0 ? current.ratingCount : cached.ratingCount,
     genres: current.genres.isNotEmpty ? current.genres : cached.genres,
     directors:
         current.directors.isNotEmpty ? current.directors : cached.directors,

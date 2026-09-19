@@ -273,6 +273,19 @@ class NasMediaIndexer {
       _NasMediaIndexerRefreshFlowX(this)
           .markDetailTargetMetadataManuallyManaged(target);
 
+  Future<void> updateRatingCount({
+    required String sourceId,
+    required String resourceId,
+    required String resourcePath,
+    required int ratingCount,
+  }) =>
+      _NasMediaIndexerRefreshFlowX(this).updateRatingCount(
+        sourceId: sourceId,
+        resourceId: resourceId,
+        resourcePath: resourcePath,
+        ratingCount: ratingCount,
+      );
+
   Future<List<MediaItem>> loadLibrary(
     MediaSourceConfig source, {
     String? sectionId,

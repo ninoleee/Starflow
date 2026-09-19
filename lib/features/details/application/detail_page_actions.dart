@@ -277,6 +277,9 @@ MediaDetailTarget buildSeriesOverviewSourceMatchSeed({
     ratingLabels: resolvedTarget.ratingLabels.isNotEmpty
         ? resolvedTarget.ratingLabels
         : pageSeedTarget.ratingLabels,
+    ratingCount: resolvedTarget.ratingCount > 0
+        ? resolvedTarget.ratingCount
+        : pageSeedTarget.ratingCount,
     genres: resolvedTarget.genres.isNotEmpty
         ? resolvedTarget.genres
         : pageSeedTarget.genres,

@@ -5,6 +5,29 @@ enum MediaRatingSource {
   other,
 }
 
+String formatRatingCountLabel(int count) {
+  if (count <= 0) {
+    return '';
+  }
+  if (count >= 100000000) {
+    return '${_formatCompactUnit(count / 100000000)}亿';
+  }
+  if (count >= 10000) {
+    return '${_formatCompactUnit(count / 10000)}万';
+  }
+  return '$count';
+}
+
+String buildRatingCountLabel(int count) {
+  final value = formatRatingCountLabel(count);
+  return value.isEmpty ? '' : '☆$value';
+}
+
+String _formatCompactUnit(double value) {
+  final fixed = value.toStringAsFixed(1);
+  return fixed.endsWith('.0') ? fixed.substring(0, fixed.length - 2) : fixed;
+}
+
 String resolvePreferredPosterRatingLabel(
   Iterable<String> labels, {
   bool preferDoubanOnly = false,

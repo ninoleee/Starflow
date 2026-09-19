@@ -8,10 +8,15 @@ void main() {
       'raw overview survives cache round-trip while link-only text is not useful',
       () {
     const raw = '来源：<a href="https://example.com/watch">编号</a><br/>';
-    const target =
-        MediaDetailTarget(title: 'Test', posterUrl: '', overview: raw);
+    const target = MediaDetailTarget(
+      title: 'Test',
+      posterUrl: '',
+      overview: raw,
+      ratingCount: 315946,
+    );
     final restored = MediaDetailTarget.fromJson(target.toJson());
     expect(restored.overview, raw);
+    expect(restored.ratingCount, 315946);
     expect(restored.hasUsefulOverview, isFalse);
   });
   group('MediaDetailTarget.needsMetadataMatch', () {
@@ -162,6 +167,30 @@ void main() {
       );
 
       expect(target.tmdbId, '19995');
+    });
+
+    test('preserves rating count from media item', () {
+      final target = MediaDetailTarget.fromMediaItem(
+        MediaItem(
+          id: 'movie-count',
+          title: '半泽直树',
+          overview: '',
+          posterUrl: '',
+          year: 2013,
+          durationLabel: '剧集',
+          genres: const [],
+          sourceId: 'nas-main',
+          sourceName: 'NAS',
+          sourceKind: MediaSourceKind.nas,
+          streamUrl: '',
+          ratingLabels: const ['豆瓣 9.2'],
+          ratingCount: 315946,
+          addedAt: DateTime(2026),
+        ),
+      );
+
+      expect(target.ratingCount, 315946);
+      expect(MediaDetailTarget.fromJson(target.toJson()).ratingCount, 315946);
     });
 
     test('keeps name fallback separate from enrichable profiles', () {

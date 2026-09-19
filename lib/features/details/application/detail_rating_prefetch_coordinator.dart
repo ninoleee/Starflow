@@ -294,6 +294,9 @@ class DetailRatingPrefetchCoordinator {
         cachedTarget.ratingLabels,
         target.ratingLabels,
       ),
+      ratingCount: target.ratingCount > 0
+          ? target.ratingCount
+          : cachedTarget.ratingCount,
       doubanId: target.doubanId.trim().isNotEmpty
           ? target.doubanId
           : cachedTarget.doubanId,
@@ -320,6 +323,7 @@ class DetailRatingPrefetchCoordinator {
           target.ratingLabels,
           preferDoubanOnly: preferDoubanOnly,
         ).isEmpty ||
+        target.ratingCount <= 0 ||
         target.posterUrl.trim().isEmpty;
   }
 
@@ -334,6 +338,7 @@ class DetailRatingPrefetchCoordinator {
       return true;
     }
     return current.doubanId.trim() != next.doubanId.trim() ||
+        current.ratingCount != next.ratingCount ||
         current.imdbId.trim().toLowerCase() !=
             next.imdbId.trim().toLowerCase() ||
         current.tmdbId.trim() != next.tmdbId.trim() ||

@@ -136,6 +136,30 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
         NativePlaybackFormatting.logPlayback("native.video.tracks ${summaries.joinToString("|")}")
     }
 
+    fun logSubtitleTracks(tracks: Tracks) {
+        val groups = tracks.groups.filter { it.type == C.TRACK_TYPE_TEXT }
+        if (groups.isEmpty()) {
+            NativePlaybackFormatting.logPlayback("native.subtitle.tracks none")
+            return
+        }
+        val summaries =
+            groups.flatMapIndexed { groupIndex, group ->
+                (0 until group.length).map { trackIndex ->
+                    val format = group.getTrackFormat(trackIndex)
+                    "g$groupIndex:t$trackIndex" +
+                        ":mime=${format.sampleMimeType ?: "-"}" +
+                        ":codecs=${format.codecs ?: "-"}" +
+                        ":language=${format.language ?: "-"}" +
+                        ":roleFlags=${format.roleFlags}" +
+                        ":supported=${group.isTrackSupported(trackIndex)}" +
+                        ":selected=${group.isTrackSelected(trackIndex)}"
+                }
+            }
+        NativePlaybackFormatting.logPlayback(
+            "native.subtitle.tracks ${summaries.joinToString("|")}",
+        )
+    }
+
     fun logPlaybackRuntimeIfNeeded() {
         val currentPlayer = host.session.player ?: return
         if (!currentPlayer.playWhenReady && currentPlayer.playbackState != Player.STATE_BUFFERING) {

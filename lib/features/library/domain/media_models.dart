@@ -427,6 +427,7 @@ class MediaItem {
     this.tmdbSetId = '',
     this.providerIds = const {},
     this.ratingLabels = const [],
+    this.ratingCount = 0,
     this.container = '',
     this.videoCodec = '',
     this.audioCodec = '',
@@ -481,6 +482,7 @@ class MediaItem {
   final String tmdbSetId;
   final Map<String, String> providerIds;
   final List<String> ratingLabels;
+  final int ratingCount;
   final String container;
   final String videoCodec;
   final String audioCodec;
@@ -538,6 +540,7 @@ class MediaItem {
     String? tmdbSetId,
     Map<String, String>? providerIds,
     List<String>? ratingLabels,
+    int? ratingCount,
     String? container,
     String? videoCodec,
     String? audioCodec,
@@ -593,6 +596,7 @@ class MediaItem {
       tmdbSetId: tmdbSetId ?? this.tmdbSetId,
       providerIds: providerIds ?? this.providerIds,
       ratingLabels: ratingLabels ?? this.ratingLabels,
+      ratingCount: ratingCount ?? this.ratingCount,
       container: container ?? this.container,
       videoCodec: videoCodec ?? this.videoCodec,
       audioCodec: audioCodec ?? this.audioCodec,
@@ -650,6 +654,7 @@ class MediaItem {
       'tmdbSetId': tmdbSetId,
       'providerIds': providerIds,
       'ratingLabels': ratingLabels,
+      'ratingCount': ratingCount,
       'container': container,
       'videoCodec': videoCodec,
       'audioCodec': audioCodec,
@@ -731,6 +736,7 @@ class MediaItem {
       ratingLabels: (json['ratingLabels'] as List<dynamic>? ?? const [])
           .whereType<String>()
           .toList(growable: false),
+      ratingCount: (json['ratingCount'] as num?)?.toInt() ?? 0,
       container: json['container'] as String? ?? '',
       videoCodec: json['videoCodec'] as String? ?? '',
       audioCodec: json['audioCodec'] as String? ?? '',

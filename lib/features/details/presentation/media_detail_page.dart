@@ -23,6 +23,7 @@ import 'package:starflow/features/details/application/detail_library_match_servi
 import 'package:starflow/features/details/application/detail_online_resource_update_service.dart';
 import 'package:starflow/features/details/application/detail_page_actions.dart';
 import 'package:starflow/features/details/application/detail_page_controller.dart';
+import 'package:starflow/features/details/application/douban_rating_stats_service.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/detail_page_providers.dart';
 import 'package:starflow/features/details/presentation/person_credits_page.dart';
@@ -32,6 +33,7 @@ import 'package:starflow/features/details/presentation/widgets/detail_hero_secti
 import 'package:starflow/features/details/presentation/widgets/detail_resource_info_section.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_television_picker_dialog.dart';
+import 'package:starflow/features/discovery/data/douban_api_client.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
@@ -226,12 +228,23 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
   required MediaDetailTarget target,
   required WmdbMetadataClient wmdbMetadataClient,
   required TmdbMetadataClient tmdbMetadataClient,
+  required DoubanApiClient doubanApiClient,
+  String doubanCookie = '',
   bool forceSearch = false,
   bool forceReplace = false,
 }) async {
   var nextTarget = target;
   final initialQuery = _detailMetadataQuery(target);
   final traceKey = _detailTraceKey(target);
+  final initialDoubanId = nextTarget.doubanId.trim();
+
+  if (initialDoubanId.isNotEmpty) {
+    nextTarget = await enrichDetailTargetWithDoubanRatingStats(
+      target: nextTarget,
+      doubanApiClient: doubanApiClient,
+      cookie: doubanCookie,
+    );
+  }
 
   if (settings.wmdbMetadataMatchEnabled &&
       (forceSearch ||
@@ -371,6 +384,16 @@ Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
     }
   }
 
+  final resolvedDoubanId = nextTarget.doubanId.trim();
+  if (resolvedDoubanId.isNotEmpty &&
+      (resolvedDoubanId != initialDoubanId || forceSearch)) {
+    nextTarget = await enrichDetailTargetWithDoubanRatingStats(
+      target: nextTarget,
+      doubanApiClient: doubanApiClient,
+      cookie: doubanCookie,
+    );
+  }
+
   return _normalizeRatingLabelsInTarget(nextTarget);
 }
 
@@ -423,6 +446,7 @@ bool _hasMetadataChanged(
       current.year != next.year ||
       current.durationLabel != next.durationLabel ||
       !_sameStrings(current.ratingLabels, next.ratingLabels) ||
+      current.ratingCount != next.ratingCount ||
       !_sameStrings(current.genres, next.genres) ||
       !_sameStrings(current.directors, next.directors) ||
       !_samePeople(
@@ -2598,11 +2622,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         },
       );
       final settings = ref.read(detailEnrichmentSettingsProvider);
+      final doubanAccount = ref.read(appSettingsProvider).doubanAccount;
       final nextTarget = await _resolveAutomaticMetadataIfNeeded(
         settings: settings,
         target: currentTarget,
         wmdbMetadataClient: ref.read(wmdbMetadataClientProvider),
         tmdbMetadataClient: ref.read(tmdbMetadataClientProvider),
+        doubanApiClient: ref.read(doubanApiClientProvider),
+        doubanCookie:
+            doubanAccount.enabled ? doubanAccount.sessionCookie.trim() : '',
         forceSearch: true,
         forceReplace: true,
       );

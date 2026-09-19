@@ -242,8 +242,11 @@ class FntvApiClient implements MediaServerClient {
         !source.selectedSectionIds.contains(sectionId)) {
       return const [];
     }
-    final parent =
-        _map(await _request(source, 'item/${Uri.encodeComponent(parentId)}'));
+    final parent = _map(await _request(
+      source,
+      'item/${Uri.encodeComponent(parentId)}',
+      operation: '读取父条目',
+    ));
     final type = _text(parent['type']).toLowerCase();
     final route = switch (type) {
       'tv' || 'series' => 'season/list',
@@ -258,8 +261,11 @@ class FntvApiClient implements MediaServerClient {
           sectionName: sectionName,
           folderListing: true);
     }
-    final rows = _rows(
-        await _request(source, '$route/${Uri.encodeComponent(parentId)}'));
+    final rows = _rows(await _request(
+      source,
+      '$route/${Uri.encodeComponent(parentId)}',
+      operation: route == 'season/list' ? '读取季列表' : '读取剧集列表',
+    ));
     final items = rows
         .map((row) =>
             _item(source, row, sectionId: sectionId, sectionName: sectionName))
@@ -345,6 +351,8 @@ class FntvApiClient implements MediaServerClient {
         .map((entry) => _playbackQuality(entry.key, entry.value))
         .whereType<FntvPlaybackQuality>()
         .toList(growable: false);
+    final useRangeForSeek =
+        _requiresRangeSeekEndpoint(video['wrapper'], audioStreams);
     var url = _uri(source, 'media/range/${Uri.encodeComponent(mediaId)}');
     final cloudType = _number(cloud['cloud_storage_type']);
     final selectedQuality = qualities.isEmpty
@@ -355,8 +363,9 @@ class FntvApiClient implements MediaServerClient {
           );
     if (qualities.isNotEmpty) {
       final quality = selectedQuality!;
-      if (const [2, 5, 9001].contains(cloudType) ||
-          (cloudType == 3 && !quality.isM3u8)) {
+      if (!useRangeForSeek &&
+          (const [2, 5, 9001].contains(cloudType) ||
+              (cloudType == 3 && !quality.isM3u8))) {
         final direct = Uri.tryParse(quality.url);
         if (direct == null ||
             !const ['http', 'https'].contains(direct.scheme) ||
@@ -410,6 +419,19 @@ class FntvApiClient implements MediaServerClient {
       playbackQualities: qualities,
       preferredPlaybackQualityIndex: selectedQuality?.index,
     );
+  }
+
+  static bool _requiresRangeSeekEndpoint(
+    Object? wrapperValue,
+    List<PlaybackAudioStream> audioStreams,
+  ) {
+    final wrapper = _text(wrapperValue).trim().toLowerCase();
+    final isTransportStream =
+        wrapper == 'ts' || wrapper == 'mpegts' || wrapper == 'mp2t';
+    return isTransportStream &&
+        audioStreams.any(
+          (stream) => stream.codec.trim().toLowerCase() == 'pcm_bluray',
+        );
   }
 
   @override
@@ -573,13 +595,27 @@ class FntvApiClient implements MediaServerClient {
     String sectionName = '',
   }) {
     final id = _text(row['guid']);
-    final title = _text(row['title']);
-    if (id.isEmpty || title.isEmpty) return null;
+    var title = _text(row['title']);
+    if (id.isEmpty) return null;
     final type = switch (_text(row['type']).toLowerCase()) {
       'tv' => 'Series',
       'directory' => 'Folder',
       final value => value,
     };
+    if (title.isEmpty) {
+      title = _text(row['file_name']);
+      if (title.isEmpty) {
+        final season = _number(row['season_number']);
+        final episode = _number(row['episode_number']);
+        title = switch (type.toLowerCase()) {
+          'season' => season != null && season >= 0 ? '第 $season 季' : '未分季',
+          'episode' =>
+            episode != null && episode >= 0 ? '第 $episode 集' : '未命名单集',
+          _ => '',
+        };
+      }
+      if (title.isEmpty) return null;
+    }
     final folder =
         const ['series', 'season', 'folder'].contains(type.toLowerCase());
     final playable =
@@ -718,7 +754,18 @@ class FntvApiClient implements MediaServerClient {
           'businessCode': code,
         },
       );
-      throw FntvApiException('飞牛影视$operation未成功（错误码 ${code ?? '未知'}）');
+      final missingItem = code == -6 &&
+          body == null &&
+          (route.startsWith('item/') ||
+              route.startsWith('season/list/') ||
+              route.startsWith('episode/list/'));
+      throw FntvApiException(
+        missingItem
+            ? '飞牛影视条目已不存在，请更新媒体库后重新打开（错误码 -6）'
+            : '飞牛影视$operation未成功（错误码 ${code ?? '未知'}）',
+        businessCode: code,
+        isMissingItem: missingItem,
+      );
     }
     return decoded['data'];
   }
@@ -807,8 +854,14 @@ class FntvApiClient implements MediaServerClient {
 }
 
 class FntvApiException implements Exception {
-  const FntvApiException(this.message);
+  const FntvApiException(
+    this.message, {
+    this.businessCode,
+    this.isMissingItem = false,
+  });
   final String message;
+  final int? businessCode;
+  final bool isMissingItem;
   @override
   String toString() => message;
 }

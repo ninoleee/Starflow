@@ -100,6 +100,16 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   bool _imageRetryExhaustedLogged = false;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!TickerMode.valuesOf(context).enabled && !_tvRasterLoadSettled) {
+      _resetTvRasterLoadThrottle();
+      _imageRetryTimer?.cancel();
+      _imageRetryTimer = null;
+    }
+  }
+
+  @override
   void didUpdateWidget(covariant AppNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url.trim() != widget.url.trim() ||
@@ -156,6 +166,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         );
       });
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override
@@ -213,6 +224,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     );
     final resolvedSvgBytesFuture = _resolvedSvgBytesFuture!;
     return FutureBuilder<Uint8List>(
+      key: ObjectKey(resolvedSvgBytesFuture),
       future: resolvedSvgBytesFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -293,9 +305,13 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   }) {
     final loadIdentity = _buildRasterLoadIdentity(candidate);
     _ensureTvRasterLoadIdentity(loadIdentity);
+    if (!TickerMode.valuesOf(context).enabled && !_tvRasterLoadSettled) {
+      return _buildLoading(context);
+    }
     // Preserve the wrapper after settlement so rebuilds retain the decoded image.
     final request = _tvRasterLoadRequest ??= _tvRasterImageLoadGate.request();
     return FutureBuilder<_TvRasterImageLoadPermit>(
+      key: ObjectKey(request),
       future: request.future,
       builder: (context, snapshot) {
         if (_tvRasterLoadIdentity != loadIdentity) {
@@ -354,6 +370,9 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
               );
     final resolvedRasterProviderFuture = _resolvedRasterProviderFuture!;
     return FutureBuilder<ImageProvider<Object>>(
+      // FutureBuilder otherwise retains the previous candidate's data/error
+      // while waiting, which can skip a fallback and strand its new permit.
+      key: ObjectKey(resolvedRasterProviderFuture),
       future: resolvedRasterProviderFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {

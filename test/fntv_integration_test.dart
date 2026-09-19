@@ -12,6 +12,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/data/fntv_api_client.dart';
+import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/library/data/mock_media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/playback_target_resolver.dart';
@@ -43,6 +45,41 @@ http.Response _ok(Object? data) =>
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('missing FNTV parent removes only its stale detail relation', () async {
+    final client = FntvApiClient(MockClient((request) async {
+      expect(request.url.path, '/v/api/v1/item/deleted-guid');
+      return http.Response(jsonEncode({'code': -6, 'msg': 'Not Found'}), 200);
+    }));
+    final container = ProviderContainer(overrides: [
+      appSettingsProvider.overrideWithValue(
+        SeedData.defaultSettings.copyWith(mediaSources: [_source]),
+      ),
+      fntvApiClientProvider.overrideWithValue(client),
+    ]);
+    addTearDown(container.dispose);
+    final cache = container.read(localStorageCacheRepositoryProvider);
+    const old = MediaDetailTarget(
+      title: '半泽直树', posterUrl: '', overview: '',
+      sourceId: 'fntv', sourceKind: MediaSourceKind.fntv,
+      itemId: 'deleted-guid', itemType: 'series',
+    );
+    final other = old.copyWith(title: 'Other show', itemId: 'other-guid');
+    for (final target in [old, other]) {
+      await cache.saveDetailTarget(seedTarget: target, resolvedTarget: target,
+          libraryMatchChoices: [target]);
+    }
+    await expectLater(
+      container.read(mediaRepositoryProvider).fetchChildren(
+        sourceId: 'fntv', parentId: 'deleted-guid',
+      ),
+      throwsA(isA<FntvApiException>().having((e) => e.isMissingItem, 'missing', true)),
+    );
+    final state = await cache.loadDetailState(old);
+    expect(state?.target.itemId ?? '', isNot('deleted-guid'));
+    expect(state?.libraryMatchChoices ?? [], isEmpty);
+    expect((await cache.loadDetailTarget(other))?.itemId, 'other-guid');
+  });
 
   test(
       'repository uses FNTV, caches sections and keeps cache on failed refresh',

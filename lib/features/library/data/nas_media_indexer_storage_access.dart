@@ -275,6 +275,7 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
       imdbId: existing.item.imdbId,
       tmdbId: existing.item.tmdbId,
       ratingLabels: existing.item.ratingLabels,
+      ratingCount: existing.item.ratingCount,
       container: existing.item.container,
       videoCodec: existing.item.videoCodec,
       audioCodec: existing.item.audioCodec,

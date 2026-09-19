@@ -433,6 +433,72 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     _notifyIndexChangedSafely();
   }
 
+  Future<void> updateRatingCount({
+    required String sourceId,
+    required String resourceId,
+    required String resourcePath,
+    required int ratingCount,
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    final normalizedResourceId = resourceId.trim();
+    final normalizedRatingCount = ratingCount < 0 ? 0 : ratingCount;
+    if (normalizedSourceId.isEmpty ||
+        normalizedResourceId.isEmpty ||
+        normalizedRatingCount <= 0) {
+      return;
+    }
+
+    final records = await _loadSourceRecordsCached(normalizedSourceId);
+    if (records.isEmpty) {
+      return;
+    }
+    final targetIndices = _resolveWritableRecordIndices(
+      records,
+      normalizedResourceId,
+      resourceScopePath: resourcePath.trim(),
+    );
+    if (targetIndices.isEmpty) {
+      return;
+    }
+
+    final changedRecords = <NasMediaIndexRecord>[];
+    for (final targetIndex in targetIndices) {
+      final currentRecord = records[targetIndex];
+      if (currentRecord.item.ratingCount == normalizedRatingCount) {
+        continue;
+      }
+      changedRecords.add(
+        currentRecord.copyWith(
+          item: currentRecord.item.copyWith(
+            ratingCount: normalizedRatingCount,
+          ),
+        ),
+      );
+    }
+    if (changedRecords.isEmpty) {
+      return;
+    }
+
+    final existingState = await _store.loadSourceState(normalizedSourceId);
+    await _patchSourceRecords(
+      sourceId: normalizedSourceId,
+      currentRecords: records,
+      upsertedRecords: changedRecords,
+      deletedRecordIds: const [],
+      state: NasMediaIndexSourceState(
+        sourceId: normalizedSourceId,
+        lastIndexedAt: DateTime.now(),
+        recordCount: records.length,
+        scopeKey: existingState?.scopeKey ?? '',
+        sourceIdentity: existingState?.sourceIdentity ?? '',
+        emptyAutoRebuildAttempted: records.isNotEmpty
+            ? false
+            : (existingState?.emptyAutoRebuildAttempted ?? false),
+      ),
+    );
+    _notifyIndexChangedSafely();
+  }
+
   Future<List<MediaItem>> loadLibrary(
     MediaSourceConfig source, {
     String? sectionId,

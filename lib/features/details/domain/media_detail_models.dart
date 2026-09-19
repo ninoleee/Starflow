@@ -110,6 +110,7 @@ class MediaDetailTarget {
     this.year = 0,
     this.durationLabel = '',
     this.ratingLabels = const [],
+    this.ratingCount = 0,
     this.genres = const [],
     this.directors = const [],
     this.directorProfiles = const [],
@@ -154,6 +155,7 @@ class MediaDetailTarget {
   final int year;
   final String durationLabel;
   final List<String> ratingLabels;
+  final int ratingCount;
   final List<String> genres;
   final List<String> directors;
   final List<MediaPersonProfile> directorProfiles;
@@ -284,6 +286,7 @@ class MediaDetailTarget {
     int? year,
     String? durationLabel,
     List<String>? ratingLabels,
+    int? ratingCount,
     List<String>? genres,
     List<String>? directors,
     List<MediaPersonProfile>? directorProfiles,
@@ -328,6 +331,7 @@ class MediaDetailTarget {
       year: year ?? this.year,
       durationLabel: durationLabel ?? this.durationLabel,
       ratingLabels: ratingLabels ?? this.ratingLabels,
+      ratingCount: ratingCount ?? this.ratingCount,
       genres: genres ?? this.genres,
       directors: directors ?? this.directors,
       directorProfiles: directorProfiles ?? this.directorProfiles,
@@ -409,6 +413,7 @@ class MediaDetailTarget {
       wikidataId: item.wikidataId,
       tmdbSetId: item.tmdbSetId,
       providerIds: item.providerIds,
+      ratingCount: item.ratingCount,
       sourceKind: item.sourceKind,
       sourceName: item.sourceName,
     );
@@ -431,6 +436,7 @@ class MediaDetailTarget {
       'year': year,
       'durationLabel': durationLabel,
       'ratingLabels': ratingLabels,
+      'ratingCount': ratingCount,
       'genres': genres,
       'directors': directors,
       'directorProfiles':
@@ -494,6 +500,7 @@ class MediaDetailTarget {
       ratingLabels: (json['ratingLabels'] as List<dynamic>? ?? const [])
           .whereType<String>()
           .toList(growable: false),
+      ratingCount: (json['ratingCount'] as num?)?.toInt() ?? 0,
       genres: (json['genres'] as List<dynamic>? ?? const [])
           .whereType<String>()
           .toList(growable: false),

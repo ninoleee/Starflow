@@ -666,6 +666,53 @@ class LocalStorageCacheRepository {
     );
   }
 
+  Future<void> updateMediaItemRatingCount({
+    required String sourceId,
+    required String itemId,
+    required int ratingCount,
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    final normalizedItemId = itemId.trim();
+    if (normalizedSourceId.isEmpty ||
+        normalizedItemId.isEmpty ||
+        ratingCount <= 0) {
+      return;
+    }
+    final snapshot = await loadEmbyLibrarySnapshot(normalizedSourceId);
+    var changed = false;
+    List<MediaItem> updateItems(List<MediaItem> items) {
+      var groupChanged = false;
+      final updated = items.map((item) {
+        if (item.id.trim() != normalizedItemId &&
+            item.playbackItemId.trim() != normalizedItemId) {
+          return item;
+        }
+        if (item.ratingCount == ratingCount) {
+          return item;
+        }
+        groupChanged = true;
+        return item.copyWith(ratingCount: ratingCount);
+      }).toList(growable: false);
+      changed = changed || groupChanged;
+      return updated;
+    }
+
+    final fallbackItems = updateItems(snapshot.fallbackItems);
+    final itemsBySection = snapshot.itemsBySection.map(
+      (sectionId, items) => MapEntry(sectionId, updateItems(items)),
+    );
+    if (!changed) {
+      return;
+    }
+    await saveEmbyLibrarySnapshot(
+      sourceId: normalizedSourceId,
+      refreshedAt: snapshot.refreshedAt ?? DateTime.now(),
+      collections: snapshot.collections,
+      fallbackItems: fallbackItems,
+      itemsBySection: itemsBySection,
+    );
+  }
+
   Future<void> clearEmbyLibrarySnapshot(String sourceId) async {
     final normalizedSourceId = sourceId.trim();
     if (normalizedSourceId.isEmpty) {
@@ -2251,7 +2298,8 @@ bool _canShareDetailCacheRecord({
   required MediaDetailTarget left,
   required MediaDetailTarget right,
 }) {
-  if (_hasConflictingDirectorySeriesIdentity(left, right)) {
+  if (_hasConflictingDirectorySeriesIdentity(left, right) ||
+      _hasConflictingFntvSeriesIdentity(left, right)) {
     return false;
   }
   final leftKind = _detailLookupKind(left);
@@ -2300,7 +2348,8 @@ bool _canRestoreStructuralMismatchRecord({
   required _CachedDetailRecord record,
   required String matchedLookupKey,
 }) {
-  if (_hasConflictingDirectorySeriesIdentity(seedTarget, record.target)) {
+  if (_hasConflictingDirectorySeriesIdentity(seedTarget, record.target) ||
+      _hasConflictingFntvSeriesIdentity(seedTarget, record.target)) {
     return false;
   }
   final seedKind = _detailLookupKind(seedTarget);
@@ -2322,6 +2371,23 @@ bool _canRestoreStructuralMismatchRecord({
     return true;
   }
   return record.libraryMatchChoices.isNotEmpty;
+}
+
+bool _hasConflictingFntvSeriesIdentity(
+  MediaDetailTarget left,
+  MediaDetailTarget right,
+) {
+  // Deleting and re-importing a series changes its GUID. A title/provider-ID
+  // alias must not replace a fresh library entry with the deleted identity.
+  return left.sourceKind == MediaSourceKind.fntv &&
+      right.sourceKind == MediaSourceKind.fntv &&
+      left.isSeries &&
+      right.isSeries &&
+      left.sourceId.trim().isNotEmpty &&
+      left.sourceId.trim() == right.sourceId.trim() &&
+      left.itemId.trim().isNotEmpty &&
+      right.itemId.trim().isNotEmpty &&
+      left.itemId.trim() != right.itemId.trim();
 }
 
 bool _hasConflictingDirectorySeriesIdentity(

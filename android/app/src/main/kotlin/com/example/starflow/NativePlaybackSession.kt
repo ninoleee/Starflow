@@ -20,13 +20,13 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultAllocator
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
+import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.ui.PlayerView
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_DECODE_MODE
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_HEADERS_JSON
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_MEDIA_MIME_TYPE
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_TITLE
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_URL
-import org.json.JSONObject
 
 internal class NativePlaybackSession(private val host: Host) {
     interface Host {
@@ -175,25 +175,9 @@ internal class NativePlaybackSession(private val host: Host) {
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(NATIVE_HTTP_CONNECT_TIMEOUT_MS)
                 .setReadTimeoutMs(NATIVE_HTTP_READ_TIMEOUT_MS)
-                .setUserAgent("Starflow")
-
-        if (headersJson.isNotEmpty()) {
-            try {
-                val json = JSONObject(headersJson)
-                val headers = mutableMapOf<String, String>()
-                val keys = json.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    headers[key] = json.optString(key)
-                }
-                dataSourceFactory.setDefaultRequestProperties(headers)
-            } catch (error: Throwable) {
-                NativePlaybackFormatting.logPlayback(
-                    "native.initialize.headers-parse-failed",
-                    error,
-                )
-            }
-        }
+        dataSourceFactory.setDefaultRequestProperties(
+            NativePlaybackSource.buildRequestHeaders(headersJson),
+        )
 
         val renderersFactory =
             NativePlaybackRenderersFactory(
@@ -230,7 +214,7 @@ internal class NativePlaybackSession(private val host: Host) {
                 .setBandwidthMeter(bandwidthMeter)
                 .setLoadControl(buildLoadControl())
                 .setMediaSourceFactory(
-                    DefaultMediaSourceFactory(dataSourceFactory)
+                    DefaultMediaSourceFactory(dataSourceFactory, buildExtractorsFactory(audioCodec))
                         .setLoadErrorHandlingPolicy(NativePlaybackLoadErrorPolicy())
                 )
                 .build()
@@ -416,6 +400,9 @@ internal class NativePlaybackSession(private val host: Host) {
             .setPrioritizeTimeOverSizeThresholds(bufferConfig.prioritizeTimeOverSizeThresholds)
             .build()
     }
+
+    internal fun buildExtractorsFactory(audioCodec: String = ""): ExtractorsFactory =
+        NativePlaybackExtractorsFactory(audioCodec)
 
     private fun buildMediaCodecSelector(preferSoftware: Boolean): MediaCodecSelector {
         return MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->

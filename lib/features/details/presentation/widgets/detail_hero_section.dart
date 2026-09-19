@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_start_playback_resolver.dart';
@@ -42,8 +43,10 @@ class DetailHeroSection extends ConsumerWidget {
         ? math.max(440.0, math.min(screenHeight * 0.62, 620.0))
         : math.max(560.0, math.min(screenHeight * 0.76, 760.0));
     final hasHeroLogo = target.logoUrl.trim().isNotEmpty;
+    final ratingCountLabel = buildRatingCountLabel(target.ratingCount);
     final metadata = <String>[
       ...target.ratingLabels.where((item) => item.trim().isNotEmpty),
+      if (ratingCountLabel.isNotEmpty) ratingCountLabel,
       if (target.year > 0) '${target.year}',
       if (target.durationLabel.trim().isNotEmpty) target.durationLabel,
       ...target.genres.take(3).where((item) => item.trim().isNotEmpty),

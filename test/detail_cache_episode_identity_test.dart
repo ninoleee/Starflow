@@ -13,6 +13,27 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  test('reimported FNTV series never restores the deleted series GUID', () async {
+    final repository = await _repository();
+    const old = MediaDetailTarget(
+      title: '半泽直树', posterUrl: '', overview: '',
+      sourceId: 'fntv', sourceKind: MediaSourceKind.fntv,
+      itemId: 'deleted-guid', itemType: 'series', tmdbId: 'same-show',
+    );
+    final fresh = old.copyWith(itemId: 'new-guid');
+    await repository.saveDetailTarget(
+      seedTarget: old, resolvedTarget: old, libraryMatchChoices: [old],
+    );
+    expect(await repository.loadDetailTarget(fresh), isNull);
+    expect(await repository.loadDetailState(fresh, allowStructuralMismatch: true), isNull);
+    await repository.saveDetailTarget(
+      seedTarget: fresh, resolvedTarget: fresh, libraryMatchChoices: [fresh],
+    );
+    final reloaded = await _repository();
+    expect((await reloaded.loadDetailTarget(fresh))?.itemId, 'new-guid');
+    expect((await reloaded.loadDetailTarget(old))?.itemId, 'deleted-guid');
+  });
+
   test('directory entry preference beats a sibling on the same NAS', () {
     final first =
         _target(itemType: 'series').copyWith(itemId: 'webdav-series|first');

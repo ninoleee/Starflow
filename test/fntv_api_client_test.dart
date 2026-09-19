@@ -249,6 +249,61 @@ void main() {
     expect(requests, hasLength(2));
   });
 
+  for (final stage in ['parent', 'season', 'episode']) {
+    test('child browsing reports $stage business failure without retry',
+        () async {
+      var calls = 0;
+      final client = FntvApiClient(MockClient((request) async {
+        calls++;
+        if (stage != 'parent' && request.url.path.contains('/item/')) {
+          return ok({'type': stage == 'season' ? 'TV' : 'Season'});
+        }
+        return http.Response(
+          jsonEncode({'code': -6, 'message': 'secret=session-token'}),
+          200,
+        );
+      }));
+      await expectLater(
+        client.fetchChildren(source, parentId: 'missing'),
+        throwsA(isA<FntvApiException>()
+            .having((error) => error.isMissingItem, 'isMissingItem', true)
+            .having((error) => error.businessCode, 'businessCode', -6)
+            .having((error) => error.message, 'message',
+                '飞牛影视条目已不存在，请更新媒体库后重新打开（错误码 -6）')),
+      );
+      expect(calls, stage == 'parent' ? 1 : 2);
+    });
+  }
+
+  test('unnamed seasons and episodes remain browsable', () async {
+    final client = FntvApiClient(MockClient((request) async {
+      if (request.url.path.endsWith('/item/show')) return ok({'type': 'TV'});
+      if (request.url.path.endsWith('/item/season')) {
+        return ok({'type': 'Season'});
+      }
+      if (request.url.path.contains('/season/list/')) {
+        return ok([
+          {'guid': 'season', 'type': 'Season', 'title': '', 'season_number': -1}
+        ]);
+      }
+      return ok([
+        {'guid': 'ep-10', 'type': 'Episode', 'title': '', 'episode_number': 10},
+        {
+          'guid': 'ep-11',
+          'type': 'Episode',
+          'title': '',
+          'episode_number': 11,
+          'file_name': 'episode.strm'
+        },
+      ]);
+    }));
+    expect((await client.fetchChildren(source, parentId: 'show')).single.title,
+        '未分季');
+    final episodes = await client.fetchChildren(source, parentId: 'season');
+    expect(episodes.map((item) => item.title), ['第 10 集', 'episode.strm']);
+    expect(episodes.every((item) => item.isPlayable), isTrue);
+  });
+
   test('playback resolves media guid, preserves artwork and carries NAS auth',
       () async {
     final client = FntvApiClient(MockClient((request) async {
@@ -401,6 +456,60 @@ void main() {
       '4K · 25.0 Mbps',
     ]);
     expect(target.preferredPlaybackQualityIndex, 1);
+  });
+
+  test('Blu-ray PCM transport stream prefers the seek-safe range endpoint',
+      () async {
+    final client = FntvApiClient(MockClient((request) async {
+      if (request.url.path.endsWith('/play/info')) {
+        return ok({'media_guid': 'file'});
+      }
+      return ok({
+        'cloud_storage_info': {'cloud_storage_type': 9001},
+        'file_stream': {'guid': 'file', 'can_play': 1},
+        'video_stream': {'guid': 'video', 'wrapper': 'MPEGTS'},
+        'audio_streams': [
+          {'guid': 'audio', 'codec_name': 'pcm_bluray'},
+        ],
+        'direct_link_qualities': [
+          {'resolution': '1080P', 'url': 'https://cdn/episode.ts'},
+        ],
+      });
+    }));
+
+    final target =
+        await client.resolvePlaybackTarget(source: source, target: _target());
+
+    expect(
+      target.streamUrl,
+      'https://nas.example.com/v/api/v1/media/range/file'
+      '?direct_link_quality_index=0',
+    );
+  });
+
+  test('Blu-ray PCM in a non-transport container keeps the direct link',
+      () async {
+    final client = FntvApiClient(MockClient((request) async {
+      if (request.url.path.endsWith('/play/info')) {
+        return ok({'media_guid': 'file'});
+      }
+      return ok({
+        'cloud_storage_info': {'cloud_storage_type': 9001},
+        'file_stream': {'guid': 'file', 'can_play': 1},
+        'video_stream': {'guid': 'video', 'wrapper': 'MKV'},
+        'audio_streams': [
+          {'guid': 'audio', 'codec_name': 'pcm_bluray'},
+        ],
+        'direct_link_qualities': [
+          {'resolution': '1080P', 'url': 'https://cdn/movie.mkv'},
+        ],
+      });
+    }));
+
+    final target =
+        await client.resolvePlaybackTarget(source: source, target: _target());
+
+    expect(target.streamUrl, 'https://cdn/movie.mkv');
   });
 
   test(

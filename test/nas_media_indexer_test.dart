@@ -1425,6 +1425,16 @@ void main() {
     expect(records.single.wmdbMatched, isTrue);
     expect(records.single.wmdbStatus, NasMetadataFetchStatus.succeeded);
     expect(records.single.manualMetadataLocked, isTrue);
+
+    await indexer.updateRatingCount(
+      sourceId: source.id,
+      resourceId: records.single.resourceId,
+      resourcePath: records.single.resourcePath,
+      ratingCount: 315946,
+    );
+    final ratingRecords = await store.loadSourceRecords(source.id);
+    expect(ratingRecords.single.item.ratingCount, 315946);
+    expect((await indexer.loadLibrary(source)).single.ratingCount, 315946);
   });
 
   test(

@@ -422,6 +422,47 @@ class AppMediaRepository implements MediaRepository {
     );
   }
 
+  Future<void> updateRatingCount({
+    required String sourceId,
+    required String itemId,
+    required String resourcePath,
+    required int ratingCount,
+  }) async {
+    final normalizedSourceId = sourceId.trim();
+    if (normalizedSourceId.isEmpty || ratingCount <= 0) {
+      return;
+    }
+    MediaSourceConfig? source;
+    for (final candidate in _enabledSources) {
+      if (candidate.id == normalizedSourceId) {
+        source = candidate;
+        break;
+      }
+    }
+    if (source == null) {
+      return;
+    }
+    if (source.kind.isMediaServer) {
+      await ref
+          .read(localStorageCacheRepositoryProvider)
+          .updateMediaItemRatingCount(
+            sourceId: normalizedSourceId,
+            itemId: itemId,
+            ratingCount: ratingCount,
+          );
+      return;
+    }
+    if (source.kind == MediaSourceKind.nas ||
+        source.kind == MediaSourceKind.quark) {
+      await _nasMediaIndexer.updateRatingCount(
+        sourceId: normalizedSourceId,
+        resourceId: itemId,
+        resourcePath: resourcePath,
+        ratingCount: ratingCount,
+      );
+    }
+  }
+
   @override
   Future<void> deleteResource({
     required String sourceId,
@@ -2820,6 +2861,26 @@ class _MatchedSyncDeleteScope {
       depth: depth ?? this.depth,
       matchMode: matchMode ?? this.matchMode,
     );
+  }
+}
+
+extension MediaRepositoryRatingCountX on MediaRepository {
+  Future<void> updateRatingCount({
+    required String sourceId,
+    required String itemId,
+    required String resourcePath,
+    required int ratingCount,
+  }) {
+    final repository = this;
+    if (repository is AppMediaRepository) {
+      return repository.updateRatingCount(
+        sourceId: sourceId,
+        itemId: itemId,
+        resourcePath: resourcePath,
+        ratingCount: ratingCount,
+      );
+    }
+    return Future<void>.value();
   }
 }
 

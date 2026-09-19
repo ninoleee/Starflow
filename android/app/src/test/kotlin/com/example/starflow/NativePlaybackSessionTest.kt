@@ -12,6 +12,12 @@ import org.mockito.Mockito.*
 
 class NativePlaybackSessionTest {
     @Test
+    fun usesCompatibleTsExtractorFactory() {
+        val session = NativePlaybackSession(mock(NativePlaybackSession.Host::class.java))
+        assertTrue(session.buildExtractorsFactory() is NativePlaybackExtractorsFactory)
+    }
+
+    @Test
     fun initializationIsIdempotentForExistingPlayer() {
         val host = mock(NativePlaybackSession.Host::class.java)
         val session = NativePlaybackSession(host)

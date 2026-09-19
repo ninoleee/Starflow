@@ -125,6 +125,35 @@ void main() {
     );
   });
 
+  test('updates rating count in cached media items', () async {
+    final preferences = _TrackingPreferencesStore();
+    final repository = LocalStorageCacheRepository(preferences: preferences);
+    final item = _embyCacheItem(
+      id: 'movie-count',
+      sectionId: 'movies',
+      title: 'Half Nagazawa',
+    );
+    await repository.saveEmbyLibrarySnapshot(
+      sourceId: 'emby-main',
+      refreshedAt: DateTime.utc(2026, 8, 24),
+      fallbackItems: <MediaItem>[item],
+      itemsBySection: <String, List<MediaItem>>{
+        'movies': <MediaItem>[item],
+      },
+    );
+
+    await repository.updateMediaItemRatingCount(
+      sourceId: 'emby-main',
+      itemId: 'movie-count',
+      ratingCount: 315946,
+    );
+
+    final reloaded = LocalStorageCacheRepository(preferences: preferences);
+    final snapshot = await reloaded.loadEmbyLibrarySnapshot('emby-main');
+    expect(snapshot.fallbackItems, isEmpty);
+    expect(snapshot.itemsBySection['movies']!.single.ratingCount, 315946);
+  });
+
   test('persists matched and enriched detail targets for later reuse',
       () async {
     final prefs = await SharedPreferences.getInstance();
@@ -809,6 +838,7 @@ MediaItem _embyCacheItem({
   required String sectionId,
   required String title,
   String overview = '',
+  int ratingCount = 0,
 }) {
   return MediaItem(
     id: id,
@@ -824,6 +854,7 @@ MediaItem _embyCacheItem({
     sourceName: 'Living Room',
     sourceKind: MediaSourceKind.emby,
     streamUrl: '',
+    ratingCount: ratingCount,
     addedAt: DateTime.utc(2026, 8, 24),
   );
 }

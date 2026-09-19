@@ -157,6 +157,7 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     var directors = _dedupe(seed.directors);
     var actors = _dedupe(seed.actors);
     var ratingLabels = <String>[];
+    final ratingCount = existingRecord?.item.ratingCount ?? 0;
     var itemType = seed.itemType.trim().isNotEmpty
         ? seed.itemType.trim()
         : recognition.itemType.trim();
@@ -629,6 +630,7 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       imdbId: imdbId.trim(),
       tmdbId: tmdbId.trim(),
       ratingLabels: _dedupe(ratingLabels),
+      ratingCount: ratingCount,
       container: container,
       videoCodec: videoCodec,
       audioCodec: audioCodec,

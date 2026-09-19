@@ -246,6 +246,9 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       const [],
       records.expand((record) => record.item.ratingLabels).toList(),
     );
+    final ratingCount = records
+        .map((record) => record.item.ratingCount)
+        .firstWhere((value) => value > 0, orElse: () => 0);
     final genres = NasMediaIndexer._dedupe(
         records.expand((record) => record.item.genres).toList());
     final directors = NasMediaIndexer._dedupe(
@@ -309,6 +312,7 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       doubanId: doubanId,
       providerIds: providerIds,
       ratingLabels: ratingLabels,
+      ratingCount: ratingCount,
       addedAt: lastAddedAt,
     );
 
@@ -374,6 +378,9 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
         const [],
         records.expand((e) => e.item.ratingLabels).toList(),
       ),
+      ratingCount: records
+          .map((record) => record.item.ratingCount)
+          .firstWhere((value) => value > 0, orElse: () => 0),
       addedAt: sorted.first.item.addedAt,
     );
 
@@ -603,6 +610,9 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       const [],
       sorted.expand((record) => record.item.ratingLabels).toList(),
     );
+    final mergedRatingCount = sorted
+        .map((record) => record.item.ratingCount)
+        .firstWhere((value) => value > 0, orElse: () => 0);
     final maxAddedAt = sorted
         .map((record) => record.item.addedAt)
         .reduce((left, right) => left.isAfter(right) ? left : right);
@@ -661,6 +671,8 @@ extension _NasMediaIndexerGroupingSupportX on NasMediaIndexer {
       actors: mergedActors,
       playbackProgress: maxPlaybackProgress ?? base.item.playbackProgress,
       ratingLabels: mergedRatingLabels,
+      ratingCount:
+          mergedRatingCount > 0 ? mergedRatingCount : base.item.ratingCount,
       addedAt: maxAddedAt,
       lastWatchedAt: lastWatchedAt ?? base.item.lastWatchedAt,
     );
