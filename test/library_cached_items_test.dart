@@ -13,6 +13,7 @@ void main() {
           posterUrl: 'https://cache.example.com/poster.jpg',
           overview: 'Cached overview',
           ratingLabels: ['豆瓣 9.0'],
+          ratingCount: 315946,
         ),
         null,
       ],
@@ -58,8 +59,49 @@ void main() {
     expect(resolved[0].title, 'Cached Title');
     expect(resolved[0].posterUrl, 'https://cache.example.com/poster.jpg');
     expect(resolved[0].ratingLabels, ['豆瓣 9.0']);
+    expect(resolved[0].ratingCount, 315946);
     expect(resolved[1].title, 'Untouched');
     expect(identical(resolved[1], items[1]), isTrue);
+  });
+
+  test('count-only changes refresh the library target and visible page',
+      () async {
+    final item = MediaItem(
+      id: 'movie',
+      title: 'Movie',
+      overview: '',
+      posterUrl: '',
+      year: 2024,
+      durationLabel: '',
+      genres: const [],
+      sourceId: 'emby-main',
+      sourceName: 'Emby',
+      sourceKind: MediaSourceKind.emby,
+      streamUrl: '',
+      addedAt: DateTime(2026),
+    );
+    final resolved = await resolveLibraryItemsWithCachedDetails(
+      items: [item],
+      localStorageCacheRepository: _TrackingLocalStorageCacheRepository(
+        batchResults: const [
+          MediaDetailTarget(
+            title: '',
+            posterUrl: '',
+            overview: '',
+            ratingCount: 315946,
+          )
+        ],
+      ),
+    );
+    expect(resolved.single.ratingCount, 315946);
+    expect(
+        visibleLibraryPageSegmentChanged(
+          previousItems: [item],
+          nextItems: resolved,
+          page: 0,
+          pageSize: 20,
+        ),
+        isTrue);
   });
 
   test('library cache merge reuses original list when overlay is unchanged',

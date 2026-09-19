@@ -18,6 +18,9 @@ internal class PgsReader(
 ) : ElementaryStreamReader {
     private var output: TrackOutput? = null
     private var sampleTimeUs = C.TIME_UNSET
+    private var packetTimeUs = C.TIME_UNSET
+    private var segmentTimeUs = C.TIME_UNSET
+    private var discardDisplaySet = false
     private var segmentType = -1
     private var segmentLength = 0
     private var segmentBytesRead = 0
@@ -45,7 +48,7 @@ internal class PgsReader(
 
     override fun packetStarted(timeUs: Long, flags: Int) {
         if (timeUs != C.TIME_UNSET) {
-            sampleTimeUs = timeUs
+            packetTimeUs = timeUs
         }
     }
 
@@ -63,9 +66,10 @@ internal class PgsReader(
                 finishSegment()
                 continue
             }
-            val bytes = ByteArray(bytesToCopy)
-            data.readBytes(bytes, 0, bytesToCopy)
-            displaySet.write(bytes)
+            if (!discardDisplaySet) {
+                displaySet.write(data.data, data.position, bytesToCopy)
+            }
+            data.skipBytes(bytesToCopy)
             segmentBytesRead += bytesToCopy
             if (segmentBytesRead == segmentLength) {
                 finishSegment()
@@ -79,9 +83,13 @@ internal class PgsReader(
         resetSegment()
         displaySet.reset()
         sampleTimeUs = C.TIME_UNSET
+        packetTimeUs = C.TIME_UNSET
+        segmentTimeUs = C.TIME_UNSET
+        discardDisplaySet = false
     }
 
     private fun readSegmentHeader(data: ParsableByteArray): Boolean {
+        if (segmentBytesRead == 0) segmentTimeUs = packetTimeUs
         val bytesToRead = minOf(
             SEGMENT_HEADER_SIZE - segmentBytesRead,
             data.bytesLeft(),
@@ -96,7 +104,20 @@ internal class PgsReader(
             ((segmentHeader[1].toInt() and 0xFF) shl 8) or
                 (segmentHeader[2].toInt() and 0xFF)
         segmentBytesRead = 0
-        displaySet.write(segmentHeader, 0, segmentHeader.size)
+        // PCS carries presentation time; the following palette/object/END PES timestamps
+        // describe decoder scheduling and can be earlier than the composition timestamp.
+        if (segmentType == SEGMENT_TYPE_PRESENTATION) {
+            displaySet.reset()
+            discardDisplaySet = false
+            sampleTimeUs = segmentTimeUs
+        } else if (displaySet.size() == 0 && !discardDisplaySet) {
+            sampleTimeUs = segmentTimeUs
+        }
+        if (displaySet.size() + SEGMENT_HEADER_SIZE + segmentLength > MAX_DISPLAY_SET_BYTES) {
+            displaySet.reset()
+            discardDisplaySet = true
+        }
+        if (!discardDisplaySet) displaySet.write(segmentHeader, 0, segmentHeader.size)
         if (segmentLength == 0) {
             finishSegment()
         }
@@ -128,6 +149,8 @@ internal class PgsReader(
             )
         }
         displaySet.reset()
+        sampleTimeUs = C.TIME_UNSET
+        discardDisplaySet = false
     }
 
     private fun resetSegment() {
@@ -139,6 +162,8 @@ internal class PgsReader(
     private companion object {
         const val SEGMENT_HEADER_SIZE = 3
         const val SEGMENT_TYPE_END = 0x80
+        const val SEGMENT_TYPE_PRESENTATION = 0x16
+        const val MAX_DISPLAY_SET_BYTES = 4 * 1024 * 1024
         const val CODEC_PGS = "S_HDMV/PGS"
     }
 }

@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,7 +18,7 @@ final fntvApiClientProvider = Provider<FntvApiClient>(
 
 /// Direct-address fnOS Video v1 client. Playback uses the NAS range endpoint,
 /// leaving seeking and container support to the selected player.
-class FntvApiClient implements MediaServerClient {
+class FntvApiClient implements MediaServerClient, MediaServerSessionClient {
   FntvApiClient(this._client);
 
   final http.Client _client;
@@ -345,14 +347,34 @@ class FntvApiClient implements MediaServerClient {
         .whereType<PlaybackSubtitleStream>()
         .toList(growable: false);
     final cloud = _map(stream['cloud_storage_info']);
-    final qualities = _rows(stream['direct_link_qualities'])
+    final directQualities = _rows(stream['direct_link_qualities'])
         .asMap()
         .entries
         .map((entry) => _playbackQuality(entry.key, entry.value))
         .whereType<FntvPlaybackQuality>()
         .toList(growable: false);
-    final useRangeForSeek =
-        _requiresRangeSeekEndpoint(video['wrapper'], audioStreams);
+    final serverQualities = _rows(stream['qualities']);
+    // Direct indices are protocol indices. Negative indices are local IDs for
+    // server qualities and must never be sent as direct_link_quality_index.
+    final qualities = <FntvPlaybackQuality>[
+      ...directQualities,
+      if (directQualities.isEmpty && serverQualities.isNotEmpty)
+        FntvPlaybackQuality(
+          index: 0,
+          resolution: '原画',
+          bitrate: _number(video['bps']) ?? 0,
+        ),
+      for (var i = 1; i < serverQualities.length; i++)
+        if (_text(serverQualities[i]['resolution']).isNotEmpty &&
+            (_number(serverQualities[i]['bitrate']) ?? 0) > 0)
+          FntvPlaybackQuality(
+            index: -i,
+            resolution: _text(serverQualities[i]['resolution']),
+            bitrate: _number(serverQualities[i]['bitrate'])!,
+            isM3u8: true,
+            serverTranscode: true,
+          ),
+    ];
     var url = _uri(source, 'media/range/${Uri.encodeComponent(mediaId)}');
     final cloudType = _number(cloud['cloud_storage_type']);
     final selectedQuality = qualities.isEmpty
@@ -361,11 +383,17 @@ class FntvApiClient implements MediaServerClient {
             (quality) => quality.index == target.preferredPlaybackQualityIndex,
             orElse: () => qualities.first,
           );
-    if (qualities.isNotEmpty) {
+    final requestedIndex = target.preferredPlaybackQualityIndex;
+    if (requestedIndex != null &&
+        requestedIndex < 0 &&
+        !qualities.any((quality) => quality.index == requestedIndex)) {
+      throw const FntvApiException('飞牛当前未提供所选转码画质，请重新选择');
+    }
+    if (directQualities.isNotEmpty &&
+        selectedQuality?.serverTranscode != true) {
       final quality = selectedQuality!;
-      if (!useRangeForSeek &&
-          (const [2, 5, 9001].contains(cloudType) ||
-              (cloudType == 3 && !quality.isM3u8))) {
+      if (const [2, 5, 9001].contains(cloudType) ||
+          (cloudType == 3 && !quality.isM3u8)) {
         final direct = Uri.tryParse(quality.url);
         if (direct == null ||
             !const ['http', 'https'].contains(direct.scheme) ||
@@ -379,14 +407,64 @@ class FntvApiClient implements MediaServerClient {
         });
       }
     }
+    final audioId = target.fntvTrackSelectionExplicit
+        ? target.preferredAudioStreamId
+        : _text(info['audio_guid']);
+    final selectedAudio =
+        audioStreams.where((s) => s.id == audioId).firstOrNull ??
+            audioStreams.where((s) => s.isDefault).firstOrNull ??
+            audioStreams.firstOrNull;
+    final subtitleId = target.fntvTrackSelectionExplicit
+        ? target.preferredSubtitleStreamId
+        : _text(info['subtitle_guid']);
+    final selectedSubtitle =
+        subtitleStreams.where((s) => s.id == subtitleId).firstOrNull;
+    var sessionLink = '';
+    if (selectedQuality?.serverTranscode == true) {
+      final response =
+          _map(await _request(source, 'play/play', operation: '创建转码会话', body: {
+        'media_guid': mediaId,
+        'video_guid': _text(video['guid']),
+        'video_encoder': 'h264',
+        'resolution': selectedQuality!.resolution,
+        'bitrate': selectedQuality.bitrate,
+        'startTimestamp': max(0, target.fntvStartPositionMs ~/ 1000),
+        'audio_encoder': 'aac',
+        'audio_guid': selectedAudio?.id ?? '',
+        // External subtitles remain client-rendered and are not burned in.
+        'subtitle_guid':
+            selectedSubtitle?.isExternal == false ? selectedSubtitle!.id : '',
+        'channels': 2,
+        'forced_sdr': 0,
+      }));
+      sessionLink = _text(response['play_link']);
+      try {
+        url = _sessionUri(source, sessionLink);
+      } catch (_) {
+        if (sessionLink.isNotEmpty) {
+          await releasePlaybackSession(
+              source: source,
+              target: target.copyWith(fntvSessionLink: sessionLink));
+        }
+        rethrow;
+      }
+    }
     final sameOrigin = url.origin == baseUri(source.endpoint).origin;
     final providerHeaders = _map(stream['header']);
+    appLogInfo('library.fntv', 'FNTV playback capabilities resolved', fields: {
+      'directQualities': directQualities.length,
+      'transcodeQualities':
+          qualities.where((quality) => quality.serverTranscode).length,
+      'audioStreams': audioStreams.length,
+      'subtitleStreams': subtitleStreams.length,
+      'serverTranscode': sessionLink.isNotEmpty,
+    });
     final headers = <String, String>{
       if (sameOrigin ||
           !providerHeaders.keys.any((key) => key.toLowerCase() == 'user-agent'))
         'User-Agent': _playbackUserAgent,
       if (sameOrigin) ...sessionHeaders(source),
-      if (sameOrigin && providerHeaders.isNotEmpty)
+      if (sameOrigin && providerHeaders.isNotEmpty && sessionLink.isEmpty)
         'X-Wp-Header': jsonEncode(providerHeaders),
       if (!sameOrigin)
         for (final entry in providerHeaders.entries)
@@ -406,32 +484,61 @@ class FntvApiClient implements MediaServerClient {
       backdropHeaders: imageHeaders(source, target.backdropUrl),
       width: _number(video['width']),
       height: _number(video['height']),
-      bitrate: _number(video['bps']) ?? _number(video['bit_rate']),
-      container: _text(video['wrapper']),
+      bitrate: sessionLink.isNotEmpty
+          ? selectedQuality!.bitrate
+          : _number(video['bps']) ?? _number(video['bit_rate']),
+      container: sessionLink.isEmpty ? _text(video['wrapper']) : 'm3u8',
       fileSizeBytes: _number(file['size']),
-      videoCodec: _text(video['codec_name']),
-      audioCodec: audioStreams.isEmpty ? '' : audioStreams.first.codec,
+      videoCodec: sessionLink.isEmpty ? _text(video['codec_name']) : 'h264',
+      audioCodec: sessionLink.isEmpty ? selectedAudio?.codec ?? '' : 'aac',
       audioStreams: audioStreams,
       subtitleStreams: subtitleStreams,
-      preferredAudioStreamId: _text(info['audio_guid']),
-      preferredSubtitleStreamId: _text(info['subtitle_guid']),
+      preferredAudioStreamId: selectedAudio?.id ?? '',
+      preferredSubtitleStreamId: selectedSubtitle?.id ?? '',
       videoStreamId: _text(video['guid']),
       playbackQualities: qualities,
       preferredPlaybackQualityIndex: selectedQuality?.index,
+      fntvSessionLink: sessionLink,
     );
   }
 
-  static bool _requiresRangeSeekEndpoint(
-    Object? wrapperValue,
-    List<PlaybackAudioStream> audioStreams,
-  ) {
-    final wrapper = _text(wrapperValue).trim().toLowerCase();
-    final isTransportStream =
-        wrapper == 'ts' || wrapper == 'mpegts' || wrapper == 'mp2t';
-    return isTransportStream &&
-        audioStreams.any(
-          (stream) => stream.codec.trim().toLowerCase() == 'pcm_bluray',
-        );
+  Uri _sessionUri(MediaSourceConfig source, String link) {
+    final base = baseUri(source.endpoint);
+    final parsed = Uri.tryParse(link);
+    final uri = parsed?.hasScheme == true
+        ? parsed
+        : Uri.tryParse(
+            '${base.toString()}${link.startsWith('/') ? '' : '/'}$link');
+    if (link.isEmpty ||
+        uri == null ||
+        !const ['http', 'https'].contains(uri.scheme) ||
+        uri.origin != base.origin ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasFragment) {
+      throw const FntvApiException('飞牛返回了无效的转码播放地址');
+    }
+    return uri;
+  }
+
+  @override
+  Future<void> releasePlaybackSession({
+    required MediaSourceConfig source,
+    required PlaybackTarget target,
+  }) async {
+    if (!target.isFntvTranscoding) return;
+    try {
+      final result =
+          _map(await _request(source, 'media/p', operation: '释放转码会话', body: {
+        'req': 'media.quit',
+        'reqid': '${DateTime.now().microsecondsSinceEpoch}',
+        'playLink': target.fntvSessionLink,
+      }));
+      if (_text(result['result']) != 'succ') {
+        throw const FntvApiException('飞牛释放转码会话未成功');
+      }
+    } catch (_) {
+      appLogWarning('library.fntv', 'FNTV transcode session release failed');
+    }
   }
 
   @override
@@ -520,12 +627,15 @@ class FntvApiClient implements MediaServerClient {
       'audio_guid': target.preferredAudioStreamId,
       'subtitle_guid': target.preferredSubtitleStreamId,
       'resolution': selectedQuality?.resolution.isNotEmpty == true
-          ? selectedQuality!.resolution
+          ? (selectedQuality!.resolution == '原画'
+              ? target.resolutionLabel
+              : selectedQuality.resolution)
           : target.resolutionLabel,
       'bitrate': selectedQuality?.bitrate ?? target.bitrate ?? 0,
       'ts': safePosition,
       'duration': safeDuration,
-      'play_link': target.streamUrl,
+      'play_link':
+          target.isFntvTranscoding ? target.fntvSessionLink : target.streamUrl,
       'device_id': deviceId,
       'direct_link_audio_index': -1,
       'lan': 'zh-CN',
@@ -823,17 +933,36 @@ class FntvApiClient implements MediaServerClient {
           timestamp: DateTime.now().millisecondsSinceEpoch,
         ),
       });
-    final response = await (() async =>
-            http.Response.fromStream(await _client.send(request)))()
-        .timeout(const Duration(seconds: 20));
-    if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const FntvApiException('飞牛影视登录失效或无访问权限，请重新测试登录');
+    final deadline = Stopwatch()..start();
+    const timeout = Duration(seconds: 20);
+    const byteLimit = 16 * 1024 * 1024;
+    final response = await _client.send(request).timeout(timeout);
+    final iterator = StreamIterator(response.stream);
+    try {
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        throw const FntvApiException('飞牛影视登录失效或无访问权限，请重新测试登录');
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw FntvApiException(
+            '飞牛影视$operation失败：HTTP ${response.statusCode}，请检查服务器地址');
+      }
+      if ((response.contentLength ?? 0) > byteLimit) {
+        throw const FntvApiException('字幕超过 16 MiB 限制');
+      }
+      final bytes = BytesBuilder(copy: false);
+      while (true) {
+        final remaining = timeout - deadline.elapsed;
+        if (remaining <= Duration.zero) throw TimeoutException('下载字幕超时');
+        if (!await iterator.moveNext().timeout(remaining)) break;
+        if (bytes.length + iterator.current.length > byteLimit) {
+          throw const FntvApiException('字幕超过 16 MiB 限制');
+        }
+        bytes.add(iterator.current);
+      }
+      return bytes.takeBytes();
+    } finally {
+      await iterator.cancel();
     }
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw FntvApiException(
-          '飞牛影视$operation失败：HTTP ${response.statusCode}，请检查服务器地址');
-    }
-    return response.bodyBytes;
   }
 
   static void _requireSession(MediaSourceConfig source) {

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
@@ -21,6 +23,7 @@ class WebDavDirectoryPickerPage extends ConsumerStatefulWidget {
 
 class _WebDavDirectoryPickerPageState
     extends ConsumerState<WebDavDirectoryPickerPage> {
+  final _selectFocusNode = FocusNode(debugLabel: 'webdav-directory-select');
   late String _currentPath;
   late String _rootPath;
   late Future<List<MediaCollection>> _foldersFuture;
@@ -39,6 +42,12 @@ class _WebDavDirectoryPickerPageState
             ? sourceLibraryPath
             : _rootPath;
     _foldersFuture = _resolveFoldersFuture(_currentPath);
+  }
+
+  @override
+  void dispose() {
+    _selectFocusNode.dispose();
+    super.dispose();
   }
 
   Future<List<MediaCollection>> _resolveFoldersFuture(String directoryId) {
@@ -110,11 +119,17 @@ class _WebDavDirectoryPickerPageState
 
   @override
   Widget build(BuildContext context) {
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    if (isTelevision) {
+      scheduleTvFocusRecovery(context: context, focusNode: _selectFocusNode);
+    }
     final parentPath = _parentPath(_currentPath);
     return SettingsPageScaffold(
       onBack: () => Navigator.of(context).pop(),
       trailing: SettingsToolbarButton(
         label: '选这里',
+        autofocus: true,
+        focusNode: _selectFocusNode,
         icon: Icons.check_rounded,
         onPressed: () => Navigator.of(context).pop(_currentPath),
       ),
@@ -129,7 +144,6 @@ class _WebDavDirectoryPickerPageState
           SettingsActionButton(
             label: '返回上一级目录',
             icon: Icons.arrow_upward_rounded,
-            autofocus: true,
             focusId: 'webdav-directory:parent',
             onPressed: () => _setCurrentPath(parentPath),
           ),
@@ -138,6 +152,12 @@ class _WebDavDirectoryPickerPageState
         FutureBuilder<List<MediaCollection>>(
           future: _foldersFuture,
           builder: (context, snapshot) {
+            if (isTelevision) {
+              scheduleTvFocusRecovery(
+                context: context,
+                focusNode: _selectFocusNode,
+              );
+            }
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Padding(
                 padding: EdgeInsets.only(top: 40),
@@ -167,7 +187,6 @@ class _WebDavDirectoryPickerPageState
                       subtitle: folder.id,
                       value: '进入',
                       leading: const Icon(Icons.folder_open_rounded),
-                      autofocus: parentPath == null && folder == folders.first,
                       focusId: 'webdav-directory:${folder.id}',
                       onPressed: () => _setCurrentPath(folder.id),
                     ),

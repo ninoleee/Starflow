@@ -27,13 +27,13 @@ Future<T?> showStarflowActionDialog<T>({
   required List<StarflowDialogAction<T>> actions,
   bool barrierDismissible = true,
   bool allowSystemDismiss = true,
+  Widget Function(Widget dialog)? dialogWrapper,
 }) {
   assert(
     message == null || content == null,
     'Provide either message or content, not both.',
   );
-  final isTelevision =
-      ProviderScope.containerOf(context, listen: false)
+  final isTelevision = ProviderScope.containerOf(context, listen: false)
           .read(isTelevisionProvider)
           .value ??
       false;
@@ -60,11 +60,11 @@ Future<T?> showStarflowActionDialog<T>({
         ),
       );
       if (allowSystemDismiss) {
-        return dialog;
+        return dialogWrapper?.call(dialog) ?? dialog;
       }
       return PopScope(
         canPop: false,
-        child: dialog,
+        child: dialogWrapper?.call(dialog) ?? dialog,
       );
     },
   );

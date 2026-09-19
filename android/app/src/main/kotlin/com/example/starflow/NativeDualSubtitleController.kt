@@ -14,7 +14,6 @@ import androidx.media3.exoplayer.ForwardingRenderer
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.RendererCapabilities
 import androidx.media3.exoplayer.text.TextOutput
-import androidx.media3.exoplayer.text.TextRenderer
 
 data class NativeSubtitleFormatKey(
     val id: String,
@@ -41,14 +40,7 @@ object NativeDualSubtitleTrackPolicy {
         sampleMimeType: String,
         codecs: String = "",
     ): Boolean {
-        return listOf(sampleMimeType, codecs).none { rawType ->
-            when (rawType.trim().lowercase()) {
-                "application/pgs",
-                "application/vobsub",
-                "application/dvbsubs" -> true
-                else -> false
-            }
-        }
+        return !NativeBitmapSubtitlePolicy.isBitmap(sampleMimeType, codecs)
     }
 
     fun isLikelyChinese(language: String, label: String): Boolean {
@@ -316,7 +308,7 @@ private class NativeSubtitleTrackRouter {
 }
 
 private class NativeRoutedTextRenderer private constructor(
-    delegate: TextRenderer,
+    delegate: Renderer,
     private val role: NativeSubtitleRendererRole,
     router: NativeSubtitleTrackRouter,
 ) : ForwardingRenderer(delegate) {
@@ -332,7 +324,7 @@ private class NativeRoutedTextRenderer private constructor(
         role: NativeSubtitleRendererRole,
         router: NativeSubtitleTrackRouter,
     ) : this(
-        delegate = TextRenderer(output, outputLooper),
+        delegate = NativeSubtitleRenderer.create(output, outputLooper),
         role = role,
         router = router,
     )

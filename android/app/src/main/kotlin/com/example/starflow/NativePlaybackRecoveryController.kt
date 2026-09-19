@@ -5,10 +5,15 @@ import androidx.media3.common.C
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Tracks
+import androidx.media3.decoder.ffmpeg.FfmpegLibrary
+import androidx.media3.exoplayer.ExoPlaybackException
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_MEDIA_MIME_TYPE
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_URL
 
-internal class NativePlaybackRecoveryController(private val host: Host) {
+internal class NativePlaybackRecoveryController(
+    private val host: Host,
+    private val supportsSoftwareAudio: (String) -> Boolean = FfmpegLibrary::supportsFormat,
+) {
     interface Host {
         val diagnostics: NativePlaybackDiagnostics
         val session: NativePlaybackSession
@@ -21,6 +26,7 @@ internal class NativePlaybackRecoveryController(private val host: Host) {
     }
 
     private var transcodedVideoFallbackAttempted = false
+    private var audioFallbackAttempted = false
     private val automaticRecoveryBudget = PlaybackRecoveryBudget()
     private var recoveryItemKey = ""
 
@@ -30,7 +36,32 @@ internal class NativePlaybackRecoveryController(private val host: Host) {
         automaticRecoveryBudget.reset()
         recoveryItemKey = ""
         transcodedVideoFallbackAttempted = false
+        audioFallbackAttempted = false
         smartStrmHlsFallbackAttempted = false
+        host.session.resetAudioRecovery()
+    }
+
+    fun retryAudioWithSoftwareDecoder(error: PlaybackException): Boolean {
+        val rendererError = error as? ExoPlaybackException ?: return false
+        val format = rendererError.rendererFormat ?: return false
+        val mime = format.sampleMimeType ?: return false
+        if (rendererError.type != ExoPlaybackException.TYPE_RENDERER ||
+            !MimeTypes.isAudio(mime) || format.cryptoType != C.CRYPTO_TYPE_NONE ||
+            format.drmInitData != null ||
+            rendererError.rendererName?.contains("ffmpeg", ignoreCase = true) == true ||
+            audioFallbackAttempted || host.session.audioFallbackMime != null ||
+            error.errorCode !in setOf(PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+                PlaybackException.ERROR_CODE_DECODING_FAILED,
+                PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+                PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED) ||
+            !supportsSoftwareAudio(mime)) return false
+        audioFallbackAttempted = true
+        host.session.preserveAudioSession()
+        host.session.audioFallbackMime = mime
+        host.diagnostics.playbackPerformanceTracker.onRecovery()
+        NativeAppLogger.warning("playback.audio", "Audio fallback decoder=ffmpeg mime=$mime code=${error.errorCode} attempt=1")
+        host.session.rebuildPlayer()
+        return true
     }
 
     fun fallbackToTranscodedVideoIfNeeded(tracks: Tracks) {

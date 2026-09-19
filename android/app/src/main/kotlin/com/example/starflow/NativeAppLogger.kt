@@ -10,11 +10,16 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.PrintWriter
+import java.io.RandomAccessFile
 import java.io.StringWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.system.exitProcess
 
 object NativeAppLogger {
@@ -30,6 +35,19 @@ object NativeAppLogger {
     private const val PLAYBACK_SESSION_FILE_NAME = "starflow-native-playback-session.json"
     private const val EXIT_STATE_PREFERENCES = "starflow_native_exit_state"
     private const val LAST_EXIT_TIMESTAMP_KEY = "last_exit_timestamp"
+    private val diskLock = Any()
+    private val droppedRecords = AtomicInteger()
+    private val writer = ThreadPoolExecutor(
+        1, 1, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(256),
+        { task -> Thread(task, "starflow-native-logs").apply { isDaemon = true } },
+        { _, _ -> droppedRecords.incrementAndGet() },
+    )
+    private var cachedConfig: NativeLogConfig? = null
+    private var configReadAtNanos = 0L
+
+    private fun timestamp(): String = synchronized(timestampFormatter) {
+        timestampFormatter.format(Date())
+    }
 
     private val timestampFormatter = SimpleDateFormat(
         "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
@@ -105,7 +123,7 @@ object NativeAppLogger {
             category = category,
             message = message,
             error = error,
-            forceSync = true,
+            forceSync = false,
         )
     }
 
@@ -121,7 +139,7 @@ object NativeAppLogger {
         }
         try {
             val marker = JSONObject().apply {
-                put("startedAt", timestampFormatter.format(Date()))
+                put("startedAt", timestamp())
                 put("startedAtMs", System.currentTimeMillis())
                 put("fields", JSONObject(fields.mapValues { (_, value) ->
                     sanitize(value?.toString().orEmpty(), 1_000)
@@ -142,7 +160,6 @@ object NativeAppLogger {
         applicationContext?.let(::clearPlaybackSessionMarker)
     }
 
-    @Synchronized
     fun log(
         level: String,
         category: String,
@@ -153,16 +170,40 @@ object NativeAppLogger {
         forceSync: Boolean = false,
     ) {
         val context = applicationContext ?: return
+        val capturedFields = fields.toMap()
+        val recordedAt = timestamp()
+        val operation = Runnable {
+            synchronized(diskLock) {
+                writeRecord(context, recordedAt, level, category, message,
+                    capturedFields, error, nativeStackTrace, forceSync)
+            }
+        }
+        if (forceSync) operation.run() else writer.execute(operation)
+    }
+
+    private fun writeRecord(
+        context: Context,
+        recordedAt: String,
+        level: String,
+        category: String,
+        message: String,
+        fields: Map<String, Any?>,
+        error: Throwable?,
+        nativeStackTrace: String,
+        forceSync: Boolean,
+    ) {
         val config = readConfig(context)
         if (!config.enabled || !config.recordedLevels.contains(level)) {
             return
         }
         try {
             val record = JSONObject().apply {
-                put("timestamp", timestampFormatter.format(Date()))
+                put("timestamp", recordedAt)
                 put("level", level)
                 put("category", sanitize(category, 160))
                 put("message", sanitize(message, 4_000))
+                val dropped = droppedRecords.getAndSet(0)
+                if (dropped > 0) put("droppedRecords", dropped)
                 if (fields.isNotEmpty()) {
                     put(
                         "fields",
@@ -194,7 +235,19 @@ object NativeAppLogger {
         }
     }
 
-    private fun readConfig(context: Context): NativeLogConfig {
+    private fun readConfig(context: Context): NativeLogConfig = synchronized(diskLock) {
+        val now = System.nanoTime()
+        val cached = cachedConfig
+        if (cached != null && now - configReadAtNanos < 1_000_000_000L) {
+            return@synchronized cached
+        }
+        loadConfig(context).also {
+            cachedConfig = it
+            configReadAtNanos = now
+        }
+    }
+
+    private fun loadConfig(context: Context): NativeLogConfig {
         val file = File(context.filesDir, CONFIG_FILE_NAME)
         if (!file.exists()) {
             return NativeLogConfig()
@@ -232,12 +285,21 @@ object NativeAppLogger {
         val limit = (maxBytes / 5).coerceIn(MIN_NATIVE_BYTES, MAX_NATIVE_BYTES)
         var bytes = line.toByteArray(Charsets.UTF_8)
         if (bytes.size > limit) {
-            bytes = bytes.takeLast(limit).toByteArray()
+            bytes = bytes.copyOfRange(bytes.size - limit, bytes.size)
         }
-        val retainedBytes = (limit - bytes.size).coerceAtLeast(0)
+        // Leave headroom so a full log is not rewritten for every new line.
+        val retainedBytes = minOf(limit / 2, (limit - bytes.size).coerceAtLeast(0))
         if (file.exists() && file.length() + bytes.size > limit) {
-            val existing = file.readBytes()
-            file.writeBytes(existing.takeLast(retainedBytes).toByteArray())
+            val tail = RandomAccessFile(file, "r").use { input ->
+                val count = minOf(input.length(), retainedBytes.toLong()).toInt()
+                ByteArray(count).also {
+                    input.seek(input.length() - count)
+                    input.readFully(it)
+                }
+            }
+            // Drop a partial first record after trimming the file's head.
+            val start = tail.indexOf(10.toByte()).let { if (it < 0) tail.size else it + 1 }
+            FileOutputStream(file, false).use { it.write(tail, start, tail.size - start) }
         }
         FileOutputStream(file, true).use { output ->
             output.write(bytes)

@@ -323,7 +323,6 @@ class DetailRatingPrefetchCoordinator {
           target.ratingLabels,
           preferDoubanOnly: preferDoubanOnly,
         ).isEmpty ||
-        target.ratingCount <= 0 ||
         target.posterUrl.trim().isEmpty;
   }
 

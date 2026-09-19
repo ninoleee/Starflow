@@ -10,10 +10,55 @@ import androidx.media3.extractor.ts.TsPayloadReader
 import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
+import androidx.media3.common.ParserException
 import org.junit.Test
 import org.mockito.Mockito.*
 
 class PcmBluRayReaderTest {
+    @Test
+    fun optionalRealLpcmPacketsMatchReferenceDecoder() {
+        val input = System.getenv("STARFLOW_LPCM_PACKETS")
+        val reference = System.getenv("STARFLOW_LPCM_REFERENCE")
+        org.junit.Assume.assumeTrue(input != null && reference != null)
+        val packets = java.io.File(input!!).readBytes()
+        val fixture = Fixture()
+        var offset = 0
+        while (offset < packets.size) {
+            val size = ((packets[offset].toInt() and 255) shl 8) or
+                (packets[offset + 1].toInt() and 255)
+            val end = offset + 4 + size
+            assert(end <= packets.size)
+            fixture.reader.packetStarted(C.TIME_UNSET, 0)
+            while (offset < end) {
+                val next = minOf(offset + 166, end)
+                fixture.consume(packets.copyOfRange(offset, next))
+                offset = next
+            }
+            fixture.reader.packetFinished(false)
+        }
+        assertArrayEquals(java.io.File(reference!!).readBytes(), fixture.track.bytes.toByteArray())
+    }
+
+    @Test
+    fun incompleteFirstHeaderFailsAtPesBoundary() {
+        val fixture = Fixture()
+        fixture.reader.packetStarted(0, 0)
+        fixture.consume(byteArrayOf(0, 4))
+        assertThrows(ParserException::class.java) { fixture.reader.packetFinished(true) }
+    }
+
+    @Test
+    fun sampleRateChangeWithoutPtsContinuesPreviousClock() {
+        val fixture = Fixture()
+        fixture.reader.packetStarted(10_000L, 0)
+        fixture.consume(header(1920) + ByteArray(1920))
+        fixture.reader.packetFinished(false)
+        fixture.reader.packetStarted(C.TIME_UNSET, 0)
+        fixture.consume(header(4, rateCode = 4) + ByteArray(4))
+        assertEquals(listOf(10_000L, 20_000L), fixture.track.timestamps)
+    }
+
     @Test
     fun consumesLogged166BytePayloadWithoutOverflowOrLosingRemainder() {
         for (offset in listOf(3052, 6602)) {
@@ -27,10 +72,10 @@ class PcmBluRayReaderTest {
             data.position = offset
             fixture.reader.consume(data)
             assertEquals(0, data.bytesLeft())
-            assertEquals(164, fixture.track.bytes.size())
+            assertEquals(0, fixture.track.bytes.size())
             fixture.consume(payload.copyOfRange(166, 168))
             assertArrayEquals(toPcm16(payload, 2), fixture.track.bytes.toByteArray())
-            assertEquals(listOf(123_456L, 124_310L), fixture.track.timestamps)
+            assertEquals(listOf(123_456L), fixture.track.timestamps)
         }
     }
 
@@ -83,7 +128,7 @@ class PcmBluRayReaderTest {
             fixture.reader.packetFinished(false)
             fixture.reader.packetStarted(C.TIME_UNSET, 0)
             fixture.consume(header(4, rateCode = rateCode) + ByteArray(4))
-            assertEquals((0L..48L).map { 100_000L + it * 1_000_000L / rate }, fixture.track.timestamps)
+            assertEquals(listOf(100_000L, 100_000L + 48L * 1_000_000L / rate), fixture.track.timestamps)
         }
     }
 
@@ -116,16 +161,55 @@ class PcmBluRayReaderTest {
     fun malformedPacketDoesNotPoisonNextPacketOrLeakTrailingSample() {
         val fixture = Fixture()
         fixture.reader.packetStarted(0, 0)
-        fixture.consume(header(2) + byteArrayOf(0x7F, 0x7F))
+        assertThrows(ParserException::class.java) { fixture.consume(header(2) + byteArrayOf(0x7F, 0x7F)) }
         fixture.reader.packetFinished(false)
         fixture.reader.packetStarted(5_000L, 0)
-        fixture.consume(byteArrayOf(0, 4, 0, 0) + ByteArray(4))
-        fixture.consume(ByteArray(8))
+        assertThrows(ParserException::class.java) { fixture.consume(byteArrayOf(0, 4, 0, 0) + ByteArray(4)) }
         fixture.reader.packetFinished(false)
         fixture.reader.packetStarted(10_000L, 0)
         fixture.consume(header(4) + ByteArray(4))
         assertArrayEquals(ByteArray(4), fixture.track.bytes.toByteArray())
         assertEquals(listOf(10_000L), fixture.track.timestamps)
+    }
+
+    @Test
+    fun remapsSurroundAndDiscardsMonoPadding() {
+        for ((layout, order) in listOf(1 to listOf(0), 9 to listOf(0,1,2,5,3,4), 11 to listOf(0,1,2,7,4,5,3,6))) {
+            for (sampleBytes in listOf(2, 3)) {
+                val inputChannels = (order.size + 1) / 2 * 2
+                val payload = ByteArray(inputChannels * sampleBytes) { (it / sampleBytes + 1).toByte() }
+                val packet = header(payload.size, depthCode = if (sampleBytes == 2) 1 else 3).apply {
+                    this[2] = ((layout shl 4) or 1).toByte()
+                } + payload
+                for (split in 1 until packet.size) {
+                    val fixture = Fixture()
+                    fixture.reader.packetStarted(0, 0)
+                    fixture.consume(packet.copyOfRange(0, split))
+                    fixture.consume(packet.copyOfRange(split, packet.size))
+                    assertEquals(order.size, fixture.track.formats.single().channelCount)
+                    assertArrayEquals(order.flatMap { listOf((it + 1).toByte(), (it + 1).toByte()) }.toByteArray(), fixture.track.bytes.toByteArray())
+                }
+            }
+        }
+    }
+
+    @Test
+    fun unsupportedHeaderFailsImmediatelyInsteadOfLeavingPreparationPending() {
+        val fixture = Fixture()
+        fixture.reader.packetStarted(0, 0)
+        assertThrows(ParserException::class.java) {
+            fixture.consume(byteArrayOf(0, 4, 0x41, 0x40))
+        }
+    }
+
+    @Test
+    fun batchesSmallTransportChunksAndFlushesAtTenMilliseconds() {
+        val fixture = Fixture()
+        fixture.reader.packetStarted(0, 0)
+        fixture.consume(header(4800))
+        repeat(1200) { fixture.consume(ByteArray(4)) }
+        assertEquals(listOf(0L, 10_000L, 20_000L), fixture.track.timestamps)
+        assertEquals(4800, fixture.track.bytes.size())
     }
 
     @Test

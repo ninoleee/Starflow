@@ -8,12 +8,14 @@ abstract class PersistentImageCache {
     String url, {
     Map<String, String>? headers,
     bool persist = true,
+    Future<void>? cancel,
   });
 
   Future<ImageProvider<Object>> resolveRasterProvider(
     String url, {
     Map<String, String>? headers,
     bool persist = true,
+    Future<void>? cancel,
   });
 
   Future<void> evict(

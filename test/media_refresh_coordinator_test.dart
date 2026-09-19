@@ -10,7 +10,7 @@ import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/application/emby_refresh_progress.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/library/data/webdav_directory_cache_store.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';

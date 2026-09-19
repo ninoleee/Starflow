@@ -372,6 +372,7 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
   MediaDetailTarget seed,
   MediaDetailTarget cached,
 ) {
+  final metadata = overlayCachedMetadata(seed, cached);
   final preferCachedResourceState =
       _homeHasResolvedLocalResourceState(cached) &&
           !_homeHasResolvedLocalResourceState(seed);
@@ -381,64 +382,33 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
   final preferCachedSourceContext =
       _homeShouldPreferCachedSourceContext(seed, cached) ||
           preferCachedResourceState;
-  final resolvedPosterUrl =
-      cached.posterUrl.trim().isNotEmpty ? cached.posterUrl : seed.posterUrl;
-  final resolvedPosterHeaders = cached.posterUrl.trim().isNotEmpty
-      ? (cached.posterHeaders.isNotEmpty
-          ? cached.posterHeaders
-          : seed.posterHeaders)
-      : (seed.posterHeaders.isNotEmpty
-          ? seed.posterHeaders
-          : cached.posterHeaders);
-  final resolvedTitle =
-      cached.title.trim().isNotEmpty ? cached.title : seed.title;
-  final resolvedBackdropUrl = seed.backdropUrl.trim().isNotEmpty
-      ? seed.backdropUrl
-      : cached.backdropUrl;
-  final resolvedBackdropHeaders = seed.backdropHeaders.isNotEmpty
-      ? seed.backdropHeaders
-      : cached.backdropHeaders;
-  final resolvedLogoUrl =
-      seed.logoUrl.trim().isNotEmpty ? seed.logoUrl : cached.logoUrl;
-  final resolvedLogoHeaders =
-      seed.logoHeaders.isNotEmpty ? seed.logoHeaders : cached.logoHeaders;
-  final resolvedBannerUrl =
-      seed.bannerUrl.trim().isNotEmpty ? seed.bannerUrl : cached.bannerUrl;
-  final resolvedBannerHeaders =
-      seed.bannerHeaders.isNotEmpty ? seed.bannerHeaders : cached.bannerHeaders;
-  final resolvedExtraBackdropUrls = seed.extraBackdropUrls.isNotEmpty
-      ? seed.extraBackdropUrls
-      : cached.extraBackdropUrls;
-  final resolvedExtraBackdropHeaders = seed.extraBackdropHeaders.isNotEmpty
-      ? seed.extraBackdropHeaders
-      : cached.extraBackdropHeaders;
-  final resolvedOverview =
-      seed.hasUsefulOverview ? seed.overview : cached.overview;
-  final resolvedDurationLabel = seed.durationLabel.trim().isNotEmpty
-      ? seed.durationLabel
-      : cached.durationLabel;
-  final resolvedRatingLabels =
-      mergeDistinctRatingLabels(cached.ratingLabels, seed.ratingLabels);
-  final resolvedGenres = seed.genres.isNotEmpty ? seed.genres : cached.genres;
-  final resolvedDirectors =
-      seed.directors.isNotEmpty ? seed.directors : cached.directors;
-  final resolvedDirectorProfiles = seed.directorProfiles.isNotEmpty
-      ? seed.directorProfiles
-      : cached.directorProfiles;
-  final resolvedActors = seed.actors.isNotEmpty ? seed.actors : cached.actors;
-  final resolvedActorProfiles =
-      seed.actorProfiles.isNotEmpty ? seed.actorProfiles : cached.actorProfiles;
-  final resolvedPlatforms =
-      seed.platforms.isNotEmpty ? seed.platforms : cached.platforms;
-  final resolvedPlatformProfiles = seed.platformProfiles.isNotEmpty
-      ? seed.platformProfiles
-      : cached.platformProfiles;
-  final resolvedDoubanId =
-      seed.doubanId.trim().isNotEmpty ? seed.doubanId : cached.doubanId;
-  final resolvedImdbId =
-      seed.imdbId.trim().isNotEmpty ? seed.imdbId : cached.imdbId;
-  final resolvedTmdbId =
-      seed.tmdbId.trim().isNotEmpty ? seed.tmdbId : cached.tmdbId;
+  final artwork =
+      overlayCachedArtwork(seed, cached, preserveLiveSecondaryArtwork: true);
+  final resolvedPosterUrl = artwork.posterUrl;
+  final resolvedPosterHeaders = artwork.posterHeaders;
+  final resolvedTitle = metadata.title;
+  final resolvedBackdropUrl = artwork.backdropUrl;
+  final resolvedBackdropHeaders = artwork.backdropHeaders;
+  final resolvedLogoUrl = artwork.logoUrl;
+  final resolvedLogoHeaders = artwork.logoHeaders;
+  final resolvedBannerUrl = artwork.bannerUrl;
+  final resolvedBannerHeaders = artwork.bannerHeaders;
+  final resolvedExtraBackdropUrls = artwork.extraBackdropUrls;
+  final resolvedExtraBackdropHeaders = artwork.extraBackdropHeaders;
+  final resolvedOverview = metadata.overview;
+  final resolvedDurationLabel = metadata.durationLabel;
+  final resolvedRatingLabels = metadata.ratingLabels;
+  final resolvedRatingCount = metadata.ratingCount;
+  final resolvedGenres = metadata.genres;
+  final resolvedDirectors = metadata.directors;
+  final resolvedDirectorProfiles = metadata.directorProfiles;
+  final resolvedActors = metadata.actors;
+  final resolvedActorProfiles = metadata.actorProfiles;
+  final resolvedPlatforms = metadata.platforms;
+  final resolvedPlatformProfiles = metadata.platformProfiles;
+  final resolvedDoubanId = metadata.doubanId;
+  final resolvedImdbId = metadata.imdbId;
+  final resolvedTmdbId = metadata.tmdbId;
   final resolvedAvailabilityLabel = preferCachedAvailability
       ? (cached.availabilityLabel.trim().isNotEmpty
           ? cached.availabilityLabel
@@ -510,6 +480,7 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
       resolvedOverview != seed.overview ||
       resolvedDurationLabel != seed.durationLabel ||
       !_sameStringList(resolvedRatingLabels, seed.ratingLabels) ||
+      resolvedRatingCount != seed.ratingCount ||
       !_sameStringList(resolvedGenres, seed.genres) ||
       !_sameStringList(resolvedDirectors, seed.directors) ||
       !_sameMediaPersonProfileList(
@@ -558,6 +529,7 @@ MediaDetailTarget _mergeCachedHomeDetailTarget(
     overview: resolvedOverview,
     durationLabel: resolvedDurationLabel,
     ratingLabels: resolvedRatingLabels,
+    ratingCount: resolvedRatingCount,
     genres: resolvedGenres,
     directors: resolvedDirectors,
     directorProfiles: resolvedDirectorProfiles,
@@ -948,6 +920,7 @@ Future<HomeSectionViewModel> _buildDoubanSectionSeed({
           durationLabel: entry.durationLabel,
           ratingLabels:
               entry.ratingLabel.trim().isEmpty ? const [] : [entry.ratingLabel],
+          ratingCount: entry.ratingCount,
           genres: entry.genres.isNotEmpty
               ? entry.genres
               : (entry.subjectType.trim().isEmpty

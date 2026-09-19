@@ -330,58 +330,6 @@ class WebDavScannedItem {
   }
 }
 
-class _ParsedNfoMetadata {
-  const _ParsedNfoMetadata({
-    required this.title,
-    required this.overview,
-    required this.thumbUrl,
-    required this.backdropUrl,
-    required this.logoUrl,
-    required this.bannerUrl,
-    required this.extraBackdropUrls,
-    required this.year,
-    required this.durationLabel,
-    required this.genres,
-    required this.directors,
-    required this.actors,
-    required this.itemType,
-    required this.seasonNumber,
-    required this.episodeNumber,
-    required this.imdbId,
-    required this.tmdbId,
-    required this.container,
-    required this.videoCodec,
-    required this.audioCodec,
-    required this.width,
-    required this.height,
-    required this.bitrate,
-  });
-
-  final String title;
-  final String overview;
-  final String thumbUrl;
-  final String backdropUrl;
-  final String logoUrl;
-  final String bannerUrl;
-  final List<String> extraBackdropUrls;
-  final int year;
-  final String durationLabel;
-  final List<String> genres;
-  final List<String> directors;
-  final List<String> actors;
-  final String itemType;
-  final int? seasonNumber;
-  final int? episodeNumber;
-  final String imdbId;
-  final String tmdbId;
-  final String container;
-  final String videoCodec;
-  final String audioCodec;
-  final int? width;
-  final int? height;
-  final int? bitrate;
-}
-
 class _ArtworkResolution {
   const _ArtworkResolution({
     this.url = '',
@@ -403,31 +351,13 @@ class _WebDavSidecarDirectoryContext {
     this.extraBackdropEntries = const [],
   });
 
-  final _ParsedNfoMetadata? seasonNfoMetadata;
-  final _ParsedNfoMetadata? seriesNfoMetadata;
+  final ParsedNfoMetadata? seasonNfoMetadata;
+  final ParsedNfoMetadata? seriesNfoMetadata;
   final _WebDavEntry? parentPosterEntry;
   final _WebDavEntry? backdropEntry;
   final _WebDavEntry? logoEntry;
   final _WebDavEntry? bannerEntry;
   final List<_WebDavEntry> extraBackdropEntries;
-}
-
-class _NfoStreamDetails {
-  const _NfoStreamDetails({
-    this.container = '',
-    this.videoCodec = '',
-    this.audioCodec = '',
-    this.width,
-    this.height,
-    this.bitrate,
-  });
-
-  final String container;
-  final String videoCodec;
-  final String audioCodec;
-  final int? width;
-  final int? height;
-  final int? bitrate;
 }
 
 class _SeriesRootInferencePlan {

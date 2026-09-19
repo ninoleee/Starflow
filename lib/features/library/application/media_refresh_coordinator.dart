@@ -5,7 +5,7 @@ import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/library/application/emby_refresh_progress.dart';
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/data/webdav_directory_cache_store.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/metadata_network_guard.dart';

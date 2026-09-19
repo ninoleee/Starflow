@@ -1,3 +1,4 @@
+import 'package:starflow/features/library/presentation/library_resource_deletion.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -15,7 +16,7 @@ import 'package:starflow/features/library/application/library_cached_items.dart'
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -344,10 +345,12 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
     if (!isTelevision) {
       return headerContent;
     }
+    scheduleTvFocusRecovery(context: context, focusNode: _headerFocusNode);
     return TvFocusableAction(
       onPressed: () => FocusScope.of(context).nextFocus(),
       focusNode: _headerFocusNode,
       focusId: 'library-collection:header',
+      autofocus: true,
       borderRadius: BorderRadius.circular(20),
       child: headerContent,
     );
@@ -362,6 +365,7 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
       data: (pageItems) {
         _scheduleRatingPrefetch(pageItems, isTelevision: isTelevision);
         return LibraryPagedGrid(
+          autofocusFirstItem: false,
           pageItems: pageItems.items,
           totalItems: pageItems.totalItems,
           currentPage: _currentPage,
@@ -388,6 +392,7 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
         _scheduleRatingPrefetch(pageItems, isTelevision: isTelevision);
         return [
           LibraryPagedGridSliver(
+            autofocusFirstItem: false,
             pageItems: pageItems.items,
             totalItems: pageItems.totalItems,
             currentPage: _currentPage,
@@ -540,75 +545,12 @@ class _LibraryCollectionPageState extends ConsumerState<LibraryCollectionPage>
     );
   }
 
-  Future<void> _confirmDeleteResource(MediaItem item) async {
-    final directResourceUri = Uri.tryParse(item.id.trim());
-    final resourcePath =
-        directResourceUri != null && directResourceUri.hasScheme
-            ? item.id.trim()
-            : item.actualAddress.trim();
-    if (resourcePath.isEmpty) {
-      return;
-    }
-    final isDirectory =
-        item.isFolder || item.itemType == 'series' || item.itemType == 'season';
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text(isDirectory ? '删除目录' : '删除文件'),
-            content: Text(
-              isDirectory
-                  ? '将从${_managedSourceLabel(item)}删除“${item.title}”对应目录及其中全部内容（含图片、字幕和 NFO），并从本地索引中移除相关条目。'
-                  : '将从${_managedSourceLabel(item)}删除“${item.title}”对应文件，并从本地索引中移除该条目。',
-            ),
-            actions: [
-              StarflowButton(
-                label: '取消',
-                onPressed: () => Navigator.of(context).pop(false),
-                variant: StarflowButtonVariant.ghost,
-                compact: true,
-              ),
-              StarflowButton(
-                label: '确认删除',
-                onPressed: () => Navigator.of(context).pop(true),
-                variant: StarflowButtonVariant.danger,
-                compact: true,
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!confirmed || !mounted) {
-      return;
-    }
-    try {
-      await ref.read(mediaRepositoryProvider).deleteResource(
-            sourceId: item.sourceId,
-            resourcePath: resourcePath,
-            sectionId: item.sectionId,
-          );
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(isDirectory ? '已删除目录' : '已删除文件')),
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('删除失败：$error')),
-      );
-    }
-  }
+  Future<void> _confirmDeleteResource(MediaItem item) =>
+      confirmLibraryResourceDeletion(context, ref, item);
 
   bool _supportsManagedIndexedItem(MediaItem item) {
     return item.sourceKind == MediaSourceKind.nas ||
         item.sourceKind == MediaSourceKind.quark;
-  }
-
-  String _managedSourceLabel(MediaItem item) {
-    return item.sourceKind == MediaSourceKind.quark ? ' Quark ' : ' WebDAV ';
   }
 }
 

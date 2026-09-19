@@ -153,6 +153,7 @@ class SubtitleSearchResult {
     required this.detailUrl,
     required this.packageName,
     required this.packageKind,
+    this.providerFileId = 0,
     this.seasonNumber,
     this.episodeNumber,
   });
@@ -172,11 +173,14 @@ class SubtitleSearchResult {
   final String detailUrl;
   final String packageName;
   final SubtitlePackageKind packageKind;
+  final int providerFileId;
   final int? seasonNumber;
   final int? episodeNumber;
 
   bool get canDownload =>
-      downloadUrl.trim().isNotEmpty &&
+      (downloadUrl.trim().isNotEmpty ||
+          (source == OnlineSubtitleSource.opensubtitles &&
+              providerFileId > 0)) &&
       packageKind != SubtitlePackageKind.unsupported;
 
   bool get canAutoLoad =>
@@ -220,6 +224,7 @@ class SubtitleSearchResult {
       'detailUrl': detailUrl,
       'packageName': packageName,
       'packageKind': packageKind.name,
+      'providerFileId': providerFileId,
       'seasonNumber': seasonNumber,
       'episodeNumber': episodeNumber,
     };
@@ -241,6 +246,7 @@ class SubtitleSearchResult {
       downloadUrl: json['downloadUrl'] as String? ?? '',
       detailUrl: json['detailUrl'] as String? ?? '',
       packageName: json['packageName'] as String? ?? '',
+      providerFileId: (json['providerFileId'] as num?)?.toInt() ?? 0,
       packageKind: switch (json['packageKind'] as String? ?? '') {
         'subtitleFile' => SubtitlePackageKind.subtitleFile,
         'zipArchive' => SubtitlePackageKind.zipArchive,

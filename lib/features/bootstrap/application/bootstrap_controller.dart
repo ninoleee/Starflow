@@ -116,7 +116,7 @@ class BootstrapController extends Notifier<BootstrapState> {
       currentStep: 0,
       title: '正在唤醒你的片库',
       subtitle: '先把应用外壳、路由和首页容器准备好。',
-      minDelay: const Duration(milliseconds: 40),
+      minDelay: Duration.zero,
     );
     if (!_canContinue) return;
 
@@ -134,7 +134,7 @@ class BootstrapController extends Notifier<BootstrapState> {
             .read(mediaSourceCacheLifecycleProvider)
             .reconcileSources(settings.mediaSources);
       },
-      stageDelay: const Duration(milliseconds: 40),
+      stageDelay: Duration.zero,
     );
     if (!_canContinue) return;
 
@@ -165,7 +165,7 @@ class BootstrapController extends Notifier<BootstrapState> {
         await waitForHomeModules(ref);
       },
       nonBlockingErrorSubtitle: '媒体源响应偏慢，先进入应用，资源会继续在后台补齐。',
-      stageDelay: const Duration(milliseconds: 30),
+      stageDelay: Duration.zero,
     );
     if (!_canContinue) return;
 
@@ -174,7 +174,7 @@ class BootstrapController extends Notifier<BootstrapState> {
       currentStep: 3,
       title: '正在整理展示内容',
       subtitle: '马上进入首页。',
-      minDelay: const Duration(milliseconds: 40),
+      minDelay: Duration.zero,
     );
   }
 

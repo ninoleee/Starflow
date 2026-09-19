@@ -37,6 +37,18 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       // Ignore preference application failures to keep playback available.
     }
 
+    if (target.isFntvTranscoding) {
+      if (target.preferredSubtitleStreamId.isEmpty) {
+        await player.setSubtitleTrack(SubtitleTrack.no());
+      }
+      return;
+    }
+    if (target.fntvTrackSelectionExplicit &&
+        target.preferredSubtitleStreamId.isEmpty) {
+      await player.setSubtitleTrack(SubtitleTrack.no());
+      return;
+    }
+
     final sessionPreference = _subtitleSessionPreference;
     if (sessionPreference != null) {
       try {
@@ -126,7 +138,9 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     PlaybackTarget target,
   ) async {
     try {
-      final preferredAudio = preferredPlaybackAudioStream(target);
+      final preferredAudio = target.isFntvTranscoding
+          ? null
+          : preferredPlaybackAudioStream(target);
       if (preferredAudio != null) {
         final tracks = await _awaitAvailableAudioTracks(player);
         final audioTrack = resolvePlaybackAudioTrack(
@@ -138,8 +152,32 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
           await player.setAudioTrack(audioTrack);
         }
       }
-
+    } catch (error, stackTrace) {
+      appLogWarning(
+        'playback.tracks',
+        'Startup audio selection failed',
+        fields: {'audioStreams': target.audioStreams.length},
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+    try {
+      if (target.isFntvTranscoding) {
+        final external = target.subtitleStreams
+            .where((stream) =>
+                stream.isExternal &&
+                stream.id == target.preferredSubtitleStreamId)
+            .firstOrNull;
+        if (external != null) {
+          await _applyServerExternalSubtitle(player, target, external);
+        }
+        return;
+      }
       final settings = _providerContainer.read(appSettingsProvider);
+      if (target.fntvTrackSelectionExplicit &&
+          target.preferredSubtitleStreamId.isEmpty) {
+        return;
+      }
       final preferredSubtitle = preferredPlaybackSubtitleStream(target);
       final shouldApplySubtitle = preferredSubtitle != null &&
           _subtitleSessionPreference == null &&
@@ -165,7 +203,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     } catch (error, stackTrace) {
       appLogWarning(
         'playback.tracks',
-        'FNTV startup track selection failed',
+        'Startup subtitle selection failed',
         fields: {
           'audioStreams': target.audioStreams.length,
           'subtitleStreams': target.subtitleStreams.length,
@@ -228,7 +266,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     if (!target.sourceKind.isMediaServer || stream.id.isEmpty) {
       return;
     }
-    if (stream.isBitmap) {
+    if (isBitmapSubtitle(image: stream.isBitmap, codec: stream.codec)) {
       _showMessage('当前飞牛字幕是位图字幕，不能作为文本字幕加载');
       return;
     }
@@ -239,10 +277,8 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       source: _sourceForTarget(target),
       subtitleId: stream.id,
     );
-    final subtitleBytes = _looksLikeZip(bytes)
-        ? extractSubtitleBytesFromZip(bytes, preferredName: stream.title)
-        : bytes;
-    final content = decodeSubtitleBytes(subtitleBytes);
+    final content =
+        await processSubtitleContent(bytes, preferredName: stream.title);
     if (!mounted || !identical(_player, player) || content.trim().isEmpty) {
       return;
     }
@@ -257,10 +293,6 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     );
     _subtitleSessionPreference = null;
     _showMessage('已加载飞牛字幕：${stream.title.isEmpty ? '未命名字幕' : stream.title}');
-  }
-
-  bool _looksLikeZip(List<int> bytes) {
-    return isSubtitleZipBytes(bytes);
   }
 
   MediaSourceConfig _sourceForTarget(PlaybackTarget target) {
@@ -487,13 +519,25 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       return currentTracks;
     }
 
+    final completer = Completer<List<SubtitleTrack>>();
+    void finish(List<SubtitleTrack> tracks) {
+      if (!completer.isCompleted) completer.complete(tracks);
+    }
+
+    final subscription = player.stream.tracks.listen((tracks) {
+      if (_hasSelectableSubtitleTracks(tracks.subtitle)) {
+        finish(tracks.subtitle);
+      }
+    },
+        onError: (Object error) => finish(currentTracks),
+        onDone: () => finish(currentTracks));
+    final timer =
+        Timer(const Duration(seconds: 3), () => finish(currentTracks));
     try {
-      return await player.stream.tracks
-          .map((tracks) => tracks.subtitle)
-          .firstWhere(_hasSelectableSubtitleTracks)
-          .timeout(const Duration(seconds: 3));
-    } catch (_) {
-      return currentTracks;
+      return await completer.future;
+    } finally {
+      timer.cancel();
+      await subscription.cancel();
     }
   }
 
@@ -563,43 +607,53 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
               ? _latestDuration
               : player.state.duration,
         );
-    unawaited(_reportFntvPlaybackProgress(
+    final report = _reportFntvPlaybackProgress(
       target: target,
+      force: force,
       position: _latestPosition,
       duration: _latestDuration > Duration.zero
           ? _latestDuration
           : player.state.duration,
-    ));
+    );
+    if (force) {
+      await report;
+    } else {
+      unawaited(report);
+    }
   }
 
   Future<void> _reportFntvPlaybackProgress({
     required PlaybackTarget target,
     required Duration position,
     required Duration duration,
+    bool force = false,
   }) async {
     if (target.sourceKind != MediaSourceKind.fntv ||
         target.itemId.trim().isEmpty ||
         target.preferredMediaSourceId.trim().isEmpty ||
-        target.videoStreamId.trim().isEmpty ||
-        _fntvProgressReportInFlight) {
+        target.videoStreamId.trim().isEmpty) {
       return;
     }
-    _fntvProgressReportInFlight = true;
-    try {
-      final client = _providerContainer.read(
-        mediaServerClientProvider(MediaSourceKind.fntv),
-      );
-      await client.reportPlaybackProgress(
-        source: _sourceForTarget(target),
-        target: target,
-        position: position,
-        duration: duration,
-      );
-    } catch (_) {
-      // Server progress is best effort and must never interrupt playback.
-    } finally {
-      _fntvProgressReportInFlight = false;
-    }
+    if (!force && _fntvProgressQueued > 0) return;
+    final client = _providerContainer
+        .read(mediaServerClientProvider(MediaSourceKind.fntv));
+    final source = _sourceForTarget(target);
+    _fntvProgressQueued++;
+    final pending = _fntvProgressTail.then((_) async {
+      try {
+        await client.reportPlaybackProgress(
+            source: source,
+            target: target,
+            position: position,
+            duration: duration);
+      } catch (_) {
+        // Server progress is best effort and must never interrupt playback.
+      } finally {
+        _fntvProgressQueued--;
+      }
+    });
+    _fntvProgressTail = pending;
+    await pending;
   }
 
   Future<void> _switchFntvPlaybackQuality(
@@ -611,30 +665,121 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
         quality.index == target.preferredPlaybackQualityIndex) {
       return;
     }
-    final position = player.state.position;
-    final duration = player.state.duration;
-    _latestPosition = position;
-    if (duration > Duration.zero) _latestDuration = duration;
-    await _persistPlaybackProgress(force: true);
-    if (!mounted || !identical(_player, player)) return;
+    await _switchFntvPlayback(
+        player, target.copyWith(preferredPlaybackQualityIndex: quality.index));
+  }
 
-    final detachedPlayer = _detachActivePlayerState();
-    await _shutdownDetachedPlayer(
-      detachedPlayer,
-      reason: 'fntv-quality-switch',
-      persistProgress: false,
-      teardownPlatformState: false,
-    );
-    if (!mounted) return;
-    final nextTarget = target.copyWith(
-      streamUrl: '',
-      headers: const {},
-      preferredPlaybackQualityIndex: quality.index,
-    );
-    _nextEpisodeIsAutomatic = false;
-    await _initialize(initialTarget: nextTarget);
-    if (mounted && _isReady) {
-      _showMessage('已切换画质：${quality.label}');
+  Future<void> _switchFntvPlayback(
+      Player player, PlaybackTarget requested) async {
+    if (_fntvSwitchInProgress || _episodeQueueAdvanceInProgress) return;
+    _fntvSwitchInProgress = true;
+    final oldTarget = _resolvedTarget ?? widget.target;
+    PlaybackTarget? next;
+    var detached = false;
+    var committed = false;
+    var rollbackAttempted = false;
+    var position = player.state.position;
+    var playing = player.state.playing;
+    var rate = player.state.rate;
+    final subtitlePreference = _subtitleSessionPreference;
+    Future<void> restoreState() async {
+      final active = _player;
+      if (!_isReady || active == null || !mounted) return;
+      await active.setRate(rate);
+      if (!playing) await active.pause();
+      if (subtitlePreference != null &&
+          !(_resolvedTarget?.isFntvTranscoding ?? false)) {
+        _subtitleSessionPreference = subtitlePreference;
+        await _restoreMpvSubtitleSessionPreference(active, subtitlePreference);
+      }
+    }
+
+    Future<void> restoreOriginal() async {
+      rollbackAttempted = true;
+      final failed = _detachActivePlayerState();
+      await _shutdownDetachedPlayer(failed,
+          reason: 'fntv-switch-rollback',
+          persistProgress: false,
+          teardownPlatformState: false);
+      if (next != null) await _fntvSessions.release(next);
+      if (!mounted) return;
+      setState(() => _error = null);
+      await _initialize(
+          initialTarget: oldTarget,
+          targetAlreadyResolved: true,
+          startPositionOverride: position);
+      if (!_isReady) await _fntvSessions.release(oldTarget);
+    }
+
+    try {
+      final request = requested.copyWith(
+        streamUrl: '',
+        headers: const {},
+        fntvSessionLink: '',
+        fntvStartPositionMs: player.state.position.inMilliseconds,
+        fntvTrackSelectionExplicit: true,
+        preferredSubtitleStreamId: !oldTarget.isFntvTranscoding &&
+                player.state.track.subtitle.id == 'no'
+            ? ''
+            : requested.preferredSubtitleStreamId,
+      );
+      next = await PlaybackTargetResolver(read: _providerContainer.read)
+          .resolve(request);
+      await _fntvSessions.retain(next);
+      if (!mounted || !identical(_player, player)) {
+        await _fntvSessions.release(next);
+        return;
+      }
+      position = player.state.position;
+      playing = player.state.playing;
+      rate = player.state.rate;
+      _latestPosition = position;
+      _latestDuration = player.state.duration;
+      await _persistPlaybackProgress(force: true);
+      if (!mounted || !identical(_player, player)) {
+        await _fntvSessions.release(next);
+        return;
+      }
+      final oldPlayer = _detachActivePlayerState();
+      detached = true;
+      await _shutdownDetachedPlayer(oldPlayer,
+          reason: 'fntv-playback-switch',
+          persistProgress: false,
+          teardownPlatformState: false);
+      if (!mounted) return;
+      _nextEpisodeIsAutomatic = false;
+      setState(() => _error = null);
+      await _initialize(
+          initialTarget: next,
+          targetAlreadyResolved: true,
+          startPositionOverride: position);
+      if (!mounted) return;
+      final switched = _isReady;
+      if (!switched) {
+        await restoreOriginal();
+      }
+      if (!mounted) return;
+      committed = switched;
+      try {
+        await restoreState();
+      } finally {
+        if (switched) await _fntvSessions.release(oldTarget);
+      }
+      _showMessage(switched ? '播放设置已切换' : '切换失败，已尝试恢复原播放');
+    } catch (_) {
+      if (!detached && next != null) await _fntvSessions.release(next);
+      if (detached && !committed && !rollbackAttempted && mounted) {
+        try {
+          await restoreOriginal();
+          await restoreState();
+        } catch (_) {
+          await _fntvSessions.release(oldTarget);
+          if (next != null) await _fntvSessions.release(next);
+        }
+      }
+      if (mounted) _showMessage(detached ? '切换播放设置失败' : '解析失败，已保留当前播放');
+    } finally {
+      _fntvSwitchInProgress = false;
     }
   }
 
@@ -1061,15 +1206,22 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     bool showFeedback = true,
   }) async {
     final resolvedPath = path.trim();
-    if (resolvedPath.isEmpty) {
+    if (resolvedPath.isEmpty || !mounted || !identical(_player, player)) {
       return;
     }
+    String content;
+    try {
+      content = await readLocalSubtitleText(resolvedPath);
+    } catch (error) {
+      if (mounted && identical(_player, player)) _showMessage('加载字幕失败：$error');
+      return;
+    }
+    if (!mounted || !identical(_player, player)) return;
     await _disableMpvDualSubtitle(player);
-    final uri = Uri.file(resolvedPath).toString();
     final applied = await _runPlayerCommand(
       () => player.setSubtitleTrack(
-        SubtitleTrack.uri(
-          uri,
+        SubtitleTrack.data(
+          content,
           title: (displayName?.trim().isNotEmpty ?? false)
               ? displayName!.trim()
               : p.basenameWithoutExtension(resolvedPath),
@@ -1077,7 +1229,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       ),
       failureMessage: '加载字幕失败',
     );
-    if (!applied) {
+    if (!applied || !mounted || !identical(_player, player)) {
       return;
     }
     _subtitleSessionPreference = null;

@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:riverpod/misc.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
 import 'package:starflow/features/playback/application/playback_startup_preparation.dart';
 import 'package:starflow/features/playback/application/playback_startup_routing.dart';
@@ -28,11 +31,18 @@ class PlaybackStartupCoordinator {
     required PlaybackTarget initialTarget,
     required bool isTelevision,
     required bool isWeb,
+    bool targetAlreadyResolved = false,
   }) async {
-    await read(mediaRepositoryProvider).cancelActiveWebDavRefreshes(
-      includeForceFull: false,
-    );
-    final resolvedTarget = await targetResolver.resolve(initialTarget);
+    // Stop new scan work immediately, but do not join unrelated HTTP bodies.
+    unawaited(read(mediaRepositoryProvider)
+        .cancelActiveWebDavRefreshes(includeForceFull: false)
+        .catchError((Object error, StackTrace stackTrace) {
+      appLogWarning('playback.startup', 'Background refresh cleanup failed',
+          error: error, stackTrace: stackTrace);
+    }));
+    final resolvedTarget = targetAlreadyResolved
+        ? initialTarget
+        : await targetResolver.resolve(initialTarget);
     final settings = read(appSettingsProvider);
     final startupPreparation = await preparePlaybackStartup(
       PlaybackStartupPreparationInput(

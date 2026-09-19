@@ -1,18 +1,20 @@
+import 'package:starflow/features/details/domain/cached_metadata.dart';
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/utils/media_rating_labels.dart';
+import 'package:starflow/features/details/application/detail_metadata_service.dart';
 import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
-import 'package:starflow/features/details/application/douban_rating_stats_service.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/details/domain/cached_artwork.dart';
 import 'package:starflow/features/discovery/data/douban_api_client.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
-import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -50,13 +52,28 @@ class DetailTargetResolver {
     required bool backgroundWorkSuspended,
     bool forceMetadataRefresh = false,
   }) async {
+    return (await resolveMetadataResult(
+      target: target,
+      backgroundWorkSuspended: backgroundWorkSuspended,
+      forceMetadataRefresh: forceMetadataRefresh,
+    ))
+        .target;
+  }
+
+  Future<DetailMetadataResult> resolveMetadataResult({
+    required MediaDetailTarget target,
+    required bool backgroundWorkSuspended,
+    bool forceMetadataRefresh = false,
+  }) async {
     if (backgroundWorkSuspended) {
       final cachedTarget = await _detailCache.loadDetailTarget(target);
-      return normalizeRatingLabelsInTarget(
-        cachedTarget == null
-            ? target
-            : _mergeCachedDetailTarget(target, cachedTarget),
-      );
+      return DetailMetadataResult(
+          target: normalizeRatingLabelsInTarget(
+            cachedTarget == null
+                ? target
+                : _mergeCachedDetailTarget(target, cachedTarget),
+          ),
+          outcome: DetailMetadataOutcome.skipped);
     }
     return _resolveMetadataOnlyIfNeeded(
       target: target,
@@ -67,9 +84,10 @@ class DetailTargetResolver {
   Future<MediaDetailTarget> _resolveDetailTargetIfNeeded({
     required MediaDetailTarget target,
   }) async {
-    final nextTarget = await _resolveMetadataOnlyIfNeeded(
+    final nextTarget = (await _resolveMetadataOnlyIfNeeded(
       target: target,
-    );
+    ))
+        .target;
     final traceKey = _detailTraceKey(target);
     final playback = nextTarget.playbackTarget;
     if (playback == null) {
@@ -135,7 +153,7 @@ class DetailTargetResolver {
     }
   }
 
-  Future<MediaDetailTarget> _resolveMetadataOnlyIfNeeded({
+  Future<DetailMetadataResult> _resolveMetadataOnlyIfNeeded({
     required MediaDetailTarget target,
     bool forceMetadataRefresh = false,
   }) async {
@@ -150,8 +168,6 @@ class DetailTargetResolver {
     );
     final cachedState = await _detailCache.loadDetailState(target);
     final cachedTarget = cachedState?.target;
-    final refreshStatus =
-        cachedState?.metadataRefreshStatus ?? DetailMetadataRefreshStatus.never;
     DebugTraceOnce.logMetadata(
       traceKey,
       'cache-load',
@@ -162,59 +178,23 @@ class DetailTargetResolver {
               'logo=${cachedTarget.logoUrl.trim().isNotEmpty} '
               'ratings=${cachedTarget.ratingLabels.join(' | ')}',
     );
-    var nextTarget = normalizeRatingLabelsInTarget(
+    final currentTarget = normalizeRatingLabelsInTarget(
       cachedTarget == null
           ? target
           : _mergeCachedDetailTarget(target, cachedTarget),
     );
-    final initialDoubanId = nextTarget.doubanId.trim();
-    if (initialDoubanId.isNotEmpty && nextTarget.ratingCount <= 0) {
-      nextTarget = await _enrichDoubanRatingStats(
-        target: nextTarget,
-      );
-    }
-    final metadataNeeds = _resolveAutomaticMetadataNeeds(
-      target: nextTarget,
+    final result = await resolveDetailMetadata(
       settings: _settings,
+      target: currentTarget,
+      wmdbMetadataClient: _ref.read(wmdbMetadataClientProvider),
+      tmdbMetadataClient: _ref.read(tmdbMetadataClientProvider),
+      doubanApiClient: _ref.read(doubanApiClientProvider),
+      doubanCookie: _doubanSessionCookie,
+      forceRatingRefresh: forceMetadataRefresh,
+      traceKey: traceKey,
     );
-    if (_shouldSkipAutomaticMetadataRefresh(
-      forceMetadataRefresh: forceMetadataRefresh,
-      refreshStatus: refreshStatus,
-      metadataNeeds: metadataNeeds,
-    )) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'auto-enrich',
-        'skipped refreshStatus=${refreshStatus.name}',
-      );
-    } else if (metadataNeeds.shouldEnrich) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'auto-enrich',
-        '${forceMetadataRefresh ? 'forced' : 'enabled'} '
-            'query=${_detailMetadataQuery(nextTarget)} '
-            'needsMetadata=${nextTarget.needsMetadataMatch} '
-            'needsImdb=${nextTarget.needsImdbRatingMatch} '
-            'needsWmdb=${metadataNeeds.needsWmdb} '
-            'needsTmdb=${metadataNeeds.needsTmdb}',
-      );
-      nextTarget = await _resolveAutomaticMetadataIfNeeded(
-        settings: _settings,
-        target: nextTarget,
-        wmdbMetadataClient: _ref.read(wmdbMetadataClientProvider),
-        tmdbMetadataClient: _ref.read(tmdbMetadataClientProvider),
-        traceKey: traceKey,
-        initialNeeds: metadataNeeds,
-      );
-    } else {
-      DebugTraceOnce.logMetadata(traceKey, 'auto-enrich', 'skipped');
-    }
-    final resolvedDoubanId = nextTarget.doubanId.trim();
-    if (resolvedDoubanId.isNotEmpty && resolvedDoubanId != initialDoubanId) {
-      nextTarget = await _enrichDoubanRatingStats(
-        target: nextTarget,
-      );
-    }
+    final nextTarget = result.target;
+    _updateRatingCount(currentTarget, nextTarget);
 
     DebugTraceOnce.logMetadata(
       traceKey,
@@ -224,7 +204,7 @@ class DetailTargetResolver {
           'logo=${nextTarget.logoUrl.trim().isNotEmpty} '
           'ratings=${nextTarget.ratingLabels.join(' | ')}',
     );
-    return nextTarget;
+    return result;
   }
 
   String get _doubanSessionCookie {
@@ -232,15 +212,9 @@ class DetailTargetResolver {
     return account.enabled ? account.sessionCookie.trim() : '';
   }
 
-  Future<MediaDetailTarget> _enrichDoubanRatingStats({
-    required MediaDetailTarget target,
-  }) async {
+  void _updateRatingCount(
+      MediaDetailTarget target, MediaDetailTarget enriched) {
     final previousCount = target.ratingCount;
-    final enriched = await enrichDetailTargetWithDoubanRatingStats(
-      target: target,
-      doubanApiClient: _ref.read(doubanApiClientProvider),
-      cookie: _doubanSessionCookie,
-    );
     if (enriched.ratingCount > previousCount &&
         enriched.sourceId.trim().isNotEmpty &&
         enriched.itemId.trim().isNotEmpty) {
@@ -256,7 +230,6 @@ class DetailTargetResolver {
             .catchError((_) {}),
       );
     }
-    return enriched;
   }
 
   Future<void> _persistResolvedTarget(
@@ -387,322 +360,16 @@ class DetailTargetResolver {
   }
 }
 
-bool _shouldSkipAutomaticMetadataRefresh({
-  required bool forceMetadataRefresh,
-  required DetailMetadataRefreshStatus refreshStatus,
-  required _DetailAutomaticMetadataNeeds metadataNeeds,
-}) {
-  if (forceMetadataRefresh ||
-      refreshStatus == DetailMetadataRefreshStatus.never) {
-    return false;
-  }
-  return !metadataNeeds.shouldEnrich;
-}
-
-String _detailMetadataQuery(MediaDetailTarget target) {
-  final raw =
-      target.searchQuery.trim().isEmpty ? target.title : target.searchQuery;
-  return raw.trim();
-}
-
-class _DetailAutomaticMetadataNeeds {
-  const _DetailAutomaticMetadataNeeds({
-    required this.needsWmdb,
-    required this.needsTmdb,
-  });
-
-  final bool needsWmdb;
-  final bool needsTmdb;
-
-  bool get shouldEnrich => needsWmdb || needsTmdb;
-}
-
-_DetailAutomaticMetadataNeeds _resolveAutomaticMetadataNeeds({
-  required MediaDetailTarget target,
-  required DetailEnrichmentSettings settings,
-}) {
-  final query = _detailMetadataQuery(target);
-  final canUseTmdb = settings.tmdbMetadataMatchEnabled &&
-      settings.tmdbReadAccessToken.trim().isNotEmpty &&
-      query.isNotEmpty;
-  if (target.sourceKind == MediaSourceKind.nas &&
-      target.sourceId.trim().isNotEmpty) {
-    return _DetailAutomaticMetadataNeeds(
-      needsWmdb: false,
-      needsTmdb: canUseTmdb && target.needsPersonProfileMatch,
-    );
-  }
-  if (query.isEmpty && target.doubanId.trim().isEmpty) {
-    return const _DetailAutomaticMetadataNeeds(
-      needsWmdb: false,
-      needsTmdb: false,
-    );
-  }
-  final needsWmdb = settings.wmdbMetadataMatchEnabled &&
-      (target.needsMetadataMatch ||
-          _needsRatingLabel(target, keyword: '豆瓣') ||
-          target.needsImdbRatingMatch ||
-          target.doubanId.trim().isEmpty ||
-          target.imdbId.trim().isEmpty);
-  final needsTmdb = canUseTmdb &&
-      (target.needsMetadataMatch ||
-          target.needsPersonProfileMatch ||
-          target.backdropUrl.trim().isEmpty ||
-          target.logoUrl.trim().isEmpty);
-  return _DetailAutomaticMetadataNeeds(
-    needsWmdb: needsWmdb,
-    needsTmdb: needsTmdb,
-  );
-}
-
-Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
-  required DetailEnrichmentSettings settings,
-  required MediaDetailTarget target,
-  required WmdbMetadataClient wmdbMetadataClient,
-  required TmdbMetadataClient tmdbMetadataClient,
-  required String traceKey,
-  _DetailAutomaticMetadataNeeds? initialNeeds,
-}) async {
-  var nextTarget = target;
-  var metadataNeeds = initialNeeds ??
-      _resolveAutomaticMetadataNeeds(
-        target: nextTarget,
-        settings: settings,
-      );
-  final initialQuery = _detailMetadataQuery(target);
-  if (metadataNeeds.needsWmdb) {
-    try {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'wmdb',
-        'request query=$initialQuery doubanId=${nextTarget.doubanId}',
-      );
-      final wmdbMatch = nextTarget.doubanId.trim().isNotEmpty
-          ? await wmdbMetadataClient.matchByDoubanId(
-              doubanId: nextTarget.doubanId,
-            )
-          : await wmdbMetadataClient.matchTitle(
-              query: initialQuery,
-              year: nextTarget.year,
-              preferSeries: _prefersSeriesMetadata(nextTarget),
-              actors: nextTarget.actors,
-            );
-      if (wmdbMatch != null) {
-        DebugTraceOnce.logMetadata(
-          traceKey,
-          'wmdb',
-          'matched title=${wmdbMatch.title} imdbId=${wmdbMatch.imdbId} '
-              'ratings=${wmdbMatch.ratingLabels.join(' | ')}',
-        );
-        nextTarget = _applyMetadataMatchToDetailTarget(
-          nextTarget,
-          wmdbMatch,
-        );
-      } else {
-        DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'no match');
-      }
-    } catch (error, stackTrace) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'wmdb',
-        'failed',
-        error: error,
-        stackTrace: stackTrace,
-      );
-    }
-    metadataNeeds = _resolveAutomaticMetadataNeeds(
-      target: nextTarget,
-      settings: settings,
-    );
-  }
-
-  if (metadataNeeds.needsTmdb) {
-    try {
-      final currentQuery = _detailMetadataQuery(nextTarget);
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'tmdb',
-        'request query=$currentQuery year=${nextTarget.year} '
-            'preferSeries=${_prefersSeriesMetadata(nextTarget)}',
-      );
-      final tmdbMatch = await tmdbMetadataClient.matchTitle(
-        query: currentQuery,
-        readAccessToken: settings.tmdbReadAccessToken.trim(),
-        year: nextTarget.year,
-        preferSeries: _prefersSeriesMetadata(nextTarget),
-      );
-      if (tmdbMatch != null) {
-        DebugTraceOnce.logMetadata(
-          traceKey,
-          'tmdb',
-          'matched title=${tmdbMatch.title} imdbId=${tmdbMatch.imdbId}',
-        );
-        final resolvedBackdropUrl = await _resolveTmdbBackdropForTarget(
-          settings: settings,
-          tmdbMetadataClient: tmdbMetadataClient,
-          target: nextTarget,
-          match: tmdbMatch,
-        );
-        nextTarget = _applyMetadataMatchToDetailTarget(
-          nextTarget,
-          MetadataMatchResult(
-            provider: MetadataMatchProvider.tmdb,
-            title: tmdbMatch.title,
-            originalTitle: tmdbMatch.originalTitle,
-            posterUrl: tmdbMatch.posterUrl,
-            backdropUrl: resolvedBackdropUrl,
-            logoUrl: tmdbMatch.logoUrl,
-            bannerUrl: _resolveTmdbBannerForTarget(
-              target: nextTarget,
-              match: tmdbMatch,
-              resolvedBackdropUrl: resolvedBackdropUrl,
-            ),
-            extraBackdropUrls: _resolveTmdbExtraBackdropUrlsForTarget(
-              target: nextTarget,
-              match: tmdbMatch,
-              resolvedBackdropUrl: resolvedBackdropUrl,
-            ),
-            overview: tmdbMatch.overview,
-            year: tmdbMatch.year,
-            durationLabel: tmdbMatch.durationLabel,
-            genres: tmdbMatch.genres,
-            directors: tmdbMatch.directors,
-            directorProfiles: tmdbMatch.directorProfiles
-                .map(
-                  (item) => MetadataPersonProfile(
-                    name: item.name,
-                    avatarUrl: item.avatarUrl,
-                  ),
-                )
-                .toList(growable: false),
-            actors: tmdbMatch.actors,
-            actorProfiles: tmdbMatch.actorProfiles
-                .map(
-                  (item) => MetadataPersonProfile(
-                    name: item.name,
-                    avatarUrl: item.avatarUrl,
-                  ),
-                )
-                .toList(growable: false),
-            platforms: tmdbMatch.platforms,
-            platformProfiles: tmdbMatch.platformProfiles
-                .map(
-                  (item) => MetadataPersonProfile(
-                    name: item.name,
-                    avatarUrl: item.avatarUrl,
-                  ),
-                )
-                .toList(growable: false),
-            ratingLabels: tmdbMatch.ratingLabels,
-            imdbId: tmdbMatch.imdbId,
-            tmdbId: '${tmdbMatch.tmdbId}',
-          ),
-        );
-      } else {
-        DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'no match');
-      }
-    } catch (error, stackTrace) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'tmdb',
-        'failed',
-        error: error,
-        stackTrace: stackTrace,
-      );
-    }
-  }
-  return normalizeRatingLabelsInTarget(nextTarget);
-}
-
-bool _prefersSeriesMetadata(MediaDetailTarget target) {
-  final itemType = target.itemType.trim().toLowerCase();
-  return itemType == 'series' || itemType == 'season' || itemType == 'episode';
-}
-
-bool _needsRatingLabel(MediaDetailTarget target, {required String keyword}) {
-  return !_hasRatingLabelKeyword(target.ratingLabels, keyword);
-}
-
-bool _hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
-  final normalizedKeyword = keyword.trim().toLowerCase();
-  if (normalizedKeyword.isEmpty) {
-    return false;
-  }
-  return labels
-      .any((label) => label.trim().toLowerCase().contains(normalizedKeyword));
-}
-
-Future<String> _resolveTmdbBackdropForTarget({
-  required DetailEnrichmentSettings settings,
-  required TmdbMetadataClient tmdbMetadataClient,
-  required MediaDetailTarget target,
-  required TmdbMetadataMatch match,
-}) async {
-  if (_isEpisodeLikeTarget(target) &&
-      match.isSeries &&
-      match.tmdbId > 0 &&
-      settings.tmdbReadAccessToken.trim().isNotEmpty) {
-    try {
-      final stillUrl = await tmdbMetadataClient.fetchEpisodeStillUrl(
-        seriesId: match.tmdbId,
-        seasonNumber: target.seasonNumber!,
-        episodeNumber: target.episodeNumber!,
-        readAccessToken: settings.tmdbReadAccessToken.trim(),
-      );
-      if (stillUrl.trim().isNotEmpty) {
-        return stillUrl.trim();
-      }
-    } catch (_) {
-      // Ignore episode still failures and keep the title-level backdrop.
-    }
-  }
-  return match.backdropUrl.trim();
-}
-
-String _resolveTmdbBannerForTarget({
-  required MediaDetailTarget target,
-  required TmdbMetadataMatch match,
-  required String resolvedBackdropUrl,
-}) {
-  if (!_isEpisodeLikeTarget(target)) {
-    return '';
-  }
-  final seriesBackdrop = match.backdropUrl.trim();
-  if (seriesBackdrop.isEmpty || seriesBackdrop == resolvedBackdropUrl.trim()) {
-    return '';
-  }
-  return seriesBackdrop;
-}
-
-List<String> _resolveTmdbExtraBackdropUrlsForTarget({
-  required MediaDetailTarget target,
-  required TmdbMetadataMatch match,
-  required String resolvedBackdropUrl,
-}) {
-  final bannerUrl = _resolveTmdbBannerForTarget(
-    target: target,
-    match: match,
-    resolvedBackdropUrl: resolvedBackdropUrl,
-  );
-  return _mergeUniqueImageUrls([
-    if (bannerUrl.isNotEmpty) bannerUrl,
-    ...match.extraBackdropUrls,
-  ])
-      .where((item) => item != resolvedBackdropUrl.trim())
-      .toList(growable: false);
-}
-
-bool _isEpisodeLikeTarget(MediaDetailTarget target) {
-  return target.itemType.trim().toLowerCase() == 'episode' &&
-      target.seasonNumber != null &&
-      target.seasonNumber! >= 0 &&
-      target.episodeNumber != null &&
-      target.episodeNumber! > 0;
-}
-
 MediaDetailTarget normalizeRatingLabelsInTarget(MediaDetailTarget target) {
   return target.copyWith(
-      ratingLabels: _mergeLabels(const [], target.ratingLabels));
+      ratingLabels: mergeDistinctRatingLabels(const [], target.ratingLabels));
+}
+
+MediaDetailTarget mergeCachedDetailArtwork(
+  MediaDetailTarget current,
+  MediaDetailTarget cached,
+) {
+  return overlayCachedArtwork(current, cached);
 }
 
 MediaDetailTarget _mergeCachedDetailTarget(
@@ -718,76 +385,13 @@ MediaDetailTarget _mergeCachedDetailTarget(
   final preferCachedSourceContext =
       _homeShouldPreferCachedSourceContext(current, cached) ||
           preferCachedResourceState;
-  final resolvedPosterUrl =
-      cached.posterUrl.trim().isNotEmpty ? cached.posterUrl : current.posterUrl;
-  final resolvedPosterHeaders = cached.posterUrl.trim().isNotEmpty
-      ? (cached.posterHeaders.isNotEmpty
-          ? cached.posterHeaders
-          : current.posterHeaders)
-      : (current.posterHeaders.isNotEmpty
-          ? current.posterHeaders
-          : cached.posterHeaders);
-  final ignoreCachedEpisodeOverview = _isEpisodeLikeTarget(current) &&
+  final ignoreCachedEpisodeOverview = isEpisodeMetadataTarget(current) &&
       !current.hasUsefulOverview &&
       current.sourceId.trim() == cached.sourceId.trim() &&
       current.itemId.trim() == cached.itemId.trim();
-  return current.copyWith(
-    title: cached.title.trim().isNotEmpty ? cached.title : current.title,
-    posterUrl: resolvedPosterUrl,
-    posterHeaders: resolvedPosterHeaders,
-    backdropUrl: current.backdropUrl.trim().isNotEmpty
-        ? current.backdropUrl
-        : cached.backdropUrl,
-    backdropHeaders: current.backdropHeaders.isNotEmpty
-        ? current.backdropHeaders
-        : cached.backdropHeaders,
-    logoUrl:
-        current.logoUrl.trim().isNotEmpty ? current.logoUrl : cached.logoUrl,
-    logoHeaders: current.logoHeaders.isNotEmpty
-        ? current.logoHeaders
-        : cached.logoHeaders,
-    bannerUrl: current.bannerUrl.trim().isNotEmpty
-        ? current.bannerUrl
-        : cached.bannerUrl,
-    bannerHeaders: current.bannerHeaders.isNotEmpty
-        ? current.bannerHeaders
-        : cached.bannerHeaders,
-    extraBackdropUrls: current.extraBackdropUrls.isNotEmpty
-        ? current.extraBackdropUrls
-        : cached.extraBackdropUrls,
-    extraBackdropHeaders: current.extraBackdropHeaders.isNotEmpty
-        ? current.extraBackdropHeaders
-        : cached.extraBackdropHeaders,
-    overview: ignoreCachedEpisodeOverview
-        ? current.overview
-        : (current.hasUsefulOverview ? current.overview : cached.overview),
-    durationLabel: current.durationLabel.trim().isNotEmpty
-        ? current.durationLabel
-        : cached.durationLabel,
-    ratingLabels: _mergeLabels(current.ratingLabels, cached.ratingLabels),
-    ratingCount:
-        current.ratingCount > 0 ? current.ratingCount : cached.ratingCount,
-    genres: current.genres.isNotEmpty ? current.genres : cached.genres,
-    directors:
-        current.directors.isNotEmpty ? current.directors : cached.directors,
-    directorProfiles: mergeMediaPersonProfiles(
-      current.directorProfiles,
-      cached.directorProfiles,
-    ),
-    actors: current.actors.isNotEmpty ? current.actors : cached.actors,
-    actorProfiles: mergeMediaPersonProfiles(
-      current.actorProfiles,
-      cached.actorProfiles,
-    ),
-    platforms:
-        current.platforms.isNotEmpty ? current.platforms : cached.platforms,
-    platformProfiles: current.platformProfiles.isNotEmpty
-        ? current.platformProfiles
-        : cached.platformProfiles,
-    doubanId:
-        current.doubanId.trim().isNotEmpty ? current.doubanId : cached.doubanId,
-    imdbId: current.imdbId.trim().isNotEmpty ? current.imdbId : cached.imdbId,
-    tmdbId: current.tmdbId.trim().isNotEmpty ? current.tmdbId : cached.tmdbId,
+  final decorated = overlayCachedMetadata(current, cached,
+      preserveEpisodeOverview: ignoreCachedEpisodeOverview);
+  return mergeCachedDetailArtwork(decorated, cached).copyWith(
     availabilityLabel: preferCachedAvailability
         ? (cached.availabilityLabel.trim().isNotEmpty
             ? cached.availabilityLabel
@@ -1086,190 +690,6 @@ bool _homeShouldPreferCachedSourceContext(
     return true;
   }
   return false;
-}
-
-List<String> _mergeLabels(List<String> initial, Iterable<String> next) {
-  final seen = <String>{};
-  final merged = <String>[];
-  for (final label in initial) {
-    final cleaned = label.trim();
-    if (cleaned.isEmpty) {
-      continue;
-    }
-    final key = _labelMergeKey(cleaned);
-    if (seen.add(key)) {
-      merged.add(cleaned);
-    }
-  }
-  for (final label in next) {
-    final cleaned = label.trim();
-    if (cleaned.isEmpty) {
-      continue;
-    }
-    final key = _labelMergeKey(cleaned);
-    if (seen.add(key)) {
-      merged.add(cleaned);
-    }
-  }
-  return merged.toList(growable: false);
-}
-
-String _labelMergeKey(String value) {
-  final normalized = value.trim().toLowerCase();
-  if (normalized.contains('豆瓣') || normalized.contains('douban')) {
-    return 'rating:douban';
-  }
-  if (normalized.contains('imdb')) {
-    return 'rating:imdb';
-  }
-  if (normalized.contains('tmdb')) {
-    return 'rating:tmdb';
-  }
-  return normalized;
-}
-
-MediaDetailTarget _applyMetadataMatchToDetailTarget(
-  MediaDetailTarget target,
-  MetadataMatchResult match, {
-  bool replaceExisting = false,
-}) {
-  final filteredMatchRatingLabels = _filterSupplementalRatingLabels(
-    existing: target.ratingLabels,
-    supplemental: match.ratingLabels,
-  );
-  final resolvedDirectorProfiles = match.directorProfiles.isNotEmpty
-      ? _toMediaPersonProfiles(match.directorProfiles)
-      : const <MediaPersonProfile>[];
-  final resolvedActorProfiles = match.actorProfiles.isNotEmpty
-      ? _toMediaPersonProfiles(match.actorProfiles)
-      : const <MediaPersonProfile>[];
-  final resolvedPlatformProfiles = match.platformProfiles.isNotEmpty
-      ? _toMediaPersonProfiles(match.platformProfiles)
-      : const <MediaPersonProfile>[];
-  final shouldReplaceCompanies = match.provider == MetadataMatchProvider.tmdb;
-  final preserveEpisodeOverview = _isEpisodeLikeTarget(target);
-
-  String pickString(String current, String incoming) {
-    if (replaceExisting) {
-      return _firstNonEmpty(incoming, current);
-    }
-    return current.trim().isNotEmpty ? current : incoming;
-  }
-
-  List<T> pickList<T>(List<T> current, List<T> incoming) {
-    if (replaceExisting) {
-      return incoming.isNotEmpty ? incoming : current;
-    }
-    return current.isNotEmpty ? current : incoming;
-  }
-
-  return target.copyWith(
-    posterUrl: pickString(target.posterUrl, match.posterUrl),
-    posterHeaders: replaceExisting && match.posterUrl.trim().isNotEmpty
-        ? const <String, String>{}
-        : target.posterHeaders,
-    backdropUrl: pickString(target.backdropUrl, match.backdropUrl),
-    backdropHeaders: replaceExisting && match.backdropUrl.trim().isNotEmpty
-        ? const <String, String>{}
-        : target.backdropHeaders,
-    logoUrl: pickString(target.logoUrl, match.logoUrl),
-    logoHeaders: replaceExisting && match.logoUrl.trim().isNotEmpty
-        ? const <String, String>{}
-        : target.logoHeaders,
-    bannerUrl: pickString(target.bannerUrl, match.bannerUrl),
-    bannerHeaders: replaceExisting && match.bannerUrl.trim().isNotEmpty
-        ? const <String, String>{}
-        : target.bannerHeaders,
-    extraBackdropUrls: replaceExisting
-        ? (match.extraBackdropUrls.isNotEmpty
-            ? _mergeUniqueImageUrls(match.extraBackdropUrls)
-            : target.extraBackdropUrls)
-        : _mergeUniqueImageUrls([
-            ...target.extraBackdropUrls,
-            ...match.extraBackdropUrls,
-          ]),
-    extraBackdropHeaders: replaceExisting && match.extraBackdropUrls.isNotEmpty
-        ? const <String, String>{}
-        : target.extraBackdropHeaders,
-    overview: preserveEpisodeOverview
-        ? target.overview
-        : replaceExisting
-            ? _firstNonEmpty(match.overview, target.overview)
-            : (target.hasUsefulOverview
-                ? target.overview
-                : pickString('', match.overview)),
-    year: replaceExisting
-        ? (match.year > 0 ? match.year : target.year)
-        : (target.year > 0 ? target.year : match.year),
-    durationLabel: pickString(target.durationLabel, match.durationLabel),
-    genres: pickList(target.genres, match.genres),
-    directors: pickList(target.directors, match.directors),
-    directorProfiles: mergeMediaPersonProfiles(
-      target.directorProfiles,
-      resolvedDirectorProfiles,
-      preferIncoming: replaceExisting,
-    ),
-    actors: pickList(target.actors, match.actors),
-    actorProfiles: mergeMediaPersonProfiles(
-      target.actorProfiles,
-      resolvedActorProfiles,
-      preferIncoming: replaceExisting,
-    ),
-    platforms: shouldReplaceCompanies
-        ? match.platforms
-        : pickList(target.platforms, match.platforms),
-    platformProfiles: shouldReplaceCompanies
-        ? resolvedPlatformProfiles
-        : pickList(target.platformProfiles, resolvedPlatformProfiles),
-    ratingLabels: _mergeLabels(target.ratingLabels, filteredMatchRatingLabels),
-    doubanId: pickString(target.doubanId, match.doubanId),
-    imdbId: pickString(target.imdbId, match.imdbId),
-    tmdbId: pickString(target.tmdbId, match.tmdbId),
-    itemType: pickString(target.itemType, match.mediaType.toItemType),
-  );
-}
-
-String _firstNonEmpty(String first, String fallback) {
-  return first.trim().isNotEmpty ? first : fallback;
-}
-
-List<String> _mergeUniqueImageUrls(Iterable<String> values) {
-  final seen = <String>{};
-  final result = <String>[];
-  for (final value in values) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty || !seen.add(trimmed)) {
-      continue;
-    }
-    result.add(trimmed);
-  }
-  return result;
-}
-
-List<String> _filterSupplementalRatingLabels({
-  required List<String> existing,
-  required List<String> supplemental,
-}) {
-  if (!_hasRatingLabelKeyword(existing, '豆瓣')) {
-    return supplemental;
-  }
-  return supplemental
-      .where((label) => !label.trim().toLowerCase().contains('豆瓣'))
-      .toList(growable: false);
-}
-
-List<MediaPersonProfile> _toMediaPersonProfiles(
-  Iterable<MetadataPersonProfile> profiles,
-) {
-  return profiles
-      .where((item) => item.name.trim().isNotEmpty)
-      .map(
-        (item) => MediaPersonProfile(
-          name: item.name.trim(),
-          avatarUrl: item.avatarUrl.trim(),
-        ),
-      )
-      .toList(growable: false);
 }
 
 class _PlaybackResolutionException implements Exception {

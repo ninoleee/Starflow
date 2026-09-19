@@ -1,4 +1,5 @@
 import 'package:riverpod/misc.dart';
+import 'package:starflow/core/storage/resource_path_identity.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
@@ -557,12 +558,6 @@ class PlaybackEpisodeQueueResolver {
   }
 
   String _normalizeIndexedPath(String value) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      return '';
-    }
-    final uri = Uri.tryParse(trimmed);
-    final rawPath = uri != null && uri.hasScheme ? uri.path : trimmed;
-    return rawPath.replaceAll('\\', '/').trim().toLowerCase();
+    return resourcePathKey(value);
   }
 }

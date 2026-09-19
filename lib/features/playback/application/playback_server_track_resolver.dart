@@ -63,7 +63,9 @@ AudioTrack? resolvePlaybackAudioTrack({
 
   final ordinal =
       streams.indexWhere((stream) => stream.id == preferredStream.id);
-  if (ordinal >= 0 && ordinal < embedded.length) {
+  if (streams.length == embedded.length &&
+      ordinal >= 0 &&
+      ordinal < embedded.length) {
     return embedded[ordinal];
   }
   return null;
@@ -81,22 +83,18 @@ PlaybackAudioStream? matchPlaybackAudioStreamForTrack({
           (item) => item.id != 'auto' && item.id != 'no' && item.uri == false)
       .toList(growable: false);
   final ordinal = embedded.indexOf(track);
-  for (final stream in streams) {
-    if (_matchesAudio(track, stream, codec: true)) {
-      return stream;
-    }
+  for (final matches in [
+    streams.where((stream) => _matchesAudio(track, stream, codec: true)),
+    streams.where((stream) => _matchesAudio(track, stream)),
+    streams.where((stream) => _matchesAudioChannels(track, stream)),
+  ]) {
+    if (matches.length == 1) return matches.single;
   }
-  for (final stream in streams) {
-    if (_matchesAudio(track, stream)) {
-      return stream;
-    }
-  }
-  for (final stream in streams) {
-    if (_matchesAudioChannels(track, stream)) {
-      return stream;
-    }
-  }
-  return ordinal >= 0 && ordinal < streams.length ? streams[ordinal] : null;
+  return streams.length == embedded.length &&
+          ordinal >= 0 &&
+          ordinal < streams.length
+      ? streams[ordinal]
+      : null;
 }
 
 SubtitleTrack? resolveEmbeddedPlaybackSubtitleTrack({
@@ -162,14 +160,14 @@ PlaybackSubtitleStream? matchPlaybackSubtitleStreamForTrack({
   return ordinal >= 0 && ordinal < streams.length ? streams[ordinal] : null;
 }
 
-T _preferredStream<T>(
+T? _preferredStream<T>(
   List<T> streams,
   String preferredId,
   String Function(T stream) idOf,
   bool Function(T stream) isDefault,
 ) {
   if (streams.isEmpty) {
-    throw StateError('No streams');
+    return null;
   }
   final normalizedId = preferredId.trim();
   if (normalizedId.isNotEmpty) {
@@ -184,8 +182,7 @@ T _preferredStream<T>(
       return stream;
     }
   }
-  final sorted = [...streams];
-  return sorted.first;
+  return streams.first;
 }
 
 bool _matchesAudio(
@@ -194,12 +191,12 @@ bool _matchesAudio(
   bool codec = false,
 }) {
   final title = _normalize(stream.title);
-  final language = _normalize(stream.language);
+  final language = _normalizeLanguage(stream.language);
   if (title.isEmpty || language.isEmpty) {
     return false;
   }
   if (_normalize(track.title) != title ||
-      _normalize(track.language) != language) {
+      _normalizeLanguage(track.language) != language) {
     return false;
   }
   if (!codec) {
@@ -213,10 +210,10 @@ bool _matchesAudioChannels(
   AudioTrack track,
   PlaybackAudioStream stream,
 ) {
-  final language = _normalize(stream.language);
+  final language = _normalizeLanguage(stream.language);
   return language.isNotEmpty &&
       stream.channels > 0 &&
-      _normalize(track.language) == language &&
+      _normalizeLanguage(track.language) == language &&
       track.channelscount == stream.channels;
 }
 
@@ -225,11 +222,19 @@ bool _matchesSubtitle(
   PlaybackSubtitleStream stream,
 ) {
   final title = _normalize(stream.title);
-  final language = _normalize(stream.language);
+  final language = _normalizeLanguage(stream.language);
   return title.isNotEmpty &&
       language.isNotEmpty &&
       _normalize(track.title) == title &&
-      _normalize(track.language) == language;
+      _normalizeLanguage(track.language) == language;
 }
+
+String _normalizeLanguage(String? value) =>
+    switch (_normalize(value).replaceAll('_', '-')) {
+      'eng' => 'en',
+      'chi' || 'zho' || 'cmn' => 'zh',
+      'jpn' => 'ja',
+      final language => language,
+    };
 
 String _normalize(String? value) => (value ?? '').trim().toLowerCase();

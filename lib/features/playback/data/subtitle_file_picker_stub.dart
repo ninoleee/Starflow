@@ -1,5 +1,8 @@
 import 'package:starflow/features/playback/data/subtitle_file_picker.dart';
 
+Future<String> readLocalSubtitleText(String path) async =>
+    throw UnsupportedError('当前平台不支持本地字幕');
+
 SubtitleFilePicker createSubtitleFilePicker() {
   return const UnsupportedSubtitleFilePicker();
 }

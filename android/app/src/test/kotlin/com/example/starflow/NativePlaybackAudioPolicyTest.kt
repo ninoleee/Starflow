@@ -64,20 +64,20 @@ class NativePlaybackAudioPolicyTest {
     }
 
     @Test
-    fun `ffmpeg decoder is enabled only for forced ac3 family audio`() {
+    fun `ffmpeg decoder remains registered independently of metadata`() {
         assertTrue(
             NativePlaybackAudioPolicy.shouldEnableFfmpegAudioDecoder(
                 forcePcmAudioOutput = true,
                 audioCodec = "eac3",
             ),
         )
-        assertFalse(
+        assertTrue(
             NativePlaybackAudioPolicy.shouldEnableFfmpegAudioDecoder(
                 forcePcmAudioOutput = false,
                 audioCodec = "eac3",
             ),
         )
-        assertFalse(
+        assertTrue(
             NativePlaybackAudioPolicy.shouldEnableFfmpegAudioDecoder(
                 forcePcmAudioOutput = true,
                 audioCodec = "aac",
@@ -122,11 +122,22 @@ class NativePlaybackAudioPolicyTest {
                 ),
             )
         }
-        assertFalse(
+        assertTrue(
             NativePlaybackAudioPolicy.shouldEnableFfmpegAudioDecoder(
                 forcePcmAudioOutput = false,
                 audioCodec = "mp3",
             ),
         )
+    }
+
+    @Test
+    fun `actual mime governs output without relying on target metadata`() {
+        assertTrue(NativePlaybackAudioPolicy.shouldEnableFfmpegAudioDecoder(false, ""))
+        assertTrue(NativePlaybackAudioPolicy.requiresDecodedOutput("audio/eac3", true, NativeAudioOutputMode.AUTO))
+        assertFalse(NativePlaybackAudioPolicy.requiresDecodedOutput("audio/eac3", false, NativeAudioOutputMode.AUTO))
+        assertFalse(NativePlaybackAudioPolicy.requiresDecodedOutput("audio/eac3", true, NativeAudioOutputMode.DEVICE_PASSTHROUGH))
+        assertTrue(NativePlaybackAudioPolicy.requiresDecodedOutput("audio/vnd.dts", false, NativeAudioOutputMode.PCM_COMPATIBILITY))
+        assertTrue(NativePlaybackAudioPolicy.requiresDecodedOutput("audio/vnd.dts", false, NativeAudioOutputMode.AUTO, "audio/vnd.dts"))
+        assertFalse(NativePlaybackAudioPolicy.requiresDecodedOutput("video/avc", true, NativeAudioOutputMode.PCM_COMPATIBILITY))
     }
 }

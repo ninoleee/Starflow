@@ -408,7 +408,7 @@ void main() {
     expect(find.byIcon(Icons.movie_creation_outlined), findsNothing);
   });
 
-  testWidgets('recent playback card shows source media library badge',
+  testWidgets('recent playback card shows source media library without decoration',
       (tester) async {
     const section = HomeSectionViewModel(
       id: 'layout-test',
@@ -443,6 +443,17 @@ void main() {
       find.byType(MediaPosterTile).first,
     );
     expect(poster.imageTopRightBadgeText, '家庭影音库');
+    expect(poster.imageTopRightBadgeTextStyle?.fontSize, 19);
+    expect(poster.imageTopRightBadgeShowDecoration, isFalse);
+    final sourceLabel = find.text('家庭影音库');
+    expect(sourceLabel, findsOneWidget);
+    final sourceOverlay = find
+        .ancestor(of: sourceLabel, matching: find.byType(Positioned))
+        .first;
+    expect(
+      find.descendant(of: sourceOverlay, matching: find.byType(DecoratedBox)),
+      findsNothing,
+    );
   });
 }
 

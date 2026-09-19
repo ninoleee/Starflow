@@ -375,6 +375,7 @@ class DoubanApiClient {
       actors: actors,
       sourceUrl: 'https://movie.douban.com/subject/$id/',
       ratingLabel: ratingLabel,
+      ratingCount: _resolveRatingCount(target, item),
       subjectType: subjectType,
     );
   }
@@ -503,6 +504,22 @@ class DoubanApiClient {
       final year = _parseYear(value);
       if (year > 0) {
         return year;
+      }
+    }
+    return 0;
+  }
+
+  int _resolveRatingCount(
+    Map<String, dynamic> target,
+    Map<String, dynamic> fallback,
+  ) {
+    for (final map in [target, fallback]) {
+      final rating = map['rating'];
+      if (rating is Map) {
+        final count = _numberValue(rating['count'])?.toInt() ?? 0;
+        if (count > 0) {
+          return count;
+        }
       }
     }
     return 0;

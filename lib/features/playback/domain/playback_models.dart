@@ -8,6 +8,7 @@ class FntvPlaybackQuality {
     this.url = '',
     this.isM3u8 = false,
     this.progressive = false,
+    this.serverTranscode = false,
   });
 
   final int index;
@@ -16,15 +17,20 @@ class FntvPlaybackQuality {
   final String url;
   final bool isM3u8;
   final bool progressive;
+  final bool serverTranscode;
 
   String get label {
     final parts = <String>[
-      if (resolution.trim().isNotEmpty) resolution.trim(),
+      if (resolution.trim().isNotEmpty)
+        serverTranscode && int.tryParse(resolution) != null
+            ? '${resolution}P'
+            : resolution.trim(),
       if (bitrate > 0)
         bitrate >= 1000000
             ? '${(bitrate / 1000000).toStringAsFixed(1)} Mbps'
             : '${(bitrate / 1000).round()} Kbps',
       if (isM3u8) 'HLS',
+      if (serverTranscode) '转码',
     ];
     return parts.isEmpty ? '画质 ${index + 1}' : parts.join(' · ');
   }
@@ -36,6 +42,7 @@ class FntvPlaybackQuality {
         'url': url,
         'isM3u8': isM3u8,
         'progressive': progressive,
+        'serverTranscode': serverTranscode,
       };
 
   factory FntvPlaybackQuality.fromJson(Map<String, dynamic> json) {
@@ -46,6 +53,7 @@ class FntvPlaybackQuality {
       url: json['url'] as String? ?? '',
       isM3u8: json['isM3u8'] as bool? ?? false,
       progressive: json['progressive'] as bool? ?? false,
+      serverTranscode: json['serverTranscode'] as bool? ?? false,
     );
   }
 }
@@ -178,6 +186,9 @@ class PlaybackTarget {
     this.videoStreamId = '',
     this.playbackQualities = const [],
     this.preferredPlaybackQualityIndex,
+    this.fntvSessionLink = '',
+    this.fntvStartPositionMs = 0,
+    this.fntvTrackSelectionExplicit = false,
     this.seasonNumber,
     this.episodeNumber,
     this.width,
@@ -220,6 +231,12 @@ class PlaybackTarget {
   final String videoStreamId;
   final List<FntvPlaybackQuality> playbackQualities;
   final int? preferredPlaybackQualityIndex;
+  // Raw server control link; not the absolute player URL.
+  final String fntvSessionLink;
+  final int fntvStartPositionMs;
+  final bool fntvTrackSelectionExplicit;
+  bool get isFntvTranscoding =>
+      sourceKind == MediaSourceKind.fntv && fntvSessionLink.isNotEmpty;
   final int? seasonNumber;
   final int? episodeNumber;
   final int? width;
@@ -262,6 +279,9 @@ class PlaybackTarget {
     String? videoStreamId,
     List<FntvPlaybackQuality>? playbackQualities,
     int? preferredPlaybackQualityIndex,
+    String? fntvSessionLink,
+    int? fntvStartPositionMs,
+    bool? fntvTrackSelectionExplicit,
     int? seasonNumber,
     int? episodeNumber,
     int? width,
@@ -310,6 +330,10 @@ class PlaybackTarget {
       playbackQualities: playbackQualities ?? this.playbackQualities,
       preferredPlaybackQualityIndex:
           preferredPlaybackQualityIndex ?? this.preferredPlaybackQualityIndex,
+      fntvSessionLink: fntvSessionLink ?? this.fntvSessionLink,
+      fntvStartPositionMs: fntvStartPositionMs ?? this.fntvStartPositionMs,
+      fntvTrackSelectionExplicit:
+          fntvTrackSelectionExplicit ?? this.fntvTrackSelectionExplicit,
       seasonNumber: seasonNumber ?? this.seasonNumber,
       episodeNumber: episodeNumber ?? this.episodeNumber,
       width: width ?? this.width,
@@ -474,6 +498,9 @@ class PlaybackTarget {
       'playbackQualities':
           playbackQualities.map((item) => item.toJson()).toList(),
       'preferredPlaybackQualityIndex': preferredPlaybackQualityIndex,
+      'fntvSessionLink': fntvSessionLink,
+      'fntvStartPositionMs': fntvStartPositionMs,
+      'fntvTrackSelectionExplicit': fntvTrackSelectionExplicit,
       'seasonNumber': seasonNumber,
       'episodeNumber': episodeNumber,
       'width': width,
@@ -541,6 +568,10 @@ class PlaybackTarget {
               .toList(growable: false),
       preferredPlaybackQualityIndex:
           (json['preferredPlaybackQualityIndex'] as num?)?.toInt(),
+      fntvSessionLink: json['fntvSessionLink'] as String? ?? '',
+      fntvStartPositionMs: (json['fntvStartPositionMs'] as num?)?.toInt() ?? 0,
+      fntvTrackSelectionExplicit:
+          json['fntvTrackSelectionExplicit'] as bool? ?? false,
       seasonNumber: (json['seasonNumber'] as num?)?.toInt(),
       episodeNumber: (json['episodeNumber'] as num?)?.toInt(),
       width: (json['width'] as num?)?.toInt(),

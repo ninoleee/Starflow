@@ -1,8 +1,8 @@
+import 'package:starflow/features/library/presentation/library_resource_deletion.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/logging/app_logger.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/navigation/page_activity_mixin.dart';
@@ -19,7 +19,7 @@ import 'package:starflow/features/library/application/library_refresh_revision.d
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/widgets/library_paged_grid.dart';
@@ -454,7 +454,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
               AppPageBackground(
                 contentPadding: appPageContentPadding(
                   context,
-                  includeBottomNavigationBar: true,
                 ),
                 child: _buildScrollContent(
                   context: context,
@@ -1272,102 +1271,8 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     }
   }
 
-  Future<void> _confirmDeleteResource(MediaItem item) async {
-    final directResourceUri = Uri.tryParse(item.id.trim());
-    final resourcePath =
-        directResourceUri != null && directResourceUri.hasScheme
-            ? item.id.trim()
-            : item.actualAddress.trim();
-    if (resourcePath.isEmpty) {
-      return;
-    }
-    final isDirectory =
-        item.isFolder || item.itemType == 'series' || item.itemType == 'season';
-    final confirmed = await showDialog<bool>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text(isDirectory ? '删除目录' : '删除文件'),
-            content: Text(
-              isDirectory
-                  ? '将从 ${_managedSourceLabel(item)} 删除“${item.title}”对应目录及其中全部内容（含图片、字幕和 NFO），并从本地索引中移除相关条目。'
-                  : '将从 ${_managedSourceLabel(item)} 删除“${item.title}”对应文件，并从本地索引中移除该条目。',
-            ),
-            actions: [
-              StarflowButton(
-                label: '取消',
-                onPressed: () => Navigator.of(context).pop(false),
-                variant: StarflowButtonVariant.ghost,
-                compact: true,
-              ),
-              StarflowButton(
-                label: '确认删除',
-                onPressed: () => Navigator.of(context).pop(true),
-                variant: StarflowButtonVariant.danger,
-                compact: true,
-              ),
-            ],
-          ),
-        ) ??
-        false;
-    if (!confirmed || !mounted) {
-      return;
-    }
-    final stopwatch = Stopwatch()..start();
-    appLogInfo(
-      'library.resource',
-      'Media resource deletion started',
-      fields: <String, Object?>{
-        'sourceId': item.sourceId,
-        'sourceKind': item.sourceKind.name,
-        'itemType': item.itemType,
-        'isDirectory': isDirectory,
-      },
-    );
-    try {
-      await ref.read(mediaRepositoryProvider).deleteResource(
-            sourceId: item.sourceId,
-            resourcePath: resourcePath,
-            sectionId: item.sectionId,
-          );
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(isDirectory ? '已删除目录' : '已删除文件')),
-      );
-      appLogInfo(
-        'library.resource',
-        'Media resource deletion completed',
-        fields: <String, Object?>{
-          'sourceId': item.sourceId,
-          'sourceKind': item.sourceKind.name,
-          'itemType': item.itemType,
-          'isDirectory': isDirectory,
-          'durationMs': stopwatch.elapsedMilliseconds,
-        },
-      );
-    } catch (error, stackTrace) {
-      appLogError(
-        'library.resource',
-        'Media resource deletion failed',
-        fields: <String, Object?>{
-          'sourceId': item.sourceId,
-          'sourceKind': item.sourceKind.name,
-          'itemType': item.itemType,
-          'isDirectory': isDirectory,
-          'durationMs': stopwatch.elapsedMilliseconds,
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('删除失败：$error')),
-      );
-    }
-  }
+  Future<void> _confirmDeleteResource(MediaItem item) =>
+      confirmLibraryResourceDeletion(context, ref, item);
 
   bool _supportsManagedIndexedItem(MediaItem item) {
     return item.sourceKind == MediaSourceKind.nas ||
@@ -1378,10 +1283,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     return item.sourceKind == MediaSourceKind.quark
         ? _LibraryRefreshSourceKind.quark
         : _LibraryRefreshSourceKind.webDav;
-  }
-
-  String _managedSourceLabel(MediaItem item) {
-    return item.sourceKind == MediaSourceKind.quark ? 'Quark' : 'WebDAV';
   }
 }
 

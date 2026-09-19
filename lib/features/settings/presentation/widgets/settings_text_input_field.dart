@@ -1,10 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/core/widgets/tv_text_input_launcher.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class SettingsTextInputField extends ConsumerWidget {
@@ -69,7 +68,7 @@ class SettingsTextInputField extends ConsumerWidget {
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: controller,
       builder: (context, value, child) {
-        return _TelevisionInputLauncher(
+        return TvTextInputLauncher(
           onOpen: () => _openTelevisionEditor(context),
           builder: (onPressed) => SettingsSelectionTile(
             title: labelText,
@@ -156,7 +155,7 @@ class SettingsTextInputField extends ConsumerWidget {
           );
         },
       );
-      if (result == null) {
+      if (!context.mounted || result == null) {
         return;
       }
       controller.text = result;
@@ -167,80 +166,4 @@ class SettingsTextInputField extends ConsumerWidget {
       confirmFocusNode.dispose();
     }
   }
-}
-
-/// Do not attach an IME while the remote key that opened it is still held.
-class _TelevisionInputLauncher extends StatefulWidget {
-  const _TelevisionInputLauncher({required this.onOpen, required this.builder});
-
-  final Future<void> Function() onOpen;
-  final Widget Function(VoidCallback) builder;
-
-  @override
-  State<_TelevisionInputLauncher> createState() =>
-      _TelevisionInputLauncherState();
-}
-
-class _TelevisionInputLauncherState extends State<_TelevisionInputLauncher> {
-  static final _activationKeys = {
-    LogicalKeyboardKey.select,
-    LogicalKeyboardKey.enter,
-    LogicalKeyboardKey.numpadEnter,
-    LogicalKeyboardKey.space,
-    LogicalKeyboardKey.gameButtonA,
-  };
-
-  bool _opening = false;
-  Completer<void>? _release;
-  bool Function(KeyEvent)? _keyHandler;
-
-  void _stopWaiting() {
-    final handler = _keyHandler;
-    if (handler != null) {
-      HardwareKeyboard.instance.removeHandler(handler);
-      _keyHandler = null;
-    }
-    final release = _release;
-    _release = null;
-    if (release != null && !release.isCompleted) release.complete();
-  }
-
-  Future<void> _open() async {
-    if (_opening) return;
-    _opening = true;
-    try {
-      final held = HardwareKeyboard.instance.logicalKeysPressed
-          .intersection(_activationKeys);
-      if (held.isNotEmpty) {
-        final release = Completer<void>();
-        _release = release;
-        _keyHandler = (event) {
-          if (!held.contains(event.logicalKey)) return false;
-          if (event is KeyUpEvent) {
-            held.remove(event.logicalKey);
-            if (held.isEmpty) _stopWaiting();
-          }
-          return true;
-        };
-        HardwareKeyboard.instance.addHandler(_keyHandler!);
-        await release.future;
-        // Finish dispatching the release before requesting text input.
-        await Future<void>.delayed(Duration.zero);
-      }
-      if (!mounted || ModalRoute.of(context)?.isCurrent == false) return;
-      await widget.onOpen();
-    } finally {
-      _stopWaiting();
-      _opening = false;
-    }
-  }
-
-  @override
-  void dispose() {
-    _stopWaiting();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.builder(_open);
 }

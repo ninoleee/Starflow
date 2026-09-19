@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/painting.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/network/bounded_http_request.dart';
+import 'package:starflow/core/scheduling/async_work_pool.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/network/starflow_http_transport.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
@@ -16,6 +18,7 @@ class _StubPersistentImageCache implements PersistentImageCache {
   _StubPersistentImageCache(this._client);
 
   final http.Client _client;
+  final _downloads = AsyncWorkPool(4);
 
   @override
   Future<void> clear() async {}
@@ -40,8 +43,12 @@ class _StubPersistentImageCache implements PersistentImageCache {
     String url, {
     Map<String, String>? headers,
     bool persist = true,
+    Future<void>? cancel,
   }) async {
-    final response = await _client.get(Uri.parse(url), headers: headers);
+    final response = await _downloads.run(() => sendBoundedRequest(
+      _client, 'GET', Uri.parse(url), headers: headers, cancel: cancel,
+      timeout: const Duration(seconds: 15), maxBytes: 32 * 1024 * 1024,
+    ));
     return validateNetworkImageHttpResponse(response, url: url);
   }
 
@@ -50,10 +57,8 @@ class _StubPersistentImageCache implements PersistentImageCache {
     String url, {
     Map<String, String>? headers,
     bool persist = true,
+    Future<void>? cancel,
   }) async {
-    return NetworkImage(
-      url,
-      headers: headers == null || headers.isEmpty ? null : headers,
-    );
+    return MemoryImage(await load(url, headers: headers, persist: persist, cancel: cancel));
   }
 }

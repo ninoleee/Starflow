@@ -14,7 +14,7 @@ import 'package:starflow/features/search/application/cloud115_save_workflow_serv
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
 import 'package:starflow/features/search/application/search_favorite_metadata_service.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
-import 'package:starflow/features/search/data/mock_search_repository.dart';
+import 'package:starflow/features/search/data/search_repository.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
@@ -300,8 +300,7 @@ void main() {
             find.textContaining(
                 stage == 'save' ? 'request denied' : 'STRM 触发失败'),
             findsOneWidget);
-        expect(
-            harness.refreshRequests, stage == 'strm' && harness.is115 ? 1 : 0);
+        expect(harness.refreshRequests, stage == 'strm' ? 1 : 0);
         harness.refresh.complete();
         expect(tester.takeException(), isNull);
       });

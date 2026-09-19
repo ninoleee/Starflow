@@ -8,7 +8,7 @@ import 'package:starflow/features/library/domain/library_collection_models.dart'
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/presentation/library_collection_page.dart';
 import 'package:starflow/features/library/presentation/library_page.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/application/local_storage_cache_revision.dart';

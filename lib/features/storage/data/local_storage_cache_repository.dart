@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
+import 'package:starflow/core/storage/resource_path_identity.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -218,16 +219,15 @@ class _DecodedEmbyItemsShard {
   final bool usedBackgroundIsolate;
 }
 
+String _encodeMediaItemsShard(List<MediaItem> items) => jsonEncode(
+    <String, dynamic>{'items': items.map((item) => item.toJson()).toList()});
+
 _EncodedEmbySnapshotShards _encodeEmbySnapshotShards(
   CachedEmbyLibrarySnapshot snapshot, {
   required bool usedBackgroundIsolate,
 }) {
   String encodeItems(List<MediaItem> items) {
-    return jsonEncode(
-      <String, dynamic>{
-        'items': items.map((item) => item.toJson()).toList(),
-      },
-    );
+    return _encodeMediaItemsShard(items);
   }
 
   final sectionItems = <String, List<MediaItem>>{
@@ -467,6 +467,9 @@ class LocalStorageCacheRepository {
   Future<void> _embyMutationTail = Future<void>.value();
 
   void dispose() {
+    if (_pendingDetailTargetSaveBatches.isNotEmpty) {
+      unawaited(_flushMergedDetailTargetSaves());
+    }
     _isDisposed = true;
     _detailCacheChangeNotificationTimer?.cancel();
     _detailCacheChangeNotificationTimer = null;
@@ -678,39 +681,38 @@ class LocalStorageCacheRepository {
         ratingCount <= 0) {
       return;
     }
-    final snapshot = await loadEmbyLibrarySnapshot(normalizedSourceId);
-    var changed = false;
-    List<MediaItem> updateItems(List<MediaItem> items) {
-      var groupChanged = false;
-      final updated = items.map((item) {
-        if (item.id.trim() != normalizedItemId &&
-            item.playbackItemId.trim() != normalizedItemId) {
-          return item;
+    await _enqueueEmbyMutation(() async {
+      final manifest = await _loadEmbyManifest();
+      final source = manifest.sources[normalizedSourceId];
+      if (source == null) return;
+      final keys = [
+        _embyFallbackShardKey(normalizedSourceId),
+        _embySummaryShardKey(normalizedSourceId),
+        for (final section in source.sectionIds)
+          _embySectionShardKey(normalizedSourceId, section),
+      ];
+      var changed = false;
+      try {
+        for (final key in keys) {
+          final items = await _loadEmbyItemsShard(key);
+          if (!items.any((item) =>
+              (item.id.trim() == normalizedItemId || item.playbackItemId.trim() == normalizedItemId) &&
+              item.ratingCount != ratingCount)) {
+            continue;
+          }
+          final updated = items.map((item) =>
+              item.id.trim() == normalizedItemId || item.playbackItemId.trim() == normalizedItemId
+                  ? item.copyWith(ratingCount: ratingCount) : item).toList(growable: false);
+          final raw = updated.length >= _embyCacheBackgroundEntryThreshold
+              ? await compute(_encodeMediaItemsShard, updated)
+              : _encodeMediaItemsShard(updated);
+          changed = true;
+          await _writeChangedEmbyPayload(key, raw);
         }
-        if (item.ratingCount == ratingCount) {
-          return item;
-        }
-        groupChanged = true;
-        return item.copyWith(ratingCount: ratingCount);
-      }).toList(growable: false);
-      changed = changed || groupChanged;
-      return updated;
-    }
-
-    final fallbackItems = updateItems(snapshot.fallbackItems);
-    final itemsBySection = snapshot.itemsBySection.map(
-      (sectionId, items) => MapEntry(sectionId, updateItems(items)),
-    );
-    if (!changed) {
-      return;
-    }
-    await saveEmbyLibrarySnapshot(
-      sourceId: normalizedSourceId,
-      refreshedAt: snapshot.refreshedAt ?? DateTime.now(),
-      collections: snapshot.collections,
-      fallbackItems: fallbackItems,
-      itemsBySection: itemsBySection,
-    );
+      } finally {
+        if (changed) _removeEmbySnapshotCacheEntries(normalizedSourceId);
+      }
+    });
   }
 
   Future<void> clearEmbyLibrarySnapshot(String sourceId) async {
@@ -952,12 +954,17 @@ class LocalStorageCacheRepository {
     _pendingDetailTargetSaveBatches.add(pending);
     if (!_detailTargetSaveFlushScheduled) {
       _detailTargetSaveFlushScheduled = true;
-      scheduleMicrotask(() => unawaited(_flushMergedDetailTargetSaves()));
+      _detailTargetSaveFlushTimer = Timer(
+        const Duration(milliseconds: 16),
+        () => unawaited(_flushMergedDetailTargetSaves()),
+      );
     }
     return pending.completer.future;
   }
 
   Future<void> _flushMergedDetailTargetSaves() async {
+    _detailTargetSaveFlushTimer?.cancel();
+    _detailTargetSaveFlushTimer = null;
     final pendingBatches = List<_PendingDetailTargetSaveBatch>.of(
       _pendingDetailTargetSaveBatches,
     );
@@ -1052,6 +1059,10 @@ class LocalStorageCacheRepository {
   Future<void> _runSerializedDetailMutation(
     Future<void> Function() operation,
   ) {
+    // A clear/update must stay behind saves accepted during the merge window.
+    if (_pendingDetailTargetSaveBatches.isNotEmpty) {
+      unawaited(_flushMergedDetailTargetSaves());
+    }
     final previous = _detailMutationTail;
     final completer = Completer<void>();
     _detailMutationTail = () async {
@@ -1593,16 +1604,16 @@ class LocalStorageCacheRepository {
     String sourceId,
     _EncodedEmbySnapshotShards encoded,
   ) async {
-    await _preferences.setString(
+    await _writeChangedEmbyPayload(
       _embyFallbackShardKey(sourceId),
       encoded.fallbackRaw,
     );
-    await _preferences.setString(
+    await _writeChangedEmbyPayload(
       _embySummaryShardKey(sourceId),
       encoded.summaryRaw,
     );
     for (final entry in encoded.sectionRaws.entries) {
-      await _preferences.setString(
+      await _writeChangedEmbyPayload(
         _embySectionShardKey(sourceId, entry.key),
         entry.value,
       );
@@ -1610,12 +1621,17 @@ class LocalStorageCacheRepository {
   }
 
   Future<void> _persistEmbyManifest(_EmbyCacheManifest manifest) async {
-    await _preferences.setString(
+    await _writeChangedEmbyPayload(
       _embyLibraryManifestKey,
       jsonEncode(manifest.toJson()),
     );
     _embyManifestCache = manifest;
     _embyManifestLoadFuture = null;
+  }
+
+  Future<void> _writeChangedEmbyPayload(String key, String raw) async {
+    if (await _preferences.getString(key) == raw) return;
+    await _preferences.setString(key, raw);
   }
 
   Future<void> _clearEmbySourceShards(String sourceId) async {
@@ -2180,9 +2196,10 @@ Set<LocalStorageDetailCacheChangedField> _resolveRecordChangedFields({
     changedFields.add(LocalStorageDetailCacheChangedField.artwork);
   }
   if (!_sameStringList(
-    previous.target.ratingLabels,
-    next.target.ratingLabels,
-  )) {
+        previous.target.ratingLabels,
+        next.target.ratingLabels,
+      ) ||
+      previous.target.ratingCount != next.target.ratingCount) {
     changedFields.add(LocalStorageDetailCacheChangedField.ratings);
   }
   if (previous.target.availabilityLabel != next.target.availabilityLabel ||
@@ -2593,64 +2610,19 @@ bool _detailTargetMatchesDeletedResource(
   }
 
   if (treatAsScope) {
-    return _pathMatchesDeletedScope(
+    return resourcePathIsWithinScope(
             target.resourcePath, normalizedResourcePath) ||
-        _pathMatchesDeletedScope(
+        resourcePathIsWithinScope(
           target.playbackTarget?.actualAddress ?? '',
           normalizedResourcePath,
         );
   }
 
-  return _pathEqualsDeletedResource(
-          target.resourcePath, normalizedResourcePath) ||
-      _pathEqualsDeletedResource(
+  return resourcePathsEqual(target.resourcePath, normalizedResourcePath) ||
+      resourcePathsEqual(
         target.playbackTarget?.actualAddress ?? '',
         normalizedResourcePath,
       );
-}
-
-bool _pathEqualsDeletedResource(String candidate, String expectedPath) {
-  final left = _normalizedCachePath(candidate);
-  final right = _normalizedCachePath(expectedPath);
-  return left.isNotEmpty && left == right;
-}
-
-bool _pathMatchesDeletedScope(String candidate, String scopePath) {
-  final candidateSegments = _cachePathSegments(candidate);
-  final scopeSegments = _cachePathSegments(scopePath);
-  if (candidateSegments.isEmpty ||
-      scopeSegments.isEmpty ||
-      candidateSegments.length < scopeSegments.length) {
-    return false;
-  }
-  for (var index = 0; index < scopeSegments.length; index++) {
-    if (candidateSegments[index] != scopeSegments[index]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-String _normalizedCachePath(String value) {
-  final trimmed = value.trim();
-  if (trimmed.isEmpty) {
-    return '';
-  }
-  final uri = Uri.tryParse(trimmed);
-  final rawPath = (uri != null && uri.hasScheme) ? uri.path : trimmed;
-  final normalized = rawPath.replaceAll('\\', '/').trim();
-  if (normalized.isEmpty) {
-    return '';
-  }
-  return normalized.replaceAll(RegExp(r'/+'), '/');
-}
-
-List<String> _cachePathSegments(String value) {
-  return _normalizedCachePath(value)
-      .split('/')
-      .map((segment) => segment.trim())
-      .where((segment) => segment.isNotEmpty)
-      .toList(growable: false);
 }
 
 MediaDetailTarget _stripResolvedLibraryResource(MediaDetailTarget target) {
@@ -2670,6 +2642,7 @@ MediaDetailTarget _stripResolvedLibraryResource(MediaDetailTarget target) {
     year: target.year,
     durationLabel: target.durationLabel,
     ratingLabels: target.ratingLabels,
+    ratingCount: target.ratingCount,
     genres: target.genres,
     directors: target.directors,
     directorProfiles: target.directorProfiles,

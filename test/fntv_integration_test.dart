@@ -14,7 +14,7 @@ import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/data/fntv_api_client.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/playback_target_resolver.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';

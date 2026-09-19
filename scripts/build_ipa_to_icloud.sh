@@ -20,48 +20,6 @@ if ! command -v flutter >/dev/null 2>&1; then
   exit 1
 fi
 
-update_pubspec_version() {
-  local pubspec_path="$1"
-  local version_line
-  local major
-  local current_month_in_version
-  local current_sequence
-  local month
-  local next_sequence
-  local next_version
-
-  version_line="$(awk '/^version:[[:space:]]*/ {print $0; exit}' "$pubspec_path")"
-  if [[ ! "$version_line" =~ ^version:[[:space:]]*([0-9]+)\.([0-9]+)\.([0-9]+)(\+[0-9]+)?[[:space:]]*$ ]]; then
-    echo "Error: unable to parse version from $pubspec_path." >&2
-    exit 1
-  fi
-
-  major="${BASH_REMATCH[1]}"
-  current_month_in_version="${BASH_REMATCH[2]}"
-  current_sequence="${BASH_REMATCH[3]}"
-  month="$(date +%-m)"
-
-  if [[ "$current_month_in_version" == "$month" ]]; then
-    next_sequence=$((10#$current_sequence + 1))
-  else
-    next_sequence=0
-  fi
-
-  next_version="${major}.${month}.${next_sequence}"
-  perl -0pi -e "s/^version:\\s*\\d+\\.\\d+\\.\\d+(?:\\+\\d+)?\\s*$/version: ${next_version}/m" "$pubspec_path"
-  printf '%s\n' "$next_version"
-}
-
-set_pubspec_version() {
-  local pubspec_path="$1"
-  local version="$2"
-  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "Error: STARFLOW_RELEASE_VERSION must use major.month.sequence." >&2
-    exit 1
-  fi
-  perl -0pi -e "s/^version:\s*\d+\.\d+\.\d+(?:\+\d+)?\s*$/version: ${version}/m" "$pubspec_path"
-  printf '%s\n' "$version"
-}
 
 APP_NAME="$(awk '/^name:[[:space:]]*/ {print $2; exit}' pubspec.yaml)"
 
@@ -70,13 +28,7 @@ if [[ -z "${APP_NAME:-}" ]]; then
   exit 1
 fi
 
-VERSION="$(
-  if [[ -n "${STARFLOW_RELEASE_VERSION:-}" ]]; then
-    set_pubspec_version pubspec.yaml "$STARFLOW_RELEASE_VERSION"
-  else
-    update_pubspec_version pubspec.yaml
-  fi
-)"
+VERSION="$(dart "$PROJECT_ROOT/tool/release_version.dart" pubspec.yaml)"
 BUILD_NUMBER="$VERSION"
 BUILD_DATE="$(date +%Y-%m-%d)"
 OUTPUT_NAME="${APP_NAME}_v${VERSION}_unsigned.ipa"

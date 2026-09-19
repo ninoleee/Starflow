@@ -459,13 +459,15 @@ class OpenSubtitlesStructuredProvider
             'query': query.query,
           },
         );
+        if (response.statusCode == 401 ||
+            response.statusCode == 403 ||
+            response.statusCode == 429) {
+          _sessionCache.remove(_sessionCacheKey());
+          throw StateError('OpenSubtitles 搜索失败：HTTP ${response.statusCode}');
+        }
         continue;
       }
-      final hydratedHits = await Future.wait(
-        _parseOpenSubtitlesSearchResponse(response.body)
-            .map((hit) => _hydrateOpenSubtitlesHit(hit, session)),
-      );
-      results.addAll(hydratedHits);
+      results.addAll(_parseOpenSubtitlesSearchResponse(response.body));
       if (results.isNotEmpty) {
         break;
       }
@@ -507,7 +509,7 @@ class OpenSubtitlesStructuredProvider
       config.baseUrl.trim(),
       config.apiKey.trim(),
       config.username.trim(),
-      config.password.trim(),
+      config.password,
     ].join('|');
   }
 
@@ -522,7 +524,7 @@ class OpenSubtitlesStructuredProvider
       },
       body: jsonEncode({
         'username': config.username.trim(),
-        'password': config.password.trim(),
+        'password': config.password,
       }),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -533,14 +535,16 @@ class OpenSubtitlesStructuredProvider
           'status': response.statusCode,
         },
       );
-      return const _OpenSubtitlesSession.empty();
+      throw StateError('OpenSubtitles 登录失败：HTTP ${response.statusCode}');
     }
     final json = jsonDecode(response.body) as Map<String, dynamic>;
     return _OpenSubtitlesSession(
       token: json['token'] as String? ?? '',
-      baseUrl: (json['base_url'] as String?)?.trim().isNotEmpty == true
-          ? (json['base_url'] as String).trim()
-          : config.baseUrl,
+      baseUrl: _normalizeOpenSubtitlesBaseUrl(
+        (json['base_url'] as String?)?.trim().isNotEmpty == true
+            ? json['base_url'] as String
+            : config.baseUrl,
+      ),
     );
   }
 
@@ -577,18 +581,12 @@ class OpenSubtitlesStructuredProvider
         .replace(queryParameters: parameters);
   }
 
-  Future<ProviderSubtitleHit> _hydrateOpenSubtitlesHit(
-    ProviderSubtitleHit hit,
-    _OpenSubtitlesSession session,
-  ) async {
-    if (!session.isReady || hit.downloadUrl.trim().isNotEmpty) {
-      return hit;
+  Future<String> resolveDownloadUrl(int fileId) async {
+    if (!isConfigured || fileId <= 0) {
+      throw StateError('OpenSubtitles 缺少账号配置或文件 ID');
     }
-    final fileId = _extractOpenSubtitlesFileId(hit);
-    if (fileId <= 0) {
-      return hit;
-    }
-    try {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final session = await _login();
       final response = await _client.post(
         Uri.parse('${session.baseUrl}/download'),
         headers: {
@@ -600,20 +598,24 @@ class OpenSubtitlesStructuredProvider
         },
         body: jsonEncode(<String, Object>{'file_id': fileId}),
       );
+      if (response.statusCode == 401 && attempt == 0) {
+        _sessionCache.remove(_sessionCacheKey());
+        continue;
+      }
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        return hit;
+        throw StateError('OpenSubtitles 下载授权失败：HTTP ${response.statusCode}'
+            '${response.statusCode == 406 || response.statusCode == 429 ? '（额度或频率限制）' : ''}');
       }
       final json = jsonDecode(response.body) as Map<String, dynamic>;
       final link = (json['link'] as String?)?.trim() ??
           (json['url'] as String?)?.trim() ??
           '';
       if (link.isEmpty) {
-        return hit;
+        throw StateError('OpenSubtitles 未返回下载链接');
       }
-      return hit.copyWith(downloadUrl: link);
-    } catch (_) {
-      return hit;
+      return link;
     }
+    throw StateError('OpenSubtitles 登录已失效');
   }
 }
 
@@ -649,15 +651,18 @@ class SubdlStructuredProvider implements OnlineSubtitleStructuredProvider {
 
     final results = <ProviderSubtitleHit>[];
     for (final query in request.buildQueryPlan()) {
+      if (query.kind == StructuredSubtitleQueryKind.hash) continue;
       final response = await _client.get(
         Uri.parse(config.baseUrl).replace(
           queryParameters: {
             'api_key': config.apiKey.trim(),
-            if (query.query.isNotEmpty) 'film_name': query.query,
-            if (request.normalizedImdbId.isNotEmpty)
-              'imdb_id': request.normalizedImdbId,
-            if (request.normalizedTmdbId.isNotEmpty)
-              'tmdb_id': request.normalizedTmdbId,
+            if (query.kind == StructuredSubtitleQueryKind.imdbId)
+              'imdb_id': query.query,
+            if (query.kind == StructuredSubtitleQueryKind.tmdbId)
+              'tmdb_id': query.query,
+            if (query.kind != StructuredSubtitleQueryKind.imdbId &&
+                query.kind != StructuredSubtitleQueryKind.tmdbId)
+              'film_name': query.query,
             if (request.seasonNumber != null)
               'season_number': '${request.seasonNumber!}',
             if (request.episodeNumber != null)
@@ -711,7 +716,7 @@ ProviderSubtitleHit? _parseOpenSubtitlesHit(Map<String, dynamic> json) {
       .toList(growable: false);
   final firstFile = files.isEmpty ? const <String, dynamic>{} : files.first;
   final fileName = firstFile['file_name'] as String? ?? '';
-  final packageName = fileName.trim().isEmpty ? 'subtitle.zip' : fileName;
+  final packageName = fileName.trim().isEmpty ? 'subtitle.srt' : fileName;
   final detailUrl = attributes['url'] as String? ?? '';
   final fileId = (firstFile['file_id'] as num?)?.toInt() ?? 0;
   return ProviderSubtitleHit(
@@ -722,6 +727,7 @@ ProviderSubtitleHit? _parseOpenSubtitlesHit(Map<String, dynamic> json) {
         attributes['release'] as String? ??
         packageName,
     downloadUrl: '',
+    providerFileId: fileId,
     packageName: packageName,
     packageKind: _resolvePackageKind(packageName),
     detailUrl: detailUrl,
@@ -766,9 +772,13 @@ ProviderSubtitleHit? _parseSubdlHit(Map<String, dynamic> json) {
     source: OnlineSubtitleSource.subdl,
     providerLabel: 'SubDL',
     title: json['name'] as String? ?? fileName,
-    downloadUrl: url,
+    downloadUrl: url.isEmpty
+        ? ''
+        : Uri.parse('https://dl.subdl.com/').resolve(url).toString(),
     packageName: fileName,
-    packageKind: _resolvePackageKind(fileName),
+    packageKind: url.toLowerCase().split('?').first.endsWith('.zip')
+        ? SubtitlePackageKind.zipArchive
+        : _resolvePackageKind(fileName),
     detailUrl: json['url'] as String? ?? '',
     version: json['release_name'] as String? ?? '',
     formatLabel: json['format'] as String? ?? '',
@@ -792,21 +802,20 @@ List<ProviderSubtitleHit> _dedupeHits(List<ProviderSubtitleHit> hits) {
   final deduped = <String, ProviderSubtitleHit>{};
   for (final hit in hits) {
     final key =
-        '${hit.source.name}|${hit.downloadUrl}|${hit.packageName}|${hit.languageLabel}';
+        '${hit.source.name}|${hit.providerFileId}|${hit.downloadUrl}|${hit.packageName}|${hit.languageLabel}';
     deduped.putIfAbsent(key, () => hit);
   }
   return deduped.values.toList(growable: false);
 }
 
-int _extractOpenSubtitlesFileId(ProviderSubtitleHit hit) {
-  final rawValue = hit.raw['file_id'];
-  if (rawValue is num) {
-    return rawValue.toInt();
+String _normalizeOpenSubtitlesBaseUrl(String value) {
+  final text = value.trim();
+  final uri = Uri.parse(text.contains('://') ? text : 'https://$text');
+  if (uri.scheme != 'https' || uri.host.isEmpty) {
+    throw StateError('OpenSubtitles API 地址无效');
   }
-  if (rawValue is String) {
-    return int.tryParse(rawValue.trim()) ?? 0;
-  }
-  return 0;
+  final path = uri.path.replaceAll(RegExp(r'/+$'), '');
+  return uri.replace(path: path.isEmpty ? '/api/v1' : path).toString();
 }
 
 _AssrtDownloadChoice? _selectAssrtDownloadChoice(
@@ -1054,10 +1063,6 @@ class _OpenSubtitlesSession {
     required this.token,
     required this.baseUrl,
   });
-
-  const _OpenSubtitlesSession.empty()
-      : token = '',
-        baseUrl = '';
 
   final String token;
   final String baseUrl;

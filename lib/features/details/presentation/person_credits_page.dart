@@ -106,6 +106,9 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    if (isTelevision) {
+      scheduleTvFocusRecovery(context: context, focusNode: _headerFocusNode);
+    }
     final target = widget.target;
     final watchedResultAsync =
         isPageVisible ? ref.watch(_personCreditsPageProvider(target)) : null;
@@ -627,6 +630,7 @@ class _PersonCreditsHeader extends StatelessWidget {
       onPressed: () => FocusScope.of(context).nextFocus(),
       focusNode: focusNode,
       focusId: 'person-credits:header',
+      autofocus: true,
       borderRadius: BorderRadius.circular(20),
       child: content,
     );
@@ -731,7 +735,7 @@ class _PersonCreditsGrid extends StatelessWidget {
             return MediaPosterTile(
               focusId:
                   'person-credits:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
-              autofocus: index == 0,
+              autofocus: false,
               tvPosterFocusOutlineOnly: true,
               tvPosterFocusShowBorder: false,
               tvPosterFocusScale: 1.06,

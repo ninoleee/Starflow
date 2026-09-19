@@ -1,4 +1,5 @@
 import 'package:media_kit/media_kit.dart';
+import 'package:starflow/features/playback/application/subtitle_render_policy.dart';
 import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 
@@ -26,7 +27,7 @@ class PlaybackSubtitleTrackFingerprint {
       language: track.language?.trim() ?? '',
       codec: track.codec?.trim() ?? '',
       isDefault: track.isDefault == true,
-      isImage: track.image == true,
+      isImage: isBitmapSubtitle(image: track.image, codec: track.codec),
     );
   }
 
@@ -39,7 +40,8 @@ class PlaybackSubtitleTrackFingerprint {
       language: preference.language,
       codec: preference.codec,
       isDefault: preference.isDefault,
-      isImage: preference.isImage,
+      isImage:
+          isBitmapSubtitle(image: preference.isImage, codec: preference.codec),
     );
   }
 
@@ -150,7 +152,8 @@ SubtitleTrack? matchPlaybackSubtitleTrack(
         track.uri ||
         track.data ||
         excludedIds.contains(track.id) ||
-        (textOnly && track.image == true)) {
+        (textOnly &&
+            isBitmapSubtitle(image: track.image, codec: track.codec))) {
       continue;
     }
     final score = _scoreSubtitleTrackMatch(track, fingerprint);
@@ -203,7 +206,8 @@ int _scoreSubtitleTrackMatch(
   if ((track.isDefault == true) == fingerprint.isDefault) {
     score += 5;
   }
-  if ((track.image == true) == fingerprint.isImage) {
+  if (isBitmapSubtitle(image: track.image, codec: track.codec) ==
+      fingerprint.isImage) {
     score += 5;
   }
   return score;

@@ -40,8 +40,7 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
     try {
       final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
       final parsed = AppSettings.fromCurrentJson(decoded);
-      final cookie =
-          await _preferences.getString(_cloud115CookieKey) ?? '';
+      final cookie = await _preferences.getString(_cloud115CookieKey) ?? '';
       final settings = parsed.copyWith(
         networkStorage: parsed.networkStorage.copyWith(
           cloud115Cookie: cookie,
@@ -142,35 +141,39 @@ AppSettings reconcileSettingsMediaSourceReferences(AppSettings settings) {
       sourcesByName.putIfAbsent(normalizedName, () => []).add(source);
     }
   }
-  final directories = <NetworkStorageWebDavDirectory>[];
-  for (final directory
-      in settings.networkStorage.syncDeleteQuarkWebDavDirectories) {
-    var source = mediaSourceById[directory.sourceId.trim()];
-    if (source == null) {
-      final nameMatches =
-          sourcesByName[directory.sourceName.trim().toLowerCase()] ?? const [];
-      if (nameMatches.length == 1) {
-        source = nameMatches.single;
+  List<NetworkStorageWebDavDirectory> reconcileDirectories(
+      List<NetworkStorageWebDavDirectory> input) {
+    final directories = <NetworkStorageWebDavDirectory>[];
+    for (final directory in input) {
+      var source = mediaSourceById[directory.sourceId.trim()];
+      if (source == null) {
+        final nameMatches =
+            sourcesByName[directory.sourceName.trim().toLowerCase()] ??
+                const [];
+        if (nameMatches.length == 1) {
+          source = nameMatches.single;
+        }
       }
+      if (source == null) {
+        continue;
+      }
+      final directoryId = alignMediaSourceLocationToCurrentRoot(
+        directory.directoryId,
+        source,
+      );
+      if (directoryId.isEmpty) {
+        continue;
+      }
+      directories.add(
+        directory.copyWith(
+          sourceId: source.id,
+          sourceName: source.name,
+          directoryId: directoryId,
+          directoryLabel: _mediaSourceDirectoryLabel(directoryId),
+        ),
+      );
     }
-    if (source == null) {
-      continue;
-    }
-    final directoryId = alignMediaSourceLocationToCurrentRoot(
-      directory.directoryId,
-      source,
-    );
-    if (directoryId.isEmpty) {
-      continue;
-    }
-    directories.add(
-      directory.copyWith(
-        sourceId: source.id,
-        sourceName: source.name,
-        directoryId: directoryId,
-        directoryLabel: _mediaSourceDirectoryLabel(directoryId),
-      ),
-    );
+    return directories;
   }
 
   return settings.copyWith(
@@ -191,7 +194,10 @@ AppSettings reconcileSettingsMediaSourceReferences(AppSettings settings) {
       return validSourceIds.contains(normalized.substring('source:'.length));
     }).toList(growable: false),
     networkStorage: settings.networkStorage.copyWith(
-      syncDeleteQuarkWebDavDirectories: directories,
+      syncDeleteQuarkWebDavDirectories: reconcileDirectories(
+          settings.networkStorage.syncDeleteQuarkWebDavDirectories),
+      syncDelete115WebDavDirectories: reconcileDirectories(
+          settings.networkStorage.syncDelete115WebDavDirectories),
       refreshMediaSourceIds: settings.networkStorage.refreshMediaSourceIds
           .where(validSourceIds.contains)
           .toList(growable: false),

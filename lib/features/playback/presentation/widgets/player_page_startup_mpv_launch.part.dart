@@ -128,7 +128,8 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       if (resolved.streamUrl.trim().isEmpty || resolved.needsResolution) {
         throw StateError('没有取得可播放地址');
       }
-      String mediaMimeType = '';
+      String mediaMimeType =
+          resolved.isFntvTranscoding ? kNativePlaybackHlsMimeType : '';
       if (shouldProbeNativeSmartStrmMediaType(resolved)) {
         final preflight = await remotePreflight.probe(
           resolved,
@@ -144,6 +145,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
   }
 
   Future<String?> _resolveNativeLaunchMimeType(PlaybackTarget target) async {
+    if (target.isFntvTranscoding) return kNativePlaybackHlsMimeType;
     if (defaultTargetPlatform != TargetPlatform.android ||
         !shouldProbeNativeSmartStrmMediaType(target)) {
       return null;
@@ -291,7 +293,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     bool markCurrentCompleted = false,
     PlaybackEpisodeQueue? selectedQueue,
   }) async {
-    if (_episodeQueueAdvanceInProgress) {
+    if (_episodeQueueAdvanceInProgress || _fntvSwitchInProgress) {
       _showMessage('正在解析剧集，请稍候');
       return false;
     }

@@ -7,6 +7,10 @@ import android.os.Looper
 import android.view.View
 import android.widget.TextView
 import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Tracks
+import androidx.media3.decoder.ffmpeg.FfmpegLibrary
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -68,6 +72,55 @@ internal class NativePlaybackSession(private val host: Host) {
     var nextInitializePlayWhenReady: Boolean? = null
 
     var audioOutputMode = NativeAudioOutputMode.AUTO
+    var audioFallbackMime: String? = null
+    private var pendingAudioFormat: Format? = null
+    private var pendingPlaybackParameters: PlaybackParameters? = null
+    private var pendingVolume: Float? = null
+    private var pendingAudioItemKey: String? = null
+
+    fun resetAudioRecovery() {
+        audioFallbackMime = null
+        pendingAudioFormat = null
+        pendingPlaybackParameters = null
+        pendingVolume = null
+        pendingAudioItemKey = null
+    }
+
+    fun preserveAudioSession() {
+        val current = player ?: return
+        pendingAudioFormat = NativePlaybackAudioTracks.list(current.currentTracks)
+            .firstOrNull { it.selected }?.format
+        pendingPlaybackParameters = current.playbackParameters
+        pendingVolume = current.volume
+        pendingAudioItemKey = host.target.playbackItemKey
+        pendingResumePositionOverrideMs = current.currentPosition.coerceAtLeast(0L)
+        nextInitializePlayWhenReady = current.playWhenReady
+    }
+
+    fun restoreAudioTrack(tracks: Tracks): Boolean {
+        val previous = pendingAudioFormat ?: return false
+        val choices = NativePlaybackAudioTracks.list(tracks)
+        if (choices.isEmpty()) return true
+        pendingAudioFormat = null
+        val match = NativePlaybackAudioTracks.match(choices, previous) ?: return false
+        val current = player ?: return false
+        current.trackSelectionParameters = current.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
+            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            .addOverride(match.override).build()
+        return true
+    }
+
+    internal fun restoreAudioPlaybackParameters(current: ExoPlayer) {
+        pendingPlaybackParameters?.let { current.playbackParameters = it }
+        pendingVolume?.let { current.volume = it }
+        pendingPlaybackParameters = null
+        pendingVolume = null
+    }
+
+    private fun requiresDecodedAudio(mime: String?): Boolean =
+        NativePlaybackAudioPolicy.requiresDecodedOutput(mime, host.isTelevisionDevice,
+            audioOutputMode, audioFallbackMime)
 
     var internalEpisodeSwitchPlayback = false
     var nextEpisodeIsAutomatic = false
@@ -91,6 +144,11 @@ internal class NativePlaybackSession(private val host: Host) {
         val title = host.activity.intent.getStringExtra(EXTRA_TITLE)?.trim().orEmpty()
         val headersJson = host.activity.intent.getStringExtra(EXTRA_HEADERS_JSON)?.trim().orEmpty()
         val targetObject = host.target.decodePlaybackTargetObject()
+        if (pendingAudioItemKey != host.target.playbackItemKey) {
+            pendingAudioFormat = null
+            pendingPlaybackParameters = null
+            pendingVolume = null
+        }
         NativePlaybackFormatting.logPlayback(
             "native.initialize.begin " +
                 "url=${NativePlaybackSource.summarizeUrl(url)} " +
@@ -182,22 +240,12 @@ internal class NativePlaybackSession(private val host: Host) {
         val renderersFactory =
             NativePlaybackRenderersFactory(
                     context = host.activity,
-                    forcePcmAudioOutput = forcePcmAudioOutput,
-                    enableFfmpegAudioDecoder = enableFfmpegAudioDecoder,
+                    requiresDecodedOutput = ::requiresDecodedAudio,
                     dualSubtitleController = host.subtitles.dualSubtitleController,
                 )
                 .apply {
                     setEnableDecoderFallback(true)
-                    when (decodeMode) {
-                        PlaybackDecodeMode.AUTO -> Unit
-                        PlaybackDecodeMode.HARDWARE_PREFERRED -> {
-                            setMediaCodecSelector(buildMediaCodecSelector(preferSoftware = false))
-                        }
-
-                        PlaybackDecodeMode.SOFTWARE_PREFERRED -> {
-                            setMediaCodecSelector(buildMediaCodecSelector(preferSoftware = true))
-                        }
-                    }
+                    setMediaCodecSelector(buildMediaCodecSelector(decodeMode))
                 }
 
         val trackSelector =
@@ -215,12 +263,15 @@ internal class NativePlaybackSession(private val host: Host) {
                 .setLoadControl(buildLoadControl())
                 .setMediaSourceFactory(
                     DefaultMediaSourceFactory(dataSourceFactory, buildExtractorsFactory(audioCodec))
+                        .setSubtitleParserFactory(NativeSubtitleParserFactory())
                         .setLoadErrorHandlingPolicy(NativePlaybackLoadErrorPolicy())
                 )
                 .build()
         host.subtitles.automaticSubtitleSelectionApplied = false
         host.subtitles.pendingExternalSubtitleSelection = false
         host.diagnostics.playbackFirstFrameRendered = false
+        host.diagnostics.awaitingVideoFrameAfterSeek = false
+        host.diagnostics.subtitleLastCueLogAtMs = -1L
         host.diagnostics.playbackLastRuntimeLogAtMs = 0L
         val sessionSubtitleMode = host.subtitles.subtitleSessionPreference?.mode
         if (
@@ -234,6 +285,7 @@ internal class NativePlaybackSession(private val host: Host) {
                     .build()
         }
         player = exoPlayer
+        restoreAudioPlaybackParameters(exoPlayer)
         exoPlayer.addListener(host.playerListener)
         exoPlayer.addAnalyticsListener(host.diagnostics.playbackPerformanceAnalyticsListener)
         val initialMediaItemBuilder =
@@ -252,8 +304,10 @@ internal class NativePlaybackSession(private val host: Host) {
                 "audioOutputMode=${audioOutputMode.rawValue} " +
                 "audioCodec=${audioCodec.ifEmpty { "-" }} " +
                 "videoCodec=${videoCodec.ifEmpty { "-" }} " +
-                "forcePcmAudioOutput=$forcePcmAudioOutput " +
-                "ffmpegAudioDecoder=$enableFfmpegAudioDecoder " +
+                "metadataPcmHint=$forcePcmAudioOutput " +
+                "ffmpegConfigured=$enableFfmpegAudioDecoder " +
+                "ffmpegAvailable=${FfmpegLibrary.isAvailable()} " +
+                "audioFallbackMime=${audioFallbackMime ?: "-"} " +
                 "mimeGuess=${guessedMimeType ?: "-"}"
         )
         baseMediaItem = initialMediaItem
@@ -404,7 +458,7 @@ internal class NativePlaybackSession(private val host: Host) {
     internal fun buildExtractorsFactory(audioCodec: String = ""): ExtractorsFactory =
         NativePlaybackExtractorsFactory(audioCodec)
 
-    private fun buildMediaCodecSelector(preferSoftware: Boolean): MediaCodecSelector {
+    private fun buildMediaCodecSelector(mode: PlaybackDecodeMode): MediaCodecSelector {
         return MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
             val allInfos =
                 MediaCodecUtil.getDecoderInfos(
@@ -412,19 +466,21 @@ internal class NativePlaybackSession(private val host: Host) {
                     requiresSecureDecoder,
                     requiresTunnelingDecoder,
                 )
-            val preferredInfos = allInfos.filter { info -> info.softwareOnly == preferSoftware }
-            if (preferredInfos.isNotEmpty()) {
-                preferredInfos
-            } else {
+            if (!requiresSecureDecoder && !requiresTunnelingDecoder &&
+                requiresDecodedAudio(mimeType) && FfmpegLibrary.supportsFormat(mimeType)) {
+                emptyList()
+            } else if (mode == PlaybackDecodeMode.AUTO) {
                 allInfos
+            } else {
+                allInfos.sortedBy { it.softwareOnly != (mode == PlaybackDecodeMode.SOFTWARE_PREFERRED) }
             }
         }
     }
 
     fun restartPlayerWithAudioOutputMode(selected: NativeAudioOutputMode) {
-        val currentPlayer = player ?: return
-        pendingResumePositionOverrideMs = currentPlayer.currentPosition.coerceAtLeast(0L)
-        nextInitializePlayWhenReady = currentPlayer.playWhenReady
+        if (player == null) return
+        preserveAudioSession()
+        audioFallbackMime = null
         audioOutputMode = selected
         NativePlaybackFormatting.logPlayback(
             "native.audio-output.changed mode=${selected.rawValue} " +

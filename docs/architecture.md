@@ -1,6 +1,18 @@
 # Starflow 架构说明
 
-这份文档描述的是仓库当前已经落地的实现，而不是早期规划稿。
+本文件是组件边界与数据流说明，按 **2026-09-20 当前工作区**（含未提交修改）核对，不是早期规划稿。目录和逐模块入口见 [代码地图](code-map.md)，平台能力和发布约束见 [README](../README.md)，请求协议见 [开发网络](development-network.md)。
+
+## 阅读索引
+
+| 范围 | 入口 |
+| --- | --- |
+| 全局基础设施 | 第 2-5 节：技术基线、目录、状态、网络、日志与启动 |
+| 内容读取 | 第 6-8 节：首页、媒体服务器/外部存储、详情与元数据 |
+| 搜索与副作用 | 第 9、11 节：验链、转存、同步、设置与缓存失效 |
+| 播放 | 第 10 节及 [字幕链路](subtitles.md)、[音频审查当前状态](audio-decoding-review-2026-09-19.md) |
+| 存储与平台 | 第 12-14 节；[主机回归](performance.md) 与 [设备验收](performance-device.md) 分开记录 |
+
+本文中的“已实现”描述代码路径，不表示真实 NAS、账号、HDMI 或全部设备已经验证。`part` 文件仍属于原 Dart library，不是独立服务边界。
 
 普通文字由 `AppColors.foreground / foregroundBody / foregroundMuted` 提供标题、正文、辅助三档亮度；`AppTheme` 和普通 `secondary / ghost` 按钮复用该层级。强调色按钮前景仍由 `AppAccent.onPrimary` 决定，TV 焦点框统一保持纯白，不随强调色或选中状态改变；普通叠层与轻量 painter 共用规则。
 
@@ -14,12 +26,21 @@ Starflow 不是单一播放器，而是一个面向个人影音库的统一入�
 - 内容发现：豆瓣
 - 聚合搜索：本地资源、`PanSou`、`CloudSaver`
 - 播放：内置 `MPV` + App 内原生播放器容器页 + 系统播放器
-- MPV / Android Exo 可靠性契约：`config/playback_policy.json` 经 `dart tool/generate_playback_policy.dart` 生成两端常量，`--check` 校验同步；应用层共享 HTTP 分类/地址刷新范围、缓冲高水位进展和恢复预算，状态优先级为失败、结束、恢复、准备、缓冲、播放/暂停。内核错误提取、FFmpeg/Media3 加载退避、解码/渲染及各端 UI 适配仍留在原边界。自动重建预算由页面/原生恢复控制器持有，不随播放器实例释放清空；切集和手动重试重置。
-- 入库联动：夸克保存、`SmartStrm` Webhook、自动增量刷新索引
+- MPV / Android Exo 可靠性契约：`config/playback_policy.json` 经 `dart tool/generate_playback_policy.dart` 生成 Dart / Kotlin / Swift 常量，`--check` 校验同步；应用层共享 HTTP 分类/地址刷新范围、缓冲高水位进展和恢复预算，状态优先级为失败、结束、恢复、准备、缓冲、播放/暂停。Swift 当前接入其中的播放记忆规则，不据此宣称拥有 MPV / Exo 的全部恢复能力。内核错误提取、FFmpeg/Media3 加载退避、解码/渲染及各端 UI 适配仍留在原边界。自动重建预算由页面/原生恢复控制器持有，不随播放器实例释放清空；切集和手动重试重置。
+- 入库联动：夸克 / 115 保存、`SmartStrm` Webhook、自动增量刷新索引
 - 本地持久化：设置、详情缓存、图片缓存、`WebDAV` 元数据索引
 - 诊断与运维：结构化本地日志、Android 原生退出信息、日志预览与导出
 
 ## 2. 技术基线
+
+### 共享规则边界
+
+- `details/domain/cached_artwork.dart` 把每类图片 URL 与 headers 作为同一个来源选择；多背景图列表不跨鉴权来源拼接。`cached_metadata.dart` 统一标题、评分、简介、演职员及外部 ID 装饰；播放身份和季集结构由各入口保留，首页 / 媒体库继续在内容不变时返回原对象。
+- `library/data/nfo_metadata.dart` 是 WebDAV / Quark 共用的纯解析模型、解析器和主次合并策略。WebDAV 通过回调解析相对图片地址；夸克不把相对地址当远程下载链接。列目录、读取文件、鉴权和本地 sidecar 优先级仍由各客户端负责。
+- `search/application/cloud_save_postprocessing.dart` 统一延迟下限、SmartStrm 部分失败与后台刷新失败边界；夸克仅重复项转存仍刷新原生夸克源，115 零新增保留原来的提前返回行为。
+- `PlaybackMemoryRepository` 串行执行完整读改写与清空，持久化成功后才更新内存快照；失效代次阻止迟到读取重新装入旧快照。这是单仓库实例内的队列，不是 Dart / 原生跨运行时事务，原生播放返回仍须失效并重读共享偏好。
+- `config/playback_policy.json` 生成 Dart / Kotlin / Swift 常量；播放记忆共享 5 秒起点、12 秒续播剩余下限、8 秒完成剩余阈值、98.5% 完成比例和 20 条最近项目上限。原生时间戳统一比较实际时间、毫秒单调递增，同时间按 key 倒序；三端用 `test/fixtures/playback_memory_contract.json` 验证阈值，内核操作仍由平台实现。
+- `library_resource_deletion.dart` 只收敛确认弹窗、mounted 检查、反馈与日志；远端删除和索引清理由仓库承担。设置加载、导入、来源编辑 / 删除对两个网盘的 WebDAV 目录引用采用同一协调规则。
 
 - 框架：`Flutter`
 - 状态管理：`flutter_riverpod`
@@ -27,25 +48,49 @@ Starflow 不是单一播放器，而是一个面向个人影音库的统一入�
 - 播放：`media_kit`
 - 设置、详情缓存与 Emby 分片缓存：`SharedPreferences`
 - `WebDAV` 索引库：`Sembast`
+- Android：Media3 `1.10.1`，`minSdk 23 / compileSdk 36 / targetSdk 35`，JVM 17；release 仅 ARM32/ARM64
+- iOS / macOS 工程最低系统版本分别为 `13.0 / 10.15`
+- `pubspec.yaml` 声明依赖范围，本机解析版本看 `pubspec.lock`；Android / iOS full MPV 使用本地依赖覆盖，Web 使用浏览器后端而非 libmpv
 
 应用入口在 `lib/main.dart`，启动时完成：
 
 - Flutter 绑定初始化
+- 读取本地设置，配置运行期代理与结构化日志
+- 安装全局异常捕获、帧监控并记录构建信息
+- 写入启动标记；上次启动未完成时只启用本次临时恢复，不覆盖用户设置
 - `media_kit` 初始化
-- `ProviderScope` 注入
+- `ProviderScope` 注入与关闭 Riverpod 默认自动重试，随后进入 `BootstrapController`
+
+`BootstrapController` 的 10 秒总上限不包含上述 `main()` 的前置读取、日志初始化或原生初始化，不能描述为从进程启动到首页的绝对上限。
 
 ## 3. 代码组织
+
+### 2026-09 代码整理
+
+- `media_repository.dart`、`discovery_repository.dart`、`search_repository.dart` 是真实仓库入口，不再使用 `mock_` 文件名。媒体查询由 `AppMediaQueryService` 负责，夸克扫描与 sidecar 读取由 `QuarkExternalStorageClient` 及索引链负责；仓库中迁移后未调用的查询、夸克扫描和 NFO 解析实现已删除，刷新与同步删除仍保留在原职责边界。
+- `detail_metadata_service.dart` 统一 WMDB/TMDB 请求、单集图片解析、豆瓣评分补全及元数据结果状态。详情刷新和后台解析复用同一服务，后台按需补缺、强制刷新允许替换，NAS 后台元数据仍优先由索引负责。字段合并复用 `DetailLibraryMatchService`，不以系列简介覆盖单集简介或覆盖已有单集类型。
+- 执行结果区分 `skipped / noMatch / succeeded / partialFailure / failed`。现有持久化格式不变：未执行时保留原刷新状态，部分失败、全部失败写入 `failed`，正常完成但无匹配仍为已完成尝试；首页和详情不再用“是否改了字段”推断请求成功。部分成功的数据仍保存，页面离开后的会话校验不变。
+- 评分合并统一到 `media_rating_labels.dart`，按来源去重并以有效值替换零分；已有有效评分保持优先，豆瓣实时评分刷新仍可更新对应值。
+- `core/storage/resource_path_identity.dart` 为详情缓存和播放历史提供来源内路径相等、目录范围比较。URL 按段解码一次，普通路径按字面处理，保留大小写、百分号和编码分隔符的身份，来源隔离仍由仓库校验。
+- 首页两种 Ref 入口共用刷新调度，返回表示已调度；启动等待仍由 `waitForHomeModules` 承担，移除无条件 `140ms` 延迟。来源列表直接读取配置，移除原 `120ms` 人工等待。废弃 body inset 接口、无效底栏参数和未调用的 trace 去重集合已移除；结构化本地日志与原生退出捕获保持启用能力。
+- 公共逻辑继续收口：`details/domain/cached_artwork.dart` 保持图片 URL 与 headers 同源合并；`library/data/nfo_metadata.dart` 共享 WebDAV / 夸克的 XML 解析及字段合并；`library/presentation/library_resource_deletion.dart` 复用媒体库删除确认；`search/application/cloud_save_postprocessing.dart` 共享 STRM 触发及刷新失败反馈；`core/widgets/tv_text_input_launcher.dart` 统一遥控器按键释放后才打开输入。
+- 整理期间新增文件按源码核对职责，测试结果仅对应各自执行时快照；公共组件、发布版本工具和位图字幕解析器的后续改动尚未在本次重新全量验证。
 
 ```text
 lib/
   main.dart
   app/
     app.dart
+    lifecycle/
     router/
     theme/
   core/
+    logging/
+    navigation/
     network/
     platform/
+    scheduling/
+    state/
     storage/
     utils/
     widgets/
@@ -72,12 +117,15 @@ lib/
 - `router/app_router.dart`：主导航和独立页面路由
 - `theme/app_theme.dart`：当前全局主题
 
-一级导航固定为：
+`AppRoutes.shellBranches` 固定保留五个一级路由：
 
 - 首页
 - 搜索
+- 收藏（复用 `SearchPage(favoritesOnly: true)`）
 - 媒体库
 - 设置
+
+可见菜单由 `navigationDestinationIds` 决定；默认四项不含收藏，设置项始终保留。路由分支索引与可见菜单索引不可混用。
 
 ### `core`
 
@@ -97,10 +145,13 @@ lib/
 - `DetailHeroSection` 监听 `playbackMemorySnapshotProvider`，使用仓库同步快照计算续播入口。“从头播放”只依赖 `MediaDetailTarget.hasMatchedResource`（已有直接播放目标，或来源 ID 与资源 ID 均非空）；不依赖历史、剧集加载或地址解析。历史 readiness 仅控制自动首焦点，避免记录晚到前先抢焦点。操作行由稳定 key 的 `KeyedSubtree` 包装，补充续播位置文字时不重建按钮子树。剧集区域将 `DetailBlock` 放在异步分支外，保留加载到完成期间标题的 Element 和布局位置。
 - 详情启动将 `_seriesSourceReady` 与 `_detailEnrichmentReady` 分开：本地缓存和版本恢复后允许剧集读取，在线元数据刷新结束后再订阅 enrichment，保留解析防重约束。剧集 provider 在区域内的 `Consumer` 监听，卡片角标通过 `select` 订阅最终显示文字；无关快照更新不会重建图片。季列表和可选历史查询使用 record `.wait` 并行，历史失败回退默认季。单季列表高度为 `292dp`，多季另加 `68dp` 季选择条空间；错误态按内容高度显示，无可用分组仍隐藏。
 - `TV` 主要页面和弹窗的普通方向键使用 Flutter 默认寻焦，不再声明 `OrderedTraversalPolicy / NumericFocusOrder`；文本编辑弹窗仅在输入框局部把上下键映射为前后焦点，选择弹窗只在首帧请求一次初始焦点，不安排延迟补焦点
-- `TV` 焦点视觉态已经收敛到 `ValueNotifier + ValueListenableBuilder` 局部更新，并补了 `TvFocusVisualStyle.none`
+- `TvFocusableAction` 与描边按钮通过自身 State 更新焦点视觉，海报使用 `ValueNotifier + ValueListenableBuilder` 局部更新；`TvFocusVisualStyle.none` 供自绘焦点外观使用
 - `TV` 页面级焦点边界、页头回顶锚点和统一的上下方向焦点兜底
 - `TV` 页面级焦点壳与方向动作面板，便于首页、搜索、媒体库、详情、设置等页共用同一套焦点边界
 - `TvPageFocusScope` 安装 `TvSafeDirectionalFocusTraversalPolicy`：方向寻焦读取候选节点坐标时若遇到动态刷新产生的暂时未布局 `RenderBox`，忽略当前按键并保持原焦点；其他异常仍继续抛出
+- `tvPressOnlyShortcuts` 在命令快捷键前加入 repeat-only activator，将重复事件映射到消费型 `DoNothingIntent`，避免只关闭 `includeRepeats` 后事件继续落到祖先默认快捷键。共享按钮确认／菜单、弹窗返回键及 MPV 页面命令复用；方向遍历和 seek 不使用该规则。`TvFocusableAction` 用 `ExcludeFocus` 明确排除普通禁用目标，避免 `NavigationMode.directional` 下 `FocusableActionDetector` 仍允许聚焦；保焦仅由 `focusableWhenDisabled` 显式开启。
+- `scheduleTvFocusRecovery` 是一次帧末缺焦检查，并主动安排帧；执行时检查页面仍挂载、路由当前、TickerMode 可见、应用前台、目标可用且全局不存在可操作焦点。WebDAV／夸克目录及首页模块合集、媒体库合集、演职员作品页复用，不增加全局监听、循环补焦或焦点历史存储。合集和作品页以常驻页头作为首焦点，媒体库多页边界按钮显式保焦但仍禁用确认。完整清单见 [TV 焦点](tv-focus.md)。
+- `TvTextInputLauncher` 从设置输入组件提取到 core，设置与搜索编辑入口共用。等待打开按键释放时拒绝重复启动，焦点已移走则取消；路由不再当前或组件销毁也不打开，并移除键盘监听。独立字幕页复用设置文本编辑入口，TV 搜索按钮忙碌时保焦；每条字幕结果只有外层焦点，内部同义按钮排除寻焦，下载期间外层保焦且禁用确认。媒体库删除确认以“取消”为首焦点。
 - 安全寻焦策略、页面边界和侧栏横向移动复用 `TvSafeDirectionalFocusAction` 的异常处理；未布局中断返回已处理，阻止页面边界将它当成正常寻焦到头。`wrapTelevisionDialogBackHandling` 在退出输入状态时优先聚焦已挂载且可请求的操作节点，避免只留下焦点域；未挂载按钮不会被选作返回目标
 - `TvDialogOption` 在 TV 复用轻量高亮与确认键映射，普通端仍为 `SimpleDialogOption`；播放器字幕/音轨/倍速/循环与配置路径选项由首项申请焦点。来源多选优先“全部”或首项，无选项时聚焦取消；字幕偏移、片头片尾和删除/覆盖确认框也有明确首焦点。夸克目录页由常驻“选择”按钮持有首焦点，不依赖异步子目录存在
 - `StarflowApp` 仅覆盖默认 `DirectionalFocusIntent` Action，补齐页面级策略覆盖不到的路由/Overlay 焦点：只捕获 `RenderBox was not laid out` 并忽略当次按键，不做下一帧重试、候选过滤或顺序改写；警告按 Action 实例做 `5s` 限频
@@ -116,7 +167,7 @@ lib/
 - TV 菜单聚焦标签通过 `OverlayPortal` 和 `CompositedTransformFollower` 跟随按钮；浮层根部用仅指定 `left/top` 的 `Positioned` 解除 Overlay 全屏紧约束，标签以自身尺寸和按钮垂直居中、文字水平间隔 `12dp`，不参与页面布局。标签使用半透明强调色胶囊背景、文字使用对应强调色的对比色，无描边，不接收指针事件，失焦或目标卸载后不显示；两种 TV 菜单布局均有标签尺寸、锚点和卸载回归测试
 - 焦点诊断统一写入 `tv.focus-recovery`：首页实际缺焦恢复为 `info`，返回清理为 `trace`，未布局候选为限频 `warning`；正常寻焦与普通方向键不写日志
 - WebDAV STRM 文本解析在返回播放 URL 前把裸 `#` 替换为 `%23`；已编码地址保持不变，避免文件名中的集号被 URI fragment 规则截断
-- `TV` 焦点进入长列表项时，会尽量把目标控件维持在视口中线附近，并驱动页面一起滚动
+- `TV` 普通方向遍历使用 Flutter 默认可见性滚动；首页恢复与选集等特定路径另行显式定位，不由共享按钮强制居中
 - 页面级保留态异步结果封装：`core/navigation/retained_async_value.dart` 与 `core/navigation/retained_async_controller.dart`
 - 桌面端横向列表的统一左右翻页按钮容器，供首页海报流、剧集横排、剧照横排复用
 - 设置区共用页面骨架和交互组件
@@ -136,6 +187,7 @@ lib/
 - `search`：本地搜索、在线搜索、夸克保存、`SmartStrm`
 - `playback`：播放器
 - `settings`：设置、配置导入导出
+- `discovery`：豆瓣客户端、发现仓库与模型，没有独立主导航页面
 - `storage`：详情缓存 revision 等辅助状态
 
 ### `tool`
@@ -162,7 +214,7 @@ lib/
 - `android/app/build.gradle.kts` 的 release ABI 过滤同步限定为 `armeabi-v7a` 与 `arm64-v8a`，防止第三方原生库带入 `x86_64`；debug 构建不受此限制
 - TV 文件名使用 `starflow-tv[-config]-主版本.月份.序号.apk`
 - 当前显示版本号按标准三段式 `主版本.月份.序号` 自动递增
-- macOS 的 TV/iOS iCloud 发布脚本可通过同一个 `STARFLOW_RELEASE_VERSION` 固定批次版本；省略时仍按月和序号分别自动递增
+- TV PowerShell / Bash、iOS Bash 和 Windows PowerShell 发布脚本统一调用 `tool/release_version.dart`；默认按月递增，显式同批发布可用 `STARFLOW_RELEASE_VERSION`。Android `versionCode` 与 Dart 范围校验共用 `config/release_version.json`，显示三段版本与数字版本码是不同概念；运行工具会写入 pubspec
 - 当前 Release APK 会继续启用 `v1 + v2` 签名，并沿用本机 debug keystore
 - `scripts/build_windows_installer.ps1` 默认把 Windows 安装器输出到桌面
 - 这条脚本会先执行 `flutter build windows`，再调用 Inno Setup 生成单个安装器
@@ -170,7 +222,7 @@ lib/
 - Inno Setup 编译器当前会优先在 `E:` 和 `C:` 下的常见安装目录查找 `ISCC.exe`
 - `scripts/connect_mumu.ps1` 会扫描 MuMu 的 `vm_config.json`，优先尝试桥接模式的 `guest_ip:5555`，再回退到 `127.0.0.1:host_port`
 
-## 3.1 近期架构与性能收口（2026-08）
+## 3.1 缓存与调度策略
 
 这一轮已经落地的 `P0` 收口主要有这些：
 
@@ -195,7 +247,7 @@ lib/
 - `mpv_tuning_policy.dart` 负责收口 `MPV` 的远程/直播识别、重片源判定、缓冲参数调节和本地 `ISO` 设备源判断，避免这些策略散落在页面状态里
 - 首页 application 收口：`home_controller.dart` 现在主要保留 controller 与 provider wiring，`home_controller_models.dart` 承载 view model，`home_feed_repository.dart` 承载首页 seed/cached section 装配
 - `PlaybackMemoryRepository` 已补单调递增 `updatedAt` 策略，保证最近播放在 Windows 或高频保存场景下仍按真正“最后一次写入”稳定排序
-- NAS 索引链收口：`NasMediaIndexer` 已拆成 `nas_media_indexer_refresh_flow.dart / nas_media_indexer_storage_access.dart / nas_media_indexer_indexing.dart / nas_media_indexer_grouping.dart / nas_media_indexer_refresh_support.dart` 多段 `part` 文件；主文件回到约 `1k` 行量级，先把刷新编排、存储访问、metadata 匹配与分组逻辑解耦，为后续 isolate 化、`IndexStore` 增量 upsert 和多级并发预算继续铺路
+- NAS 索引链收口：`NasMediaIndexer` 已拆成 `nas_media_indexer_refresh_flow.dart / nas_media_indexer_storage_access.dart / nas_media_indexer_indexing.dart / nas_media_indexer_grouping.dart / nas_media_indexer_refresh_support.dart` 多段 `part` 文件；分别承载刷新编排、存储访问、metadata 匹配和分组。`IndexStore` 已有增量 upsert / patch 及分区查询，多层预算已有调度入口，不把这些能力继续描述为未来规划
 - NAS 分区读链收口：显式分区查询直接交给 `NasMediaIndexStore.loadSourceRecords(..., sectionId: ...)`，Sembast 在数据库层组合 `sourceId + sectionId` 过滤；只有整源查询继续复用来源级内存缓存
 - 首页模块加载与元数据预取已拆成独立调度器：前者限制首页数据源扇出并串行应用结果，后者统一约束 Hero、评分、元数据补全和显式维护任务；两者共享一个持久化最大并发值，各自保留首批数量和后续批次间隔
 - 元数据调度器在前台交互结束后按可配置静默期恢复；首页、媒体库和集合页只在进入“内容加载中”状态时申请一次静默期，避免 widget rebuild 持续推迟后台任务
@@ -223,7 +275,7 @@ lib/
 - `test/home_controller_test.dart`、`test/home_settings_slices_test.dart`、`test/playback_memory_repository_test.dart`、`test/nas_media_indexer_test.dart` 已通过
 - `NasMediaIndexer` 拆分后的定向验证已通过：`dart analyze lib/features/library/data/nas_media_indexer*.dart` 与 `flutter test test/nas_media_indexer_test.dart`
 
-## 3.2 跨 feature 新结构关系（Home / Detail / Playback / Library / Settings Slices）
+## 3.2 跨模块调用关系
 
 这一轮收口后，几条高频链路已经形成明确的“编排层 -> 解析层 -> 数据层”关系：
 
@@ -250,10 +302,12 @@ lib/
 - `DetailTargetResolver` 已作为详情解析入口，统一负责：
   - seed + 详情缓存合并
   - 自动元数据补全（`WMDB / TMDB`）
-  - 播放目标补全（`Emby / Quark`）
+  - 通过既有来源客户端按需补全播放目标；飞牛在真正启动时仍重新解析临时地址
   - 解析结果回写详情缓存
 - `HomeHeroPrefetchCoordinator` 与详情链路复用同一套详情缓存与 enrichment provider，避免首页和详情各自维护一套补全逻辑。
 - 详情页 presentation 入口已经进一步拆成 `detail_page_providers.dart`、`detail_hero_section.dart`、`detail_resource_info_section.dart`，`media_detail_page.dart` 主要保留页面级 session / callback / section wiring。
+- 详情首屏图片恢复独立于延迟启动：页面初始化通过 `peekDetailState` 同步检查内存缓存，未命中则立即读取本地详情缓存，期间不请求入口旧图片。初始展示目标沿用 `DetailCachedStateRestorer` 的来源与版本选择；普通单条缓存只叠加 artwork，不设置手动覆盖状态，不改变自动资源匹配条件。延迟启动复用这次本地读取，在线补全仍在资源状态恢复后开始。读取完成后检查页面存活和目标 generation，来源或季集切换后的迟到结果不能更新新页面。
+- `mergeCachedDetailArtwork` 由首屏展示和 `DetailTargetResolver` 共用，缓存中非空的 `poster / backdrop / logo / banner / extraBackdrop` 优先，缺项保留入口值；图片 URL 与对应请求头成对选择，避免加载缓存图片时混入入口图片的鉴权头，也避免补全返回后退回旧背景图。图片占位目标仅用于展示，不传入联网解析或保存缓存。
 
 ### Playback
 
@@ -263,6 +317,7 @@ lib/
 - `PlaybackStartupExecutor`：执行路由动作，并返回是否继续走内置 `MPV` 打开链。
 - `player_page.dart`：只保留页面壳、状态字段和顶层装配；平台会话、启动/MPV、运行期动作和播放器控制已经沉到 `presentation/widgets/player_page_*.part.dart` 与独立 widgets。
 - `PlaybackMemoryRepository`：负责最近播放/续播记忆，并通过单调递增 `updatedAt` 保证最近播放列表稳定排序。
+- `FntvSessionOwner`：管理新旧转码会话、回退和迟到结果清理；控制链接不作为下次播放的历史入口。
 
 ### Library
 
@@ -293,7 +348,7 @@ lib/
 - `NetworkProxyConfig` 保存运行期 HTTP 代理地址、可选 Basic 认证和局域网直连策略；`NetworkProxyRuntime` 提供进程内当前快照与 revision，IO 传输层在 revision 变化后为后续请求切换连接池，不中断已经交给旧连接池的请求
 - 持久化图片缓存的网络读取也复用 `StarflowHttpClient`；`networkOnly` 图片先通过共享传输取得字节再交给 `MemoryImage`，不会绕过代理配置
 - `network_failure.dart` 把错误统一归类为 `timeout / tlsHandshake / dns / connection / connectionClosed / httpStatus / circuitOpen / cancelled / unknown`
-- `NetworkRequestGuard` 按 `policy + host` 保存连续临时故障状态，提供总请求超时、可选的幂等重试和熔断；非幂等操作默认不重试
+- `NetworkRequestGuard` 按 `policy + host` 保存连续临时故障状态，提供总请求超时、可选的幂等重试和熔断；`maxRetries` 默认 `0`，幂等请求也需调用方显式启用重试
 - 豆瓣与元数据策略当前使用 `6` 秒总请求超时、连续 `3` 次临时故障后熔断、熔断 `2` 分钟；保留原有业务异常类型以兼容调用方
 - HTTP `408 / 425 / 429 / 5xx` 视为临时状态；鉴权失败、资源不存在等永久状态不会触发临时故障策略
 - 共享传输日志只记录 method、scheme、host、port、path、status 和错误分类，不记录请求头、Cookie、Token 或完整 query
@@ -306,7 +361,8 @@ lib/
 - 元数据成功缓存命中、加入已有请求，以及没有可用 NFO/图片的空 sidecar 上下文不逐条写入 `TRACE`；真实请求、失败和阶段完成仍保留
 - 预览读取最近 `300` 条、展示筛选后的最新 `100` 条，TV 端条目和滚动区域均可聚焦
 - 导出会合并轮转文件；TV 通过临时局域网 HTTP 页面和二维码下载，iOS 使用系统文件导出器，其他支持文件的平台使用对应文件流程
-- Android 原生侧读取 `ApplicationExitInfo`，把上一进程的 ANR、Java/Native 崩溃、低内存和资源异常退出合并进日志
+- Android 11 / API 30 及以上读取 `ApplicationExitInfo`，把上一进程的 ANR、Java/Native 崩溃、低内存和资源异常退出合并进日志；API 23 仍有原生日志，但没有这个系统退出信息接口
+- Web 日志实现为不支持文件存储的 stub，不提供 IO 轮转和导出能力；这不表示 Android、iOS 或桌面的结构化日志关闭
 
 ## 4. 核心设计取向
 
@@ -363,6 +419,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 详情页搜索页（`/detail-search`，复用搜索页并带返回工具栏，当前无转场）
 - 人物关联影片页
 - 元数据索引管理页
+- 字幕搜索页（`/subtitle-search`，可由 Android 第二个 Flutter engine 承载）
 - 播放器页
 
 ## 6. 首页链路
@@ -400,7 +457,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 首页 `Hero / item` 的运行时局部 overlay 更新现在可由设置统一关闭；关闭后，首页会保持当前静态快照，只在应用启动、保存设置或显式刷新边界后重新合并缓存
 - 如果缓存里已经有刮削或手动关联后的标题，首页 `Hero`、卡片和后续详情入口都会优先展示这份标题，而不是继续显示原始文件名或 seed 标题
 - 最近播放模块直接读取本地播放记忆，并优先尝试从详情缓存补海报
-- 最近播放卡片会从 `PlaybackTarget.sourceName` 读取来源媒体库并显示在海报右上角；来源名为空时退回来源类型标签，不使用详情缓存里的来源字段覆盖播放记录
+- 最近播放卡片会从 `PlaybackTarget.sourceName` 读取来源媒体库并以 19 号加粗、无边框、无背景的文字显示在海报右上角，保留原有间距，其他海报角标样式不变；来源名为空时退回来源类型标签，不使用详情缓存里的来源字段覆盖播放记录
 - 最近播放卡片的主标题会优先显示电影名或剧集总名；对于单集，`SxxEyy`、进度等信息继续留在副标题，不再把具体集名作为首页主标题
 - Hero 当前主要外显配置是 Logo 形态标题、`normal / borderless` 展示方式和背景图
 - 首页滚动区外层 `LayoutBuilder` 按实际可用高度计算 Hero 高度：扣除 Hero 外边距后取 `62%`，常规下限 `220dp`，普通/无边框上限分别为 `440/500dp`；空间不足时以预留 `140dp` 给分页区、下一模块标题和卡片露出为优先。加载占位和真实内容共用计算值与 `20dp` 分页占位，单项也保留分页高度。简介最多两行，元信息限制一行；局部布局结合文字缩放在矮窗口下依次隐藏简介、元信息，优先保留片名。
@@ -443,12 +500,15 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - `LocalStorageCacheRepository` 的记录共享和结构恢复均拒绝同一飞牛来源下不同 GUID 的剧集之间恢复资源身份，防止删除重入库后 title / provider-ID 别名把新条目映射回旧条目；读取、批量读取及写入合并使用同一约束，不影响其他来源或同 GUID 文件版本恢复。
 - 主页分区、媒体库筛选、本地搜索、详情匹配及版本选择包含飞牛；季 / 集通过服务端层级接口读取，连播队列不使用 NAS 索引。播放启动统一通过 `PlaybackTargetResolver` 重新解析飞牛地址，避免复用详情缓存中过期的临时链接。
 - 飞牛来源每次进入媒体服务器缓存刷新前，`FntvApiClient.requestLibraryRefresh` 会对当前选中分区逐一致 `POST item/refresh`，请求体仅含 `item_guid`；未限定分区时先读取 `mediadb/list` 后刷新除音乐 / 直播外的库根。通知失败被记录并降级为仅本地刷新，不阻止随后 `fetchCollections / item/list` 和缓存快照落盘。手动“更新”、启动同步及“转存后刷新媒体库”选中的飞牛来源共用该顺序。
-- `FntvApiClient.resolvePlaybackTarget` 保留直链质量选择，但 `pcm_bluray` + MPEG-TS 会固定使用同源 `media/range/{media_guid}`，并继续携带选中的 `direct_link_quality_index`；判定只基于服务端返回的 wrapper 和音频 codec，不读取 URL 后缀。其他音频编码及 MKV / MP4 等容器不走该分支。
+- `FntvApiClient.resolvePlaybackTarget` 按云盘类型和所选质量决定直链 / NAS 代理，不因 `pcm_bluray` 或 MPEG-TS 改写端点。STRM（9001）沿用服务端解析出的直链，不附带 NAS 凭据；本地文件与原本需代理的云盘类型保留 `media/range` 及质量索引。TS seek 兼容由 Android extractor 负责，而非在跨平台地址解析层强制绕行。
 - `FntvApiClient` 在媒体流协商中传入当前会话摘要（协议字段 `ip`）及数组格式的 `header.User-Agent`，并向播放目标传递一致的默认 UA；服务端提供的外链 UA 优先。业务错误仅记录安全的阶段和错误码，不让请求体、会话摘要或响应正文进入日志。
 - `PlaybackTarget` 携带飞牛音轨 / 字幕流描述、服务端默认流 ID 和 `direct_link_qualities`；`playback_server_track_resolver` 将服务端流映射到 media_kit 实际轨道。播放器启动只自动应用服务端默认轨道，已有剧集字幕偏好和“关闭字幕”设置优先；外挂字幕通过原始字节下载，播放器侧支持 ZIP 中的文本字幕和常见 UTF-8 / UTF-16 / GBK 编码，并拒绝位图字幕文本化。多个质量可在播放设置中选择，切换会保留当前位置并重新解析播放地址；播放器按节流策略调用 `play/record` 回写进度。
+- `FntvPlaybackQuality.serverTranscode` 区分 `qualities` 与直链列表；直链保留非负协议索引，服务端转码使用负的本地选择 ID，不会写入 `direct_link_quality_index`。`qualities` 首项按飞牛契约视为原画，其余有效分辨率 / 码率成为可选转码档位。默认不申请转码；明确选择后由 `FntvApiClient` 调用 `play/play`，保留原始 `fntvSessionLink` 控制链接与完整轨道列表，同时输出 HLS 播放地址和 H264 / AAC 描述。显式轨道选择包括“字幕关闭”，不再被 `play/info` 默认值覆盖。
+- 画质菜单由 Dart `fntv_quality_menu` 和 Kotlin `NativeFntvQualityMenu` 按相同规则分组：`2160 / 2160P / 4K` 统一显示 `4K`，数字分辨率统一为 `1080P` 等，原画及供应商命名保留；同名分组优先当前选择，否则使用服务端第一档。分组不改原始索引或档位列表；有重复分辨率时提供“自定义”，仅在二级菜单展示分辨率和码率，不显示 HLS / 转码技术标签。2026-09-20 增加分组策略及 Flutter 菜单回归测试，属于主机验证，不代表真实设备性能测量。
+- `FntvSessionOwner` 管理活动和待打开的转码会话；MPV 页面与 `NativeFntvService` 分别持有 owner。切换使用新会话，不对旧会话原地调用 `media.resetQuality`，使解析 / 首帧失败时可以恢复旧地址；新画质就绪才释放旧会话，换集 / 退出 / 迟到结果调用 `media/p` 的 `media.quit`。Android resolver 仍只负责跨平台协议调用，Kotlin 不复制签名实现。MPV 已解析的切换目标通过显式 `targetAlreadyResolved` 跳过二次申请；外部首次播放仍重新解析。观看历史去除控制链接、起播参数及转码选择，避免恢复已释放会话或后台预取触发转码。原画继续走本地轨道选择，转码模式按服务端完整列表重新申请音轨 / 字幕组合；外挂文本字幕保持客户端渲染。
 - 媒体源编辑器在地址、用户名、密码变更时清除飞牛会话和分区；过期登录及分区请求结果不覆盖已修改的草稿。来源删除、账户切换及地址改变沿用 `MediaSourceCacheLifecycle`。
 - Android Exo 的 `NativeFntvController` 接入原生设置、字幕、运行期和换集生命周期。播放设置按飞牛目标生成固定可见的“画质 / 音轨 / 字幕”标签，并附带当前画质、音轨数和内置 / 外挂字幕数；画质不足两项时给出不可切换原因。TS 解复用额外识别 Blu-ray `HDMV/PGS` 文本轨；reader 跨 PES 聚合 `PDS / WDS / ODS / END` 等段，在显示集完整后交给 Media3 解析为位图 cue，字幕菜单与自动选轨因此可以正常显示；飞牛外挂文本字幕仍走原有下载链路。画质解析复用现有 episode resolver；字幕下载和进度通过同一 resolver channel 调用 Dart，`NativeFntvService` 持有来源与临时字幕目录，仍由 `FntvApiClient` 统一签名和鉴权。服务按 resolver session 隔离，退出后等待 `NativeFntvProgressQueue` 排空最后进度再关闭；初次画面就绪不是会话结束。换集 / 关闭使旧画质及字幕结果失效，质量切换首帧失败或启动超时会尝试回退；原生轨道偏好按新轨道匹配，不复用旧轨道组 override。
-- 飞牛与 Emby 共用后台刷新并发预算和启动刷新开关，进度标题按实际来源类型展示。该接入不新增扫描服务，不改 WebDAV / Quark 索引，也不请求服务端转码或 FN ID 中继发现。
+- 飞牛与 Emby 共用后台刷新并发预算和启动刷新开关，进度标题按实际来源类型展示。该接入不新增扫描服务，不改 WebDAV / Quark 索引；转码只由显式画质 / 转码轨道选择触发，不执行 FN ID 中继发现。
 
 ### WebDAV
 
@@ -487,7 +547,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - `NasMediaPathPolicy` 是外部存储路径语义的唯一入口：统一解析设置路径/分区路径与资源路径的公共前缀、默认及自定义包装层、首个电影目录、系列标题与结构根、嵌套电影发布目录。`WebDavNasClient` 的扫描分类与 `NasMediaIndexer` 的入库、搜刮和展示分组只消费该策略结果，不再各自维护目录常量和回退链
 - 系列路径解析一次返回 `NasSeriesRootResolution`，其中同时包含标题、结构根片段和公共边界状态；展示标题与 `webdav-series` 分组键必须来自同一结果，避免标题使用父目录而分组键使用子目录
 - 结构候选根会排除 `movies`、`strm`、`quark`、`WebDAV` 等传输或媒体库包装目录；扫描从具体媒体目录开始时仍保留空相对根作为有效剧集根，兼容分区扫描
-- 统一路径规则的作用域版本为 `webdav-v13`；版本变化会使旧作用域重新索引。单资源结构指纹仍独立记录最终 `itemType / season / episode`，供重建索引和诊断比较使用；增量阶段不再用它重新分类已有记录，两种失效机制不可互相替代
+- 当前作用域版本为 `NasMediaIndexer._webDavMetadataSchemaVersion = webdav-v14`；版本变化会使旧作用域重新索引。单资源结构指纹仍独立记录最终 `itemType / season / episode`，供重建索引和诊断比较使用；作用域未失效的普通增量不重新分类已有记录，两种机制不可混淆
 - 电影多版本会在详情页 Hero 下方提供直接可见的“播放版本”选择控件；“本地资源”仅按来源分组并负责来源切换，播放版本仅按当前来源展开，两个选择互不混用，版本辅助行统一收口为来源、分辨率、首个格式和文件大小；`.strm` 包装文件的格式和大小不会进入辅助行，只有当前选中版本经详情解析器取得真实地址后才展示源视频格式和大小；NAS / WebDAV 详情路由没有携带原始目录范围时，会使用已经确定的 `sourceId + sectionId + itemId` 读取现有索引，而不是错误地重算整源范围键，因此选中目录索引里的版本不会被隐藏；WMDB / TMDB 匹配统一使用影片根目录名，清晰度和编码等文件名后缀只保留给版本展示，明确匹配的 NFO / sidecar 标题优先
 - `顶层推断目录` 仅补充非标准自定义包装层；来源根、所选分区根和内置常见包装层由扫描上下文自动过滤。识别到剧文件或季目录后，命中额外配置的目录名会停止继续向上推断，并回退到下一级已推断目录或文件名
 - 综艺/节目文件名轻量识别，例如 `第X期`、`01 会员版` 这类“集号 + 版本说明”形式会继续归到对应集，而不是把版本说明当标题主体
@@ -502,11 +562,11 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 剧集父子关系聚合
 - 电影多版本聚合以影片根目录为边界：媒体库只生成一个代表卡片，底层索引保留每个真实资源（包括版本目录下的嵌套文件），详情页的“播放版本”再按可播放性、元数据完整度和画质排序展开。该结构规则使用条目级指纹；增量只处理新文件，旧误分类需通过重建索引或显式元数据操作修复，不通过整库 schema 失效迁移
 - 目录名里如果能识别出明确季号，例如 `Season 1`、`S02`、`SE08`、`第2季`、`Stranger.Things.S02.2160p.BluRay.REMUX`，会直接把这一层当作季目录
-- `SE08.06` 这类文件名会同时提供季号和集号；结构推断确定母目录为剧集根后，母目录名是唯一剧名，子目录/文件只提供季集与单集展示信息。标题中间的 `#19`、子目录开头的 `#004`，以及名称修正去掉井号后保留的三位补零编号 `004` 都可作为第 1 季集号，子目录不能另起剧名或独立季；单视频子目录折叠规则通过 `webdav-v13` 重建旧错误分组
+- `SE08.06` 这类文件名会同时提供季号和集号；结构推断确定母目录为剧集根后，母目录名是唯一剧名，子目录/文件只提供季集与单集展示信息。标题中间的 `#19`、子目录开头的 `#004`，以及名称修正去掉井号后保留的三位补零编号 `004` 都可作为第 1 季集号，子目录不能另起剧名或独立季。当前 schema 为 `webdav-v14`；相同 scope 指纹下的规则调整不自动重写旧记录，旧错误分组需显式重建
 - 对 `2.巴以 / 5.美国 / 9.韩国` 这类“数字 + 标题”的专题目录，会额外要求同级里存在多个同类兄弟目录，避免把普通数字目录误判成季
 - 明确剧名下面的多个年份分组目录（如 `2025 / 2026（4K）`）保留原目录名作为季名，索引与在线系列查询都继承上级剧名；`4K 12集` 这类只表达画质、版本或总集数且看不出季名的目录会折叠为包装层，文件有明确季号时按文件季号归组，否则进入默认季；媒体源顶层的纯年份目录不会因此被强制吞并
 - 当年份已经作为独立字段识别时，WMDB / TMDB 客户端会从查询标题末尾移除同一个年份；纯年份标题不会被清空，标题中不同年份也不会被误删
-- `LocalStorageCacheRepository` 会将 `16ms` 内并发到达的详情目标保存合并为一次序列化写入，并在编码结果与最后落盘内容完全一致时跳过写入；清理和其他详情缓存变更仍通过同一 mutation tail 保持串行
+- `LocalStorageCacheRepository._enqueueMergedDetailTargetSave` 用 `scheduleMicrotask` 合并本次 flush 前进入队列的详情目标，再通过 mutation tail 串行写入；不是固定 `16ms` 计时窗，跨事件循环的保存可能分别落盘。编码结果与最后落盘内容完全一致时跳过写入；清理及其他详情变更仍遵守同一串行边界
 - 一旦当前层被识别为季目录，上一级目录就会作为剧名；像 `怪奇物语/Season 1/Season 2`、`怪奇物语/Stranger.Things.S02.2160p.BluRay.REMUX` 都会把 `怪奇物语` 当剧名
 - 当路径里已经确认存在显式季目录时，即使当前只有一季，也会继续保留“剧 -> 季 -> 集”层级，不再因为单季而直接拍平成集列表
 - 当前实现上，`NasMediaIndexer` 已拆成 grouping / refresh flow / storage access / indexing / refresh support 多个 part 文件；并发预算在 indexer 内按 `source / collection / enrichment item` 三层收口，三层与首页、元数据调度统一读取同一个最大并发设置，并分别受来源最多 `2`、集合和单源补全最多 `4` 的内部保护。同一来源的 sidecar / 在线补全由固定 worker pool 处理，每个条目同时进入全局元数据并发预算；用户主动全量重建的条目使用 maintenance permit，绕过普通后台批次与交互静默等待但仍受并发上限约束；每轮任务开始前读取最新持久化设置，修改后无需重启
@@ -535,7 +595,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 媒体库卡片读取详情缓存时也会复用批量缓存读取，不再为同一批条目逐条扫描本地详情 payload
 - 媒体库当前可见页现在也支持切到“静态快照”模式；关闭运行时 overlay 后，只会在当前分页首次装配时做一次缓存合并，后台 metadata 更新不会再把可见页之外的条目带进重算
 
-### Quark
+### 网盘工作流与 Quark 来源
 
 目录型剧集详情的资源选择优先匹配入口 `sourceId + itemId`（或播放目标的 seriesId），再使用来源偏好，防止同一 NAS 下的同名副本覆盖入口目录。
 
@@ -557,7 +617,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 115 扫码登录由 `Cloud115LoginClient` 和 `Cloud115LoginPage` 负责：获取二维码、串行轮询、确认后换取 Cookie；页面关闭或刷新时废弃旧请求结果并停止定时器。Cookie 返回网盘编辑器，仍复用普通自动保存链触发保存，但 `NetworkStorageConfig.toJson()` 不输出该字段；本机仓储将 Cookie 写入独立的本地凭据项。普通配置导出、导入、局域网传输和 WebDAV 同步均不携带 115 Cookie，导入配置也不会覆盖当前设备凭据。登录请求不使用记录 HTTP 错误的包装客户端，异常提示不输出响应、二维码令牌或 Cookie。
 
-115 删除由 `Cloud115SyncDeleteService` 独立预检和执行，接入媒体库 WebDAV 删除链。`syncDelete115Enabled / syncDelete115WebDavDirectories` 独立持久化，默认关闭。只匹配精确 sourceId 与 URI 路径段范围，逐层解析监听目录到保存目录的相对路径；STRM 可映射到唯一同名视频。不允许根目录、多个候选或跨网盘重叠，预检失败不会删除 WebDAV。WebDAV 成功后才调用 115 回收站接口，115 失败提示部分完成并保留本地索引。115 不复用夸克的模糊目录匹配、监听路径自动迁移或 403/405 回退。两种网盘的同步删除配置和目录管理均位于各自设置页；目录管理复用现有确认交互，115 使用自己的客户端。直接管理网盘不会清理 STRM 或触发生成任务。
+115 删除由 `Cloud115SyncDeleteService` 独立预检和执行，接入媒体库 WebDAV 删除链。`syncDelete115Enabled / syncDelete115WebDavDirectories` 独立持久化，默认关闭。只匹配精确 sourceId 与 URI 路径段范围，逐层解析监听目录到保存目录的相对路径；STRM 可映射到唯一同名视频。不允许根目录、多个候选或跨网盘重叠，预检失败不会删除 WebDAV。WebDAV 成功后才调用 115 回收站接口，115 失败提示部分完成并保留本地索引。115 不复用夸克的模糊删除匹配或 403/405 回退，但来源编辑、删除和配置导入已通过公共来源路径规则协调两种监听目录，无法确认的引用移除后需重新选择。两种网盘的同步删除配置和目录管理均位于各自设置页；目录管理复用现有确认交互，115 使用自己的客户端。直接管理网盘不会清理 STRM 或触发生成任务。
 
 整剧条目的 `actualAddress` 使用公共 `NasMediaPathPolicy.resolveSeriesRoot` 提供的实际目录深度，从原始资源路径截取同一剧名根目录；保留大小写、编码和 `(1)` 后缀，不从展示标题反推路径。`NasMediaIndexer.buildSeriesItem` 要求组内根路径一致，不能因全部视频位于一季或一个子目录就把整剧地址缩到这一层。单季仍取该季资源共同目录，单集仍取文件 URI。更改发生在索引条目物化时，不清空或迁移已有文件记录，不改变剧集分组 ID，也不自动清理历史残留目录。
 
@@ -579,7 +639,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 通过选择一个夸克目录，把该目录作为本地媒体源根目录
 - 可继续选择根目录下的子目录作为分区范围
 - 索引、结构推断和在线搜刮配置复用 `WebDAV` 同一套外部存储扫描与 `NasMediaIndexer` 规则，包括本地 sidecar、顶层推断目录和“剧集只按剧名层级搜刮”
-- 媒体库读取时递归列目录，直接把视频文件映射成 `MediaItem`
+- 普通媒体库读取优先使用 NAS 索引；刷新或首次空索引重建通过 `QuarkExternalStorageClient` 递归列目录，再由索引器生成 `MediaItem`。Quark 空库路径可等待重建，不应套用 WebDAV 空库一律后台调度的描述
 - 播放地址不提前持久化；详情页只会在真正播放前按需请求一次夸克下载直链
 
 ## 8. 详情与元数据
@@ -614,7 +674,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - `LocalStorageCacheRepository` 的 `season / episode` 内容查找键同时包含季号与集号（季条目仅季号），优先读取详情字段，缺失时读取播放目标字段；不完整的季集身份仅生成 `sourceId + itemId` 资源键。缓存读写均校验条目类型及季集身份，拒绝旧版跨季集别名；旧记录 ID 冲突时新建独立记录，不继承错误候选，也不删除其他条目的缓存。同集多版本选择与整剧入口的显式结构恢复仍保持原流程。
 - 详情页与人物作品页已经收口到 `RetainedAsyncController`；页面 inactive、切回前台或播放期间页面让路时，会优先保留最近一次已解析结果
 - 详情页在 inactive 时会取消当前匹配 / 刷新会话，但不会再无条件失效成功缓存；重新回到页面时优先复用已有详情结果
-- 详情页在 inactive 时也会解除详情 provider 订阅并卸载剧集、剧照等延迟内容；最近一次成功结果继续由保留态控制器持有，返回页面时无需为了释放隐藏页面负载而牺牲已取得的数据
+- 详情页失活时解除相应 provider 监听并取消当前工作，但已展示的剧集、剧照不因 `TickerMode` 关闭而卸载；播放器返回后复用季选择、滚动和已加载结果。路由销毁或目标身份变化才清理对应组件状态
 - 网络图片在展示层支持候选图回退，主图 `404` 或解码失败时会自动尝试下一张候选 artwork；全部候选失败会清空当前失败 Future 并有限重试，持久化图片解码失败时同时淘汰对应磁盘条目
 - 详情页已经移除内联字幕搜索与外挂字幕选择；在线字幕搜索只保留在播放器页与独立字幕搜索页，仍按 `设置 -> 播放 -> 字幕` 里的配置使用 `ASSRT API / OpenSubtitles / SubDL`
 - 详情页不再把字幕候选或选中项写入详情缓存，也不会在进入播放器前向播放目标注入外挂字幕；字幕选择改由播放器页会话独立持有
@@ -626,6 +686,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 非 TV 使用标准详情 Hero；TV 固定使用精简详情 Hero
 - `TMDB` 已接入 `poster / backdrop / still / profile / logo` 等图片字段，并把 `TMDB x.x` 写入统一评分标签链路；当前不再主动去 `IMDb` 搜索信息，`IMDb` 相关标签只会在上游 `WMDB / TMDB` 已返回时参与展示和保存
 - `MediaItem.ratingCount` 与 `MediaDetailTarget.ratingCount` 共用豆瓣评分人数。详情 Hero 使用 `buildRatingCountLabel` 显示 `☆31.6万`；`douban_rating_stats_service` 获取 `rating.count` 后，`MediaRepository.updateRatingCount` 会把人数写回 Emby / 飞牛分片缓存或 NAS / WebDAV / Quark 索引。索引建条目、系列 / 季 / 特殊集分组和增量刷新均保留该字段，因此媒体库入口再次打开详情时可直接恢复人数。
+- 人数不再作为独立预取条件：resolver 在缺豆瓣评分、豆瓣 ID 新匹配或强制刷新时同步获取评分与人数。`DoubanEntry` 保留列表响应的 `rating.count`；首页（含轮播）和媒体库批量缓存合并、可见页变化检测、资源匹配、剧集变体及清理失效资源关联时均保留人数；仅人数变化也归入 `LocalStorageDetailCacheChangedField.ratings`，沿评分缓存订阅更新入口。已有评分但无人数的旧缓存不自动补人数，可手动更新影片信息。
 - 详情页评分标签会按来源归一去重；`豆瓣 / IMDb / TMDB` 各最多保留一条，避免 seed target、详情缓存和后续在线补全合并后出现重复评分标签；评分人数不占用标签条目
 - 人物头像统一来自 `TMDB profile`，详情页公司 Logo 来自 `TMDB production_companies.logo_path`，不再把 `networks` 混作公司展示
 - 详情页公司 Logo 位于资源信息之后的页面底部，使用带柔和高对比度背景卡片的单行横向 `PlatformRail`，超出可视区域时可左右滑动，TV 端每个 Logo 都有独立焦点目标并带轻微放大提示，不再通过多行 `Wrap` 换行
@@ -755,17 +816,17 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 内置播放器负责应用内播放、字幕增强、续播和跳过逻辑
 - App 内原生播放器负责在 Android / iOS 上以原生容器页承载播放，尽量减少 Flutter 合成层干扰
 - 系统播放器负责把播放地址交给平台默认视频应用
-- Android `ExoPlayer（原生）` 的音频输出由 `NativePlaybackAudioPolicy` 和 `NativePlaybackRenderersFactory` 统一决策；`自动 / PCM 兼容 / 设备直通` 来自全局设置，也可在播放中按当前进度重建会话。TV 的自动模式遇到 `DDP / E-AC-3` 时禁用压缩音频直通，并加载仅包含 AC-3 / E-AC-3 解码器的 Media3 FFmpeg 扩展输出 PCM；视频渲染器与播放地址不变
+- Android `ExoPlayer（原生）` 的音频输出由 `NativePlaybackAudioPolicy` 和 `NativePlaybackRenderersFactory` 决定；FFmpeg 扩展始终作为备选注册，按实际音轨 MIME 决定 PCM 与 renderer 路由。扩展包含 `ac3 / eac3 / mlp / truehd / dca / mp1 / mp2 / mp3`，不是完整 FFmpeg。TV 自动模式对 E-AC-3/JOC 使用兼容输出，视频策略不随音频回退改变
 
 主流程大致是：
 
 1. 进入播放器页
 2. `PlaybackStartupCoordinator` 解析播放目标，读取本地续播和按剧跳过偏好，并得到路由动作
-3. 如果是 `Emby / Quark`，会在这一步补齐真实播放源和请求头
+3. 按 `Emby / 飞牛 / WebDAV / Quark` 来源解析真实播放地址和请求头；飞牛默认重新协商，已解析的会话切换目标可显式跳过重复申请
 4. `PlaybackStartupExecutor` 按用户选择的播放器内核执行系统播放器、原生容器或内置 MPV 分支
-5. 如果执行结果要求继续走内置 `MPV`，则进入轻量探测和等待态展示
+5. 内置播放进入等待态并直接打开，不做独立 Range 启动预检或测速；SmartStrm 轻量格式探测只服务原生 Exo 分支
 6. 调用内置 `MPV` 打开链并应用启动期调优
-7. 失败自动重试，最多 `3` 次
+7. MPV 临时网络失败在同一启动期限内最多创建 `3` 次播放器（包含首次）；永久与未知错误不无条件重试
 8. 超过配置的最大打开超时时间则终止
 
 当前播放页已落地的能力包括：
@@ -791,7 +852,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 字幕语言识别统一组合轨道 language 与 label，并规范化 ISO/三字码/发布组常用简写：简体覆盖 `zh-cn / zh-hans / chs / chn / chi / zho / cn / sc / 简中`，繁体覆盖 `zh-tw / zh-hant / cht / tc / big5 / 繁中`，英语覆盖 `en / eng / English / 英字`，日语覆盖 `ja / jp / jpn / Japanese / 日字`。MPV、Android Media3 和 iOS AVPlayer 保持同一语义
 - 播放记忆的 `subtitlePreferences` 按 `seriesKey` 持有剧集专属选择指纹：用户在某部剧中手动选择内封字幕、关闭字幕或双字幕后，只覆盖该剧其他集；不会写入 `AppSettings`，电影和其他剧不读取。切集重建播放器时按规范化语言、标题、编码、默认/强制标记和稳定 ID 降权匹配，匹配不到才回退全局默认。外挂/在线字幕文件不进入剧集指纹，避免把单集时间轴套到另一集
 - MPV 与 Android Media3 字幕菜单都暴露“使用全局默认”；该动作删除当前 `seriesKey` 的 `subtitlePreferences` 并立即重新应用 `AppSettings` 的默认状态、默认字幕及双字幕主/副语言。MPV 的底层 `auto` 轨道不再直接展示，避免与全局默认语义混淆
-- 非 `TV` 的内嵌 `MPV` 当前使用 Starflow 自己的轻量播放叠层，而不是 `media_kit` 默认控制条：
+- 非 `TV` 内置播放复用 `media_kit_video` Adaptive Material / MaterialDesktop 控制层，Starflow 提供按钮、主题、留白和设置页适配：
   - 首层只保留返回、播放/暂停、进度、全屏和“更多”；音量、字幕、音轨与其他高级播放项统一收进播放设置弹窗
   - 顶部标题栏、底部控制区和播放设置弹窗都收敛到更官方的 Material 组件组合：`Material + IconButton + Slider + Text + ListTile + TextButton`；手机、桌面和 TV 顶栏都从最左侧返回按钮开始，实时网速紧跟在其右侧
   - `PiP / AirPlay` 入口继续按平台能力显示
@@ -804,7 +865,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
   - `player_page.dart`：页面壳、字段与顶层 wiring
   - `player_page_platform_session.part.dart`：PiP、后台播放、系统播放会话
   - `player_page_startup_mpv.part.dart`：播放启动、打开重试、`MPV` / ISO / 调优链
-  - `player_page_runtime_actions.part.dart`：续播、跳过、字幕、外挂字幕、在线字幕、启动 probe
+  - `player_page_runtime_actions.part.dart`：续播、跳过、字幕、外挂字幕、在线字幕、飞牛画质与轨道切换
   - `player_page_controls.part.dart`：返回、进度、选择器、播放设置、视频 surface
   - `player_playback_options_dialog.dart`、`player_playback_overlays.dart`、`player_playback_dialogs.dart`、`player_tv_playback_widgets.dart`、`player_network_speed_label.dart`：纯展示层组件；旧自定义 `PlayerMpvControlsOverlay` 已删除，非 TV 统一使用 media_kit Adaptive 控制层
 - `lib/core/utils/playback_trace.dart`、`subtitle_search_trace.dart`、`metadata_search_trace.dart` 与 `detail_resource_switch_trace.dart` 仍保留调用点，但当前实现都已静音，不再产生运行时输出
@@ -817,7 +878,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - `App 内原生播放器` 额外已接入：
   - 原生控制条与进度条
   - 本地续播记忆
-  - 在线字幕搜索
+  - Android 在线字幕搜索与挂载；iOS AVPlayer 暂未完成该闭环
   - Android 原生音轨/字幕选择、播放中音频输出切换、外挂字幕加载与外挂字幕偏移
   - Android 原生播放设置弹窗一级只保留本剧跳过片头片尾、音轨、字幕和选择剧集；播放速度、音频输出、主字幕大小、主/副字幕位置、副字幕大小、在线查找字幕、加载外部字幕和字幕偏移全部收进列表最下方的“更多”二级弹窗
   - Android TV 原生控制层只让进度条参与遥控器焦点；播放/暂停及右下角字幕、音轨和更多按钮仍保留显示与点击，但不进入方向键焦点链。确定键由原生遥控器处理层直接切换播放状态。`NativePlaybackRemoteController` 无论控制栏是否可见，按下都统一优先打开选集；没有选集才打开播放设置。选集直接叠加在当前画面上，不主动收起或重新显示控制栏。长按重复不重开，已有弹窗和字幕搜索中的下键交还原界面；菜单键、字幕键快捷入口不变
@@ -830,8 +891,9 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - `searchStructured(...)` 会基于当前播放目标、详情外部 ID 和本地文件信息组装 `OnlineSubtitleSearchRequest`，优先尝试文件哈希、`IMDb ID / TMDB ID`、季集号、年份和标题
 - 结构化源当前支持 `ASSRT API / OpenSubtitles / SubDL`；`ASSRT` Token 来自设置页，未填写时不会访问 API；`OpenSubtitles` API Key 通过 `--dart-define=STARFLOW_OPENSUBTITLES_API_KEY=...` 注入，账号密码来自设置页；`SubDL` API Key 直接来自设置页
 - 多字幕源搜索会并行执行；`OpenSubtitles` 登录态会做短时会话缓存，避免同一轮搜索里重复登录
-- 结构化搜索阶段会先在应用内预下载、验证并筛掉不可直接挂载的结果；页面只展示可直接挂载的 `SRT / ASS / SSA / VTT` 或可解压 `ZIP` 字幕
-- 下载后的字幕会写入当前会话的临时目录 `starflow/online_subtitles/session-.../downloads`；当前不做 `cache-hit` 复用，重新搜索或重新选择时都会生成新的临时文件
+- 结构化搜索只获取元数据；OpenSubtitles 结果保存 `providerFileId`，点选时申请下载链接。手动编辑查询清除旧目标 ID、文件路径与季集条件，页面用 generation 丢弃旧请求和旧下载回调
+- `SubtitleValidationPipeline` 是仓库实际使用的下载管线：流式有界下载、后台 ZIP 选集/语言排序、CRC/格式检查、UTF-8 规范化。`subtitle_content_decoder.dart` 提供共享编码、格式与 ZIP 限制；`subtitle_render_policy.dart` 区分 MPV 文本和位图渲染。详细边界见 [字幕链路](subtitles.md)
+- 下载写入 `starflow/online_subtitles/download-*`，不做跨请求文件复用；仓库按根目录统计和清理全部会话及旧版目录，下载时清理超过 7 天的缓存。MPV 挂载文本数据，Android `NativePlaybackSubtitleFiles` 持有独立副本，正常退出后清理；不因清理下载缓存删除正在播放的文件
 - 播放器页本身不再直接承载全部启动决策；目标解析、路由判定与执行分支已经拆到独立 application 文件，页面层主要负责装配、等待态和内置 `MPV` 运行期行为，便于 controller 级测试和后续替换策略
 - 播放器页 presentation 也已进一步拆开：`player_page.dart` 主要保留会话和流程编排，控制叠层、启动等待态、播放设置弹窗与平台会话子树分别沉到 `presentation/widgets` 与 `player_page_*.part.dart`
 
@@ -845,7 +907,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 媒体源编辑器把 `Emby / 飞牛影视 / WebDAV / Quark` 连接表单下沉到 `media_source_editor_forms.part.dart`，WebDAV 路径统一复用 `WebDavDirectoryPickerPage`，不再维护第二套私有目录浏览器
 - 透明磨砂与简化装饰、减少动画与静态导航、静态 Hero 与精简 Hero 分别合并为三个原子更新的界面开关；菜单栏自动隐藏和 Hero 背景继续独立保存
 - 非 TV 使用标准详情 Hero 与标准播放界面，可单独设置激进 MPV 调优
-- `TV` 固定使用无缩放 / 无阴影的轻量焦点、精简详情 Hero 与精简播放界面，并固定关闭自动更新卡片信息；固定项不在 TV 设置页展示开关
+- `TV` 固定使用轻量焦点描边、精简详情 Hero 与精简播放界面，并固定关闭自动更新卡片信息；轻量描边通过前景绘制隔离内容重绘，组件显式传入的 focusScale 仍生效，部分 chip 仍有自身阴影。固定项不在 TV 设置页展示开关
 - 路由、导航壳和播放器直接消费对应独立设置；不再根据启用项数量推导隐藏的统一性能档位
 - 内置 `MPV` 会在启动前按片源、平台与模式做额外调优：
   - 动态选择前向缓冲与回看缓冲
@@ -891,9 +953,11 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - `NativePlaybackTrackController / NativePlaybackTrackChoices / NativePlaybackTrackModels` 分别负责选轨交互、候选构建/双字幕匹配及轨道模型；`NativePlaybackSubtitleStyleController` 管理全局主/副字幕样式；`NativePlaybackExternalSubtitleController` 管理文件选择、在线搜索返回与挂载，`NativePlaybackSubtitleFiles / NativeSubtitleTiming` 分离 Android 文件访问和纯文本 SRT/VTT/ASS 时间偏移。实际双字幕渲染仍由既有 `NativeDualSubtitleController` 承担。
 - `NativePlaybackRuntimeController` 管理运行循环、watchdog 调度、自动跳过和进度采样；`NativePlaybackDiagnostics` 管理会话性能、带宽与运行日志；`NativePlaybackSystemController` 管理系统会话与画中画。`NativePlaybackMemoryStore` 独立管理 SharedPreferences 快照读写、20 条历史裁剪和剧集字幕/跳过偏好，以显式 key 接收请求并保留强制 commit/普通 apply；`NativePlaybackTarget / NativePlaybackMarkers / NativePlaybackSource / NativePlaybackFormatting` 分别提供目标信息、章节标记、源地址处理和显示格式。
 - Android 原生播放器容器页当前使用原生 `Activity + Media3/ExoPlayer` 承载播放，在 UI 中命名为 `ExoPlayer（原生）`；它会跟随设置选择 `自动 / 硬解优先 / 软解优先` 和独立的音频输出模式
-- Android 原生播放器每次轨道变化都会把音频轨的 MIME、编码标记、声道数、采样率、支持状态和选中状态写入结构化 native 日志；初始化日志同时标记 `audioOutputMode / forcePcmAudioOutput / ffmpegAudioDecoder`
+- Android 原生播放器按实际 `Format.sampleMimeType` 决定音频输出策略，始终注册 FFmpeg 备选；TV 自动 E-AC-3/JOC、PCM 兼容及故障回退禁用对应压缩直通，FFmpeg 支持时将该音频路由到扩展 renderer。`NativePlaybackAudioSink` 包装 context-aware 默认 sink，保留设备能力监测和 PCM 能力查询。系统解码器的软/硬解优先使用稳定排序，不删除其他候选。
+- `NativePlaybackRecoveryController` 只对非 DRM 音频 renderer 的解码/AudioTrack 初始化或写入错误尝试一次 FFmpeg/PCM 重建；网络、视频、已使用 FFmpeg 或库不支持的音频不进入这条恢复。`NativePlaybackSession` 保存位置、暂停、倍速、音量和音轨 Format，在新轨道中按身份匹配并创建新的 override；新媒体清空回退预算，不复用旧 TrackGroup。`NativePlaybackAudioTracks` 同时负责飞牛首次 GUID 匹配，语言别名归一化，序号兜底保留不支持轨且要求两端轨道数量一致，已有用户 override 优先。
+- Android 音频轨变化日志按内容去重，保留 MIME、声道、采样率、支持/选中状态；初始化区分 `ffmpegConfigured / ffmpegAvailable / audioFallbackMime`，真实 decoder 回调及 AudioTrack 初始化记录 decoder 名称、输出 encoding、采样率、声道掩码、offload/tunneling。MPV 在会话结束的有界属性查询中增加音频 codec、输出后端、输入格式、输出声道/采样率和 A/V sync，不新增高频轮询。
 - Android 原生播放器的字幕菜单不使用 Media3 泛化轨道名称，而由 `NativeSubtitleTrackLabelPolicy` 按内置 MPV 的“标题 · 语言 · 默认/强制”顺序生成；`und / zxx` 不显示为语言，外挂字幕优先显示文件名
-- Android 原生播放器的可选双字幕模式由 `NativeDualSubtitleController` 承担：同一 Exo 会话使用主/副两个文本渲染器分别解码两条分离的文本字幕轨，动态能力路由只让副渲染器认领英文轨，再按独立主/副位置输出两个 cue；副字幕字号、主位置和副位置从 Flutter 设置传入，并可在原生“更多”中覆盖当前会话。普通字幕模式仍只启用主文本渲染器，PGS/VobSub/DVB 图片字幕不进入双字幕候选
+- Android 双字幕由 `NativeDualSubtitleController` 管理主/副文本 renderer，按选定轨道的 `NativeSubtitleFormatKey` 路由，不再把副轨写死为英文。样式从 Flutter 全局设置传入，播放内修改经窄保存回调持久化；普通模式只启用主字幕，PGS/VobSub/DVB 不进入双字幕候选
 - Android 原生播放器的跨集字幕恢复由 `NativeSubtitleSessionPreferencePolicy` 匹配新的 `TrackSelectionOverride`；双字幕恢复成功后再重新配置 `NativeDualSubtitleController` 的主/副路由，不保存上一集的 Media3 group 或 override 实例
 - 非 Web 内置 MPV 使用原生 `sid / secondary-sid` 选择两条分离的内封文本轨，同时向 libmpv 写入 `sub-pos / secondary-sub-pos / secondary-sub-scale`；由于当前 `libass=false`，画面上的主/副字幕由 Starflow 自定义 Flutter 叠层分别渲染，保证窗口态与全屏态都使用独立位置和字号。跨集时由 `PlaybackSubtitleSessionPreference` 分别匹配新的 `sid / secondary-sid`。图片字幕和临时外挂字幕不进入特殊模式。播放设置一级通过“更多”打开二级页，二级页同时提供字幕布局、后台播放、手势、卡顿恢复和性能调优开关
 - 非 Web MPV 控制层左上角以返回按钮作为第一个控件，不保留人为前置间距；其右侧网速标签使用轻量轮询读取 libmpv `cache-speed`，展示当前缓存下层 I/O 读取速度。桌面 / 手机 Adaptive 控制层和 TV chrome 复用同一排列与网速组件
@@ -902,7 +966,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - Android / iOS 非 TV MPV 的 `MaterialVideoControlsThemeData.backdropColor` 显式设为 `Color(0x33000000)`，即黑色 `20%` 不透明度（`80%` 透明），普通和全屏共用该主题。遮罩铺满播放器并沿用控件库的显隐动画，不跟随按钮栏留白缩小；手势层保留库内 `16` 逻辑像素系统边缘保护及底栏避让，不再额外缩小。MaterialDesktop 渐变铺满播放器，颜色与强度不变；TV 和启动/错误临时顶栏的背景不变。
 - 视频控制层创建后，非 TV MPV 的 `PlayerStartupOverlay` 通过 `showSpinner: false` 保留启动/缓冲指标但不重复绘制圆圈，缓冲圆圈由 Adaptive 控制层负责；播放器创建前及 TV 保留应用叠层圆圈。
 - MPV 缓冲预算由 `resolveMpvBufferBudget` 统一计算，并通过 Android `starflow/platform -> getMemoryClassMb` 读取 TV 应用内存等级；低内存 TV 将夸克/激进前向缓冲封顶 `96 MB`、回看封顶 `16 MB`，中高内存和非 TV 继续使用原预算。`resolveMpvRemotePlaybackTuningProfile` 还会比较启动速度与片源码率，达到 `2.5x` 且非高风险容器时进入 `fast-start`，否则保留 standard/high-risk 档
-- MPV 打开重试先由 `classifyMpvOpenFailure` 分类，只有临时网络错误才在统一总超时内重建最多 `3` 次；永久资源/权限/格式错误与未知错误不再无条件重复创建播放器。进程内 `PlaybackHostBandwidthCache` 按主机缓存实际播放速度 `10` 分钟，首次播放与切集都只读缓存，不额外发起 Range 预检或测速
+- MPV 打开重试先由 `classifyMpvOpenFailure` 分类，只有临时网络错误才在统一总超时内最多尝试 `3` 次（包含首次）；永久资源/权限/格式错误与未知错误不再无条件重复创建播放器。进程内 `PlaybackHostBandwidthCache` 按主机缓存实际播放速度 `10` 分钟，首次播放与切集都只读缓存，不额外发起 Range 预检或测速
 - 启动编排通过 `_startupGeneration` 在退出或替换会话后使旧异步任务失效，并在解析、打开和重试边界校验；打开失败只清理仍由当前打开链持有的播放器，已 detach 的实例交给退出/替换路径释放。单次打开从开流到首帧、稳定播放共用启动错误信号，不在中间重置；TCP `ffurl_read` 读取失败纳入有限临时网络重试。
 - MPV 的 `_initialize` 在地址解析和本地准备后直接进入 `_openEmbeddedPlayback / _openWithRetry`，移除 `_prepareStartupDiagnostics`、预检拦截、预检 Range 风险状态和预检测速统计。`resolveMpvRemotePlaybackTuningProfile` 的可选 `estimatedMegabitsPerSecond` 来自同主机缓存；缺失时按片源元数据选标准/高风险档，后续经本地 `cache-speed` 更新缓存。`PlaybackRemotePreflight` 仅继续供原生 ExoPlayer 的 SmartStrm 格式探测使用。`playback.startup / playback.mpv` 记录直接打开、启动异常与重试决定，不依赖静音的旧 trace helper
 - 当平滑后的同主机速度低于片源码率 `0.9x` 时，MPV 运行期 hard stall 与 Exo watchdog 保留当前连接继续缓冲并提示；MPV 已失败并释放的开流不受该历史速度门槛限制，仍按错误分类有限重试。
@@ -915,8 +979,13 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
 - Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；`/smartstrm_fid/` 只在目标为 MP4/未知格式时执行最多 `64` 字节、约 `1.5s` 的轻量预检，以 MP4 `ftyp` 或 HLS `#EXTM3U` 文件头优先选择 MediaSource。已知 MKV 等其他容器不再产生额外 Range 探测；其他含 `#/%23` 的 SmartStrm 地址仍保留探测。预检失败或文件头不明确时继续按原格式启动；标准 `/smartstrm/` 与 `/smartstrm_*/` 路径在首次解析错误 `3003` 后仍由 `NativePlaybackHlsFallbackPolicy` 保留进度并强制切换 HLS 一次
 - `NativePlaybackSource.buildRequestHeaders` 只负责构造原生播放请求头：保留目标已有 `User-Agent`，缺失时才补 `Starflow`；`NativePlaybackSession` 不再调用 `DefaultHttpDataSource.Factory.setUserAgent`，避免后写覆盖飞牛 115 直链要求的浏览器 UA。
-- Android 原生 progressive TS 使用 `NativePlaybackExtractorsFactory` 替换默认 `TsExtractor` 的 payload reader。Session 将当前目标 `audioCodec` 传入 factory；`NativeTsPayloadReaderFactory` 仅对 `0x80` 且编码精确匹配 `pcm_bluray`（忽略大小写及首尾空白）或 ES 注册描述符（tag `0x05`）标识 `HDMV` 的流启用 `PcmBluRayReader`。描述符按 TLV 边界解析，截断、过短注册描述符及非 HDMV/冲突注册信息均保留默认 reader，即使目标编码为 `pcm_bluray`。`0x90` Blu-ray PGS 流启用 `PgsReader`，按 PGS segment header 跨 PES 聚合 `PDS / WDS / ODS / END`，只在完整显示集结束时以 `application/pgs` / `S_HDMV/PGS` 提交一个样本，由 Media3 的 `PgsParser` 转成位图 cue；seek 会丢弃未完成的显示集。未使用 PMT program-level 描述符或读取媒体包猜测；无证据的 NAS/STRM `0x80` 仍走默认 `DC2/H.262`。reader 按 HDMV LPCM header 解析标准双声道 48/96/192 kHz、16/20/24-bit 数据并输出 PCM16；其他流类型继续使用 Media3 默认 reader 和 flags。该改动不作用于 HLS extractor 或内置 MPV。
-- `PcmBluRayReader.createTracks` 提前注册音轨，格式在完整音频头可用时发布；每个 PES 开始重置四字节头和残片，TS 分片之间只输出完整双声道采样帧，余数从输入读取到独立残片缓冲。`sampleData` 使用 `(data, length, SAMPLE_DATA_PART_MAIN)` 契约，时间戳按累计采样帧数计算，避免逐片舍入漂移；缺失 PTS 时延续已建立的时钟，seek 清除时钟、包头和残片，不支持的包跳过剩余数据并允许下一包重新解析。
+- Android 原生 progressive TS 使用 `NativePlaybackExtractorsFactory` 替换默认 `TsExtractor` 的 payload reader。Session 将当前目标 `audioCodec` 传入 factory；`NativeTsPayloadReaderFactory` 仅对 `0x80` 且编码精确匹配 `pcm_bluray`（忽略大小写及首尾空白）或 ES 注册描述符（tag `0x05`）标识 `HDMV` 的流启用 `PcmBluRayReader`。描述符按 TLV 边界解析，截断、过短注册描述符及非 HDMV/冲突注册信息均保留默认 reader，即使目标编码为 `pcm_bluray`。未使用 PMT program-level 描述符或读取媒体包猜测；无证据的 NAS/STRM `0x80` 仍走默认 `DC2/H.262`。reader 解析 HDMV 布局 1/3/9/11（单声道、双声道、5.1、7.1）的 48/96/192 kHz、16/20/24-bit 数据，移除填充并重排为 Media3 PCM16 顺序；高位深截取高 16 位，其他布局明确抛出不支持错误。默认 reader factory 额外启用 `FLAG_ALLOW_NON_IDR_KEYFRAMES`，由 Media3 识别 H.264 非 IDR I slice，避免开放 GOP 在 seek 后无关键帧可读；不启用其他 TS flags，不影响 HLS extractor 或内置 MPV。
+- `0x90` Blu-ray PGS 流由 `PgsReader` 按 segment header 跨 PES 聚合 `PCS / PDS / WDS / ODS / END`，完整显示集以 `application/pgs` / `S_HDMV/PGS` 提交给 `NativeSubtitleParserFactory` 的 `BoundedPgsParser`。显示时间锁定为 PCS 开始处的 PES PTS，即使 segment header 跨包也不被后续 PTS 覆盖；缺少 PCS 时 reader 保留首段时间，parser 不推测缺失的组合对象。新 PCS 会抛弃缺失 END 的旧显示集，单个显示集最多缓存 `4 MiB`，超限后忽略至 END 或新 PCS；seek 清空组装状态。PGS parser 按 ID 管理对象/调色板，支持多对象、裁剪、窗口和正常组合复用；epoch/acquisition 清缓存。对象编码缓存上限 `8 MiB`，sample/解压上限 `4 MiB`，组合像素上限 `3840 × 2160`。`BoundedVobsubParser` 基于 Media3 1.10.1，增加循环前进与分配边界；DVB 保留上游解码但预检资源并修正 offset。progressive extractor 按自身作用域记录 parser，seek/release 显式 reset，TS PGS/DVB 连续性中断按 format ID reset。MediaSource 字幕入口使用同一工厂，Blu-ray `0x90` 自定义识别不扩展到 HLS。详细限制见 [字幕链路](subtitles.md)。
+- `NativePlaybackExtractorsFactory.TS_TIMESTAMP_SEARCH_BYTES` 将 progressive TS 的 PCR 搜索窗口设为 `6000 * 188 = 1,128,000` 字节（默认 `600 * 188`）。高码率 / 可变码率 TS 的相邻 PCR 可相隔数百 KiB，旧窗口找不到 PCR 时，Media3 `TsBinarySearchSeeker` 会退出二分定位并从估算字节位置读取；首尾搜索不到 PCR 还会让 `TsDurationReader` 无法确定时长。扩大的有界窗口同时供这两个原有组件使用，不自建 seek 算法，不改变其他容器、HLS、MPV 或加载策略。回归测试直接调用 Media3 定位器和时长读取器，用稀疏 PCR 流验证旧窗口的错误落点及新窗口的收敛；这不代替 TV 解码和字幕屏幕位置验证。
+- `NativeSubtitleRenderer` 包装 Media3 `TextRenderer`，将其 cue 回调留在播放线程，再由 `NativeSubtitleOutput` 单槽队列交付 UI。PGS/VobSub/DVB 每轮最多追赶 32 次，`BitmapSubtitleSampleStream` 最多允许一条未来样本进入 resolver，保持外部原 stream 身份与 offset 语义；后续每帧仍调用 render 以推进显示/清屏。到达追赶上限时保留最后状态但暂不发 UI，下一轮继续。主、副 renderer 各自持有状态；reset/disable 清除旧更新，disable 通过公开 position reset 清理 resolver，release 关闭输出。Media3 继续负责 cue 替换和时间轴，不改 PGS PTS。`lagMs` 超过 1 秒时最多每 5 秒记录一次，其余维持 30 秒限频，它不是解码耗时；`subtitle.decode` 另记录 PGS 解码耗时/像素/编码缓存，`subtitle.decode.drop` 记录丢弃原因，`subtitle.catch-up` 记录追赶批次，均限频且不含字幕正文。
+- MPV 的 `MpvSubtitleRenderBinding` 独立管理字幕可见性，订阅 track、tracks 及原生 sid，解析 auto 的实际轨道并容忍迟到元数据；串行合并属性写入、检查关闭状态、失败写结构化日志。`subtitle_render_policy.dart` 统一渲染、双字幕、偏好指纹和飞牛外挂的 codec/image 判定。绑定不修改 sid，不抢用户选轨；关闭时解除观察及订阅。
+- 原生运行期日志另记录 `awaitingVideoFrameAfterSeek`：存在已选视频轨时在 seek 回调中置位，收到 `onRenderedFirstFrame` 后清除，创建新播放器时重置。与历史 `firstFrame` 分开，便于区分“本会话曾出画面”和“此次快进已恢复画面”；该标记只用于诊断，不把字幕输出或播放时钟推进视为视频出帧，也不新增自动恢复策略。
+- `PcmBluRayReader.createTracks` 提前注册音轨，格式在完整音频头可用时发布；非法布局、位深、采样率、payload 长度或 PES 边界截断的音频头明确失败，不静默等待 Format。完整采样帧使用固定 24 字节 scratch，输出复用 30,720 字节缓冲和 ParsableByteArray，最多 10 ms 或 PES 完成时提交。`sampleData` 遵循 `(data, length, SAMPLE_DATA_PART_MAIN)`，时间戳按累计采样帧数计算，缺 PTS 时延续时钟，变采样率先折算上一段时长；seek 清除时钟、包头和残片。未完成的采样帧不跨 PES 拼接。
 - `NativePlaybackSession` 保持其他容器的 extractor、HLS 工厂、load control 档位及启动预算不变；`1004` 本身不是 HLS 格式证据，不据此强制回退 HLS。
 - Android 原生启动通过 `buildDeferredNativeEpisodeQueue` 携带当前季的完整未解析队列并保留真实 `currentIndex`，只用已解析目标替换当前条目；原生选集、上一集、下一集和播放结束自动续播统一通过 `starflow/native_playback_resolver` 回调 Flutter，按选中的单集执行 `PlaybackTargetResolver` 和必要的 SmartStrm MP4/HLS 探测。异步解析期间旧播放器不释放，成功后才更新队列条目并切换，失败或会话变化则保留当前视频
 - Android TV 原生播放器内切换远程剧集时，`releasePlayer()` 先清理旧 Exo、Surface、Analytics/带宽监听、运行循环、看门狗和系统媒体会话；新集不继承旧 URL、MediaSource 或缓冲数据。低内存 TV 的内部切集档使用 `minBuffer=30s / start=6s / rebuffer=12s / target=48 MB`，首次外部启动继续使用原快启档。`native.queue.old-player-released` 与 `native.buffer-policy episodeSwitchWarmup=true` 用于验证两段边界
@@ -937,6 +1006,12 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - Android / iOS 播放记忆仓库使用带 `reload()` 的 shared preferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v1`；返回前台时递增播放历史 revision 使首页和详情页重新读取
 - Android 原生播放器每 `10s` 记录一次位置、时长、缓冲位置、缓冲比例、播放态、首帧状态与视频尺寸；位置不连续事件单独记录旧/新位置和 Media3 原因码
 - Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 的 `native_network_speed` 不设置独立背景，直接使用所在顶栏的背景，保留原文字样式和间距。手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
+- 选集初始定位在首次绘制前完成：Flutter 在 `LayoutBuilder` 中按当前分段、行高和实际视口高度设置 `ScrollController.initialScrollOffset`，由当前集 autofocus 接收焦点，不再首帧后 jump；Android 预先构建条目，在一次性 `OnPreDrawListener` 中请求当前集焦点并 `scrollTo`，抑制初始焦点回调的平滑滚动。打开后的遥控器浏览继续沿用原有滚动行为。
+- 播放器弹窗经 `showPlaybackMenuDialog` 统一挂载 `PlaybackMenuTheme`，背景唯一配置为 `playbackMenuBackground = #CC18181B`（80% 不透明），禁用 surface tint 和 elevation，避免叠加背景使透明度失真；选集及各级设置菜单不单独重复配置。退出确认通过通用 action dialog 的可选 `dialogWrapper` 接入主题，其他页面不受影响。Android 的 `NativePlaybackSettingsDialogTheme` 仅由 windowBackground 绘制 `native_settings_background = #CC18181B`，内容 colorBackground 透明，选集自绘底板复用同一颜色。前景控件及各入口原有遮罩保持不变。
+- 选集结构切换（季、布局、分段、定位）复用绘制前定位：Flutter 用布局代次更换滚动子树和初始 offset，旧控制器在卸载后释放，过时代次不请求焦点；同段方向移动直接更新焦点和滚动，不调用面板 setState。Android 仅保留一个待执行 pre-draw listener，同段焦点回调只发起一次居中，不再 post 重复滚动，关闭移除 listener。
+- 列表/网格偏好使用 `episode_picker_layout`（`list`/`grid`），Flutter 经 `SharedPreferencesStore.reloading` 在打开前读取；Android 使用 `FlutterSharedPreferences` 的 `flutter.episode_picker_layout`，两种播放器共享本地模式。仍以当前播放集初始化位置，不记忆临时浏览位置。每段保留 30 集，网格左右停止在本行边界，上下跨段使用段内列号，缺列夹紧到可用项；剧集首尾分别连接标题右侧的列表模式按钮和底部定位按钮，按钮反向可返回剧集。主面板移除关闭 X，保留返回关闭。
+- 切季保留旧队列、标题和条目，固定高度状态区显示加载/错误，加载中禁止确认旧集；成功提交新队列和季标题后再定位，失败保留旧内容并支持重试。Flutter 单独维护待加载季，空季按失败处理；定位当前集使在途结果失效。窄网格集号保持单行，Flutter 必要时缩小，Android 超长集号省略。
+- 选集样式统一为深灰面板、6dp 控件圆角、44dp 工具按钮及 22dp 图标。标题右侧排列列表/网格切换；36dp 副标题行合并季名与总集数，作为选择季入口。列表加载/错误原位替换副标题，网格另设 28dp 焦点信息行显示标题/状态或加载/错误。布局选中态用低亮灰底，焦点使用白色描边；Flutter 用独立 ValueNotifier 局部更新信息行，Android 只更新 TextView。TV 列表使用 16/13 字号，手机为 15/12；列表与网格统一 72dp 行高，条目垂直内边距 4dp；Flutter 行距 1.2，Android 标题/状态关闭额外字体 padding，以容纳双行中文标题和状态。滚动定位与渲染共用行高。播放标记和进度线统一青绿色，网格采用角标而非格内小字，补充语义标签；原生使用本地 Material 风格 vector 图标替代平台旧图标，分段箭头不再使用媒体上一集/下一集图标。
 - Exo 手机 / TV 布局的 `exo_play_pause` 直接放在 `exo_bottom_bar` 左侧、播放时间前面，时间行预留按钮宽度及间距，使用 48dp 按钮及无描边的圆形半透明背景，并随底栏收起。TV 在 XML 和运行时均禁用该按钮焦点，保留状态显示及点击；`PRIMARY` 改为 `exo_progress`，不可聚焦时回退播放器容器。手机中央控制组仅保留快退/快进，播放/暂停仍加入底栏横向焦点链并保留焦点高亮。
 - MPV 启动和错误状态的 `PlayerAdaptiveTopChrome` 共用 `playbackControlsPadding` 的系统 `viewPadding` 加上下各 `6`、左右各 `12` 逻辑像素规则（临时顶栏将底部 padding 置零），与 Material / MaterialDesktop 控制层共用 `playbackButtonBarHeight = 56`；不叠加其他边距，按钮垂直居中，显隐和点击行为不变。
 - `NativePlaybackRemoteController` 在 TV 进度条持焦且无字幕搜索/设置弹窗时接管确定键：仅首次 `ACTION_DOWN` 调用 `togglePlayback`，消费重复按下和抬起事件，刷新控制栏显示但不转移进度条焦点。左右方向键仍由既有 TV seek 策略处理。
@@ -947,11 +1022,11 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - `NativePlaybackHostBandwidthCache` 在当前原生 Activity 内按主机保留 `10` 分钟带宽；`NativePlaybackBufferPolicy` 用带宽/片源码率的 `2.5x / 1.25x` 阈值选择 fast/balanced/constrained 启动与二次缓冲参数，但目标缓存字节仍由内存等级和重片源档位约束
 - Flutter MPV 与 Android Exo 分别通过 `PlaybackPerformanceTracker / NativePlaybackPerformanceTracker` 汇总同一组会话指标，并统一写入 `playback.performance`：首帧、缓冲次数与累计时长、恢复次数、速度 min/avg/max、片源码率及比值、解码器/硬解、掉帧、音频欠载和缓冲预算。首帧记录一次，会话切集、失败或退出时记录一次摘要
 - Flutter 启动层额外记录 `targetResolutionMs / startupToFirstFrameMs`，用来把播放地址解析时间与播放器自身首帧时间分开；这条记录不增加网络请求
-- iOS 原生播放器容器页当前使用原生 `AVPlayerViewController` 全屏承载播放，不退出 App；它会复用同一份续播记忆，并补了在线字幕搜索入口，但解码走系统链路，当前不提供软硬解切换或字幕偏移
+- iOS 原生播放器容器页使用 `AVPlayerViewController` 全屏承载播放，复用续播与系统字幕选择记忆；在线搜索到外挂挂载的闭环尚未完成，不提供双字幕、软硬解切换或字幕偏移
 - iOS 原生播放器切集前从 `currentMediaSelection` 读取当前系统字幕选择，下一集的 legible group 可用后按语言与显示名称恢复；没有匹配项时回退全局自动字幕策略
 - “从头播放”不再从历史构造临时目标。Hero 根据 `hasMatchedResource` 提供无参数解析回调，点击后 `DetailStartPlaybackResolver` 只接收当前详情：影片使用自己的播放目标（尚未补全时按来源 / 分区查找匹配资源）；系列按来源季列表顺序取最前面的季，再复用 `sortEpisodesForDetailBrowser` 选择最前面的可播放剧集；无季分组时直接排序剧集。起点不受历史、当前选中季或 S01E01 编号限制，目标集使用自己的直链、版本、请求头和字幕信息，统一设置 `allowResume=false`。续播回调直接返回 `allowResume=true` 的历史目标。两个回调共用启动锁、跳转和错误处理，解析中保持按钮挂载，失败后释放锁供重试；从头入口在所有内置引擎从 0 开始，不应用片头跳过
 - 有续播目标时 Hero 操作顺序固定为“继续播放 / 从头播放”，继续播放作为 Hero 的默认 TV 焦点，并在操作区上方明确展示“上次播放：第 X 季 · 第 Y 集 · mm:ss”；系列详情加载出历史剧集后只滚动到该集，不把焦点从继续播放移走。播放版本仍限定在单集详情页，系列页的剧集卡片不新增版本弹窗
-- Hero 续播查询按 `PlaybackResumeDetailLookup` 的播放身份复用；初次历史查询完成（或失败）后才挂载播放操作及其默认焦点。操作使用稳定 key，`DetailHeroContent` 维护共用启动锁，覆盖旧会话清理和播放器路由存活期，异常或返回后解除。
+- Hero 从共享 `playbackMemorySnapshotProvider` 同步派生续播入口；“从头播放”只依赖已匹配资源，历史读取只控制自动首焦点和续播信息。操作行使用稳定 key，`DetailHeroContent` 维护共用启动锁，覆盖旧会话清理和播放器路由存活期，异常或返回后解除。
 - 详情页初始化在恢复缓存、版本选择及按需刷新完成前不订阅 `enrichedDetailTargetProvider`，避免首帧补全与缓存恢复并行竞争；恢复失败时仍放行补全。种子目标改变时清理详情保留态，新目标立即生效，同一种子重载继续保留已有展示；系列保留态仅在系列请求身份变化时清理。
 - 系列保留态单独按 `DetailSeriesBrowserRequest` 隔离，不随元数据对象变化清空；请求身份包含源、系列和分区 ID，不包含分区显示名。初始化读取共享播放历史，预载历史季而非固定第一季，浏览器保存已加载季；剧集匹配优先播放身份，再在同源内按季集编号回退。首次水平定位使远端卡片被构建并滚动可见，但不请求焦点；手动切季取消待执行的初始定位，元数据重建不再次滚动。卡片进度同步派生自共享快照，避免每卡异步查询闪动。
 - 详情页播放入口统一通过 `activePlaybackLaunchInProgress` 协调，Hero 按钮和剧集卡片共享同一启动锁，禁止清理旧会话或路由期间再次发起播放。详情页从播放器返回后保留系列浏览器的季选择、滚动位置和已加载季。
@@ -960,7 +1035,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 桌面端系统播放器通过临时 `.m3u` 交给系统默认视频应用
 - 重型视频不会再因启发式规则自动改变播放器路径；内置 MPV 仅在当前会话内按片源调整缓冲与解码参数
 - 内置 `MPV` 会跟随设置切换解码模式；系统播放器无法稳定回传进度，且解码方式由外部播放器自行决定，因此续播记忆只在内置 `MPV` 和 App 内原生播放器里生效
-- 自动跳过片头片尾支持内置 `MPV` 和 Android `ExoPlayer（原生）`；本轮提前解析与直接切集链路只修改 Android ExoPlayer。
+- 自动跳过片头片尾、结束边界前 30 秒预解析下一集和直接切集均支持非 Web 内置 MPV 与 Android Exo；iOS AVPlayer 不参与这条应用层自动跳过链路。
 - 字幕偏移当前支持内置 `MPV` 与 Android 原生播放器的外挂字幕链路；iOS 原生播放器暂未提供字幕偏移
 
 播放器默认偏好目前包括：
@@ -1039,7 +1114,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 主字幕大小、主字幕位置、副字幕位置、副字幕大小
 - 在线字幕来源
 - 各在线字幕来源的专属配置（`ASSRT Token / OpenSubtitles 账号密码 / SubDL API Key`）
-- 在线字幕优先语言（`简体中文 / 繁体中文 / 英语 / 日语`，可多选；不选时按字幕结果和系统语言自动处理）与单次最多验证条数
+- 在线字幕优先语言（`简体中文 / 繁体中文 / 英语 / 日语`，可多选；不选时按字幕结果和系统语言自动处理）与单次最多结果数（保留旧存储键，不进行搜索期验证）
 - 播放器内核
 - 简化界面特效（关闭透明磨砂并减少装饰）
 - 减少界面动画（减少动画并使用静态导航切换）
@@ -1058,10 +1133,10 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 播放设置在页面结构上额外做了分组：
 
 - 播放页放播放器内核、解码模式、ExoPlayer 音频输出、打开超时、后台播放、默认倍速
-- 字幕收拢到独立的“字幕”一级页：字幕默认状态、默认字幕、主字幕大小、主/副字幕位置、副字幕大小、在线字幕来源与凭据、在线字幕优先语言、单次最多验证条数
+- 字幕收拢到独立的“字幕”一级页：字幕默认状态、默认字幕、主字幕大小、主/副字幕位置、副字幕大小、在线字幕来源与凭据、在线字幕优先语言、单次最多结果数
 - 主字幕大小、主字幕位置、副字幕位置和副字幕大小属于全局字段；设置页的步进项每次点击立即入有序保存队列，MPV 播放内修改走 `savePlaybackRuntimePreferences(...)`，Android 原生播放内修改经 Flutter 回调走 `savePlaybackSubtitleStylePreferences(...)`，三条路径最终写同一组 `AppSettings` 字段
 - 主/副字幕位置统一使用 `50%–100%` 范围；设置页使用 `1%` 步进，MPV 播放内“更多”使用 `5%` 步进。Exo 的 `NativePlaybackNumberPicker` 使用加减按钮与原生 `SeekBar`，并支持整数或小数步长：主字号 `20–78`、主/副位置 `50–100`、副字幕大小 `50–120` 均以 `1` 为步长，倍速 `0.75–2.0` 以 `0.05` 为步长，外挂字幕偏移 `-30s–+30s` 以 `100ms` 为步长。遥控器左右键及按键重复由 SeekBar 处理；打开时不写入设置，每次实际变化由对应控制器立即应用并走既有保存回调，完成/返回不回滚。字幕偏移连续输入按 `250ms` 合并后重建字幕，避免滑杆拖动时反复创建媒体项。弹窗在 `show()` 前设置顶部 gravity 并清除背景变暗，显示后的回调只申请滑杆焦点，因此首帧就位于顶部且不会从中央跳动；关闭仍走 `showTransientDialog` 恢复焦点。设置页和 MPV 的副字幕大小仍为 `5%` 步进
-- Exo 的 `NativePlaybackSubtitleStyleController` 将现有 `SubtitleView` 挂入 `PlayerView.overlayFrameLayout`，保持 Media3 cue 更新与控制栏层级，字幕布局覆盖整个播放窗口而不受视频宽高比和上下黑边限制。`NativeSubtitlePositionPolicy` 将位置完整映射到 `0.5–1.0`，普通文本 cue 清除内嵌垂直 line 后使用 `0–0.5` 底部留白，保留其余样式和位图 cue；双字幕使用 `ANCHOR_TYPE_END` 使主/副字幕块底边分别对齐所选百分比。`100%` 不再被截到 `95%` 或强制保留 `5%` 底部安全区；字体自身的字面留白仍由 Media3 排版决定
+- Exo 的 `NativePlaybackSubtitleStyleController` 保存现有 `SubtitleView` 的原视频比例父容器；文本字幕挂入 `PlayerView.overlayFrameLayout`，覆盖整个窗口及黑边，PGS 等位图 cue 则挂回原视频比例区域，保留视频平面的原始坐标和尺寸。`NativePlaybackCoordinator.onCues` 按非空 cue 是否含位图更新父容器，空 cue 只清屏、不在字幕间隙和 seek 时来回迁移；重复样式应用保持当前坐标区域，切回文本恢复全窗口定位。继续使用同一个 SubtitleView 和 Media3 的 cue 更新，不增加第二个字幕 renderer。`NativeSubtitlePositionPolicy` 将文本位置完整映射到 `0.5–1.0`，普通文本 cue 清除内嵌垂直 line 后使用 `0–0.5` 底部留白，保留其余样式和位图 cue；双字幕使用 `ANCHOR_TYPE_END` 使主/副字幕块底边分别对齐所选百分比。`100%` 不再被截到 `95%` 或强制保留 `5%` 底部安全区；字体自身的字面留白仍由 Media3 排版决定
 - 内置 MPV 的触屏交互、卡顿自动恢复和激进性能调优保留在全局设置的独立“MPV”一级页；播放器内的播放设置一级只提供“更多”入口，二级页复用同一组持久化字段，并额外集中提供后台播放与主/副字幕布局
 - 三个页面都不再维护需要手动提交的页面草稿：选择、开关和步进项修改后立即排入持久化队列，文本输入使用 `250ms` 合并窗口；返回时会先把最后草稿加入有序写入队列，再立即关闭页面，不再显示保存确认框或工具栏提交按钮
 - 三个全局设置页各自只写自己那段字段：播放页走 `savePlaybackPreferences(...)`、字幕页走 `savePlaybackSubtitlePreferences(...)`、MPV 页走 `savePlaybackMpvPreferences(...)`；播放器内二级“更多”使用 `savePlaybackRuntimePreferences(...)` 原子保存其当前完整快照，避免连续操作互相覆盖
@@ -1120,11 +1195,11 @@ Android TV 下的设置页还额外做了遥控器适配：
 - 多个二级设置页的主要按钮支持焦点可达；整页设置采用自动保存，不再提供单独的保存焦点目标
 - iOS 的设置路由保留平台原生转场和边缘返回手势；TV 与其他平台继续使用零时长设置转场。WebDAV 目录选择页的返回只取消本次选择，“选这里”才返回新目录
 - 二级、三级设置页面的页头统一只渲染标题；页级说明文字已移除，条目级 subtitle 与必要的操作提示继续由具体组件承载
-- 长列表中的焦点会尽量停在屏幕中部，滚动容器随焦点一起平滑移动
+- 长列表沿用默认方向寻焦与可见性滚动，不强制每次居中；首页及选集等需要居中的路径由各自组件显式处理
 - 媒体源、搜索服务、豆瓣账号、网盘与转存等编辑页里的文本项会先显示成可聚焦条目，再进入独立编辑弹窗
 - 播放、界面与性能后台页面从一级分类直接进入，每页首个条目具有明确 TV 初始焦点
-- 多数设置编辑页已经统一到同一种工具栏、保存按钮、危险操作按钮和选择条目样式
-- 仍有少量弹窗和编辑流需要继续补齐焦点细节
+- 多数设置编辑页统一标题栏、自动保存、危险操作和选择条目样式；整页不保留手动提交按钮，输入弹窗的“保存”只提交该字段
+- 公共按键去重、文本编辑及二级页缺焦恢复的核对范围与真实遥控器／输入法复测项见 [TV 焦点清单](tv-focus.md)
 
 ## 12. 本地持久化
 
@@ -1166,10 +1241,8 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 用于保存：
 
-- 当前会话下载的在线字幕 `starflow/online_subtitles/session-.../downloads`
-- 同一会话里再次选择同一字幕时，可优先复用已下载文件
-- 结构化在线字幕验证缓存 `starflow/validated_online_subtitles`
-- 新链路预下载后筛出的可直接挂载字幕文件
+- 点选下载并验证后的在线字幕 `starflow/online_subtitles/download-*`；每次下载生成新目录，不复用旧链接
+- 旧版 `session-*`、`starflow/validated_online_subtitles` 与 `native_subtitles` 纳入统一统计和清理，不再生成旧式验证缓存
 
 ### Sembast
 
@@ -1200,13 +1273,13 @@ Android TV 下的设置页还额外做了遥控器适配：
 - Android 主清单显式声明了 `INTERNET`、`ACCESS_NETWORK_STATE` 和明文流量支持，保证 TV 端能访问局域网与在线元数据资源
 - Android 当前实际最低兼容版本固定为 `API 23 / Android 6.0`
 - Release APK 当前启用了 `v1 + v2` 签名，兼容老一些的电视安装器
-- 当前 Release APK 仍使用本机 debug keystore 签名；如果设备里已有其他签名的旧版 `com.example.starflow`，覆盖安装会失败，需要先卸载旧包
+- 当前 Release APK 仍使用本机 debug keystore 签名；如果设备已有不同签名的 `com.example.starflow`，不能覆盖安装。优先保持原签名，卸载前先备份重要配置和数据
 - `TvMenuButtonScope` 用来把菜单键语义统一上抛到页面壳
-- `TvReturnToTopScope` 与 `TvDirectionalFocusBoundary` 只负责页头回顶和方向越界；普通候选仍由 Flutter 默认策略决定
+- `TvDirectionalFocusBoundary` 处理方向越界，页头／Hero 路径由页面显式动作负责；不存在单独的 `TvReturnToTopScope`，普通候选仍由 Flutter 默认策略决定
 - 首页、搜索、媒体库、详情与设置页不再挂载空的焦点记忆作用域，也不做坐标校验或反向候选拦截
 - 首页 Hero 的翻页焦点只会请求已挂载且可用的按钮；单项 Hero 按左直接回到主菜单。媒体库首页则只让顶部筛选项申请初始焦点，异步加载的合集与网格不再竞争首焦点
-- `TvFocusableAction` 在垂直滚动容器里会尝试把焦点项保持在视口中线附近，降低 TV 遥控器纵向浏览时的视线跳动
-- `TvFocusableAction` 的焦点视觉态已经改成局部 `ValueNotifier` 更新；TV 固定使用无缩放、无阴影的轻量高亮
+- `TvFocusableAction` 不自行调度居中滚动，普通遍历遵循 Flutter 可见性策略；首页恢复和选集等业务路径单独定位
+- `TvFocusableAction` 使用自身 State 更新焦点外观，海报使用局部 ValueNotifier；TV 轻量描边不否定控件显式缩放和 chip 自有阴影
 - `SettingsTextInputField` 会在 TV 模式下把页面内文本输入改成“设置条目 + 弹窗编辑”交互；弹窗输入框局部保留上下键退出处理，减少焦点被输入法占据的情况
 - 配置管理当前按平台分支：
   - Android TV 使用应用内局域网传输
@@ -1215,7 +1288,7 @@ Android TV 下的设置页还额外做了遥控器适配：
   - 其他 IO 平台继续使用目录 / 文件选择器
 - IO / Web 平台对本地数据库、图片缓存、配置导入导出各有分支实现
 
-平台外部图标资源当前也统一走同一条导出链路：
+启动等待与启动界面：
 
 - `BootstrapController` 在原有首页预热/刷新调度后调用 `waitForHomeModules`，并发等待所有已启用模块的 `homeSectionProvider.future`（包括缓存整理）；各模块失败独立处理，5 秒超时由启动阶段降级逻辑放行。此等待仅用于启动，不改变首页手动刷新行为，也不等待海报解码或全库扫描
 - `BootstrapController.start()` 使用单个 `10s` 总截止计时器覆盖所有启动阶段，正常完成时提前取消，provider 销毁时取消并释放等待；配置读取 `3s`、首页模块 `5s` 阶段上限保持不变。总超时标记启动完成并记录 `app.bootstrap` 本地警告（阶段、超时毫秒数），不取消底层已发出的异步操作；各异步边界检查 provider 存活与启动完成状态，迟到成功/失败不覆盖完成状态、不继续触发后续阶段或重复首页刷新。此上限从 Flutter 启动编排开始计算，不覆盖原生初始化或主线程同步阻塞
@@ -1226,15 +1299,19 @@ Android TV 下的设置页还额外做了遥控器适配：
 - 原生启动页只保留背景：Android 的 layer-list 不加载位图，Android 12+ 显式使用 `transparent_splash_icon`，iOS storyboard 移除 LaunchImage 视图及其约束。Flutter 初始化流程保持不变；导出链保留的原生启动图片当前不参与展示
 - Flutter `BootstrapPage` 的 Logo 和字标始终静态显示，固定大小、位置与不透明度，不执行淡入、缩放、位移或循环动画；不订阅启动进度或减少动画设置来驱动视觉变化。启动完成由独立的状态监听注册帧后首页跳转，并调用 `ensureVisualUpdate()` 主动请求帧，避免静态页面在 release 模式空闲时一直等待回调；跳转前仍检查 `mounted`
 
+平台外部图标资源统一走同一条导出链路：
+
 - Android、iOS、macOS、Web、Windows 的外部 App Icon 都由 `tool/generate_brand_assets.py` 生成
 - Android TV Banner 也由同一脚本生成
 - 启动页首帧图标、Android 启动页主图与 iOS 原生 LaunchImage 也由同一脚本同步生成，保留原图完整构图
 - Android 启动器小图标与 TV 横幅里的 Logo 复用同一份 `assets/branding/starflow_logo_source.png`
 - 小尺寸外部图标采用 Lanczos 缩放，不额外锐化；iOS 默认与深色模式 App Icon 都使用无透明通道的 RGB，深色外观由 `assets/branding/starflow_ios_dark_icon_source.png` 生成并在 Asset Catalog 中绑定
-- 旧版品牌文件和生成脚本保存在 `backups/branding/2026-09-07-before-logo-replacement.zip`，不参与运行时资源打包
+- 旧版品牌归档说明位于 `backups/branding/README.md`；历史 ZIP 是被忽略的本机产物，干净克隆可能不含该文件，不参与运行时打包
 - 当前约定以 `build/brand_assets/starflow_app_icon_master.png` 作为统一母版，再缩放到各平台资源，避免手工替换时出现偏移或不对称
 
 ## 14. 测试覆盖
+
+测试入口与各次执行快照见 [主机验证](performance.md)，真实显示、音频、网络和生命周期验收见 [设备性能](performance-device.md)。2026-09-20 早段 Flutter 全量通过，Android JVM 有一个选集外观源码断言失败和一个可选样本测试跳过；之后工作区继续变化，未重新全量验证。不要将下列“覆盖”理解为最新工作区或所有平台验收通过。
 
 当前 `test/` 已覆盖的重点包括：
 
@@ -1245,14 +1322,18 @@ Android TV 下的设置页还额外做了遥控器适配：
 - 详情缓存
 - 页面级 `RetainedAsync` 保留态控制器
 - `Emby / WebDAV` 客户端
+- 飞牛协议、播放解析、转码会话、进度队列与迟到结果清理
 - `WebDAV` 识别与索引
 - `NasMediaIndexer` 分组、增量刷新和并发预算
 - 空库自动重建后台调度
 - 元数据客户端
 - 搜索 provider 与搜索仓库
 - 夸克保存和 `SmartStrm`
+- 115 保存 / 同步删除、公共目录规划与名称清理、每设备收藏同步
 - 播放记忆与最近播放排序稳定性
 - 播放启动准备与路由判定
+- 在线字幕协议、ZIP / 编码限制、缓存、语言契约及原生 cue 生命周期
+- Android 音频策略、LPCM / PGS reader、单次音频回退及状态恢复（JVM，不等于 ARM 解码）
 - 统一网络错误分类、超时、幂等重试边界与按主机熔断
 - 本地日志轮转、脱敏、原生日志合并、预览与导出
 - 首页模块和元数据预取的共享并发值及独立首批预算

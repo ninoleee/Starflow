@@ -809,6 +809,10 @@ AppSettings _removeMediaSourceReferences(AppSettings settings, String rawId) {
         )
         .toList(growable: false),
     networkStorage: settings.networkStorage.copyWith(
+      syncDelete115WebDavDirectories: settings
+          .networkStorage.syncDelete115WebDavDirectories
+          .where((directory) => directory.sourceId.trim() != sourceId)
+          .toList(growable: false),
       syncDeleteQuarkWebDavDirectories: settings
           .networkStorage.syncDeleteQuarkWebDavDirectories
           .where((directory) => directory.sourceId.trim() != sourceId)
@@ -826,8 +830,9 @@ AppSettings _reconcileMediaSourceReferences(
   required MediaSourceConfig current,
 }) {
   if (previous == null ||
-      mediaSourceResourceIdentity(previous) ==
-          mediaSourceResourceIdentity(current)) {
+      (previous.name == current.name &&
+          mediaSourceResourceIdentity(previous) ==
+              mediaSourceResourceIdentity(current))) {
     return settings;
   }
   HomeModuleConfig remapHomeModule(HomeModuleConfig module) {
@@ -846,27 +851,32 @@ AppSettings _reconcileMediaSourceReferences(
     );
   }
 
+  List<NetworkStorageWebDavDirectory> remapDirectories(
+          List<NetworkStorageWebDavDirectory> directories) =>
+      directories
+          .map((directory) {
+            if (directory.sourceId.trim() != current.id.trim()) {
+              return directory;
+            }
+            return directory.copyWith(
+              sourceName: current.name,
+              directoryId: remapMediaSourceLocation(
+                directory.directoryId,
+                previous: previous,
+                current: current,
+              ),
+            );
+          })
+          .where((directory) => directory.directoryId.trim().isNotEmpty)
+          .toList(growable: false);
   return settings.copyWith(
     homeModules:
         settings.homeModules.map(remapHomeModule).toList(growable: false),
     networkStorage: settings.networkStorage.copyWith(
-      syncDeleteQuarkWebDavDirectories:
-          settings.networkStorage.syncDeleteQuarkWebDavDirectories
-              .map((directory) {
-                if (directory.sourceId.trim() != current.id.trim()) {
-                  return directory;
-                }
-                return directory.copyWith(
-                  sourceName: current.name,
-                  directoryId: remapMediaSourceLocation(
-                    directory.directoryId,
-                    previous: previous,
-                    current: current,
-                  ),
-                );
-              })
-              .where((directory) => directory.directoryId.trim().isNotEmpty)
-              .toList(growable: false),
+      syncDeleteQuarkWebDavDirectories: remapDirectories(
+          settings.networkStorage.syncDeleteQuarkWebDavDirectories),
+      syncDelete115WebDavDirectories: remapDirectories(
+          settings.networkStorage.syncDelete115WebDavDirectories),
     ),
   );
 }

@@ -33,16 +33,7 @@ internal class NativePlaybackMemoryStore(
         val durationMs = entry.optLong("durationMs", 0L)
         val progress = entry.optDouble("progress", 0.0)
         val completed = entry.optBoolean("completed", false)
-        if (completed || positionMs < 5_000L) {
-            return 0L
-        }
-        if (durationMs > 0L && durationMs - positionMs <= 12_000L) {
-            return 0L
-        }
-        if (progress >= 0.985) {
-            return 0L
-        }
-        return positionMs
+        return PlaybackMemoryPolicy.resume(positionMs, durationMs, progress, completed)
     }
 
     fun loadPlaybackEntry(itemKey: String): JSONObject? {
@@ -162,7 +153,7 @@ internal class NativePlaybackMemoryStore(
             }
         val completed =
             completedByAutoSkip ||
-                isCompleted(
+                PlaybackMemoryPolicy.completed(
                     positionMs = safePosition,
                     durationMs = clampedDuration,
                     progress = progress,
@@ -188,11 +179,24 @@ internal class NativePlaybackMemoryStore(
                 }
             }
 
+        if (targetObject.optString("sourceKind") == "fntv") {
+            if (targetObject.optString("fntvSessionLink").isNotBlank()) {
+                targetObject.put("preferredPlaybackQualityIndex", 0)
+                targetObject.put("streamUrl", "")
+                targetObject.put("headers", JSONObject())
+            }
+            targetObject.put("fntvSessionLink", "")
+            targetObject.put("fntvStartPositionMs", 0)
+        }
+
         val entry =
             JSONObject().apply {
                 put("key", itemKey)
                 put("target", targetObject)
-                put("updatedAt", now())
+                put("updatedAt", PlaybackMemoryPolicy.nextTimestamp(now(),
+                    listOf(items, series).flatMap { group ->
+                        group.keys().asSequence().map { group.optJSONObject(it)?.optString("updatedAt") ?: "" }.toList()
+                    }))
                 put("seriesKey", seriesKey)
                 put("seriesTitle", seriesTitle)
                 put("positionMs", safePosition)
@@ -235,16 +239,10 @@ internal class NativePlaybackMemoryStore(
         if (keyedEntries.size <= RECENT_ENTRY_LIMIT) {
             return
         }
-        keyedEntries.sortByDescending { (_, value) -> value.optString("updatedAt") }
+        keyedEntries.sortWith(compareByDescending<Pair<String, JSONObject>> {
+            PlaybackMemoryPolicy.timestamp(it.second.optString("updatedAt"))
+        }.thenByDescending { it.first })
         keyedEntries.drop(RECENT_ENTRY_LIMIT).forEach { (key, _) -> items.remove(key) }
-    }
-
-    private fun isCompleted(positionMs: Long, durationMs: Long, progress: Double): Boolean {
-        if (durationMs <= 0L) {
-            return progress >= 0.995
-        }
-        val remaining = durationMs - positionMs
-        return progress >= 0.985 || remaining <= 8_000L
     }
 
     fun loadSeriesSkipPreference(seriesKey: String): JSONObject? {

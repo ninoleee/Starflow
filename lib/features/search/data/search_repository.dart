@@ -1,10 +1,11 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/search/data/cloud_saver_api_client.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/data/pansou_api_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
@@ -84,6 +85,17 @@ class AppSearchRepository implements SearchRepository {
       sectionId: sectionId,
       limit: 2000,
     );
+    final input = (library: library, keyword: keyword, limit: limit);
+    return library.length >= 128
+        ? compute(_searchLocalLibrary, input)
+        : _searchLocalLibrary(input);
+  }
+
+  static SearchFetchResult _searchLocalLibrary(
+      ({List<MediaItem> library, String keyword, int limit}) input) {
+    final library = input.library;
+    final keyword = input.keyword;
+    final limit = input.limit;
     final normalizedKeyword = _normalizeSearchText(keyword);
     final terms = normalizedKeyword
         .split(' ')
@@ -120,7 +132,7 @@ class AppSearchRepository implements SearchRepository {
     );
   }
 
-  SearchResult _mapLocalResult(MediaItem item) {
+  static SearchResult _mapLocalResult(MediaItem item) {
     final summary = item.overview.trim().isEmpty ||
             Uri.tryParse(item.overview)?.hasScheme == true
         ? '本地资源已就绪'
@@ -255,7 +267,7 @@ class AppSearchRepository implements SearchRepository {
     );
   }
 
-  int _scoreLocalItem(
+  static int _scoreLocalItem(
     MediaItem item, {
     required String normalizedKeyword,
     required List<String> terms,
@@ -304,7 +316,7 @@ class AppSearchRepository implements SearchRepository {
     return bestScore;
   }
 
-  String _normalizeSearchText(String value) {
+  static String _normalizeSearchText(String value) {
     final normalized = value
         .toLowerCase()
         .replaceAll(RegExp(r'\s+'), ' ')

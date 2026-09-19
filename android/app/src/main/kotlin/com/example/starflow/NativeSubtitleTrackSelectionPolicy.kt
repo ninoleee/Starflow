@@ -83,7 +83,7 @@ object NativeSubtitleTrackSelectionPolicy {
                 return@forEachIndexed
             }
             val match = languageMatches(language, preference) ||
-                subtitleLanguageTokens(preference).any(searchable::contains)
+                subtitleLanguageTokens(preference).any { containsToken(searchable, it) }
             if (match) {
                 return (preferredLanguages.size - index).coerceAtLeast(1)
             }
@@ -118,12 +118,12 @@ object NativeSubtitleTrackSelectionPolicy {
     }
 
     private fun subtitleLanguageTokens(language: String): List<String> = when (language) {
-        "zh-cn" -> listOf("zhcn", "zhhans", "chs", "chn", "chi", "zho", "cn", "sc", "简体", "簡體", "简中")
-        "zh-tw" -> listOf("zhtw", "zhhant", "cht", "chi", "zho", "tc", "big5", "繁体", "繁體", "繁中")
+        "zh-cn" -> listOf("zh cn", "zh hans", "zhcn", "zhhans", "chs", "chn", "chi", "zho", "cn", "sc", "简体", "簡體", "简中")
+        "zh-tw" -> listOf("zh tw", "zh hant", "zhtw", "zhhant", "cht", "chi", "zho", "tc", "big5", "繁体", "繁體", "繁中")
         "zh" -> listOf("chinese", "中文", "国语", "國語")
-        "en" -> listOf("english", " eng ", "英语", "英語", "英文", "英字")
-        "ja" -> listOf("japanese", " jp ", " jpn ", "日语", "日語", "日文", "日字", "日本語")
-        "ko" -> listOf("korean", " kr ", " kor ", "韩语", "韓語", "한국어")
+        "en" -> listOf("en", "english", "eng", "英语", "英語", "英文", "英字", "中英")
+        "ja" -> listOf("ja", "japanese", "jp", "jpn", "日语", "日語", "日文", "日字", "日本語")
+        "ko" -> listOf("ko", "korean", "kr", "kor", "韩语", "韓語", "한국어")
         else -> listOf(language.replace("-", ""))
     }
 
@@ -140,8 +140,13 @@ object NativeSubtitleTrackSelectionPolicy {
             "僅外語",
             "外语对白",
             "外語對白",
-        ).any(normalized::contains)
+        ).any { containsToken(normalized, it) }
     }
+
+    private fun containsToken(text: String, token: String): Boolean =
+        if (token.all { it.code < 128 }) {
+            text.contains(" ${normalizeText(token).trim()} ")
+        } else text.contains(token)
 
     private fun normalizeText(raw: String): String =
         " ${raw.trim().lowercase(Locale.ROOT).replace(Regex("[^\\p{L}\\p{N}]+"), " ")} "

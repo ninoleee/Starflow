@@ -6,6 +6,7 @@ Future<MediaDetailTarget> enrichDetailTargetWithDoubanRatingStats({
   required MediaDetailTarget target,
   required DoubanApiClient doubanApiClient,
   String cookie = '',
+  bool propagateErrors = false,
 }) async {
   final doubanId = target.doubanId.trim();
   if (doubanId.isEmpty) {
@@ -29,6 +30,7 @@ Future<MediaDetailTarget> enrichDetailTargetWithDoubanRatingStats({
           stats.ratingCount > 0 ? stats.ratingCount : target.ratingCount,
     );
   } catch (_) {
+    if (propagateErrors) rethrow;
     return target;
   }
 }

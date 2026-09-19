@@ -245,6 +245,7 @@ class ProviderSubtitleHit {
     this.releaseNames = const [],
     this.hearingImpaired = false,
     this.forced = false,
+    this.providerFileId = 0,
     this.raw = const {},
   });
 
@@ -270,9 +271,12 @@ class ProviderSubtitleHit {
   final List<String> releaseNames;
   final bool hearingImpaired;
   final bool forced;
+  final int providerFileId;
   final Map<String, Object?> raw;
 
-  bool get canDownload => downloadUrl.trim().isNotEmpty;
+  bool get canDownload =>
+      downloadUrl.trim().isNotEmpty ||
+      (source == OnlineSubtitleSource.opensubtitles && providerFileId > 0);
 
   ProviderSubtitleHit copyWith({
     String? downloadUrl,
@@ -303,6 +307,7 @@ class ProviderSubtitleHit {
       releaseNames: releaseNames,
       hearingImpaired: hearingImpaired,
       forced: forced,
+      providerFileId: providerFileId,
       raw: raw ?? this.raw,
     );
   }
@@ -324,6 +329,7 @@ class ProviderSubtitleHit {
       detailUrl: detailUrl,
       packageName: packageName,
       packageKind: packageKind,
+      providerFileId: providerFileId,
       seasonNumber: seasonNumber,
       episodeNumber: episodeNumber,
     );

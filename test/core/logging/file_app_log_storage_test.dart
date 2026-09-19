@@ -5,6 +5,17 @@ import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/core/logging/app_logger_impl_io.dart';
 
 void main() {
+  test('preview skips an oversized partial record and keeps recent entries', () async {
+    final directory = await Directory.systemTemp.createTemp('starflow-log-tail-');
+    addTearDown(() => directory.delete(recursive: true));
+    final storage = FileAppLogStorage(directory);
+    await storage.activeFile.writeAsString('${'x' * (3 * 1024 * 1024)}\n');
+    await storage.activeFile.writeAsString(AppLogFormatter.format(
+      level: AppLogLevel.info, category: 'test', message: 'latest',
+    ), mode: FileMode.append);
+    expect((await storage.read(limit: 1)).single.message, 'latest');
+  });
+
   test('file log storage rotates within its configured capacity', () async {
     final temporaryDirectory = await Directory.systemTemp.createTemp(
       'starflow-log-test-',

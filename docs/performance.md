@@ -1,10 +1,92 @@
-## Performance Baseline Runbook
+# 主机性能与回归验证
 
-> This document describes the lightweight host-side smoke timer.
+核对日期：2026-09-20。本文负责主机侧 smoke 计时、可重复运行方法及自动化回归证据。电视、手机和桌面实际界面的测量方法见 [真机性能验证](performance-device.md)，组件关系见 [架构说明](architecture.md)。下文历史代码优化只说明工作量与策略变化，不代表已经测得设备收益。
 
-`tool/perf/run_perf_baselines.dart` is the centralized script for capturing the five core performance baselines we are tracking: startup, home feed, detail screen, playback warm launch, and index refresh latency. Run it any time you change shared data layers, split hot UI files, or adjust the rendering/animation budget, so regressions are caught before a release.
+## 计时含义
 
-### 2026-08-27 sync
+`tool/perf/run_perf_baselines.dart` 串行启动 `flutter test` 子进程，用 wall-clock 记录整个子进程耗时，包含工具启动、可能的依赖检查、编译与测试执行。名称中的 `first_screen` 或 `player_open` 是场景标识，不是设备首屏 / 视频首帧时间，也不是远程服务吞吐量。
+
+| 场景 | 实际测试入口（相对仓库根目录） | 主要覆盖 |
+| --- | --- | --- |
+| `startup` | `test/perf/bootstrap_smoke_test.dart` | Flutter 启动编排与截止时间 |
+| `home_first_screen` | `test/home_controller_test.dart` | 首页来源及装配逻辑 |
+| `detail_first_screen` | `test/media_detail_enrichment_test.dart` | 详情缓存和元数据补全 |
+| `player_open` | `test/features/playback/application/playback_startup_preparation_test.dart`、`playback_startup_routing_test.dart`，以及 `test/perf/player_open_smoke_test.dart` | 本地准备、解析、路由、执行器协作，不运行真实 decoder |
+| `index_refresh` | `test/media_repository_quark_source_test.dart` | 夸克来源索引读取 / 刷新契约，不等于真实 WebDAV 全库扫描耗时 |
+
+默认每场景运行 5 次；`--scenario` 接受逗号分隔的场景 ID。每次保存原始 `runsMs`，p50 / p95 使用排序后的 nearest-rank（`ceil(n * p) - 1`）。只有 1 个样本时两者相等，5 个样本的 p95 实际就是最大值，不宜据此宣称稳定尾延迟。
+
+## 当前验证记录
+
+### 2026-09-20 逻辑统一回归
+
+本轮在持续有其他任务修改的同一工作区执行，不能把某次通过当成所有后续修改的证明。未运行发布预设、未递增版本、未生成交付 APK，也未做设备性能采样。
+
+- 14 个受影响测试文件的定向回归：150 项通过，覆盖首页 / 详情缓存、WebDAV / Quark NFO、播放记忆、版本工具、设置引用与两种网盘转存交互。
+- 最后一次播放记忆、资源身份兼容、版本工具复测：24 项通过；版本 CLI 只修改临时 pubspec，覆盖固定批次版本、CRLF 和非法月份拒绝。
+- Android 全量 JVM：337 项，336 通过、0 失败、1 跳过；包含共享播放记忆 fixture、时间戳排序裁剪和原生选集共享调色板。使用 `-x :app:compileFlutterBuildDebug` 复用已有 Flutter 输出，原生 Kotlin 和 JVM 测试正常编译，不代表完整发布构建。
+- Swift 播放记忆契约：10 个阈值用例及 UTC / 时区 / 微秒旧时间戳归一化通过；`AppDelegate.swift` 与新策略文件通过语法解析，Xcode 工程通过 `plutil -lint`，未做 AVPlayer 真机续播验收。
+- 策略生成 `--check`、两个 Bash 发布入口 `bash -n`、`git diff --check` 通过。本机无 PowerShell，未执行 PowerShell 发布入口。
+- 最后一次 `flutter analyze --no-pub`：`No issues found`。整仓 Flutter 复跑未完成：机器负载超过 400 并发生大量内存交换，已停止本任务的重复重型验证。中断前记录到两项 `app_network_image_test.dart` 的 TV 图片加载失败，以及 `nas_media_indexer_test.dart` 新增冷加载并发合并用例失败（期望一次读取、实际六次）；这几处属于运行期间并行修改的工作区，不能把本次定向通过结果扩展成整仓全绿。SIGTERM 造成的收尾错误不计为业务断言失败。
+- 最新增加的微秒 fixture 在 Dart / Swift 已通过；Android 全量通过后追加的 fixture 复跑因同机 Gradle 争用中断，不冒充再次通过。此前 JVM 已覆盖毫秒、时区、排序、裁剪及单调时间戳。
+
+下方记录是本轮统一之前的历史快照，选集调色板失败已经在上面的 JVM 复跑修复；不要把两个时点合并计数。
+
+2026-09-20，在包含既有未提交修改的 macOS 工作区执行。以下是**执行当时的快照**，不是后续继续编辑的工作区全绿声明：
+
+| 检查 | 结果 | 边界 |
+| --- | --- | --- |
+| `flutter analyze --no-pub` | 无问题 | 静态分析，不是所有平台构建 |
+| `flutter test --no-pub --reporter expanded` | 1580 项通过 | 主机单元 / 组件回归，不是设备播放 |
+| `dart tool/generate_playback_policy.dart --check` | 通过 | Dart / Kotlin 生成策略与 JSON 一致 |
+| Android `:app:testDebugUnitTest` | 318 项：316 通过、1 失败、1 跳过 | 失败为选集外观源码断言；跳过为需要外部 LPCM 样本的可选测试 |
+| Android `:app:compileReleaseKotlin` | 单独执行通过 | 有弃用警告；没有生成或交付 APK |
+| Swift 字幕语言契约 | 16 项通过 | 只编译语言策略与 fixture runner |
+
+Android 失败位于 `android/app/src/test/kotlin/com/example/starflow/NativePlaybackSettingsAppearanceTest.kt:101`，检查选集面板源码是否包含指定调色板引用；本次未修改 UI 或测试绕过此失败。Gradle 的测试失败会使同一命令后续任务不再执行，因此本次另行运行了 release Kotlin 编译并通过。JVM 报告通常生成在 `build/app/reports/tests/testDebugUnitTest/index.html`，后续构建或清理会覆盖 / 删除，不能作为永久证据链接。
+
+Flutter 全量运行于本地时间约 00:22 完成；文档收尾期间又出现公共组件、位图字幕解析、设置引用协调和发布版本工具等代码改动。本文已补充这些文件的职责，但没有把它们冒充为前面测试覆盖的内容，也没有启动发布预设来验证。需要针对最终稳定工作区重新运行回归。
+
+本次未重新运行五场景性能采样、未运行发布预设，也没有新增真机性能数据。仓库现有 [perf_baselines.json](../tool/perf/perf_baselines.json) 生成于 **2026-04-11**，每场景只有 1 次采样：startup 2931ms、home 2568ms、detail 2988ms、player 2773ms、index 2635ms。它只是一份历史 smoke 记录，不是当前版本基线，本次保留原文件未覆盖。
+
+### 位图字幕专项（2026-09-20）
+
+本次 PGS/VobSub/DVB 加固及 MPV 绑定改动的专项检查，与前面的全量快照分开记录：
+
+| 检查 | 结果 | 边界 |
+| --- | --- | --- |
+| Flutter 字幕五文件回归 | 34 项通过 | 新增绑定测试，以及 pipeline、server track resolver、FNTV、session preference |
+| Android 字幕及相邻提取器/会话专项 | 86 项通过，无失败或跳过 | 含 11 项有界位图测试、真实 TextRenderer 时钟测试、作用域隔离；Bitmap 是 JVM mock |
+| 本次涉及的 10 个 Dart 源码/测试文件定向分析 | 无问题 | 不代表并行修改文件的状态 |
+| 最新全项目 `flutter analyze --no-pub` | 2 条 info | `persistent_image_cache_impl_io.dart:46`、`online_subtitle_repository_io.dart:149` 的大括号样式，属于并行修改文件 |
+
+Flutter 命令：`flutter test --no-pub test/mpv_subtitle_render_binding_test.dart test/subtitle_pipeline_regression_test.dart test/playback_server_track_resolver_test.dart test/native_fntv_service_test.dart test/playback_subtitle_session_preference_test.dart`。
+
+Android 在 `android/` 运行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --console=plain`，使用 `--tests` 选择 `*BoundedBitmapSubtitleTest`、`*PgsReaderTest`、`*NativeSubtitle*Test`、`*NativeDualSubtitleTrackPolicyTest`、`*NativePlaybackSubtitleStyleControllerTest`、`*NativePlaybackExtractorsFactoryTest`、`*NativeTsH264SeekTest`、`*NativePlaybackSessionTest`。跳过 Flutter 打包任务是为了隔离运行期间其他任务的 Dart 改动，Kotlin/Java 和 JVM 测试实际编译；不是 APK 构建证据。报告目录可能被并行测试覆盖，以上只统计选择范围。
+
+过程中曾遇到并行生成策略字段及日志模块编译暂态错误；未改动这些无关文件，恢复后字幕 Flutter 集重新通过。本轮未运行发布预设、未修改版本或交付 APK，也没有真机显示/峰值内存测量。资源上限和回归样本只证明边界行为，不证明低内存 TV 的实际播放效果。
+
+### TV 焦点回归（2026-09-20）
+
+同日约 00:55–01:01 的独立焦点检查，不能与上方较早的全量结果合并成当前工作区全绿结论。覆盖清单与页面职责见 [TV 焦点清单](tv-focus.md)。
+
+| 检查 | 结果 | 边界 |
+| --- | --- | --- |
+| Flutter 焦点及相邻页面回归 | 352 项通过 | 公共控件、侧栏、首页、详情、设置、媒体库、搜索、字幕与播放器弹窗 |
+| `tv_press_only_shortcuts_test.dart` 单项补跑 | 1 项通过 | 验证重复事件拦截器保留快捷键触发键及调试描述；与上行合计 353 项 |
+| Android 六个焦点／遥控器测试类 | 50 项通过，无失败或跳过 | JVM 策略与 mock 验证，不运行 ARM 播放器或系统输入法 |
+| 本轮涉及的 Dart 源码与测试静态检查 | 无问题 | 定向检查，不代表全仓库无告警 |
+| `dart analyze lib test` | 2 个 warning、2 个 info | 位于并行改动文件，未在焦点任务中修改 |
+
+原生运行使用 `:app:testDebugUnitTest`、`-Pandroid-skip-build-dependency-validation=true`，以 `--tests` 限定 `NativePlayerTvFocusPolicyTest`（4）、`NativePlayerTvSeekPolicyTest`（4）、`NativePlaybackRemoteControllerTest`（23）、`NativePlaybackControllerViewTest`（9）、`NativeEpisodePickerNavigationTest`（4）和 `NativePlaybackNumberPickerTest`（6）。本轮没有改原生焦点实现，也没有重复运行前述全部原生测试。
+
+全仓库静态检查的 warning 是 `home_controller.dart`、`library_cached_items.dart` 中未使用的评分工具导入；info 是 `nfo_metadata.dart`、`playback_memory_policy.dart` 的条件分支括号风格。另一次包含转存流程的运行发现 `search_page_save_progress_test.dart` 的 `CloudSaveDrive.quark strm failure closes progress` 失败：STRM 失败后刷新次数期望为 0，实际为 1；该测试显式使用非 TV 模式，与并行的转存后处理整合有关，未调整其业务行为或测试断言。
+
+快捷键单项补跑最初在编译阶段遇到磁盘 `errno = 28`，空间恢复后重试通过。未清理其他任务文件；没有生成 APK、修改发布版本或进行设备性能测量，`adb devices` 无连接设备。
+
+## 比较条件与策略背景
+
+以下保留自 2026-08-27 起的架构 / 性能检查事项，并按当前实现核对。代码边界变化不能单独证明性能改善：
 The latest architecture pass moved several hot paths out of single large files:
 
 * Home presentation is now split between `home_page.dart`, `home_page_hero.dart`, and `home_page_sections.dart`.
@@ -26,7 +108,7 @@ The latest architecture pass moved several hot paths out of single large files:
 * Detail series browsing starts after local source restoration without waiting for online metadata refresh. History and season reads run concurrently; series completion rebuilds only its Consumer region, and progress badges select their displayed text. Single-season content uses 292 logical pixels; only multi-season content adds the 68-pixel season selector. Errors use their natural height and empty series remain hidden. Validate cold/warm history, slow metadata, season switching and error states on TV; host smoke timings are not device frame measurements.
 * Emby section refreshes enter the same global limiter as NAS metadata items. Maintenance sections have priority, so a large Emby library no longer launches every section request alongside NAS enrichment.
 * Emby library persistence uses the current small manifest plus a source summary and source/section shards. Root-library and collection-only reads share a newest-400-item summary, section-scoped Home loads decode only the requested shard, and full-library matching decodes at most two shards concurrently. Identical snapshot and shard reads share in-flight work. Fallback payloads exclude items already represented by section shards, and large JSON work runs on a background isolate. Loads slower than `500ms` emit an info-level `storage.emby-cache` record. Legacy single-payload caches are not read or migrated.
-* Concurrent detail-cache updates arriving within 16 ms are merged into one serialized persistence operation. Byte-identical encoded payloads skip the preferences write, avoiding back-to-back writes of the roughly 500–600 KB detail payload seen in TV diagnostics.
+* Detail-cache saves are coalesced before the next microtask flush, not across a guaranteed 16 ms window. Calls arriving in separate event-loop turns can still serialize separately. Byte-identical encoded payloads skip the preferences write; measure actual write counts before claiming reduced I/O.
 * NAS/WebDAV section reads now apply `sourceId + sectionId` in the Sembast finder instead of loading a whole source into Dart before filtering.
 * Bootstrap and the navigation shell share cold-start refresh completion state, so a baseline should contain at most one automatic Home refresh cycle.
 * Structured logging and the frame monitor are active by default. Keep the same recorded log levels across comparison runs because trace-heavy diagnostics add some I/O.
@@ -58,23 +140,77 @@ The September 10 change coalesces directional repeats into one absolute seek per
 * Check direction changes, start/end bounds, Back/Menu/confirm during a hold, focus loss and an episode switch with pending input. Confirm the controller does not flash closed or steal focus, no old callback seeks the next episode, and playback metadata/buttons update after a title, duration, pause or queue-boundary change.
 * Host smoke timings and JVM mock-call counts cannot certify these device results. No TV device measurement is recorded for this change yet.
 
-### Command
+### Audio conversion verification (2026-09-19)
+
+LPCM now reuses a 24-byte sample-frame buffer, a 30,720-byte output buffer and
+one ParsableByteArray. The JVM batching test feeds 1,200 four-byte fragments
+(25 ms, stereo/48 kHz) and expects three metadata submissions, not 1,200.
+This is a deterministic work-count assertion, not a measured CPU/GC improvement.
+
+For a local, legally available Blu-ray LPCM TS sample, compare the reader with
+an independent FFmpeg decode without committing media into the repository:
+
 ```bash
-dart tool/perf/run_perf_baselines.dart
+ffmpeg -i sample.ts -map 0:a:0 -c:a copy -f data /tmp/lpcm-packets.bin
+ffmpeg -i sample.ts -map 0:a:0 -c:a pcm_s16le -f s16le /tmp/lpcm-reference.bin
+cd android
+STARFLOW_LPCM_PACKETS=/tmp/lpcm-packets.bin STARFLOW_LPCM_REFERENCE=/tmp/lpcm-reference.bin ./gradlew :app:testDebugUnitTest --tests '*PcmBluRayReaderTest'
+```
+
+The optional fixture test is skipped when the two environment variables are
+absent. The local stereo 48 kHz/16-bit TS sample matched byte-for-byte; synthetic
+tests cover mono padding, 5.1/7.1 order, all fragment splits, 20/24-bit reduction,
+seek, missing PTS and sample-rate changes. Real multichannel/high-bit-depth
+samples and ARM32/ARM64 decoder execution still require device validation.
+
+On API 23 TV and modern HDMI devices, test AC-3/E-AC-3/JOC, TrueHD, DTS/DTS-HD,
+MP1/MP2/MP3 and supported LPCM layouts with missing metadata, mixed audio tracks,
+output-mode changes, seek, speed, pause and episode changes. Capture actual
+`playback.audio` decoder/output logs, underruns, CPU/GC and A/V sync. Confirm an
+audio fallback happens at most once and never changes the video decode policy.
+No connected-device audio performance result is recorded by this change.
+
+## 运行命令
+
+在仓库根目录执行，确保 `flutter` 在 PATH。先完成依赖安装和功能回归；对比期间不要同时运行 Flutter 构建、Gradle 或 iOS 发布脚本，避免共享输出目录争用。
+
+```bash
+dart tool/perf/run_perf_baselines.dart --runs 5 --output tool/perf/perf_baselines.local.json
 ```
 
 Common variants:
 
 ```bash
-dart tool/perf/run_perf_baselines.dart --runs 3
-dart tool/perf/run_perf_baselines.dart --scenario player_open --runs 1
-dart tool/perf/run_perf_baselines.dart --runs 1 --output tool/perf/perf_baselines.json
+dart tool/perf/run_perf_baselines.dart --runs 3 --output /tmp/starflow-perf.json
+dart tool/perf/run_perf_baselines.dart --scenario player_open --runs 1 --output /tmp/starflow-player-perf.json
+dart tool/perf/run_perf_baselines.dart --scenario startup,home_first_screen --runs 5 --output /tmp/starflow-startup-perf.json
 ```
 
-It runs the selected baseline scenarios and writes JSON output to `tool/perf/perf_baselines.json` by default, unless `--output` is provided. The script assumes Flutter is available via `flutter` in the path and runs on the host OS.
+`/tmp` 示例用于 macOS / Linux；Windows 可使用仓库内输出路径。脚本当前默认路径用 Windows 反斜杠拼接，所以跨平台调用必须显式提供 `--output`，避免在 POSIX 上生成错误位置的文件。这里记录现有限制，没有修改脚本。默认不覆盖历史基线；明确需要建立新基线时再指定 `tool/perf/perf_baselines.json`，同时记录机器、SDK、缓存和样本数。
 
 ### Output and validation
 Review the generated report for regressions in the five baseline IDs: `startup`, `home_first_screen`, `detail_first_screen`, `player_open`, and `index_refresh`. The JSON contains `generatedAt`, `runsPerScenario`, and a `results` array with `runsMs`, `p50Ms`, and `p95Ms` for each scenario. If runtime shifts significantly, capture the new numbers together with the relevant diff and scenario id.
+
+场景失败时脚本提前退出，不会写本轮完整报告；旧路径上的 JSON 可能仍在，必须同时检查退出码与 `generatedAt`。报告不自动收集设备、系统负载、SDK 版本或缓存状态，这些应随测量记录保存。
+
+## 全量功能回归
+
+仓库根目录：
+
+```sh
+flutter analyze --no-pub
+flutter test --no-pub
+dart tool/generate_playback_policy.dart --check
+```
+
+Android 目录分别执行，避免单元测试失败遮蔽编译检查：
+
+```sh
+./gradlew :app:testDebugUnitTest -Pandroid-skip-build-dependency-validation=true
+./gradlew :app:compileReleaseKotlin -Pandroid-skip-build-dependency-validation=true
+```
+
+JVM mocks、源码断言与 Swift 纯策略测试不执行 ARM decoder，不验证系统字幕、HDMI、锁屏或 PiP。字幕的 Swift 命令见 [字幕链路](subtitles.md)，AAR 来源和重建见 [音频依赖](../android/app/libs/README.md)。
 
 ### Suggested focused verification
 For this repo, the perf baseline run is usually paired with a few focused checks so we can tell whether a regression is functional, orchestration-related, or purely performance-related:

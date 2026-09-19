@@ -3,11 +3,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
+import 'package:starflow/features/discovery/data/discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
@@ -315,6 +315,7 @@ void main() {
                   posterUrl: '',
                   note: '圭多用幽默守护家人。',
                   ratingLabel: '豆瓣 9.6',
+                  ratingCount: 315946,
                 ),
               ],
             ),
@@ -328,6 +329,7 @@ void main() {
       expect(sections.first.items.first.posterUrl, isEmpty);
       expect(sections.first.items.first.detailTarget.sourceId, isEmpty);
       expect(sections.first.items.first.detailTarget.itemId, isEmpty);
+      expect(sections.first.items.first.detailTarget.ratingCount, 315946);
       expect(mediaRepository.fetchLibraryCallCount, 0);
       expect(mediaRepository.fetchRecentlyAddedCallCount, 0);
     });
@@ -853,6 +855,54 @@ void main() {
   });
 
   group('HomeFeedRepository applyCachedSection', () {
+    for (final layout in HomeSectionLayout.values) {
+      test('restores count-only cache updates for ${layout.name}', () async {
+        const target = MediaDetailTarget(
+          title: 'Movie',
+          posterUrl: '',
+          overview: '',
+          ratingLabels: ['豆瓣 9.2'],
+          doubanId: '24697949',
+        );
+        final section = HomeSectionViewModel(
+          id: 'ratings',
+          title: 'Movies',
+          subtitle: '',
+          emptyMessage: '',
+          layout: layout,
+          items: const [
+            HomeCardViewModel(
+              id: 'movie',
+              title: 'Movie',
+              subtitle: '',
+              posterUrl: '',
+              detailTarget: target,
+            ),
+          ],
+          carouselItems: const [
+            HomeCarouselItemViewModel(
+              id: 'movie',
+              title: 'Movie',
+              subtitle: '',
+              imageUrl: '',
+              detailTarget: target,
+            ),
+          ],
+        );
+        final resolved = await const HomeFeedRepository().applyCachedSection(
+          section: section,
+          localStorageCacheRepository: _FakeLocalStorageCacheRepository(
+            target: target.copyWith(ratingCount: 315946),
+          ),
+        );
+        final restored = layout == HomeSectionLayout.carousel
+            ? resolved.carouselItems.single.detailTarget
+            : resolved.items.single.detailTarget;
+        expect(restored.ratingCount, 315946);
+        expect(restored.ratingLabels, target.ratingLabels);
+      });
+    }
+
     test('reuses poster rail section when cache overlay is unchanged',
         () async {
       const section = HomeSectionViewModel(

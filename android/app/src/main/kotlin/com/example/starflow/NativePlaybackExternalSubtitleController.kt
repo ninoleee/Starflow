@@ -8,9 +8,29 @@ import android.os.Looper
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterActivityLaunchConfigs
 import java.io.File
+import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorService
+import androidx.media3.common.MediaItem
 import org.json.JSONObject
 
-internal class NativePlaybackExternalSubtitleController(private val host: Host) {
+internal class NativePlaybackExternalSubtitleController(
+    private val host: Host,
+    private val handler: Handler = Handler(Looper.getMainLooper()),
+    private val worker: ExecutorService = Executors.newSingleThreadExecutor(),
+) {
+    private var generation = 0
+    private var closed = false
+    private var applyPending: Runnable? = null
+    private var mountedUri: Uri? = null
+
+    fun close() {
+        if (closed) return
+        closed = true
+        generation++
+        applyPending?.let(handler::removeCallbacks)
+        worker.execute { host.subtitleFiles.close() }
+        worker.shutdown()
+    }
     interface Host {
         val controllerView: NativePlaybackControllerView
         val target: NativePlaybackTarget
@@ -27,6 +47,12 @@ internal class NativePlaybackExternalSubtitleController(private val host: Host) 
     var subtitleDelayMs: Long = 0L
 
     var externalSubtitleSource: ExternalSubtitleSource? = null
+        set(value) {
+            generation++
+            applyPending?.let(handler::removeCallbacks)
+            applyPending = null
+            field = value
+        }
 
     var subtitleSearchActive = false
 
@@ -61,8 +87,6 @@ internal class NativePlaybackExternalSubtitleController(private val host: Host) 
             host.showToast("当前仅支持外挂字幕偏移")
             return
         }
-        val handler = Handler(Looper.getMainLooper())
-        var applyPending: Runnable? = null
         val dialog = NativePlaybackNumberPicker.createStepped(
             activity = host.activity,
             title = "字幕偏移",
@@ -75,6 +99,7 @@ internal class NativePlaybackExternalSubtitleController(private val host: Host) 
             },
         ) { value ->
             subtitleDelayMs = value.toLong()
+            generation++
             applyPending?.let(handler::removeCallbacks)
             val apply = Runnable {
                 applyPending = null
@@ -171,13 +196,14 @@ internal class NativePlaybackExternalSubtitleController(private val host: Host) 
             } catch (_: SecurityException) {} catch (_: Throwable) {}
         }
 
+        val previous = externalSubtitleSource
         externalSubtitleSource =
             ExternalSubtitleSource(
                 originalUri = uri,
                 mimeType = mimeType,
                 displayName = host.subtitleFiles.resolveDisplayName(uri),
             )
-        applyExternalSubtitleConfiguration()
+        applyExternalSubtitleConfiguration(onFailure = { externalSubtitleSource = previous })
     }
 
     fun restoreExternalSubtitleSourceFromTarget() {
@@ -195,13 +221,15 @@ internal class NativePlaybackExternalSubtitleController(private val host: Host) 
         prepareCachedSubtitleFile(subtitleFilePath, displayName)
     }
 
-    fun loadCachedSubtitleFile(filePath: String, displayName: String): Boolean {
+    fun loadCachedSubtitleFile(filePath: String, displayName: String,
+        onApplied: (() -> Unit)? = null): Boolean {
         val previous = externalSubtitleSource
         if (!prepareCachedSubtitleFile(filePath, displayName)) {
             host.showToast("缓存字幕文件不存在")
             return false
         }
-        val applied = applyExternalSubtitleConfiguration()
+        val applied = applyExternalSubtitleConfiguration(onApplied = onApplied,
+            onFailure = { externalSubtitleSource = previous })
         if (!applied) externalSubtitleSource = previous
         return applied
     }
@@ -227,20 +255,47 @@ internal class NativePlaybackExternalSubtitleController(private val host: Host) 
         return true
     }
 
-    fun applyExternalSubtitleConfiguration(showFeedback: Boolean = true): Boolean {
+    // The return value means queued; only onApplied signals successful mounting.
+    fun applyExternalSubtitleConfiguration(showFeedback: Boolean = true,
+        onApplied: (() -> Unit)? = null, onFailure: (() -> Unit)? = null): Boolean {
+        if (closed) return false
         val currentPlayer = host.session.player ?: return false
         val source = externalSubtitleSource ?: return false
         val sourceMediaItem = host.session.baseMediaItem ?: currentPlayer.currentMediaItem ?: return false
+        val token = ++generation
+        val targetJson = host.target.playbackTargetJson
+        val delay = subtitleDelayMs
+        worker.execute {
+            val result = runCatching { host.subtitleFiles.buildSubtitleConfiguration(source, delay) }
+            handler.post {
+                if (closed || token != generation || host.session.player !== currentPlayer ||
+                    host.target.playbackTargetJson != targetJson || host.activity.isFinishing ||
+                    host.activity.isDestroyed) {
+                    result.getOrNull()?.let { configuration ->
+                        if (!worker.isShutdown) worker.execute { host.subtitleFiles.deletePrepared(configuration.uri) }
+                    }
+                    return@post
+                }
+                val configuration = result.getOrElse {
+                    onFailure?.invoke()
+                    host.showToast("字幕处理失败，已保留当前播放")
+                    return@post
+                }
+                mountConfiguration(configuration, sourceMediaItem, showFeedback)
+                val previousUri = mountedUri
+                mountedUri = configuration.uri
+                worker.execute { host.subtitleFiles.deletePrepared(previousUri) }
+                onApplied?.invoke()
+            }
+        }
+        return true
+    }
+
+    private fun mountConfiguration(configuration: MediaItem.SubtitleConfiguration,
+        sourceMediaItem: MediaItem, showFeedback: Boolean) {
+        val currentPlayer = host.session.player ?: return
         val currentPosition = currentPlayer.currentPosition
         val shouldResumePlayback = currentPlayer.playWhenReady
-        val configuration =
-            try {
-                host.subtitleFiles.buildSubtitleConfiguration(source, subtitleDelayMs)
-            } catch (_: Throwable) {
-                host.showToast("字幕处理失败，已保留当前播放")
-                return false
-            }
-
         val updatedMediaItem =
             sourceMediaItem.buildUpon().setSubtitleConfigurations(listOf(configuration)).build()
         host.subtitles.subtitleSessionPreference = null
@@ -264,6 +319,5 @@ internal class NativePlaybackExternalSubtitleController(private val host: Host) 
             )
         }
         host.controllerView.showControllerForRemoteFocus(ControllerFocusTarget.SETTINGS)
-        return true
     }
 }

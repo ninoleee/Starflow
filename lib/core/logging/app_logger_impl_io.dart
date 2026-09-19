@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -15,6 +18,11 @@ class _IoAppLogService implements AppLogService {
   Set<AppLogLevel> _recordedLevels = kDefaultRecordedAppLogLevels;
   Future<void> _pending = Future<void>.value();
   Future<FileAppLogStorage>? _storageFuture;
+  final List<String> _bufferedLines = [];
+  int _bufferedChars = 0;
+  int _droppedLines = 0;
+  Timer? _batchTimer;
+  bool _drainScheduled = false;
 
   @override
   bool get isEnabled => _enabled;
@@ -36,6 +44,7 @@ class _IoAppLogService implements AppLogService {
     required int maxBytes,
     required Set<AppLogLevel> recordedLevels,
   }) {
+    _drainLogs();
     _enabled = enabled;
     _maxBytes = maxBytes < _minimumMaxBytes ? _minimumMaxBytes : maxBytes;
     _recordedLevels = Set<AppLogLevel>.from(recordedLevels);
@@ -69,11 +78,36 @@ class _IoAppLogService implements AppLogService {
       error: error,
       stackTrace: stackTrace,
     );
+    if (_bufferedLines.length >= 256 || _bufferedChars + line.length > 1024 * 1024) {
+      _droppedLines++;
+      return;
+    }
+    _bufferedLines.add(line);
+    _bufferedChars += line.length;
+    if (!_drainScheduled) {
+      _batchTimer ??= Timer(const Duration(milliseconds: 16), _drainLogs);
+    }
+  }
+
+  void _drainLogs() {
+    _batchTimer?.cancel();
+    _batchTimer = null;
+    if (_drainScheduled || (_bufferedLines.isEmpty && _droppedLines == 0)) return;
+    _drainScheduled = true;
     final limit = _maxBytes;
-    _enqueue(
-      (storage) => storage.append(line, maxBytes: limit),
-      swallowErrors: true,
-    );
+    unawaited(_enqueue((storage) async {
+      final lines = _bufferedLines.join();
+      final dropped = _droppedLines;
+      _bufferedLines.clear();
+      _bufferedChars = 0;
+      _droppedLines = 0;
+      _drainScheduled = false;
+      final notice = dropped == 0 ? '' : AppLogFormatter.format(
+        level: AppLogLevel.warning, category: 'app.logging',
+        message: 'Log queue capacity reached', fields: {'droppedRecords': dropped},
+      );
+      await storage.append('$lines$notice', maxBytes: limit);
+    }, swallowErrors: true).catchError((Object _) {}));
   }
 
   @override
@@ -96,6 +130,7 @@ class _IoAppLogService implements AppLogService {
       stackTrace: stackTrace,
     );
     final limit = _maxBytes;
+    _drainLogs();
     return _enqueue(
       (storage) => storage.append(line, maxBytes: limit, flush: true),
       swallowErrors: true,
@@ -103,7 +138,10 @@ class _IoAppLogService implements AppLogService {
   }
 
   @override
-  Future<void> flush() => _pending;
+  Future<void> flush() {
+    _drainLogs();
+    return _pending;
+  }
 
   @override
   Future<AppLogSummary> inspect() async {
@@ -125,6 +163,7 @@ class _IoAppLogService implements AppLogService {
 
   @override
   Future<void> clear() {
+    _drainLogs();
     return _enqueue((storage) => storage.clear());
   }
 
@@ -246,6 +285,11 @@ class FileAppLogStorage {
   }
 
   Future<List<AppLogEntry>> read({int limit = 300}) async {
+    final path = directory.path;
+    return Isolate.run(() => FileAppLogStorage(Directory(path))._readTail(limit));
+  }
+
+  Future<List<AppLogEntry>> _readTail(int limit) async {
     if (!await directory.exists() || limit <= 0) {
       return const <AppLogEntry>[];
     }
@@ -254,14 +298,28 @@ class FileAppLogStorage {
       if (!await file.exists()) {
         continue;
       }
-      final content = utf8.decode(
-        await file.readAsBytes(),
-        allowMalformed: true,
-      );
-      for (final line in const LineSplitter().convert(content)) {
+      final handle = await file.open();
+      late String content;
+      try {
+        final length = await handle.length();
+        // A preview is bounded even when a malformed record has no newline.
+        final start = (length - 2 * 1024 * 1024).clamp(0, length);
+        await handle.setPosition(start);
+        content = utf8.decode(await handle.read(length - start), allowMalformed: true);
+        if (start > 0) {
+          final newline = content.indexOf('\n');
+          content = newline < 0 ? '' : content.substring(newline + 1);
+        }
+      } finally {
+        await handle.close();
+      }
+      final lines = const LineSplitter().convert(content);
+      var accepted = 0;
+      for (final line in lines.reversed) {
         final entry = AppLogEntry.tryParse(line);
         if (entry != null) {
           entries.add(entry);
+          if (++accepted >= limit) break;
         }
       }
     }
@@ -276,23 +334,24 @@ class FileAppLogStorage {
     if (!await directory.exists()) {
       return const AppLogExportData(bytes: <int>[], fileCount: 0);
     }
-    final bytes = <int>[];
+    final bytes = BytesBuilder(copy: false);
+    int? lastByte;
     var fileCount = 0;
     for (final file in <File>[nativeFile, previousFile, activeFile]) {
       if (!await file.exists()) {
         continue;
       }
-      final fileBytes = await file.readAsBytes();
-      if (fileBytes.isEmpty) {
-        continue;
+      var nonEmpty = false;
+      await for (final chunk in file.openRead()) {
+        if (chunk.isEmpty) continue;
+        if (!nonEmpty && lastByte != null && lastByte != 0x0A) bytes.addByte(0x0A);
+        nonEmpty = true;
+        bytes.add(chunk);
+        lastByte = chunk.last;
       }
-      if (bytes.isNotEmpty && bytes.last != 0x0A) {
-        bytes.add(0x0A);
-      }
-      bytes.addAll(fileBytes);
-      fileCount += 1;
+      if (nonEmpty) fileCount += 1;
     }
-    return AppLogExportData(bytes: bytes, fileCount: fileCount);
+    return AppLogExportData(bytes: bytes.takeBytes(), fileCount: fileCount);
   }
 
   Future<void> clear() async {

@@ -42,6 +42,19 @@ class NativePlaybackMemoryStoreTest {
     }
 
     @Test
+    fun transcodeHistoryDropsSessionAndReturnsToOriginalQuality() {
+        store.savePlaybackEntry(
+            """{"sourceKind":"fntv","fntvSessionLink":"private-session","fntvStartPositionMs":42000,"preferredPlaybackQualityIndex":-1}""",
+            "item", "", 42000L, 100000L, true,
+        )
+        val saved = JSONObject(raw!!).getJSONObject("items").getJSONObject("item").getJSONObject("target")
+        assertEquals("", saved.getString("fntvSessionLink"))
+        assertEquals(0, saved.getInt("fntvStartPositionMs"))
+        assertEquals(0, saved.getInt("preferredPlaybackQualityIndex"))
+        assertEquals(42000L, store.loadResumePositionMs("item"))
+    }
+
+    @Test
     fun invalidSnapshotAndMissingKeyAreSafe() {
         raw = "invalid"
         assertEquals(0L, store.loadResumePositionMs("item"))

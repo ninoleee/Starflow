@@ -100,7 +100,14 @@ class PlaybackEpisodeQueue {
     }
     final nextEntries = [...entries];
     nextEntries[currentIndex] = nextEntries[currentIndex].copyWith(
-      target: target,
+      target: target.isFntvTranscoding
+          ? target.copyWith(
+              streamUrl: '',
+              headers: const {},
+              fntvSessionLink: '',
+              fntvStartPositionMs: 0,
+              preferredPlaybackQualityIndex: 0)
+          : target,
     );
     return copyWith(entries: nextEntries);
   }

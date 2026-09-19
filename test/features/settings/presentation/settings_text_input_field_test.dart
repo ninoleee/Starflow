@@ -6,6 +6,33 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
 void main() {
+  testWidgets('moving focus while holding confirm cancels the pending editor',
+      (tester) async {
+    final controller = TextEditingController();
+    final other = FocusNode();
+    addTearDown(controller.dispose);
+    addTearDown(other.dispose);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [isTelevisionProvider.overrideWith((ref) => true)],
+      child: MaterialApp(
+          home: Scaffold(
+              body: Column(children: [
+        SettingsTextInputField(
+            controller: controller, labelText: 'Name', autofocus: true),
+        TextButton(
+            focusNode: other, onPressed: () {}, child: const Text('Other')),
+      ]))),
+    ));
+    await tester.pumpAndSettle();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
+    other.requestFocus();
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(other.hasPrimaryFocus, isTrue);
+  });
+
   for (final key in [LogicalKeyboardKey.select, LogicalKeyboardKey.enter]) {
     testWidgets('TV editor waits for ${key.keyLabel} release', (tester) async {
       final controller = TextEditingController(text: 'original');

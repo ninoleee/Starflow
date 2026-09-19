@@ -1,3 +1,4 @@
+import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -545,36 +546,25 @@ class DetailLibraryMatchService {
       posterUrl: firstNonEmpty(matched.posterUrl, current.posterUrl),
       posterHeaders: matched.posterUrl.trim().isNotEmpty
           ? matched.posterHeaders
-          : (current.posterHeaders.isNotEmpty
-              ? current.posterHeaders
-              : matched.posterHeaders),
+          : current.posterHeaders,
       backdropUrl: firstNonEmpty(matched.backdropUrl, current.backdropUrl),
       backdropHeaders: matched.backdropUrl.trim().isNotEmpty
           ? matched.backdropHeaders
-          : (current.backdropHeaders.isNotEmpty
-              ? current.backdropHeaders
-              : matched.backdropHeaders),
+          : current.backdropHeaders,
       logoUrl: firstNonEmpty(matched.logoUrl, current.logoUrl),
       logoHeaders: matched.logoUrl.trim().isNotEmpty
           ? matched.logoHeaders
-          : (current.logoHeaders.isNotEmpty
-              ? current.logoHeaders
-              : matched.logoHeaders),
+          : current.logoHeaders,
       bannerUrl: firstNonEmpty(matched.bannerUrl, current.bannerUrl),
       bannerHeaders: matched.bannerUrl.trim().isNotEmpty
           ? matched.bannerHeaders
-          : (current.bannerHeaders.isNotEmpty
-              ? current.bannerHeaders
-              : matched.bannerHeaders),
-      extraBackdropUrls: mergeUniqueImageUrls([
-        ...matched.extraBackdropUrls,
-        ...current.extraBackdropUrls,
-      ]),
+          : current.bannerHeaders,
+      extraBackdropUrls: matched.extraBackdropUrls.isNotEmpty
+          ? matched.extraBackdropUrls
+          : current.extraBackdropUrls,
       extraBackdropHeaders: matched.extraBackdropUrls.isNotEmpty
           ? matched.extraBackdropHeaders
-          : (current.extraBackdropHeaders.isNotEmpty
-              ? current.extraBackdropHeaders
-              : matched.extraBackdropHeaders),
+          : current.extraBackdropHeaders,
       overview: current.hasUsefulOverview ? current.overview : matched.overview,
       year: current.year > 0 ? current.year : matched.year,
       durationLabel: current.durationLabel.trim().isNotEmpty
@@ -601,6 +591,8 @@ class DetailLibraryMatchService {
         matched.ratingLabels,
         current.ratingLabels,
       ),
+      ratingCount:
+          matched.ratingCount > 0 ? matched.ratingCount : current.ratingCount,
       doubanId: current.doubanId,
       imdbId: current.imdbId,
       tmdbId:
@@ -628,10 +620,6 @@ class DetailLibraryMatchService {
     MetadataMatchResult match, {
     bool replaceExisting = false,
   }) {
-    final filteredMatchRatingLabels = filterSupplementalRatingLabels(
-      existing: target.ratingLabels,
-      supplemental: match.ratingLabels,
-    );
     final resolvedDirectorProfiles = match.directorProfiles.isNotEmpty
         ? _toMediaPersonProfiles(match.directorProfiles)
         : const <MediaPersonProfile>[];
@@ -653,7 +641,9 @@ class DetailLibraryMatchService {
           ? (match.posterUrl.trim().isNotEmpty
               ? const <String, String>{}
               : target.posterHeaders)
-          : target.posterHeaders,
+          : (target.posterUrl.trim().isNotEmpty
+              ? target.posterHeaders
+              : const {}),
       backdropUrl: replaceExisting
           ? firstNonEmpty(match.backdropUrl, target.backdropUrl)
           : (target.backdropUrl.trim().isNotEmpty
@@ -663,7 +653,9 @@ class DetailLibraryMatchService {
           ? (match.backdropUrl.trim().isNotEmpty
               ? const <String, String>{}
               : target.backdropHeaders)
-          : target.backdropHeaders,
+          : (target.backdropUrl.trim().isNotEmpty
+              ? target.backdropHeaders
+              : const {}),
       logoUrl: replaceExisting
           ? firstNonEmpty(match.logoUrl, target.logoUrl)
           : (target.logoUrl.trim().isNotEmpty ? target.logoUrl : match.logoUrl),
@@ -671,7 +663,7 @@ class DetailLibraryMatchService {
           ? (match.logoUrl.trim().isNotEmpty
               ? const <String, String>{}
               : target.logoHeaders)
-          : target.logoHeaders,
+          : (target.logoUrl.trim().isNotEmpty ? target.logoHeaders : const {}),
       bannerUrl: replaceExisting
           ? firstNonEmpty(match.bannerUrl, target.bannerUrl)
           : (target.bannerUrl.trim().isNotEmpty
@@ -681,20 +673,23 @@ class DetailLibraryMatchService {
           ? (match.bannerUrl.trim().isNotEmpty
               ? const <String, String>{}
               : target.bannerHeaders)
-          : target.bannerHeaders,
+          : (target.bannerUrl.trim().isNotEmpty
+              ? target.bannerHeaders
+              : const {}),
       extraBackdropUrls: replaceExisting
           ? (match.extraBackdropUrls.isNotEmpty
               ? mergeUniqueImageUrls(match.extraBackdropUrls)
               : target.extraBackdropUrls)
-          : mergeUniqueImageUrls([
-              ...target.extraBackdropUrls,
-              ...match.extraBackdropUrls,
-            ]),
+          : (target.extraBackdropUrls.isNotEmpty
+              ? target.extraBackdropUrls
+              : mergeUniqueImageUrls(match.extraBackdropUrls)),
       extraBackdropHeaders: replaceExisting
           ? (match.extraBackdropUrls.isNotEmpty
               ? const <String, String>{}
               : target.extraBackdropHeaders)
-          : target.extraBackdropHeaders,
+          : (target.extraBackdropUrls.isNotEmpty
+              ? target.extraBackdropHeaders
+              : const {}),
       overview: preserveEpisodeOverview
           ? target.overview
           : replaceExisting
@@ -753,7 +748,7 @@ class DetailLibraryMatchService {
                   : resolvedPlatformProfiles.isNotEmpty
                       ? resolvedPlatformProfiles
                       : target.platformProfiles)),
-      ratingLabels: mergeLabels(target.ratingLabels, filteredMatchRatingLabels),
+      ratingLabels: mergeLabels(target.ratingLabels, match.ratingLabels),
       doubanId: replaceExisting
           ? firstNonEmpty(match.doubanId, target.doubanId)
           : (target.doubanId.trim().isNotEmpty
@@ -765,6 +760,9 @@ class DetailLibraryMatchService {
       tmdbId: replaceExisting
           ? firstNonEmpty(match.tmdbId, target.tmdbId)
           : (target.tmdbId.trim().isNotEmpty ? target.tmdbId : match.tmdbId),
+      itemType: target.itemType.trim().isNotEmpty
+          ? target.itemType
+          : match.mediaType.toItemType,
     );
   }
 
@@ -970,28 +968,6 @@ class DetailLibraryMatchService {
     );
   }
 
-  List<String> filterSupplementalRatingLabels({
-    required List<String> existing,
-    required List<String> supplemental,
-  }) {
-    if (!hasRatingLabelKeyword(existing, '豆瓣')) {
-      return supplemental;
-    }
-    return supplemental
-        .where((label) => !label.trim().toLowerCase().contains('豆瓣'))
-        .toList(growable: false);
-  }
-
-  bool hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
-    final normalizedKeyword = keyword.trim().toLowerCase();
-    if (normalizedKeyword.isEmpty) {
-      return false;
-    }
-    return labels.any(
-      (label) => label.trim().toLowerCase().contains(normalizedKeyword),
-    );
-  }
-
   String firstNonEmpty(String primary, String fallback) {
     final primaryTrimmed = primary.trim();
     if (primaryTrimmed.isNotEmpty) {
@@ -1038,19 +1014,7 @@ class DetailLibraryMatchService {
   }
 
   List<String> mergeLabels(List<String> primary, List<String> secondary) {
-    final seen = <String>{};
-    final merged = <String>[];
-    for (final value in [...primary, ...secondary]) {
-      final trimmed = value.trim();
-      if (trimmed.isEmpty) {
-        continue;
-      }
-      final key = _labelMergeKey(trimmed);
-      if (seen.add(key)) {
-        merged.add(trimmed);
-      }
-    }
-    return merged;
+    return mergeDistinctRatingLabels(primary, secondary);
   }
 
   List<String> mergeUniqueImageUrls(Iterable<String> values) {
@@ -1064,20 +1028,6 @@ class DetailLibraryMatchService {
       merged.add(trimmed);
     }
     return merged;
-  }
-
-  String _labelMergeKey(String value) {
-    final normalized = value.trim().toLowerCase();
-    if (normalized.contains('豆瓣') || normalized.contains('douban')) {
-      return 'rating:douban';
-    }
-    if (normalized.contains('imdb')) {
-      return 'rating:imdb';
-    }
-    if (normalized.contains('tmdb')) {
-      return 'rating:tmdb';
-    }
-    return normalized;
   }
 
   bool _containsAnyKeyword(String value, List<String> keywords) {
@@ -1097,10 +1047,11 @@ class DetailLibraryMatchService {
     List<MetadataPersonProfile> profiles,
   ) {
     return profiles
+        .where((item) => item.name.trim().isNotEmpty)
         .map(
           (item) => MediaPersonProfile(
-            name: item.name,
-            avatarUrl: item.avatarUrl,
+            name: item.name.trim(),
+            avatarUrl: item.avatarUrl.trim(),
           ),
         )
         .toList(growable: false);

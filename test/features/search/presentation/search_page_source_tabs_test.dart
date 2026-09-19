@@ -11,7 +11,7 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
-import 'package:starflow/features/search/data/mock_search_repository.dart';
+import 'package:starflow/features/search/data/search_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';

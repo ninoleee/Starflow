@@ -24,10 +24,10 @@ void main() {
 
     final client = MockClient((request) async {
       if (request.url.toString().contains('episode-1')) {
-        return http.Response('EP01', 200);
+        return http.Response('1\n00:00:01,000 --> 00:00:02,000\nEP01', 200);
       }
       if (request.url.toString().contains('episode-2')) {
-        return http.Response('EP02', 200);
+        return http.Response('1\n00:00:01,000 --> 00:00:02,000\nEP02', 200);
       }
       return http.Response('not-found', 404);
     });
@@ -69,11 +69,11 @@ void main() {
     expect(first.subtitleFilePath, isNot(equals(second.subtitleFilePath)));
     expect(
       await File(first.subtitleFilePath!).readAsString(),
-      equals('EP01'),
+      endsWith('EP01'),
     );
     expect(
       await File(second.subtitleFilePath!).readAsString(),
-      equals('EP02'),
+      endsWith('EP02'),
     );
   });
 }

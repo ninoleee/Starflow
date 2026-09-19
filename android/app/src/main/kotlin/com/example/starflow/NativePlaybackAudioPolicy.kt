@@ -1,5 +1,7 @@
 package com.example.starflow
 
+import androidx.media3.common.MimeTypes
+
 enum class NativeAudioOutputMode(
     val rawValue: String,
     val displayLabel: String,
@@ -29,14 +31,23 @@ object NativePlaybackAudioPolicy {
         return isDolbyDigitalPlus(audioCodec)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun shouldEnableFfmpegAudioDecoder(
         forcePcmAudioOutput: Boolean,
         audioCodec: String,
+    ): Boolean = true
+
+    fun requiresDecodedOutput(
+        mimeType: String?,
+        isTelevision: Boolean,
+        outputMode: NativeAudioOutputMode,
+        fallbackMime: String? = null,
     ): Boolean =
-        (forcePcmAudioOutput && isAc3Family(audioCodec)) ||
-            isTrueHdFamily(audioCodec) ||
-            isDtsFamily(audioCodec) ||
-            isMpegAudioFamily(audioCodec)
+        mimeType != null && MimeTypes.isAudio(mimeType) &&
+            (outputMode == NativeAudioOutputMode.PCM_COMPATIBILITY ||
+                mimeType == fallbackMime ||
+                (outputMode == NativeAudioOutputMode.AUTO && isTelevision &&
+                    mimeType in setOf(MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC)))
 
     private fun isDolbyDigitalPlus(audioCodec: String): Boolean {
         val normalizedCodec = normalizeCodec(audioCodec)
@@ -46,34 +57,6 @@ object NativePlaybackAudioPolicy {
             normalizedCodec == "ddp" ||
             normalizedCodec == "ddplus" ||
             normalizedCodec == "dolby_digital_plus"
-    }
-
-    private fun isAc3Family(audioCodec: String): Boolean {
-        val normalizedCodec = normalizeCodec(audioCodec)
-        return isDolbyDigitalPlus(normalizedCodec) ||
-            normalizedCodec == "ac3" ||
-            normalizedCodec == "ac_3" ||
-            normalizedCodec == "dolby_digital"
-    }
-
-    private fun isTrueHdFamily(audioCodec: String): Boolean {
-        val normalizedCodec = normalizeCodec(audioCodec)
-        return normalizedCodec.startsWith("truehd") ||
-            normalizedCodec == "mlp" ||
-            normalizedCodec == "mha"
-    }
-
-    private fun isDtsFamily(audioCodec: String): Boolean {
-        val normalizedCodec = normalizeCodec(audioCodec)
-        return normalizedCodec.startsWith("dts") ||
-            normalizedCodec == "dca"
-    }
-
-    private fun isMpegAudioFamily(audioCodec: String): Boolean {
-        val normalizedCodec = normalizeCodec(audioCodec)
-        return normalizedCodec == "mp1" ||
-            normalizedCodec == "mp2" ||
-            normalizedCodec == "mpa"
     }
 
     private fun normalizeCodec(audioCodec: String): String =

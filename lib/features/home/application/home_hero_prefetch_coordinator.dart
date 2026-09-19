@@ -1,9 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
+import 'package:starflow/features/details/application/detail_metadata_service.dart';
 import 'package:starflow/features/details/application/detail_target_resolver.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
@@ -207,8 +207,8 @@ class HomeHeroPrefetchCoordinator {
       }
 
       try {
-        final updatedTarget =
-            await ref.read(detailTargetResolverProvider).resolveMetadataOnly(
+        final result =
+            await ref.read(detailTargetResolverProvider).resolveMetadataResult(
                   target: workingTarget,
                   backgroundWorkSuspended: false,
                   forceMetadataRefresh: forceMetadataRefresh,
@@ -220,14 +220,14 @@ class HomeHeroPrefetchCoordinator {
         )) {
           return;
         }
-        final producedUpdate =
-            _heroMetadataRefreshProducedUpdate(target, updatedTarget);
         await cacheRepository.saveDetailTarget(
           seedTarget: target,
-          resolvedTarget: updatedTarget,
-          metadataRefreshStatus: producedUpdate
-              ? DetailMetadataRefreshStatus.succeeded
-              : DetailMetadataRefreshStatus.failed,
+          resolvedTarget: result.target,
+          metadataRefreshStatus: result.outcome == DetailMetadataOutcome.skipped
+              ? null
+              : result.hasFailure
+                  ? DetailMetadataRefreshStatus.failed
+                  : DetailMetadataRefreshStatus.succeeded,
         );
       } catch (error, stackTrace) {
         appLogWarning(
@@ -319,33 +319,6 @@ class HomeHeroPrefetchCoordinator {
             target.backdropUrl.trim().isEmpty ||
             target.logoUrl.trim().isEmpty);
     return needsWmdb || needsTmdb;
-  }
-
-  bool _heroMetadataRefreshProducedUpdate(
-    MediaDetailTarget current,
-    MediaDetailTarget next,
-  ) {
-    if (!_needsHeroMetadataRefresh(next)) {
-      return true;
-    }
-    return current.posterUrl.trim() != next.posterUrl.trim() ||
-        current.searchQuery.trim() != next.searchQuery.trim() ||
-        current.backdropUrl.trim() != next.backdropUrl.trim() ||
-        current.logoUrl.trim() != next.logoUrl.trim() ||
-        current.bannerUrl.trim() != next.bannerUrl.trim() ||
-        !listEquals(current.extraBackdropUrls, next.extraBackdropUrls) ||
-        current.overview.trim() != next.overview.trim() ||
-        current.durationLabel.trim() != next.durationLabel.trim() ||
-        current.year != next.year ||
-        !listEquals(current.ratingLabels, next.ratingLabels) ||
-        !listEquals(current.genres, next.genres) ||
-        !listEquals(current.directors, next.directors) ||
-        !listEquals(current.actors, next.actors) ||
-        current.doubanId.trim() != next.doubanId.trim() ||
-        current.imdbId.trim().toLowerCase() !=
-            next.imdbId.trim().toLowerCase() ||
-        current.tmdbId.trim() != next.tmdbId.trim() ||
-        current.tvdbId.trim() != next.tvdbId.trim();
   }
 
   bool _missingRatingKeyword(Iterable<String> labels, String keyword) {

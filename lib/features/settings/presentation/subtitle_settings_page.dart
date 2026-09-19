@@ -513,7 +513,7 @@ class _SubtitleSettingsPageState extends ConsumerState<SubtitleSettingsPage> {
           const SizedBox(height: 12),
           SettingsTextInputField(
             controller: _subtitleSearchMaxValidatedCandidatesController,
-            labelText: '单次最多验证条数',
+            labelText: '单次最多结果数',
             hintText: '$kSubtitleSearchMaxValidatedCandidatesDefault',
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],

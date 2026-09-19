@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:starflow/features/playback/application/fntv_quality_menu.dart';
 
 import 'package:flutter/material.dart';
+import 'package:starflow/features/playback/presentation/widgets/player_menu_style.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -114,7 +116,7 @@ class PlaybackOptionsDialog extends StatelessWidget {
     Tracks tracks,
     Track currentTrack,
   ) {
-    return showDialog<void>(
+    return showPlaybackMenuDialog<void>(
       context: context,
       builder: (dialogContext) {
         return _PlaybackSubtitleOptionsDialog(
@@ -313,7 +315,7 @@ class _PlaybackOptionsDialogBodyState
   }
 
   Future<void> _selectPlaybackSpeed() async {
-    final selection = await showDialog<double>(
+    final selection = await showPlaybackMenuDialog<double>(
       context: context,
       builder: (dialogContext) {
         return SimpleDialog(
@@ -341,7 +343,7 @@ class _PlaybackOptionsDialogBodyState
   }
 
   Future<void> _selectPlaylistMode() async {
-    final selection = await showDialog<PlaylistMode>(
+    final selection = await showPlaybackMenuDialog<PlaylistMode>(
       context: context,
       builder: (dialogContext) {
         return SimpleDialog(
@@ -368,14 +370,30 @@ class _PlaybackOptionsDialogBodyState
     await widget.player.setPlaylistMode(selection);
   }
 
-  Future<void> _selectPlaybackQuality() async {
+  Future<void> _selectPlaybackQuality({bool custom = false}) async {
     final qualities = widget.target.playbackQualities;
-    final selected = await showDialog<FntvPlaybackQuality>(
+    if (qualities.length < 2) {
+      await showPlaybackMenuDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+                title: const Text('画质'),
+                content: Text(qualities.isEmpty ? '飞牛未返回可切换画质' : '当前仅有一档画质'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('关闭'))
+                ],
+              ));
+      return;
+    }
+    final presets = fntvQualityPresets(
+        qualities, widget.target.preferredPlaybackQualityIndex);
+    final selected = await showPlaybackMenuDialog<Object>(
       context: context,
       builder: (dialogContext) => SimpleDialog(
-        title: const Text('画质'),
+        title: Text(custom ? '自定义画质' : '画质'),
         children: [
-          for (final quality in qualities)
+          for (final quality in custom ? qualities : presets)
             TvDialogOption(
               isTelevision: widget.isTelevision,
               autofocus: quality.index ==
@@ -384,14 +402,25 @@ class _PlaybackOptionsDialogBodyState
               child: Text(
                 quality.index ==
                         (widget.target.preferredPlaybackQualityIndex ?? 0)
-                    ? '${quality.label}  当前'
-                    : quality.label,
+                    ? '${custom ? fntvQualityDetail(quality) : fntvQualityTitle(quality)}  当前'
+                    : custom
+                        ? fntvQualityDetail(quality)
+                        : fntvQualityTitle(quality),
               ),
             ),
+          if (!custom && presets.length < qualities.length)
+            TvDialogOption(
+                isTelevision: widget.isTelevision,
+                onPressed: () => Navigator.of(dialogContext).pop('custom'),
+                child: const Text('自定义')),
         ],
       ),
     );
-    if (selected != null && widget.onSelectQuality != null) {
+    if (selected == 'custom' && mounted) {
+      await _selectPlaybackQuality(custom: true);
+      return;
+    }
+    if (selected is FntvPlaybackQuality && widget.onSelectQuality != null) {
       await widget.onSelectQuality!(selected);
       if (mounted) {
         Navigator.of(context).pop();
@@ -400,7 +429,7 @@ class _PlaybackOptionsDialogBodyState
   }
 
   Future<void> _openMoreOptionsDialog() {
-    return showDialog<void>(
+    return showPlaybackMenuDialog<void>(
       context: context,
       builder: (dialogContext) {
         return _PlaybackMoreOptionsDialog(
@@ -487,20 +516,19 @@ class _PlaybackOptionsDialogBodyState
           ),
         ),
         if (widget.onSelectQuality != null &&
-            widget.target.sourceKind == MediaSourceKind.fntv &&
-            widget.target.playbackQualities.length > 1) ...[
+            widget.target.sourceKind == MediaSourceKind.fntv) ...[
           const SizedBox(height: 8),
           _PlaybackOptionTile(
             isTelevision: widget.isTelevision,
             title: '画质',
-            value: widget.target.playbackQualities
-                .firstWhere(
-                  (quality) =>
-                      quality.index ==
-                      (widget.target.preferredPlaybackQualityIndex ?? 0),
-                  orElse: () => widget.target.playbackQualities.first,
-                )
-                .label,
+            value: widget.target.playbackQualities.isEmpty
+                ? '未返回可切换画质'
+                : fntvQualityTitle(widget.target.playbackQualities.firstWhere(
+                    (quality) =>
+                        quality.index ==
+                        (widget.target.preferredPlaybackQualityIndex ?? 0),
+                    orElse: () => widget.target.playbackQualities.first,
+                  )),
             onPressed: _selectPlaybackQuality,
           ),
         ],

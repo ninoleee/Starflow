@@ -29,7 +29,9 @@ String remapMediaSourceLocation(
   final trimmed = value.trim();
   if (trimmed.isEmpty ||
       previous.kind != MediaSourceKind.nas ||
-      current.kind != MediaSourceKind.nas) {
+      current.kind != MediaSourceKind.nas ||
+      mediaSourceResourceIdentity(previous) ==
+          mediaSourceResourceIdentity(current)) {
     return trimmed;
   }
   final oldRoot = previous.libraryPath.trim().isNotEmpty
@@ -108,10 +110,22 @@ String alignMediaSourceLocationToCurrentRoot(
   final resolvedValueUri = valueUri;
   final rootSegments = _decodedSegments(resolvedRootUri.path);
   final valueSegments = _decodedSegments(resolvedValueUri.path);
-  if (resolvedRootUri.host.toLowerCase() ==
-          resolvedValueUri.host.toLowerCase() &&
-      _startsWith(valueSegments, rootSegments)) {
-    return trimmed;
+  if (_startsWith(valueSegments, rootSegments)) {
+    if (resolvedRootUri.scheme == resolvedValueUri.scheme &&
+        resolvedRootUri.host == resolvedValueUri.host &&
+        resolvedRootUri.port == resolvedValueUri.port) {
+      return trimmed;
+    }
+    return Uri(
+      scheme: resolvedRootUri.scheme,
+      userInfo: resolvedRootUri.userInfo,
+      host: resolvedRootUri.host,
+      port: resolvedRootUri.hasPort ? resolvedRootUri.port : null,
+      pathSegments: [
+        ...valueSegments,
+        if (resolvedValueUri.path.endsWith('/')) ''
+      ],
+    ).toString();
   }
 
   const stableBoundaryLabels = <String>{

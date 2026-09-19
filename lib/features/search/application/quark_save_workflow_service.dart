@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:starflow/features/search/application/cloud_save_postprocessing.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
@@ -163,14 +164,15 @@ class QuarkSaveWorkflowService {
       sanitizedNameCharacters: sanitizedNameCharacters,
     );
     final savedAnyFiles = saveResult.savedCount > 0;
-    final refreshDelaySeconds = _normalizeDelaySeconds(
+    final refreshDelaySeconds = cloudSaveDelaySeconds(
       networkStorage.refreshDelaySeconds,
     );
-    final smartStrmDelaySeconds = _normalizeDelaySeconds(
+    final smartStrmDelaySeconds = cloudSaveDelaySeconds(
       networkStorage.smartStrmDelaySeconds,
     );
     var triggeredSmartStrm = false;
     SmartStrmTriggerResult? smartStrmResult;
+    var smartStrmFailure = '';
 
     final nameOutcome = await processCloudSavedNames(
       characters: sanitizedNameCharacters,
@@ -206,15 +208,19 @@ class QuarkSaveWorkflowService {
         nameOutcome.canTriggerSmartStrm &&
         networkStorage.smartStrmWebhookUrl.trim().isNotEmpty &&
         networkStorage.smartStrmTaskName.trim().isNotEmpty) {
-      smartStrmResult = await _triggerSmartStrm(
-        webhookUrl: networkStorage.smartStrmWebhookUrl,
-        taskName: networkStorage.smartStrmTaskName,
-        storagePath: saveResult.targetFolderPath == '/'
-            ? ''
-            : saveResult.targetFolderPath,
-        delay: smartStrmDelaySeconds,
-      );
-      triggeredSmartStrm = true;
+      final outcome = await triggerSavedCloudStrm(
+          drive: CloudSaveDrive.quark,
+          trigger: () => _triggerSmartStrm(
+                webhookUrl: networkStorage.smartStrmWebhookUrl,
+                taskName: networkStorage.smartStrmTaskName,
+                storagePath: saveResult.targetFolderPath == '/'
+                    ? ''
+                    : saveResult.targetFolderPath,
+                delay: smartStrmDelaySeconds,
+              ));
+      smartStrmResult = outcome.result;
+      smartStrmFailure = outcome.failure;
+      triggeredSmartStrm = smartStrmResult != null;
     }
 
     final refreshSourceIds = _resolveRefreshSourceIds(
@@ -223,10 +229,13 @@ class QuarkSaveWorkflowService {
     );
     if (refreshSourceIds.isNotEmpty) {
       unawaited(
-        _refreshInBackground(
-          sourceIds: refreshSourceIds,
-          delaySeconds: refreshDelaySeconds,
-          invalidateWebDavDirectoryCache: savedAnyFiles,
+        refreshSavedCloudMedia(
+          drive: CloudSaveDrive.quark,
+          refresh: () => _refreshSelectedSources(
+            sourceIds: refreshSourceIds,
+            delaySeconds: refreshDelaySeconds,
+            invalidateWebDavDirectoryCache: savedAnyFiles,
+          ),
           onFailure: onBackgroundRefreshFailure,
         ),
       );
@@ -238,32 +247,11 @@ class QuarkSaveWorkflowService {
       nameWarning: nameOutcome.warning,
       triggeredSmartStrm: triggeredSmartStrm,
       smartStrmResult: smartStrmResult,
+      smartStrmFailure: smartStrmFailure,
       refreshSourceIds: refreshSourceIds,
       refreshDelaySeconds: refreshDelaySeconds,
       smartStrmDelaySeconds: smartStrmDelaySeconds,
     );
-  }
-
-  Future<void> _refreshInBackground({
-    required List<String> sourceIds,
-    required int delaySeconds,
-    required bool invalidateWebDavDirectoryCache,
-    void Function(String)? onFailure,
-  }) async {
-    try {
-      await _refreshSelectedSources(
-        sourceIds: sourceIds,
-        delaySeconds: delaySeconds,
-        invalidateWebDavDirectoryCache: invalidateWebDavDirectoryCache,
-      );
-    } catch (error) {
-      appLogWarning('quark.save', 'Quark post-save media refresh failed',
-          fields: {
-            'sourceCount': sourceIds.length,
-            'errorType': error.runtimeType.toString(),
-          });
-      onFailure?.call(CloudSaveDrive.quark.refreshFailureMessage);
-    }
   }
 }
 
@@ -272,6 +260,7 @@ class QuarkSaveWorkflowResult {
     required this.saveResult,
     this.sanitizeResult,
     this.nameWarning = '',
+    this.smartStrmFailure = '',
     required this.triggeredSmartStrm,
     required this.smartStrmResult,
     required this.refreshSourceIds,
@@ -282,6 +271,7 @@ class QuarkSaveWorkflowResult {
   final QuarkSaveResult saveResult;
   final QuarkNameSanitizeResult? sanitizeResult;
   final String nameWarning;
+  final String smartStrmFailure;
   final bool triggeredSmartStrm;
   final SmartStrmTriggerResult? smartStrmResult;
   final List<String> refreshSourceIds;
@@ -297,6 +287,7 @@ class QuarkSaveWorkflowResult {
       renamedCount: sanitizeResult?.renamedCount ?? 0,
       renameFailedCount: sanitizeResult?.failedNames.length ?? 0,
       nameWarning: nameWarning,
+      smartStrmFailure: smartStrmFailure,
       smartStrmTriggered: triggeredSmartStrm,
       smartStrmDelaySeconds: smartStrmDelaySeconds,
       smartStrmAddedCount: smartStrmResult?.addedCount,
@@ -305,8 +296,4 @@ class QuarkSaveWorkflowResult {
           refreshSourceIds.isEmpty ? null : refreshDelaySeconds,
     ).buildSuccessMessage();
   }
-}
-
-int _normalizeDelaySeconds(int configuredDelaySeconds) {
-  return configuredDelaySeconds <= 0 ? 1 : configuredDelaySeconds;
 }

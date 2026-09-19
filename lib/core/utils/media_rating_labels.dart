@@ -5,6 +5,12 @@ enum MediaRatingSource {
   other,
 }
 
+bool hasUsableRatingForSource(
+    Iterable<String> labels, MediaRatingSource source) {
+  return labels.any((label) =>
+      resolveMediaRatingSource(label) == source && _isUsableRatingLabel(label));
+}
+
 String formatRatingCountLabel(int count) {
   if (count <= 0) {
     return '';

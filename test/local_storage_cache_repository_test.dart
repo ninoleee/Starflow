@@ -406,6 +406,39 @@ void main() {
     expect(summary.totalBytes, greaterThan(64 * 1024));
   });
 
+  test('count-only changes emit a ratings notification and survive reload',
+      () async {
+    final prefs = await SharedPreferences.getInstance();
+    final notifications = <LocalStorageDetailCacheChangeEvent>[];
+    final repository = LocalStorageCacheRepository(
+      sharedPreferences: prefs,
+      detailCacheChangeNotificationDelay: Duration.zero,
+      notifyDetailCacheChanged: notifications.add,
+    );
+    addTearDown(repository.dispose);
+    const target = MediaDetailTarget(
+      title: 'Movie',
+      posterUrl: '',
+      overview: '',
+      doubanId: '24697949',
+      ratingLabels: ['豆瓣 9.2'],
+    );
+    await repository.saveDetailTarget(
+        seedTarget: target, resolvedTarget: target);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    notifications.clear();
+    await repository.saveDetailTarget(
+      seedTarget: target,
+      resolvedTarget: target.copyWith(ratingCount: 315946),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(notifications.single.changedFields,
+        contains(LocalStorageDetailCacheChangedField.ratings));
+    final reloaded = LocalStorageCacheRepository(sharedPreferences: prefs);
+    addTearDown(reloaded.dispose);
+    expect((await reloaded.loadDetailTarget(target))!.ratingCount, 315946);
+  });
+
   test('batches scoped detail cache change notifications', () async {
     final prefs = await SharedPreferences.getInstance();
     final notifications = <LocalStorageDetailCacheChangeEvent>[];
@@ -679,6 +712,7 @@ void main() {
     );
     final resolvedTarget = seedTarget.copyWith(
       availabilityLabel: '资源已就绪：WebDAV · nas',
+      ratingCount: 315946,
       sourceId: 'nas-main',
       itemId: 'https://nas.example.com/dav/Movies/The%20Matrix.mkv',
       itemType: 'movie',
@@ -717,6 +751,7 @@ void main() {
     expect(cached.playbackTarget, isNull);
     expect(cached.availabilityLabel, '无');
     expect(cached.tmdbId, '603');
+    expect(cached.ratingCount, 315946);
     expect(
       await repository.loadDetailTarget(
         const MediaDetailTarget(

@@ -1,0 +1,18 @@
+[
+  {"text":"en","preference":"en","match":true},
+  {"text":"ja","preference":"ja","match":true},
+  {"text":"ko","preference":"ko","match":true},
+  {"text":"eng","preference":"en","match":true},
+  {"text":"jpn","preference":"ja","match":true},
+  {"text":"Film.zh-Hans","preference":"zh-cn","match":true},
+  {"text":"Film.zh-Hant","preference":"zh-tw","match":true},
+  {"text":"简中","preference":"zh-cn","match":true},
+  {"text":"繁中","preference":"zh-tw","match":true},
+  {"text":"中英双语","preference":"en","match":true},
+  {"text":"French","preference":"en","match":false},
+  {"text":"scene","preference":"zh-cn","match":false},
+  {"text":"bilingual","preference":"ja","match":false},
+  {"text":"双语","preference":"zh-cn","match":false},
+  {"text":"English","preference":"ja","match":false},
+  {"text":"繁体中文","preference":"zh-cn","match":false}
+]

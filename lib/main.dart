@@ -44,11 +44,9 @@ Future<void> main() async {
       AppFramePerformanceMonitor(
         startupStopwatch: startupStopwatch,
       ).install();
-      appLogInfo(
-        'app.lifecycle',
-        'Application startup',
-        fields: await _resolveBuildInfoFields(),
-      );
+      unawaited(_resolveBuildInfoFields().then((fields) {
+        appLogInfo('app.lifecycle', 'Application startup', fields: fields);
+      }));
       if (settingsLoadError != null) {
         appLogWarning(
           'app.startup',

@@ -5,6 +5,31 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
+  test('local resource matching preserves the existing rating count', () {
+    const current = MediaDetailTarget(
+      title: 'Movie',
+      posterUrl: '',
+      overview: '',
+      ratingLabels: ['豆瓣 9.2'],
+      ratingCount: 315946,
+      doubanId: '24697949',
+    );
+    const matched = MediaDetailTarget(
+      title: 'Movie',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'nas-main',
+      itemId: 'movie-1',
+    );
+    final resolved =
+        const DetailLibraryMatchService().mergeMatchedLibraryTarget(
+      current: current,
+      matched: matched,
+    );
+    expect(resolved.ratingCount, current.ratingCount);
+    expect(resolved.ratingLabels, current.ratingLabels);
+  });
+
   group('DetailLibraryMatchService.movieVariantOptionSubtitle', () {
     const service = DetailLibraryMatchService();
 

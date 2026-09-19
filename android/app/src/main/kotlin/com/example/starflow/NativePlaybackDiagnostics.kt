@@ -8,7 +8,9 @@ import android.widget.TextView
 import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
+import androidx.media3.common.text.CueGroup
 import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.upstream.BandwidthMeter
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_URL
 import java.util.Locale
@@ -34,8 +36,28 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
     val playbackHostBandwidthCache = NativePlaybackHostBandwidthCache()
 
     var playbackFirstFrameRendered = false
+    var awaitingVideoFrameAfterSeek = false
 
     var playbackLastRuntimeLogAtMs = 0L
+    var subtitleLastCueLogAtMs = -1L
+    private var lastAudioTracks = ""
+
+    fun logSubtitleCues(cueGroup: CueGroup) {
+        if (cueGroup.cues.isEmpty()) return
+        val now = SystemClock.elapsedRealtime()
+        val positionMs = host.session.player?.currentPosition ?: 0L
+        val lagMs = if (cueGroup.presentationTimeUs == C.TIME_UNSET) null
+            else positionMs - cueGroup.presentationTimeUs / 1_000L
+        val intervalMs = if (lagMs != null && lagMs > 1_000L) 5_000L else 30_000L
+        if (subtitleLastCueLogAtMs >= 0 && now - subtitleLastCueLogAtMs < intervalMs) return
+        subtitleLastCueLogAtMs = now
+        NativePlaybackFormatting.logPlayback(
+            "native.subtitle.cues count=${cueGroup.cues.size} " +
+                "bitmapCount=${cueGroup.cues.count { it.bitmap != null }} " +
+                "presentationTimeUs=${cueGroup.presentationTimeUs} " +
+                "positionMs=$positionMs lagMs=${lagMs ?: "unknown"}",
+        )
+    }
 
     val bandwidthEventListener =
         BandwidthMeter.EventListener { elapsedMs, bytesTransferred, bitrateEstimate ->
@@ -70,6 +92,21 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
                 initializationDurationMs: Long,
             ) {
                 playbackPerformanceTracker.onAudioDecoder(decoderName)
+                NativeAppLogger.info("playback.audio", "Audio decoder initialized name=$decoderName durationMs=$initializationDurationMs")
+            }
+
+            override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, config: AudioSink.AudioTrackConfig) {
+                NativeAppLogger.info("playback.audio", "Audio output initialized encoding=${config.encoding} " +
+                    "sampleRate=${config.sampleRate} channelMask=${config.channelConfig} " +
+                    "offload=${config.offload} tunneling=${config.tunneling} bufferBytes=${config.bufferSize}")
+            }
+
+            override fun onAudioCodecError(eventTime: AnalyticsListener.EventTime, error: Exception) {
+                NativeAppLogger.warning("playback.audio", "Audio decoder error type=${error.javaClass.simpleName}")
+            }
+
+            override fun onAudioSinkError(eventTime: AnalyticsListener.EventTime, error: Exception) {
+                NativeAppLogger.warning("playback.audio", "Audio output error type=${error.javaClass.simpleName}")
             }
 
             override fun onDroppedVideoFrames(
@@ -93,7 +130,8 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
     fun logAudioTracks(tracks: Tracks) {
         val groups = tracks.groups.filter { it.type == C.TRACK_TYPE_AUDIO }
         if (groups.isEmpty()) {
-            NativePlaybackFormatting.logPlayback("native.audio.tracks none")
+            if (lastAudioTracks != "none") NativePlaybackFormatting.logPlayback("native.audio.tracks none")
+            lastAudioTracks = "none"
             return
         }
         val summaries =
@@ -110,7 +148,10 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
                         ":selected=${group.isTrackSelected(trackIndex)}"
                 }
             }
-        NativePlaybackFormatting.logPlayback("native.audio.tracks ${summaries.joinToString("|")}")
+        val summary = summaries.joinToString("|")
+        if (summary == lastAudioTracks) return
+        lastAudioTracks = summary
+        NativePlaybackFormatting.logPlayback("native.audio.tracks $summary")
     }
 
     fun logVideoTracks(tracks: Tracks) {
@@ -186,6 +227,7 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
                 "playing=${currentPlayer.isPlaying} " +
                 "playWhenReady=${currentPlayer.playWhenReady} " +
                 "firstFrame=$playbackFirstFrameRendered " +
+                "awaitingVideoFrameAfterSeek=$awaitingVideoFrameAfterSeek " +
                 "videoSize=${videoSize.width}x${videoSize.height}"
         )
     }
@@ -238,6 +280,7 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
                 JSONObject()
             }
         playbackPerformanceTracker.begin(sourceBitrate = targetObject.optLong("bitrate", 0L))
+        lastAudioTracks = ""
         bandwidthWarningShown = false
     }
 

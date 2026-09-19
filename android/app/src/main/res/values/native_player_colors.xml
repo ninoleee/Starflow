@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="native_settings_background">#181818</color>
+    <color name="native_settings_background">#CC18181B</color>
     <color name="native_settings_title">#FFFFFF</color>
     <color name="native_settings_value">#BDBDBD</color>
     <color name="native_settings_divider">#2C2C2C</color>

@@ -83,6 +83,13 @@ extension _PlayerPageStatePerformance on _PlayerPageState {
       _readMpvStringProperty(player, 'video-codec'),
       _readMpvIntProperty(player, 'decoder-frame-drop-count'),
       _readMpvIntProperty(player, 'frame-drop-count'),
+      _readMpvStringProperty(player, 'audio-codec-name'),
+      _readMpvStringProperty(player, 'current-ao'),
+      _readMpvStringProperty(player, 'audio-params/format'),
+      _readMpvStringProperty(player, 'audio-params/channel-count'),
+      _readMpvStringProperty(player, 'audio-out-params/samplerate'),
+      _readMpvStringProperty(player, 'audio-out-params/channel-count'),
+      _readMpvStringProperty(player, 'avsync'),
     ]);
     final cacheSpeed = properties[0] as int?;
     if (cacheSpeed != null && cacheSpeed > 0) {
@@ -120,6 +127,13 @@ extension _PlayerPageStatePerformance on _PlayerPageState {
             summary.bandwidthToBitrateRatio?.toStringAsFixed(2) ?? '',
         'hardwareDecoder': hardwareDecoder ?? '',
         'videoDecoder': videoDecoder ?? '',
+        'audioDecoder': properties[5] ?? '',
+        'audioOutput': properties[6] ?? '',
+        'audioSampleFormat': properties[7] ?? '',
+        'audioInputChannels': properties[8] ?? '',
+        'audioOutputSampleRate': properties[9] ?? '',
+        'audioOutputChannels': properties[10] ?? '',
+        'avSyncSeconds': properties[11] ?? '',
         'droppedFrames': droppedDecoderFrames + droppedOutputFrames,
         'forwardBufferBytes': budget.forwardBytes,
         'backBufferBytes': budget.backBytes,

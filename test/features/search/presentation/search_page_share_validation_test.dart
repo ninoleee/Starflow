@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
-import 'package:starflow/features/search/data/mock_search_repository.dart';
+import 'package:starflow/features/search/data/search_repository.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';

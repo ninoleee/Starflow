@@ -17,7 +17,8 @@
     </style>
     <style name="NativePlaybackSettingsDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
         <item name="android:windowBackground">@drawable/native_settings_background</item>
-        <item name="android:colorBackground">@color/native_settings_background</item>
+        <!-- Only the window draws the translucent surface, not each content panel. -->
+        <item name="android:colorBackground">@android:color/transparent</item>
         <item name="android:textColorPrimary">@color/native_settings_title</item>
         <item name="android:textColorSecondary">@color/native_settings_value</item>
         <item name="android:colorAccent">@color/native_settings_title</item>

@@ -101,6 +101,8 @@ void main() {
     await tester.pumpWidget(build(true));
     await _pumpUntil(tester, () => requests.length == 4);
     expect(requests.every((path) => path.startsWith('/old/')), isTrue);
+    // UI permit expiry must not prevent subsequent transport cancellation.
+    await tester.pump(const Duration(seconds: 5));
     await tester.pumpWidget(build(false));
     await _pumpUntil(
       tester,

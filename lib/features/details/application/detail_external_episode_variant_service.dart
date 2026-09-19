@@ -288,6 +288,8 @@ class DetailExternalEpisodeVariantService {
         current.ratingLabels,
         base.ratingLabels,
       ),
+      ratingCount:
+          current.ratingCount > 0 ? current.ratingCount : base.ratingCount,
       genres: base.genres.isNotEmpty ? base.genres : current.genres,
       directors: base.directors.isNotEmpty ? base.directors : current.directors,
       directorProfiles: mergeMediaPersonProfiles(

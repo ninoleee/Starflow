@@ -22,6 +22,8 @@ class MediaPosterTile extends ConsumerStatefulWidget {
     this.subtitleColor,
     this.imageBadgeText = '',
     this.imageTopRightBadgeText = '',
+    this.imageTopRightBadgeTextStyle,
+    this.imageTopRightBadgeShowDecoration = true,
     this.focusId,
     this.focusNode,
     this.autofocus = false,
@@ -44,6 +46,8 @@ class MediaPosterTile extends ConsumerStatefulWidget {
   final Color? subtitleColor;
   final String imageBadgeText;
   final String imageTopRightBadgeText;
+  final TextStyle? imageTopRightBadgeTextStyle;
+  final bool imageTopRightBadgeShowDecoration;
   final String? focusId;
   final FocusNode? focusNode;
   final bool autofocus;
@@ -196,12 +200,14 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
                   right: 10,
                   child: _PosterImageBadge(
                     text: widget.imageTopRightBadgeText,
-                    textStyle: theme.textTheme.labelSmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0,
-                      fontSize: 10,
-                    ),
+                    showDecoration: widget.imageTopRightBadgeShowDecoration,
+                    textStyle: widget.imageTopRightBadgeTextStyle ??
+                        theme.textTheme.labelSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0,
+                          fontSize: 10,
+                        ),
                   ),
                 ),
             ],
@@ -386,13 +392,30 @@ class _PosterImageBadge extends StatelessWidget {
   const _PosterImageBadge({
     required this.text,
     this.textStyle,
+    this.showDecoration = true,
   });
 
   final String text;
   final TextStyle? textStyle;
+  final bool showDecoration;
 
   @override
   Widget build(BuildContext context) {
+    final label = Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 4,
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: textStyle,
+      ),
+    );
+    if (!showDecoration) {
+      return label;
+    }
     return DecoratedBox(
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.68),
@@ -401,18 +424,7 @@ class _PosterImageBadge extends StatelessWidget {
           color: Colors.white.withValues(alpha: 0.12),
         ),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 8,
-          vertical: 4,
-        ),
-        child: Text(
-          text,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: textStyle,
-        ),
-      ),
+      child: label,
     );
   }
 }

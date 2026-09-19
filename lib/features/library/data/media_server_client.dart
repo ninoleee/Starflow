@@ -64,3 +64,11 @@ abstract interface class MediaServerClient {
     required Duration duration,
   }) async {}
 }
+
+/// Optional server-session lifecycle, separate from stateless media browsing.
+abstract interface class MediaServerSessionClient {
+  Future<void> releasePlaybackSession({
+    required MediaSourceConfig source,
+    required PlaybackTarget target,
+  });
+}

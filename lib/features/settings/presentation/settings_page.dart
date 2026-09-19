@@ -69,7 +69,6 @@ class SettingsPage extends ConsumerStatefulWidget {
           body: AppPageBackground(
             contentPadding: appPageContentPadding(
               context,
-              includeBottomNavigationBar: true,
             ),
             child: ListView(
               controller: scrollController,

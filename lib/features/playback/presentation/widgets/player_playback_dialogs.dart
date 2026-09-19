@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/features/playback/presentation/widgets/player_menu_style.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -10,7 +11,7 @@ Future<void> showPlaybackSubtitleDelayDialog({
   required List<double> steps,
   required Future<double> Function(double nextDelay) onApplyDelay,
 }) {
-  return showDialog<void>(
+  return showPlaybackMenuDialog<void>(
     context: context,
     builder: (dialogContext) {
       var currentDelay = initialDelay;
@@ -73,7 +74,7 @@ Future<SeriesSkipPreference?> showPlaybackSeriesSkipDialog({
   required Duration currentPosition,
   required SeriesSkipPreference seedPreference,
 }) {
-  return showDialog<SeriesSkipPreference>(
+  return showPlaybackMenuDialog<SeriesSkipPreference>(
     context: context,
     builder: (dialogContext) {
       var enabled = seedPreference.enabled;

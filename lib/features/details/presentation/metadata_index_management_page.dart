@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -532,20 +533,7 @@ class _MetadataIndexManagementPageState
     List<String> primary,
     List<String> secondary,
   ) {
-    final seen = <String>{};
-    final merged = <String>[];
-    for (final label in [...primary, ...secondary]) {
-      final trimmed = label.trim();
-      if (trimmed.isEmpty) {
-        continue;
-      }
-      final normalized = trimmed.toLowerCase();
-      if (!seen.add(normalized)) {
-        continue;
-      }
-      merged.add(trimmed);
-    }
-    return merged;
+    return mergeDistinctRatingLabels(primary, secondary);
   }
 
   void _invalidateReaders() {

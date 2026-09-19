@@ -96,6 +96,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           client: _ref.read(mediaServerClientProvider(MediaSourceKind.fntv)),
           source: source,
         );
+        await _fntvSessions[sessionId]!.sessions.retain(target);
       }
       final launched = await _platformChannel.invokeMethod<bool>(
         'launchNativePlaybackContainer',
@@ -163,6 +164,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
     if (const [
       'downloadNativeFntvSubtitle',
       'reportNativeFntvProgress',
+      'releaseNativeFntvPlayback',
       'closeNativeFntvSession'
     ].contains(call.method)) {
       final args = Map<String, dynamic>.from(call.arguments as Map);
@@ -185,6 +187,10 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         if (call.method == 'downloadNativeFntvSubtitle') {
           return await service.downloadSubtitle(
               target, args['subtitleId'] as String);
+        }
+        if (call.method == 'releaseNativeFntvPlayback') {
+          await service.sessions.release(target);
+          return {'ok': true};
         }
         await service.client.reportPlaybackProgress(
           source: service.source,
@@ -277,7 +283,15 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
             .timeout(const Duration(seconds: 30));
         return {'ok': true, 'queueJson': jsonEncode(queue.toJson())};
       }
+      // Keep the owner alive across async resolution so a late result is
+      // released even if the native activity closed in the meantime.
+      final fntv = _fntvSessions[resolverSessionId];
+      if (target.sourceKind == MediaSourceKind.fntv &&
+          (fntv == null || fntv.source.id != target.sourceId)) {
+        return {'ok': false, 'message': '飞牛播放会话已失效'};
+      }
       final resolved = await resolver(target);
+      await fntv?.sessions.retain(resolved.target);
       final resolvedPlaybackItemKey = buildPlaybackItemKey(resolved.target);
       return <String, Object?>{
         'ok': true,

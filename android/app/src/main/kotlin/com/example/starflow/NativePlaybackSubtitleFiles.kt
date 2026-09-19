@@ -8,18 +8,52 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import java.io.File
 import java.nio.charset.StandardCharsets
+import java.io.RandomAccessFile
+import java.nio.channels.FileLock
 
 internal class NativePlaybackSubtitleFiles(private val context: Context) {
+    private var leaseFile: RandomAccessFile? = null
+    private var lease: FileLock? = null
+    private val directory by lazy {
+        val root = File(context.cacheDir, "playback_subtitles").apply { mkdirs() }
+        val cutoff = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+        root.listFiles()?.filter { it.isDirectory && it.lastModified() < cutoff }?.forEach { old ->
+            runCatching {
+                RandomAccessFile(File(old, ".lease"), "rw").use { file ->
+                    file.channel.tryLock()?.use { old.deleteRecursively() }
+                }
+            }
+        }
+        File.createTempFile("session-", ".dir", root).apply {
+            delete()
+            mkdirs()
+            leaseFile = RandomAccessFile(File(this, ".lease"), "rw")
+            lease = leaseFile!!.channel.lock()
+        }
+    }
+    private var cachedSource: Uri? = null
+    private var cachedText: String? = null
+
+    fun close() {
+        cachedSource = null
+        cachedText = null
+        directory.deleteRecursively()
+        lease?.release()
+        leaseFile?.close()
+        lease = null
+        leaseFile = null
+    }
+
+    fun deletePrepared(uri: Uri?) {
+        val path = uri?.path ?: return
+        val file = File(path)
+        if (file.parentFile == directory) file.delete()
+    }
     fun buildSubtitleConfiguration(
         source: ExternalSubtitleSource,
         delayMs: Long,
     ): MediaItem.SubtitleConfiguration {
-        val effectiveUri =
-            if (delayMs == 0L) {
-                source.originalUri
-            } else {
-                buildShiftedSubtitleFile(source, delayMs)
-            }
+        val effectiveUri = buildShiftedSubtitleFile(source, delayMs)
         return MediaItem.SubtitleConfiguration.Builder(effectiveUri)
             .setMimeType(source.mimeType)
             .setLanguage(C.LANGUAGE_UNDETERMINED)
@@ -36,23 +70,33 @@ internal class NativePlaybackSubtitleFiles(private val context: Context) {
     }
 
     private fun buildShiftedSubtitleFile(source: ExternalSubtitleSource, delayMs: Long): Uri {
-        val subtitleDirectory = File(context.cacheDir, "native_subtitles").apply { mkdirs() }
         val extension = resolveSubtitleExtension(source)
-        val outputFile =
-            File(
-                subtitleDirectory,
-                "shifted_${source.displayName.hashCode()}_${delayMs}.$extension",
-            )
-        val originalContent =
-            openSubtitleInputStream(source.originalUri)
-                ?.bufferedReader(StandardCharsets.UTF_8)
-                ?.use { it.readText() } ?: throw IllegalStateException("字幕文件读取失败")
+        val originalContent = if (cachedSource == source.originalUri && cachedText != null) {
+            cachedText!!
+        } else {
+            val bytes = openSubtitleInputStream(source.originalUri)?.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    require(output.size() + count <= NativeSubtitleContent.MAX_BYTES) { "字幕文件过大" }
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            } ?: throw IllegalStateException("字幕文件读取失败")
+            NativeSubtitleContent.decode(bytes).also {
+                cachedSource = source.originalUri
+                cachedText = it
+            }
+        }
         val shiftedContent =
             NativeSubtitleTiming.shiftSubtitleContent(
                 content = originalContent,
                 mimeType = source.mimeType,
                 delayMs = delayMs,
             )
+        val outputFile = File.createTempFile("subtitle-", ".$extension", directory)
         outputFile.writeText(shiftedContent, StandardCharsets.UTF_8)
         return Uri.fromFile(outputFile)
     }

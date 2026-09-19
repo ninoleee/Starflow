@@ -4,6 +4,28 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class NativeSubtitleTrackSelectionPolicyTest {
+    @Test fun `shared cross-platform language contract`() {
+        val fixture = sequenceOf(java.io.File("../../test/fixtures/subtitle_language_contract.json"),
+            java.io.File("test/fixtures/subtitle_language_contract.json")).first { it.exists() }
+        val rows = org.json.JSONArray(fixture.readText())
+        for (index in 0 until rows.length()) {
+            val row = rows.getJSONObject(index)
+            val selected = NativeSubtitleTrackSelectionPolicy.selectLanguage(
+                listOf(NativeSubtitleTrackCandidate(true, label = row.getString("text"))),
+                listOf(row.getString("preference")))
+            assertEquals(row.toString(), row.getBoolean("match"), selected == true)
+        }
+    }
+    @Test
+    fun `short aliases require token boundaries and bilingual alone does not match`() {
+        assertEquals(null, NativeSubtitleTrackSelectionPolicy.selectLanguage(
+            listOf(NativeSubtitleTrackCandidate("wrong", label = "French bilingual scene")),
+            listOf("en", "zh-cn")))
+        for (language in listOf("en", "ja", "ko", "fr", "de", "es", "pt", "ru")) {
+            assertEquals(language, NativeSubtitleTrackSelectionPolicy.selectLanguage(
+                listOf(NativeSubtitleTrackCandidate(language, label = language)), listOf(language)))
+        }
+    }
     @Test
     fun `selects preferred language before forced and default tracks`() {
         val candidates = listOf(

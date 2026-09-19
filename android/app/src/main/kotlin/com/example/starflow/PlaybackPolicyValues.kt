@@ -2,7 +2,13 @@
 package com.example.starflow
 
 internal object PlaybackPolicyValues {
-    const val version = 2
+    const val version = 3
+    const val memoryRecentLimit = 20
+    const val memoryResumeMinimumMs = 5000
+    const val memoryResumeRemainingMs = 12000
+    const val memoryCompletedRemainingMs = 8000
+    const val memoryCompletedPermille = 985
+    const val memoryUnknownCompletedPermille = 995
     const val maxPlayerAttempts = 3
     const val maxRuntimeRecoveries = 2
     const val startupHardLimitMs = 120000

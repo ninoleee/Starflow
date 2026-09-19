@@ -930,6 +930,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
           switch sessionPreference {
           case .off:
             item.select(nil, in: group)
+            self.automaticallyAppliedSubtitlePreference = .off
             return
           case .single(let fingerprint):
             if let restored = self.matchSubtitleOption(
@@ -937,6 +938,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
               fingerprint: fingerprint
             ) {
               item.select(restored, in: group)
+              self.automaticallyAppliedSubtitlePreference = .single(self.subtitleFingerprint(for: restored))
               return
             }
           }
@@ -1049,24 +1051,8 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     _ option: AVMediaSelectionOption,
     matches rawPreference: String
   ) -> Bool {
-    let preference = canonicalSubtitleLanguage(rawPreference)
-    guard !preference.isEmpty else {
-      return false
-    }
-    let optionLanguage = canonicalSubtitleLanguage(option.locale?.identifier ?? "")
-    if optionLanguage == preference {
-      return true
-    }
-    let optionRoot = optionLanguage.split(separator: "-").first.map(String.init) ?? ""
-    let preferenceRoot = preference.split(separator: "-").first.map(String.init) ?? ""
-    if !optionRoot.isEmpty, optionRoot == preferenceRoot,
-      optionRoot != "zh" || optionLanguage == "zh" || preference == "zh"
-    {
-      return true
-    }
-
-    let label = normalizedSubtitleLabel(option.displayName)
-    return subtitleLanguageTokens(preference).contains { label.contains($0) }
+    return NativeSubtitleLanguagePolicy.matches(
+      language: option.locale?.identifier ?? "", label: option.displayName, preference: rawPreference)
   }
 
   private var defaultSubtitleLanguages: [String] {
@@ -1081,31 +1067,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   private func canonicalSubtitleLanguage(_ raw: String) -> String {
-    let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-      .lowercased()
-      .replacingOccurrences(of: "_", with: "-")
-    switch normalized {
-    case "", "und", "zxx", "null", "unknown": return ""
-    case "english", "eng": return "en"
-    case "japanese", "jp", "jpn": return "ja"
-    case "korean", "kr", "kor": return "ko"
-    case "chinese", "ch", "chi", "zho": return "zh"
-    case "zh-hans", "zh-sg", "chs", "chn", "cn", "sc", "gb": return "zh-cn"
-    case "zh-hant", "zh-hk", "zh-mo", "cht", "tc", "big5": return "zh-tw"
-    default: return normalized
-    }
-  }
-
-  private func subtitleLanguageTokens(_ language: String) -> [String] {
-    switch language {
-    case "zh-cn": return ["zhcn", "zhhans", "chs", "chn", "chi", "zho", "cn", "sc", "简体", "簡體", "简中"]
-    case "zh-tw": return ["zhtw", "zhhant", "cht", "chi", "zho", "tc", "big5", "繁体", "繁體", "繁中"]
-    case "zh": return ["chinese", "中文", "国语", "國語"]
-    case "en": return ["english", " eng ", "英语", "英語", "英文", "英字"]
-    case "ja": return ["japanese", " jp ", " jpn ", "日语", "日語", "日文", "日字", "日本語"]
-    case "ko": return ["korean", " kr ", " kor ", "韩语", "韓語", "한국어"]
-    default: return [language.replacingOccurrences(of: "-", with: "")]
-    }
+    return NativeSubtitleLanguagePolicy.canonical(raw)
   }
 
   private func isForcedSubtitleLabel(_ label: String) -> Bool {
@@ -1113,7 +1075,7 @@ private final class NativePlaybackViewController: AVPlayerViewController {
     return [
       "forced", "force", "signs", "强制", "強制", "强迫",
       "仅外语", "僅外語", "外语对白", "外語對白",
-    ].contains { normalized.contains($0) }
+    ].contains { NativeSubtitleLanguagePolicy.contains(normalized, token: $0) }
   }
 
   private func normalizedSubtitleLabel(_ label: String) -> String {
@@ -1741,9 +1703,11 @@ private final class NativePlaybackViewController: AVPlayerViewController {
 
 private final class NativePlaybackMemoryStore {
   private static let storageKey = "flutter.starflow.playback.memory.v1"
-  private static let recentEntryLimit = 20
+  private static let recentEntryLimit = PlaybackPolicyValues.memoryRecentLimit
 
   private let userDefaults: UserDefaults
+  private var cachedPlaybackRaw: String?
+  private var cachedPlaybackSnapshot: [String: Any]?
 
   init(userDefaults: UserDefaults = .standard) {
     self.userDefaults = userDefaults
@@ -1759,16 +1723,7 @@ private final class NativePlaybackMemoryStore {
     let progress = entry.doubleValue(for: "progress")
     let completed = entry.boolValue(for: "completed")
 
-    if completed || positionMs < 5_000 {
-      return 0
-    }
-    if durationMs > 0, durationMs - positionMs <= 12_000 {
-      return 0
-    }
-    if progress >= 0.985 {
-      return 0
-    }
-    return positionMs
+    return PlaybackMemoryPolicy.resume(positionMs: positionMs, durationMs: durationMs, progress: progress, completed: completed)
   }
 
   func savePlaybackEntry(
@@ -1790,7 +1745,7 @@ private final class NativePlaybackMemoryStore {
     let progress = clampedDuration <= 0
       ? 0.0
       : min(max(Double(safePosition) / Double(clampedDuration), 0.0), 1.0)
-    let completed = isCompleted(positionMs: safePosition, durationMs: clampedDuration, progress: progress)
+    let completed = PlaybackMemoryPolicy.completed(positionMs: safePosition, durationMs: clampedDuration, progress: progress)
 
     var snapshot = loadPlaybackSnapshot()
     var items = snapshot["items"] as? [String: Any] ?? [:]
@@ -1809,7 +1764,8 @@ private final class NativePlaybackMemoryStore {
     let entry: [String: Any] = [
       "key": itemKey,
       "target": targetObject,
-      "updatedAt": updatedAt,
+      "updatedAt": PlaybackMemoryPolicy.nextTimestamp(now: updatedAt, existing:
+        [items, series].flatMap { $0.values }.compactMap { ($0 as? [String: Any])?["updatedAt"] as? String }),
       "seriesKey": seriesKey,
       "seriesTitle": seriesTitle,
       "positionMs": NSNumber(value: safePosition),
@@ -1871,12 +1827,21 @@ private final class NativePlaybackMemoryStore {
   }
 
   private func loadPlaybackSnapshot() -> [String: Any] {
-    guard let raw = userDefaults.string(forKey: Self.storageKey),
-      let data = raw.data(using: .utf8),
+    guard let raw = userDefaults.string(forKey: Self.storageKey) else {
+      cachedPlaybackRaw = nil
+      cachedPlaybackSnapshot = nil
+      return [:]
+    }
+    if raw == cachedPlaybackRaw, let cached = cachedPlaybackSnapshot {
+      return cached
+    }
+    guard let data = raw.data(using: .utf8),
       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else {
       return [:]
     }
+    cachedPlaybackRaw = raw
+    cachedPlaybackSnapshot = object
     return object
   }
 
@@ -1888,6 +1853,8 @@ private final class NativePlaybackMemoryStore {
       return
     }
     userDefaults.set(raw, forKey: Self.storageKey)
+    cachedPlaybackRaw = raw
+    cachedPlaybackSnapshot = snapshot
   }
 
   func decodeTargetJson(_ raw: String) -> [String: Any] {
@@ -1906,14 +1873,14 @@ private final class NativePlaybackMemoryStore {
     }
 
     let sortedKeys = items
-      .compactMap { key, value -> (String, String)? in
+      .compactMap { key, value -> (String, Int64)? in
         guard let entry = value as? [String: Any] else {
           return nil
         }
-        return (key, entry["updatedAt"] as? String ?? "")
+        return (key, PlaybackMemoryPolicy.timestamp(entry["updatedAt"] as? String ?? ""))
       }
       .sorted { left, right in
-        left.1 > right.1
+        left.1 == right.1 ? left.0 > right.0 : left.1 > right.1
       }
 
     for entry in sortedKeys.dropFirst(Self.recentEntryLimit) {
@@ -1921,13 +1888,6 @@ private final class NativePlaybackMemoryStore {
     }
   }
 
-  private func isCompleted(positionMs: Int64, durationMs: Int64, progress: Double) -> Bool {
-    if durationMs <= 0 {
-      return progress >= 0.995
-    }
-    let remaining = durationMs - positionMs
-    return progress >= 0.985 || remaining <= 8_000
-  }
 }
 
 private extension Dictionary where Key == String, Value == Any {

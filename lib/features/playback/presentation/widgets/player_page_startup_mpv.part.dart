@@ -14,6 +14,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
   Future<void> _initialize({
     PlaybackTarget? initialTarget,
     bool automaticRecovery = false,
+    bool targetAlreadyResolved = false,
+    Duration? startPositionOverride,
   }) async {
     if (!automaticRecovery) _automaticRecoveryBudget.reset();
     final generation = ++_startupGeneration;
@@ -58,11 +60,23 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         targetResolver: PlaybackTargetResolver(read: _providerContainer.read),
         engineRouter: const PlaybackEngineRouter(),
       );
-      final outcome = await scope.wait(coordinator.start(
+      final outcome = await scope.wait(coordinator
+          .start(
         initialTarget: startupTarget,
         isTelevision: _isTelevisionPlaybackDevice,
         isWeb: kIsWeb,
-      ));
+        targetAlreadyResolved: targetAlreadyResolved,
+      )
+          .then((outcome) async {
+        // Ownership precedes the cancellation check, including late results.
+        if (outcome.routeAction == PlaybackStartupRouteAction.openEmbeddedMpv) {
+          await _fntvSessions.retain(outcome.resolvedTarget);
+          if (!_isCurrentStartup(generation)) {
+            await _fntvSessions.release(outcome.resolvedTarget);
+          }
+        }
+        return outcome;
+      }));
       if (!_isCurrentStartup(generation)) {
         return;
       }
@@ -149,11 +163,14 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
           ),
         );
       }
-      final startPosition = _resolvePlaybackStartPosition(
-        target: resolvedTarget,
-        resumeEntry: resumeEntry,
-        skipPreference: skipPreference,
-      );
+      final startPosition = startPositionOverride == null
+          ? _resolvePlaybackStartPosition(
+              target: resolvedTarget,
+              resumeEntry: resumeEntry,
+              skipPreference: skipPreference,
+            )
+          : PlaybackStartPosition(
+              position: startPositionOverride, isResume: true);
       await _resolveAndroidMemoryClassIfNeeded();
       if (!_isCurrentStartup(generation)) {
         return;
@@ -197,6 +214,15 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
 
       _playerErrorSubscription = playback.errorSubscription;
       _playerLogSubscription = playback.logSubscription;
+      await _bindMpvSubtitleRendering(playback.player);
+      if (!_isCurrentStartup(generation)) return;
+      _playerSubtitleRenderSubscription = playback.player.stream.track.listen((_) {
+        _syncMpvSubtitleRendering(playback.player);
+      });
+      _playerSubtitleTracksSubscription = playback.player.stream.tracks.listen((_) {
+        _syncMpvSubtitleRendering(playback.player);
+      });
+      _syncMpvSubtitleRendering(playback.player);
       _playerPlayingSubscription = playback.player.stream.playing.listen((
         playing,
       ) {
@@ -326,6 +352,9 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         reason: 'failed',
         player: _player,
       );
+      if (!_fntvSwitchInProgress && _resolvedTarget != null) {
+        await _fntvSessions.release(_resolvedTarget!);
+      }
       if (!_isCurrentStartup(generation)) {
         return;
       }

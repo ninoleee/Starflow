@@ -171,6 +171,16 @@ int scorePreferredSubtitleText(
     systemLocale: systemLocale,
   );
   for (var index = 0; index < preferenceKeys.length; index++) {
+    final preference = preferenceKeys[index];
+    final conflictingScript = preference == 'zh-cn'
+        ? const ['zh-tw', 'zh-hant', 'cht', '繁中', '繁体', '繁體']
+        : preference == 'zh-tw'
+            ? const ['zh-cn', 'zh-hans', 'chs', '简中', '简体', '簡體']
+            : const <String>[];
+    if (_containsPreferredToken(
+        normalizedText, normalizedTokens, conflictingScript)) {
+      continue;
+    }
     final weight = switch (index) {
       0 => 120,
       1 => 84,
@@ -187,11 +197,12 @@ int scorePreferredSubtitleText(
     }
   }
 
-  if (_containsPreferredToken(
-    normalizedText,
-    normalizedTokens,
-    const ['双语', '雙語', '中英', 'bilingual'],
-  )) {
+  if (score > 0 &&
+      _containsPreferredToken(
+        normalizedText,
+        normalizedTokens,
+        const ['双语', '雙語', '中英', 'bilingual'],
+      )) {
     score += 12;
   }
   return score;
@@ -202,7 +213,8 @@ bool isForcedSubtitleText(String text) {
   if (normalizedText.isEmpty) {
     return false;
   }
-  return const <String>[
+  return _containsPreferredToken(
+      normalizedText, _tokenizeSubtitlePreferenceText(text), const <String>[
     'forced',
     'force',
     'signs',
@@ -213,10 +225,7 @@ bool isForcedSubtitleText(String text) {
     '仅外语',
     '外语对白',
     '外語對白',
-  ].any(
-    (marker) =>
-        normalizedText.contains(normalizeSubtitlePreferenceText(marker)),
-  );
+  ]);
 }
 
 T? selectAutomaticSubtitleTrack<T>(
@@ -503,8 +512,6 @@ List<String> _subtitleMatchTokensForPreferenceKey(String key) {
         'ch',
         'chinese',
         '中英',
-        '双语',
-        '雙語',
       ],
     'zh-tw' => const <String>[
         'zh-tw',
@@ -526,8 +533,6 @@ List<String> _subtitleMatchTokensForPreferenceKey(String key) {
         'ch',
         'chinese',
         '中英',
-        '双语',
-        '雙語',
       ],
     'zh' => const <String>[
         'ch',
@@ -539,15 +544,31 @@ List<String> _subtitleMatchTokensForPreferenceKey(String key) {
         '中文',
         'chinese',
         '中英',
-        '双语',
-        '雙語',
       ],
-    'en' => const <String>['eng', 'english', '英语', '英語', '英文', '英字'],
-    'ja' => const <String>['jp', 'jpn', 'japanese', '日本語', '日语', '日文', '日字'],
-    'ko' => const <String>['kr', 'kor', 'korean', '韩语', '韓語', '韩文', '韓文'],
-    'fr' => const <String>['fre', 'fra', 'french', '法语', '法文'],
-    'de' => const <String>['ger', 'deu', 'german', '德语', '德文'],
-    'es' => const <String>['spa', 'spanish', '西班牙语'],
+    'en' => const <String>[
+        'en',
+        'eng',
+        'english',
+        '英语',
+        '英語',
+        '英文',
+        '英字',
+        '中英'
+      ],
+    'ja' => const <String>[
+        'ja',
+        'jp',
+        'jpn',
+        'japanese',
+        '日本語',
+        '日语',
+        '日文',
+        '日字'
+      ],
+    'ko' => const <String>['ko', 'kr', 'kor', 'korean', '韩语', '韓語', '韩文', '韓文'],
+    'fr' => const <String>['fr', 'fre', 'fra', 'french', '法语', '法文'],
+    'de' => const <String>['de', 'ger', 'deu', 'german', '德语', '德文'],
+    'es' => const <String>['es', 'spa', 'spanish', '西班牙语'],
     'pt-br' => const <String>[
         'pt-br',
         'ptbr',
@@ -556,8 +577,8 @@ List<String> _subtitleMatchTokensForPreferenceKey(String key) {
         '巴葡',
         '巴西葡语',
       ],
-    'pt' => const <String>['por', 'portuguese', '葡萄牙语'],
-    'ru' => const <String>['rus', 'russian', '俄语', '俄文'],
+    'pt' => const <String>['pt', 'por', 'portuguese', '葡萄牙语'],
+    'ru' => const <String>['ru', 'rus', 'russian', '俄语', '俄文'],
     _ =>
       key.contains('-') ? <String>[key, key.split('-').first] : <String>[key],
   };
@@ -583,8 +604,9 @@ bool _containsPreferredToken(
     if (normalizedToken.isEmpty) {
       continue;
     }
-    if (normalizedToken.length <= 2) {
-      if (normalizedTokens.contains(normalizedToken)) {
+    if (RegExp(r'^[a-z0-9]+$').hasMatch(normalizedToken)) {
+      if (normalizedTokens.contains(normalizedToken) ||
+          (token.contains('-') && normalizedText.contains(normalizedToken))) {
         return true;
       }
       continue;

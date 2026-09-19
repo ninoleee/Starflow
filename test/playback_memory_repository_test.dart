@@ -46,6 +46,30 @@ void main() {
     expect(entry.progress, closeTo(0.3016, 0.001));
   });
 
+  test('cached FNTV history drops active transcode sessions', () async {
+    final repository = PlaybackMemoryRepository(
+        sharedPreferences: await SharedPreferences.getInstance());
+    const target = PlaybackTarget(
+        title: 'Film',
+        sourceId: 'nas',
+        streamUrl: 'https://nas/session.m3u8',
+        sourceName: 'NAS',
+        sourceKind: MediaSourceKind.fntv,
+        itemId: 'film',
+        fntvSessionLink: '/session.m3u8',
+        fntvStartPositionMs: 42000,
+        preferredPlaybackQualityIndex: -1);
+    await repository.saveProgress(
+        target: target,
+        position: const Duration(seconds: 42),
+        duration: const Duration(minutes: 90));
+    final saved = (await repository.loadRecentEntries()).single;
+    expect(saved.target.fntvSessionLink, '');
+    expect(saved.target.streamUrl, '');
+    expect(saved.target.preferredPlaybackQualityIndex, 0);
+    expect(saved.position.inSeconds, 42);
+  });
+
   test('reads playback progress written by the Android native player',
       () async {
     const target = PlaybackTarget(

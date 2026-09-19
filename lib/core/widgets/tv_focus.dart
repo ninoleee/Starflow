@@ -29,6 +29,45 @@ enum StarflowButtonVariant {
 
 const double kTvButtonFocusScale = 1.035;
 
+/// Consumes held command keys without letting repeats reach ancestor shortcuts.
+/// Directional navigation and numeric adjustment shortcuts opt in separately.
+Map<ShortcutActivator, Intent> tvPressOnlyShortcuts(
+  Map<SingleActivator, Intent> shortcuts,
+) {
+  return <ShortcutActivator, Intent>{
+    for (final entry in shortcuts.entries) ...{
+      _TvKeyRepeatActivator(entry.key): const DoNothingIntent(),
+      entry.key: entry.value,
+    },
+  };
+}
+
+class _TvKeyRepeatActivator implements ShortcutActivator {
+  const _TvKeyRepeatActivator(this.activator);
+
+  final SingleActivator activator;
+
+  @override
+  Iterable<LogicalKeyboardKey> get triggers => activator.triggers;
+
+  @override
+  bool accepts(KeyEvent event, HardwareKeyboard state) =>
+      event is KeyRepeatEvent && activator.accepts(event, state);
+
+  @override
+  String debugDescribeKeys() => '${activator.debugDescribeKeys()} (repeat)';
+}
+
+final _tvActionShortcuts = tvPressOnlyShortcuts(const {
+  SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+  SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+  SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
+  SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+  SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
+  SingleActivator(LogicalKeyboardKey.contextMenu): TvContextMenuIntent(),
+  SingleActivator(LogicalKeyboardKey.gameButtonY): TvContextMenuIntent(),
+});
+
 final _lightweightTvFocusSettingsProvider = Provider<bool>((ref) {
   return ref.watch(appSettingsProvider.select(
     (settings) => settings.effectiveLightweightTvFocusEnabled(
@@ -253,6 +292,26 @@ bool hasActionableTvFocus([FocusNode? focusNode]) {
       node is! FocusScopeNode &&
       node.context != null &&
       node.canRequestFocus;
+}
+
+void scheduleTvFocusRecovery({
+  required BuildContext context,
+  required FocusNode focusNode,
+}) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (!context.mounted ||
+        (lifecycle != null && lifecycle != AppLifecycleState.resumed) ||
+        ModalRoute.of(context)?.isCurrent == false ||
+        !TickerMode.valuesOf(context).enabled ||
+        hasActionableTvFocus() ||
+        focusNode.context == null ||
+        !focusNode.canRequestFocus) {
+      return;
+    }
+    requestTvFocus(focusNode);
+  });
+  WidgetsBinding.instance.ensureVisualUpdate();
 }
 
 class TvDirectionalFocusBoundary extends StatelessWidget {
@@ -779,33 +838,28 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
       );
     }
 
-    return FocusableActionDetector(
-      focusNode: _effectiveFocusNode,
-      autofocus: widget.autofocus,
-      enabled: enabled || widget.focusableWhenDisabled,
-      onFocusChange: (value) {
-        if (_isFocused != value) {
-          setState(() {
-            _isFocused = value;
-          });
-        }
-        if (value) {
-          widget.onFocused?.call();
-        }
-      },
-      shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
-        SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-        SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
-        SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-        SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
-        SingleActivator(LogicalKeyboardKey.contextMenu): TvContextMenuIntent(),
-        SingleActivator(LogicalKeyboardKey.gameButtonY): TvContextMenuIntent(),
-      },
-      actions: _buildTelevisionActions(context),
-      child: _buildFocusVisualFrame(
-        child: widget.child,
-        lightweightTvFocusEnabled: lightweightTvFocusEnabled,
+    return ExcludeFocus(
+      excluding: !enabled && !widget.focusableWhenDisabled,
+      child: FocusableActionDetector(
+        focusNode: _effectiveFocusNode,
+        autofocus: widget.autofocus,
+        enabled: enabled || widget.focusableWhenDisabled,
+        onFocusChange: (value) {
+          if (_isFocused != value) {
+            setState(() {
+              _isFocused = value;
+            });
+          }
+          if (value) {
+            widget.onFocused?.call();
+          }
+        },
+        shortcuts: _tvActionShortcuts,
+        actions: _buildTelevisionActions(context),
+        child: _buildFocusVisualFrame(
+          child: widget.child,
+          lightweightTvFocusEnabled: lightweightTvFocusEnabled,
+        ),
       ),
     );
   }
@@ -1598,7 +1652,7 @@ Widget wrapTelevisionDialogBackHandling({
     return child;
   }
 
-  final shortcuts = <ShortcutActivator, Intent>{
+  final shortcuts = <SingleActivator, Intent>{
     const SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
     const SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
   };
@@ -1627,7 +1681,7 @@ Widget wrapTelevisionDialogBackHandling({
   }
 
   return Shortcuts(
-    shortcuts: shortcuts,
+    shortcuts: tvPressOnlyShortcuts(shortcuts),
     child: Actions(
       actions: <Type, Action<Intent>>{
         DismissIntent: CallbackAction<DismissIntent>(

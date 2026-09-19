@@ -12,7 +12,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/discovery/data/douban_api_client.dart';
 import 'package:starflow/features/library/data/emby_api_client.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
@@ -240,62 +240,121 @@ void main() {
       expect(resolved.ratingLabels, ['豆瓣 9.6', 'IMDb 8.6']);
     });
 
-    test('loads the rating count from Douban details automatically', () async {
-      var doubanRequests = 0;
-      final container = ProviderContainer(
-        overrides: [
-          appSettingsProvider.overrideWithValue(
-            AppSettings.fromJson({
-              'mediaSources': const [],
-              'searchProviders': const [],
-              'doubanAccount': const {'enabled': false},
-              'homeModules': const [],
-              'wmdbMetadataMatchEnabled': false,
-              'tmdbMetadataMatchEnabled': false,
-              'imdbRatingMatchEnabled': false,
-            }),
-          ),
-          doubanApiClientProvider.overrideWithValue(
-            DoubanApiClient(
-              MockClient((request) async {
-                doubanRequests += 1;
-                expect(request.url.path, '/rexxar/api/v2/movie/24697949');
-                return http.Response(
-                  jsonEncode({
-                    'rating': {'value': 9.2, 'count': 315946},
-                    'comment_count': 84448,
-                    'review_count': 720,
-                  }),
-                  200,
-                  headers: const {'content-type': 'application/json'},
-                );
+    for (final count in [0, 315946]) {
+      test('loads and caches Douban score with count $count together',
+          () async {
+        var doubanRequests = 0;
+        final container = ProviderContainer(
+          overrides: [
+            appSettingsProvider.overrideWithValue(
+              AppSettings.fromJson({
+                'mediaSources': const [],
+                'searchProviders': const [],
+                'doubanAccount': const {'enabled': false},
+                'homeModules': const [],
+                'wmdbMetadataMatchEnabled': false,
+                'tmdbMetadataMatchEnabled': false,
+                'imdbRatingMatchEnabled': false,
               }),
             ),
-          ),
-        ],
-      );
+            doubanApiClientProvider.overrideWithValue(
+              DoubanApiClient(
+                MockClient((request) async {
+                  doubanRequests += 1;
+                  expect(request.url.path, '/rexxar/api/v2/movie/24697949');
+                  return http.Response(
+                    jsonEncode({
+                      'rating': {'value': 9.2, 'count': count},
+                      'comment_count': 84448,
+                      'review_count': 720,
+                    }),
+                    200,
+                    headers: const {'content-type': 'application/json'},
+                  );
+                }),
+              ),
+            ),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        const target = MediaDetailTarget(
+          title: '半泽直树',
+          posterUrl: 'https://cached.example.com/poster.jpg',
+          overview: '已有完整简介',
+          year: 2013,
+          ratingCount: 0,
+          availabilityLabel: '无',
+          searchQuery: '半泽直树',
+          doubanId: '24697949',
+          sourceName: '豆瓣',
+        );
+
+        final resolved = await container.read(
+          enrichedDetailTargetProvider(target).future,
+        );
+
+        expect(doubanRequests, 1);
+        expect(resolved.ratingCount, count);
+        expect(resolved.ratingLabels, ['豆瓣 9.2']);
+        final reopened =
+            await container.read(detailTargetResolverProvider).resolve(
+                  target: target,
+                  backgroundWorkSuspended: false,
+                );
+        expect(reopened.ratingCount, count);
+        expect(reopened.ratingLabels, ['豆瓣 9.2']);
+        expect(doubanRequests, 1);
+      });
+    }
+
+    test('missing count alone never reloads an existing Douban score',
+        () async {
+      var requests = 0;
+      final container = ProviderContainer(overrides: [
+        appSettingsProvider.overrideWithValue(AppSettings.fromJson({
+          'mediaSources': const [],
+          'wmdbMetadataMatchEnabled': false,
+          'tmdbMetadataMatchEnabled': false,
+          'imdbRatingMatchEnabled': false,
+        })),
+        doubanApiClientProvider.overrideWithValue(DoubanApiClient(
+          MockClient((_) async {
+            requests += 1;
+            return http.Response(
+                jsonEncode({
+                  'rating': {'value': 9.2, 'count': 315946},
+                }),
+                200);
+          }),
+        )),
+      ]);
       addTearDown(container.dispose);
-
       const target = MediaDetailTarget(
-        title: '半泽直树',
-        posterUrl: 'https://cached.example.com/poster.jpg',
-        overview: '已有完整简介',
-        year: 2013,
-        ratingLabels: ['豆瓣 9.1'],
-        ratingCount: 0,
-        availabilityLabel: '无',
-        searchQuery: '半泽直树',
+        title: 'Movie',
+        posterUrl: '',
+        overview: '',
         doubanId: '24697949',
-        sourceName: '豆瓣',
+        ratingLabels: ['豆瓣 9.1'],
       );
-
-      final resolved = await container.read(
-        enrichedDetailTargetProvider(target).future,
+      final resolver = container.read(detailTargetResolverProvider);
+      for (var i = 0; i < 3; i++) {
+        final resolved = await resolver.resolve(
+          target: target,
+          backgroundWorkSuspended: false,
+        );
+        expect(resolved.ratingCount, 0);
+        expect(resolved.ratingLabels, target.ratingLabels);
+      }
+      expect(requests, 0);
+      final refreshed = await resolver.resolveMetadataOnly(
+        target: target,
+        backgroundWorkSuspended: false,
+        forceMetadataRefresh: true,
       );
-
-      expect(doubanRequests, 1);
-      expect(resolved.ratingCount, 315946);
-      expect(resolved.ratingLabels, ['豆瓣 9.2']);
+      expect(requests, 1);
+      expect(refreshed.ratingCount, 315946);
+      expect(refreshed.ratingLabels, ['豆瓣 9.2']);
     });
 
     test('prefers Douban count after WMDB discovers the Douban id', () async {
@@ -418,7 +477,7 @@ void main() {
         enrichedDetailTargetProvider(seedTarget).future,
       );
 
-      expect(resolved.ratingLabels, ['豆瓣 9.6', 'TMDB 8.3']);
+      expect(resolved.ratingLabels, ['豆瓣9.6', 'TMDB 8.3']);
     });
 
     test('skips auto enrichment when cached metadata is already complete',

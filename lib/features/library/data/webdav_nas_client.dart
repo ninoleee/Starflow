@@ -1,3 +1,4 @@
+import 'package:starflow/features/library/data/nfo_metadata.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
@@ -7,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/network/bounded_http_request.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/nas_media_path_policy.dart';
 import 'package:starflow/features/library/data/webdav_directory_cache_store.dart';
@@ -40,10 +42,10 @@ class WebDavNasClient {
 
   final http.Client _client;
   final WebDavDirectoryCacheStore? _directoryCacheStore;
-  final Map<String, _ParsedNfoMetadata?> _nfoCache =
-      <String, _ParsedNfoMetadata?>{};
-  final Map<String, Future<_ParsedNfoMetadata?>> _nfoInflight =
-      <String, Future<_ParsedNfoMetadata?>>{};
+  final Map<String, ParsedNfoMetadata?> _nfoCache =
+      <String, ParsedNfoMetadata?>{};
+  final Map<String, Future<ParsedNfoMetadata?>> _nfoInflight =
+      <String, Future<ParsedNfoMetadata?>>{};
   final Map<String, List<_WebDavEntry>> _directoryCache =
       <String, List<_WebDavEntry>>{};
   final Map<String, Future<List<_WebDavEntry>>> _directoryInflight =

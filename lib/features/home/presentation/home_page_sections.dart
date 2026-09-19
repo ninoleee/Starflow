@@ -320,6 +320,14 @@ class _HomePosterTile extends StatelessWidget {
         module: module,
         item: item,
       ),
+      imageTopRightBadgeShowDecoration: false,
+      imageTopRightBadgeTextStyle:
+          Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0,
+                fontSize: 19,
+              ),
       tvPosterFocusOutlineOnly: true,
       tvPosterFocusShowBorder: false,
       tvPosterFocusScale: 1.06,
@@ -357,13 +365,7 @@ class _HomeShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final verticalInsets = EdgeInsets.only(
-      top: appPageTopInset(context),
-      bottom: appPageBottomInset(
-        context,
-        includeBottomNavigationBar: true,
-      ),
-    );
+    const verticalInsets = EdgeInsets.zero;
 
     return Stack(
       fit: StackFit.expand,

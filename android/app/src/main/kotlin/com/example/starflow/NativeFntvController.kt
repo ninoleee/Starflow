@@ -4,7 +4,6 @@ import android.app.Activity
 import android.app.AlertDialog
 import androidx.media3.common.C
 import androidx.media3.ui.PlayerView
-import java.util.Locale
 import org.json.JSONObject
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_URL
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_HEADERS_JSON
@@ -37,6 +36,8 @@ internal class NativeFntvController(
     private var generation = 0
     private var rollback: (() -> Unit)? = null
     private var restoreTracks: (() -> Unit)? = null
+    private var initialAudioAppliedTo: androidx.media3.exoplayer.ExoPlayer? = null
+    private var rollbackJson: String? = null
     private var closed = false
     private var loadedSubtitleId = ""
     private var loadedSubtitleUri = ""
@@ -52,6 +53,7 @@ internal class NativeFntvController(
     val isSwitching: Boolean get() = busy || rollback != null
     private fun target() = host.target.decodePlaybackTargetObject()
     private fun isFntv() = target().optString("sourceKind") == "fntv"
+    fun isTranscoding() = isFntv() && target().optString("fntvSessionLink").isNotBlank()
     fun qualities(): List<JSONObject> = rows("playbackQualities")
     fun qualitySettingsLabel(): String? {
         if (!isFntv()) return null
@@ -60,7 +62,7 @@ internal class NativeFntvController(
         val selected = qualities.firstOrNull {
             it.optInt("index") == target().optInt("preferredPlaybackQualityIndex", 0)
         } ?: qualities.first()
-        val label = selected.optString("resolution").ifBlank { "当前画质" }
+        val label = NativeFntvQualityMenu.title(selected)
         return "画质 · $label" + if (qualities.size == 1) "（仅一档）" else ""
     }
     fun audioSettingsLabel(): String? {
@@ -94,9 +96,15 @@ internal class NativeFntvController(
 
     fun report(position: Long, duration: Long) {
         if (closed || !isFntv() || duration <= 0 || rollback != null) return
+        val snapshot = currentSelectionSnapshot()
+        progress.enqueue(snapshot.optString("itemId") + "|" + snapshot.optString("preferredMediaSourceId"),
+            args(snapshot.toString()) + mapOf("positionMs" to position, "durationMs" to duration))
+    }
+
+    private fun currentSelectionSnapshot(): JSONObject {
         val snapshot = target()
         // Resolve actual selected tracks, not the defaults from play/info.
-        for ((type, field, streamKey) in listOf(
+        for ((type, field, streamKey) in if (isTranscoding()) emptyList() else listOf(
             Triple(C.TRACK_TYPE_AUDIO, "preferredAudioStreamId", "audioStreams"),
             Triple(C.TRACK_TYPE_TEXT, "preferredSubtitleStreamId", "subtitleStreams"),
         )) {
@@ -115,36 +123,73 @@ internal class NativeFntvController(
                 }
                 val stream = matching.singleOrNull() ?: streams.getOrNull(choices.indexOf(selected))
                 if (stream != null) snapshot.put(field, stream.optString("id"))
-            } else if (type == C.TRACK_TYPE_TEXT) {
+            } else if (type == C.TRACK_TYPE_TEXT && choices.isNotEmpty()) {
                 snapshot.put(field, if (selected?.isExternal == true &&
                     host.externalSubtitles.externalSubtitleSource?.originalUri?.toString() == loadedSubtitleUri
                 ) loadedSubtitleId else "")
             }
         }
-        progress.enqueue(snapshot.optString("itemId") + "|" + snapshot.optString("preferredMediaSourceId"),
-            args(snapshot.toString()) + mapOf("positionMs" to position, "durationMs" to duration))
+        return snapshot
     }
 
     fun close() {
         if (closed) return
         closed = true
-        invalidateMedia()
+        invalidateMedia(release = false)
         val session = host.target.resolverSessionId
         progress.finish {
             invoke("closeNativeFntvSession", mapOf("resolverSessionId" to session)) {}
         }
     }
 
-    fun invalidateMedia() {
+    fun invalidateMedia(release: Boolean = true) {
+        if (release) {
+            releasePlayback(host.target.playbackTargetJson)
+            rollbackJson?.let(::releasePlayback)
+        }
+        rollbackJson = null
         generation++
         busy = false
         rollback = null
         restoreTracks = null
+        initialAudioAppliedTo = null
         loadedSubtitleId = ""
         loadedSubtitleUri = ""
     }
 
-    fun openQualityPicker() {
+    private fun releasePlayback(json: String) {
+        val value = runCatching { JSONObject(json) }.getOrNull() ?: return
+        if (value.optString("fntvSessionLink").isBlank()) return
+        invoke("releaseNativeFntvPlayback", args(json)) {}
+    }
+
+    fun openServerTrackPicker(subtitle: Boolean): Boolean {
+        if (!isTranscoding()) return false
+        if (closed || isSwitching || host.episodes.isSwitching) return true
+        val streams = rows(if (subtitle) "subtitleStreams" else "audioStreams")
+        val field = if (subtitle) "preferredSubtitleStreamId" else "preferredAudioStreamId"
+        val ids = (if (subtitle) listOf("") else emptyList()) + streams.map { it.optString("id") }
+        val labels = (if (subtitle) listOf("关闭") else emptyList()) + streams.map {
+            listOf(it.optString("title"), it.optString("language"), it.optString("codec"))
+                .filter(String::isNotBlank).joinToString(" · ").ifBlank { "轨道 ${it.optInt("index") + 1}" }
+        }
+        val dialog = AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
+            .setTitle(if (subtitle) "字幕选择" else "音轨选择")
+            .setSingleChoiceItems(labels.toTypedArray(), ids.indexOf(target().optString(field))) { picker, which ->
+                picker.dismiss()
+                val stream = streams.firstOrNull { it.optString("id") == ids[which] }
+                if (subtitle && stream?.optBoolean("isExternal") == true &&
+                    target().optString("preferredSubtitleStreamId").isBlank()) {
+                    loadSubtitle(stream)
+                } else {
+                    switchPlayback(target().put(field, ids[which]))
+                }
+            }.setNegativeButton("取消", null).create()
+        host.settings.showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
+        return true
+    }
+
+    fun openQualityPicker(custom: Boolean = false) {
         val qualities = qualities()
         if (closed || !isFntv()) return
         if (isSwitching) {
@@ -158,31 +203,37 @@ internal class NativeFntvController(
             return
         }
         val current = target().optInt("preferredPlaybackQualityIndex", 0)
-        val dialog = AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme).setTitle("画质")
-            .setSingleChoiceItems(qualities.map {
-                buildList {
-                    add(it.optString("resolution").ifBlank { "画质 ${it.optInt("index") + 1}" })
-                    val bitrate = it.optLong("bitrate")
-                    if (bitrate > 0) add(if (bitrate >= 1_000_000) {
-                        String.format(Locale.ROOT, "%.1f Mbps", bitrate / 1_000_000.0)
-                    } else "${bitrate / 1000} Kbps")
-                    if (it.optBoolean("isM3u8")) add("HLS")
-                }.joinToString(" · ")
-            }.toTypedArray(), qualities.indexOfFirst { it.optInt("index") == current }) { picker, which ->
+        val presets = NativeFntvQualityMenu.presets(qualities, current)
+        val options = if (custom) qualities else presets
+        val labels = options.map { if (custom) NativeFntvQualityMenu.detail(it) else NativeFntvQualityMenu.title(it) } +
+            if (!custom && presets.size < qualities.size) listOf("自定义") else emptyList()
+        val dialog = AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
+            .setTitle(if (custom) "自定义画质" else "画质")
+            .setSingleChoiceItems(labels.toTypedArray(), options.indexOfFirst { it.optInt("index") == current }) { picker, which ->
                 picker.dismiss()
-                val index = qualities[which].optInt("index")
-                if (index != current) switchQuality(index)
+                if (which == options.size) openQualityPicker(custom = true)
+                else {
+                    val index = options[which].optInt("index")
+                    if (index != current) switchQuality(index)
+                }
             }.setNegativeButton("取消", null).create()
         host.settings.showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
     }
 
     fun switchQuality(index: Int) {
         if (closed || qualities().none { it.optInt("index") == index }) return
+        switchPlayback(currentSelectionSnapshot().put("preferredPlaybackQualityIndex", index))
+    }
+
+    private fun switchPlayback(request: JSONObject) {
+        if (closed) return
         if (isSwitching || host.episodes.isSwitching) return
         val oldPlayer = host.session.player ?: return
         val oldJson = host.target.playbackTargetJson
-        val request = JSONObject(oldJson).put("preferredPlaybackQualityIndex", index)
-            .put("streamUrl", "").put("headers", JSONObject())
+        request.put("streamUrl", "").put("headers", JSONObject())
+            .put("fntvSessionLink", "")
+            .put("fntvTrackSelectionExplicit", true)
+            .put("fntvStartPositionMs", oldPlayer.currentPosition.coerceAtLeast(0))
         busy = true
         val token = ++generation
         host.showToast("正在解析画质")
@@ -198,11 +249,17 @@ internal class NativeFntvController(
             host.target.resolverSessionId, request.toString(),
         ) callback@{ result ->
             host.playerView.removeCallbacks(timeout)
-            if (token != generation) return@callback
+            if (token != generation) {
+                releasePlayback(result["playbackTargetJson"]?.toString().orEmpty())
+                return@callback
+            }
             busy = false
             if (host.activity.isFinishing || host.activity.isDestroyed ||
                 host.session.player !== oldPlayer || host.target.playbackTargetJson != oldJson ||
-                host.episodes.isSwitching) return@callback
+                host.episodes.isSwitching) {
+                releasePlayback(result["playbackTargetJson"]?.toString().orEmpty())
+                return@callback
+            }
             val json = result["playbackTargetJson"]?.toString().orEmpty()
             val next = runCatching { JSONObject(json) }.getOrNull()
             if (result["ok"] != true || next == null || next.optString("streamUrl").isBlank()) {
@@ -228,11 +285,15 @@ internal class NativeFntvController(
                 else -> null
             }
             val oldMime = host.activity.intent.getStringExtra(EXTRA_MEDIA_MIME_TYPE).orEmpty()
+            val oldExternal = host.externalSubtitles.externalSubtitleSource
             host.runtime.persistPlaybackProgress(force = true)
             host.episodes.invalidateResolution()
             fun open(targetJson: String, mime: String) {
                 host.session.releasePlayer()
+                loadedSubtitleId = ""
+                loadedSubtitleUri = ""
                 val value = JSONObject(targetJson)
+                host.externalSubtitles.externalSubtitleSource = if (targetJson == oldJson) oldExternal else null
                 host.target.playbackTargetJson = targetJson
                 host.activity.intent.putExtra(EXTRA_PLAYBACK_TARGET_JSON, targetJson)
                 host.activity.intent.putExtra(EXTRA_URL, value.optString("streamUrl"))
@@ -255,22 +316,40 @@ internal class NativeFntvController(
                                     choices.map(NativeTrackChoice::restoreCandidate), old.subtitleFingerprint,
                                 )
                             }
+                            val streams = value.optJSONArray("audioStreams")
+                            val sourceTracks = if (streams == null) emptyList() else
+                                (0 until streams.length()).mapNotNull { streams.optJSONObject(it) }
+                                    .sortedBy { it.optInt("index") }
+                            val ordinal = sourceTracks.indexOfFirst {
+                                it.optString("id") == value.optString("preferredAudioStreamId")
+                            }
+                            val serverChoice = if (value.optString("fntvSessionLink").isNotBlank()) {
+                                choices.firstOrNull()
+                            } else choices.getOrNull(ordinal)
                             val updated = player.trackSelectionParameters.buildUpon()
                                 .clearOverridesOfType(C.TRACK_TYPE_AUDIO)
                                 .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO,
                                     parameters.disabledTrackTypes.contains(C.TRACK_TYPE_AUDIO))
-                            if (match != null) updated.addOverride(match.override)
+                            if (serverChoice != null) updated.addOverride(serverChoice.override)
+                            else if (match != null) updated.addOverride(match.override)
                             player.trackSelectionParameters = updated.build()
                         }
                     }
                 }
                 host.session.initializePlayer()
-                host.subtitles.subtitleSessionPreference = preference
+                host.subtitles.subtitleSessionPreference = when {
+                    value.optBoolean("fntvTrackSelectionExplicit") &&
+                        value.optString("preferredSubtitleStreamId").isBlank() ->
+                        NativeSubtitleSessionPreference(NativeSubtitleSessionMode.OFF)
+                    value.optString("fntvSessionLink").isNotBlank() -> null
+                    else -> preference
+                }
                 host.subtitles.pendingExternalSubtitleSelection = false
                 host.subtitles.automaticSubtitleSelectionApplied = false
                 host.session.player?.playbackParameters = speed
             }
             rollback = { open(oldJson, oldMime) }
+            rollbackJson = oldJson
             try {
                 open(json, result["mediaMimeType"]?.toString().orEmpty())
             } catch (_: Exception) {
@@ -287,17 +366,41 @@ internal class NativeFntvController(
     fun onReady() {
         if (rollback != null) {
             rollback = null
+            rollbackJson?.let(::releasePlayback)
+            rollbackJson = null
             host.showToast("画质已切换")
+        }
+        if (isTranscoding() && !busy) {
+            externalSubtitles().firstOrNull {
+                it.optString("id") == target().optString("preferredSubtitleStreamId") &&
+                    it.optString("id") != loadedSubtitleId
+            }?.let(::loadSubtitle)
         }
     }
     fun onTracksReady() {
-        val restore = restoreTracks ?: return
-        if (host.session.player?.currentTracks?.groups?.isEmpty() != false) return
-        restore()
+        val player = host.session.player ?: return
+        if (player.currentTracks.groups.isEmpty()) return
+        val restore = restoreTracks
+        if (restore != null) {
+            initialAudioAppliedTo = player
+            restore()
+            return
+        }
+        if (!isFntv() || isTranscoding() || initialAudioAppliedTo === player) return
+        val choices = NativePlaybackAudioTracks.list(player.currentTracks)
+        if (choices.isEmpty()) return
+        initialAudioAppliedTo = player
+        if (player.trackSelectionParameters.overrides.values.any { it.type == C.TRACK_TYPE_AUDIO }) return
+        val preferred = NativePlaybackAudioTracks.serverDefault(choices, target()) ?: return
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_AUDIO).setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+            .addOverride(preferred.override).build()
     }
     fun recoverQualityFailure(): Boolean {
         val restore = rollback ?: return false
         rollback = null
+        releasePlayback(host.target.playbackTargetJson)
+        rollbackJson = null
         host.showToast("画质播放失败，正在恢复原画质")
         try {
             restore()
@@ -325,16 +428,18 @@ internal class NativeFntvController(
                 host.showToast(result["message"]?.toString() ?: "飞牛字幕下载失败")
                 return@callback
             }
-            if (!host.externalSubtitles.loadCachedSubtitleFile(
-                result["path"]?.toString().orEmpty(), result["displayName"]?.toString().orEmpty())) {
-                return@callback
-            }
-            loadedSubtitleId = stream.optString("id")
-            loadedSubtitleUri = host.externalSubtitles.externalSubtitleSource?.originalUri?.toString().orEmpty()
-            host.target.playbackTargetJson = JSONObject(json)
-                .put("preferredSubtitleStreamId", stream.optString("id")).toString()
-            host.activity.intent.putExtra(EXTRA_PLAYBACK_TARGET_JSON, host.target.playbackTargetJson)
-            host.runtime.persistPlaybackProgress(force = true)
+            host.externalSubtitles.loadCachedSubtitleFile(
+                result["path"]?.toString().orEmpty(), result["displayName"]?.toString().orEmpty(),
+                onApplied = {
+                    if (token == generation && host.target.playbackTargetJson == json) {
+                        loadedSubtitleId = stream.optString("id")
+                        loadedSubtitleUri = host.externalSubtitles.externalSubtitleSource?.originalUri?.toString().orEmpty()
+                        host.target.playbackTargetJson = JSONObject(json)
+                            .put("preferredSubtitleStreamId", stream.optString("id")).toString()
+                        host.activity.intent.putExtra(EXTRA_PLAYBACK_TARGET_JSON, host.target.playbackTargetJson)
+                        host.runtime.persistPlaybackProgress(force = true)
+                    }
+                })
         }
     }
 }

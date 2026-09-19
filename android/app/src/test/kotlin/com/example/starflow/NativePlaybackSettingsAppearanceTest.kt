@@ -110,7 +110,7 @@ class NativePlaybackSettingsAppearanceTest {
             val color = colors.item(it) as Element
             color.getAttribute("name") to color.textContent
         }
-        assertEquals("#181818", values["native_settings_background"])
+        assertEquals("#CC18181B", values["native_settings_background"])
         assertEquals("#4D000000", values["native_player_overlay_scrim"])
     }
 

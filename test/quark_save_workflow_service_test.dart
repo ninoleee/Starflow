@@ -7,6 +7,54 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
   group('QuarkSaveWorkflowService', () {
+    test('webhook failure preserves save success and independent refresh',
+        () async {
+      var refreshed = false;
+      final service = QuarkSaveWorkflowService(
+        saveShareLink: (
+                {required String shareUrl,
+                required String cookie,
+                String toPdirFid = '0',
+                String toPdirPath = '/',
+                String saveFolderName = '',
+                String sanitizedNameCharacters = ''}) async =>
+            const QuarkSaveResult(
+                taskId: 'saved', savedCount: 1, targetFolderPath: '/Film'),
+        sanitizeSavedNames: (
+                {required String cookie,
+                required List<QuarkSavedEntry> savedEntries,
+                required String characters}) async =>
+            const QuarkNameSanitizeResult(),
+        triggerSmartStrm: (
+                {required String webhookUrl,
+                required String taskName,
+                String storagePath = '',
+                int delay = 0}) async =>
+            throw const SmartStrmWebhookException('offline'),
+        resolveRefreshSourceIds: (
+                {required NetworkStorageConfig networkStorage,
+                required bool includeConfiguredSources}) =>
+            ['nas'],
+        refreshSelectedSources: (
+            {required List<String> sourceIds,
+            required int delaySeconds,
+            required bool invalidateWebDavDirectoryCache}) async {
+          refreshed = true;
+        },
+      );
+      final result = await service.saveToQuark(
+          shareUrl: 'https://pan.quark.cn/s/test',
+          saveFolderName: 'Film',
+          networkStorage: const NetworkStorageConfig(
+              quarkCookie: 'test',
+              smartStrmWebhookUrl: 'https://strm.test/hook',
+              smartStrmTaskName: 'test'));
+      expect(result.saveResult.savedCount, 1);
+      expect(result.triggeredSmartStrm, isFalse);
+      expect(result.smartStrmFailure, 'offline');
+      expect(result.buildSuccessMessage(), contains('offline'));
+      expect(refreshed, isTrue);
+    });
     test('throws when quark cookie is missing', () async {
       var saveCalled = false;
       final service = QuarkSaveWorkflowService(

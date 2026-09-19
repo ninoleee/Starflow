@@ -38,31 +38,9 @@ function Get-InnoSetupCompilerPath {
 }
 
 function Update-PubspecVersion([string]$pubspecPath) {
-  $raw = Get-Content -LiteralPath $pubspecPath -Raw
-  $match = [regex]::Match($raw, '(?m)^version:\s*(\d+)\.(\d+)\.(\d+)(?:\+\d+)?\s*$')
-  if (-not $match.Success) {
-    throw "Unable to parse version from $pubspecPath"
-  }
-
-  $major = [int]$match.Groups[1].Value
-  $currentMonthInVersion = [int]$match.Groups[2].Value
-  $currentSequence = [int]$match.Groups[3].Value
-  $month = (Get-Date).Month
-  $nextSequence = if ($currentMonthInVersion -eq $month) {
-    $currentSequence + 1
-  } else {
-    0
-  }
-
-  $nextVersion = "{0}.{1}.{2}" -f $major, $month, $nextSequence
-  $updated = [regex]::Replace(
-    $raw,
-    '(?m)^version:\s*\d+\.\d+\.\d+(?:\+\d+)?\s*$',
-    "version: $nextVersion",
-    1
-  )
-  Set-Content -LiteralPath $pubspecPath -Value $updated
-  return $nextVersion
+  $version = & dart (Join-Path $PSScriptRoot "../tool/release_version.dart") $pubspecPath
+  if ($LASTEXITCODE -ne 0) { throw "Release version update failed" }
+  return $version
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path

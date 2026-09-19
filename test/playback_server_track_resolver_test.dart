@@ -86,6 +86,66 @@ void main() {
     );
   });
 
+  test('missing audio metadata does not prevent subtitle resolution', () {
+    final withoutAudio = target.copyWith(audioStreams: const []);
+    expect(preferredPlaybackAudioStream(withoutAudio), isNull);
+    expect(resolvePlaybackAudioTrack(target: withoutAudio, tracks: const []),
+        isNull);
+    expect(
+        preferredPlaybackSubtitleStream(withoutAudio)?.id, 'subtitle-external');
+    expect(
+        preferredPlaybackSubtitleStream(
+            target.copyWith(subtitleStreams: const [])),
+        isNull);
+  });
+
+  test(
+      'language aliases resolve reordered tracks without guessing missing rows',
+      () {
+    const english =
+        AudioTrack('1', 'English', 'eng', codec: 'eac3', channelscount: 6);
+    const chinese =
+        AudioTrack('2', '国语', 'zho', codec: 'aac', channelscount: 2);
+    expect(
+        resolvePlaybackAudioTrack(
+            target: target, tracks: const [english, chinese]),
+        chinese);
+    expect(
+        resolvePlaybackAudioTrack(
+            target: target, tracks: const [AudioTrack('1', null, null)]),
+        isNull);
+  });
+
+  test(
+      'ambiguous reverse audio matching uses ordinal, not first language match',
+      () {
+    final duplicate = target.copyWith(audioStreams: const [
+      PlaybackAudioStream(
+          id: 'a',
+          title: 'English',
+          language: 'en',
+          codec: 'aac',
+          channels: 2,
+          index: 0),
+      PlaybackAudioStream(
+          id: 'b',
+          title: 'English',
+          language: 'en',
+          codec: 'aac',
+          channels: 2,
+          index: 1),
+    ]);
+    const tracks = [
+      AudioTrack('1', 'English', 'eng', codec: 'aac'),
+      AudioTrack('2', 'English', 'eng', codec: 'aac')
+    ];
+    expect(
+        matchPlaybackAudioStreamForTrack(
+                target: duplicate, tracks: tracks, track: tracks[1])
+            ?.id,
+        'b');
+  });
+
   test('resolves embedded subtitle and leaves external subtitle for download',
       () {
     const chinese = SubtitleTrack(

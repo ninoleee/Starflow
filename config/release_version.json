@@ -1,0 +1,7 @@
+{
+  "baseCode": 100000000,
+  "epochYear": 2026,
+  "sequenceRadix": 10000,
+  "majorRadix": 100,
+  "maxCode": 2100000000
+}

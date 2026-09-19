@@ -13,6 +13,7 @@ import 'package:starflow/features/playback/domain/online_subtitle_structured_mod
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
 
 class SubtitleSearchPage extends ConsumerStatefulWidget {
   const SubtitleSearchPage({
@@ -38,6 +39,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   bool _isSearching = false;
   String? _errorMessage;
   String? _busyResultId;
+  int _searchGeneration = 0;
 
   @override
   void initState() {
@@ -68,6 +70,12 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     if (oldWidget.request == widget.request) {
       return;
     }
+    _searchGeneration++;
+    _busyResultId = null;
+    _isSearching = false;
+    _results = const [];
+    _validatedSelectionsByResultId = const {};
+    _structuredCandidatesByResultId = const {};
     final nextInput = _resolveInitialInput(widget.request);
     if (_controller.text == nextInput) {
       return;
@@ -80,6 +88,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
 
   @override
   void dispose() {
+    _searchGeneration++;
     _controller.dispose();
     super.dispose();
   }
@@ -127,6 +136,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   }
 
   Future<void> _performSearch() async {
+    if (_isSearching || _busyResultId != null) return;
+    final generation = ++_searchGeneration;
     final query = _controller.text.trim();
     subtitleSearchTrace(
       'page.search.start',
@@ -202,24 +213,26 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
           <String, ValidatedSubtitleCandidate>{};
 
       if (structuredSources.isNotEmpty) {
+        final manuallyEdited = query != _resolveInitialInput(widget.request);
         final structuredRequest =
             await buildOnlineSubtitleSearchRequestForRoute(
           SubtitleSearchRequest(
             query: query,
-            title: widget.request.title,
-            originalTitle: widget.request.originalTitle,
+            title: manuallyEdited ? '' : widget.request.title,
+            originalTitle: manuallyEdited ? '' : widget.request.originalTitle,
             initialInput: widget.request.initialInput,
-            year: widget.request.year,
-            imdbId: widget.request.imdbId,
-            tmdbId: widget.request.tmdbId,
-            seasonNumber: widget.request.seasonNumber,
-            episodeNumber: widget.request.episodeNumber,
-            filePath: widget.request.filePath,
+            year: manuallyEdited ? null : widget.request.year,
+            imdbId: manuallyEdited ? '' : widget.request.imdbId,
+            tmdbId: manuallyEdited ? '' : widget.request.tmdbId,
+            seasonNumber: manuallyEdited ? null : widget.request.seasonNumber,
+            episodeNumber: manuallyEdited ? null : widget.request.episodeNumber,
+            filePath: manuallyEdited ? '' : widget.request.filePath,
             applyMode: widget.request.applyMode,
             standalone: widget.request.standalone,
           ),
           languages: settings.subtitlePreferredLanguages,
         );
+        if (!mounted || generation != _searchGeneration) return;
         final candidates = await repository.searchStructured(
           structuredRequest,
           sources: structuredSources,
@@ -254,7 +267,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         }
       }
       final nextResults = nextResultsById.values.toList(growable: false);
-      if (!mounted) {
+      if (!mounted || generation != _searchGeneration) {
         return;
       }
       subtitleSearchTrace(
@@ -276,7 +289,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         _errorMessage = nextResults.isEmpty ? '没有找到可用字幕结果' : null;
       });
     } catch (error, stackTrace) {
-      if (!mounted) {
+      if (!mounted || generation != _searchGeneration) {
         return;
       }
       subtitleSearchTrace(
@@ -302,7 +315,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   }
 
   Future<void> _handleDownload(SubtitleSearchResult result) async {
-    if (_busyResultId != null) {
+    final generation = _searchGeneration;
+    if (_busyResultId != null || _isSearching) {
       subtitleSearchTrace(
         'page.download.skip-busy',
         fields: {
@@ -369,6 +383,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     try {
       final downloadResult =
           await ref.read(onlineSubtitleRepositoryProvider).download(result);
+      if (!mounted || generation != _searchGeneration) return;
       final selection = SubtitleSearchSelection(
         cachedPath: downloadResult.cachedPath,
         displayName: downloadResult.displayName,
@@ -385,9 +400,9 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         error: error,
         stackTrace: stackTrace,
       );
-      _showMessage('$error');
+      if (mounted && generation == _searchGeneration) _showMessage('$error');
     } finally {
-      if (mounted) {
+      if (mounted && generation == _searchGeneration) {
         setState(() {
           _busyResultId = null;
         });
@@ -490,6 +505,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                     child: _SearchHeader(
+                      isTelevision: isTelevision,
                       controller: _controller,
                       title: title,
                       applyMode: applyMode,
@@ -511,7 +527,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
                     ),
                   ),
                   Expanded(
-                    child: _buildBody(applyMode),
+                    child: _buildBody(applyMode, isTelevision),
                   ),
                 ],
               ),
@@ -522,7 +538,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     );
   }
 
-  Widget _buildBody(SubtitleSearchApplyMode applyMode) {
+  Widget _buildBody(SubtitleSearchApplyMode applyMode, bool isTelevision) {
     if (_isSearching && _results.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -535,6 +551,8 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       itemBuilder: (context, index) {
         final result = _results[index];
         return _SubtitleResultTile(
+          key: ValueKey(result.id),
+          isTelevision: isTelevision,
           result: result,
           validationCandidate: _structuredCandidatesByResultId[result.id],
           hasValidatedSelection:
@@ -562,6 +580,7 @@ String _pageSubtitleResultSample(List<SubtitleSearchResult> results) {
 
 class _SearchHeader extends StatelessWidget {
   const _SearchHeader({
+    required this.isTelevision,
     required this.controller,
     required this.title,
     required this.applyMode,
@@ -573,6 +592,7 @@ class _SearchHeader extends StatelessWidget {
   });
 
   final TextEditingController controller;
+  final bool isTelevision;
   final String title;
   final SubtitleSearchApplyMode applyMode;
   final List<OnlineSubtitleSource> availableSources;
@@ -610,25 +630,48 @@ class _SearchHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          TextField(
-            controller: controller,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => unawaited(onSearch()),
-            decoration: InputDecoration(
-              labelText: '字幕关键词',
-              hintText: '片名、剧名、S01E01、年份等',
-              filled: true,
-              fillColor: theme.colorScheme.surface,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide.none,
-              ),
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.search_rounded),
-                onPressed: isBusy ? null : () => unawaited(onSearch()),
+          if (isTelevision)
+            Row(
+              children: [
+                Expanded(
+                  child: SettingsTextInputField(
+                    controller: controller,
+                    labelText: '字幕关键词',
+                    hintText: '片名、剧名、S01E01、年份等',
+                    autofocus: true,
+                    focusId: 'subtitle-search:query',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                StarflowIconButton(
+                  icon: Icons.search_rounded,
+                  tooltip: '搜索字幕',
+                  focusId: 'subtitle-search:submit',
+                  focusableWhenDisabled: true,
+                  onPressed: isBusy ? null : () => unawaited(onSearch()),
+                ),
+              ],
+            )
+          else
+            TextField(
+              controller: controller,
+              textInputAction: TextInputAction.search,
+              onSubmitted: isBusy ? null : (_) => unawaited(onSearch()),
+              decoration: InputDecoration(
+                labelText: '字幕关键词',
+                hintText: '片名、剧名、S01E01、年份等',
+                filled: true,
+                fillColor: theme.colorScheme.surface,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.search_rounded),
+                  onPressed: isBusy ? null : () => unawaited(onSearch()),
+                ),
               ),
             ),
-          ),
           if (availableSources.isNotEmpty) ...[
             const SizedBox(height: 14),
             Text(
@@ -663,6 +706,8 @@ class _SearchHeader extends StatelessWidget {
 
 class _SubtitleResultTile extends StatelessWidget {
   const _SubtitleResultTile({
+    super.key,
+    required this.isTelevision,
     required this.result,
     required this.validationCandidate,
     required this.hasValidatedSelection,
@@ -672,6 +717,7 @@ class _SubtitleResultTile extends StatelessWidget {
   });
 
   final SubtitleSearchResult result;
+  final bool isTelevision;
   final ValidatedSubtitleCandidate? validationCandidate;
   final bool hasValidatedSelection;
   final SubtitleSearchApplyMode applyMode;
@@ -688,6 +734,8 @@ class _SubtitleResultTile extends StatelessWidget {
     final buttonLabel = _resolveButtonLabel(enabled);
 
     return TvFocusableAction(
+      focusId: 'subtitle-search:result:${result.id}',
+      focusableWhenDisabled: enabled,
       onPressed: enabled && !isBusy ? onPressed : null,
       borderRadius: BorderRadius.circular(24),
       child: Opacity(
@@ -777,13 +825,16 @@ class _SubtitleResultTile extends StatelessWidget {
               const SizedBox(height: 14),
               Align(
                 alignment: Alignment.centerRight,
-                child: StarflowButton(
-                  label: isBusy ? '处理中...' : buttonLabel,
-                  onPressed: enabled && !isBusy ? onPressed : null,
-                  variant: enabled
-                      ? StarflowButtonVariant.secondary
-                      : StarflowButtonVariant.ghost,
-                  compact: true,
+                child: ExcludeFocus(
+                  excluding: isTelevision,
+                  child: StarflowButton(
+                    label: isBusy ? '处理中...' : buttonLabel,
+                    onPressed: enabled && !isBusy ? onPressed : null,
+                    variant: enabled
+                        ? StarflowButtonVariant.secondary
+                        : StarflowButtonVariant.ghost,
+                    compact: true,
+                  ),
                 ),
               ),
             ],

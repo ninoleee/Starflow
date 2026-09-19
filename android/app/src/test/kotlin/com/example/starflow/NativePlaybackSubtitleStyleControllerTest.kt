@@ -1,9 +1,12 @@
 package com.example.starflow
 
 import android.app.Activity
+import android.graphics.Bitmap
 import android.view.accessibility.CaptioningManager
 import android.widget.FrameLayout
 import androidx.media3.ui.SubtitleView
+import androidx.media3.common.text.Cue
+import androidx.media3.common.text.CueGroup
 import org.junit.Before
 import org.junit.Test
 import org.mockito.Mockito.*
@@ -55,5 +58,49 @@ class NativePlaybackSubtitleStyleControllerTest {
         }
         verify(subtitleView, times(2)).setBottomPaddingFraction(0f)
         verify(subtitleView, times(2)).setUserDefaultTextSize()
+    }
+
+    @Test
+    fun `bitmap subtitles return to video frame and text returns to full window`() {
+        val subtitleView = host.playerView.subtitleView!!
+        val overlay = host.playerView.overlayFrameLayout!!
+        val contentFrame = mock(FrameLayout::class.java)
+        val bitmapGroup = CueGroup(listOf(
+            Cue.Builder().setBitmap(mock(Bitmap::class.java))
+                .setPosition(0.25f).setLine(0.8f, Cue.LINE_TYPE_FRACTION)
+                .setSize(0.5f).setBitmapHeight(0.1f).build(),
+        ), 1L)
+        val textGroup = CueGroup(listOf(Cue.Builder().setText("Subtitle").build()), 2L)
+        `when`(subtitleView.parent).thenReturn(contentFrame)
+        mockConstruction(FrameLayout.LayoutParams::class.java).use { params ->
+            controller.applySubtitleStyle()
+            `when`(subtitleView.parent).thenReturn(overlay)
+            controller.onCues(bitmapGroup)
+            verify(overlay).removeView(subtitleView)
+            verify(contentFrame).addView(subtitleView, params.constructed()[1])
+            `when`(subtitleView.parent).thenReturn(contentFrame)
+            controller.onCues(CueGroup.EMPTY_TIME_ZERO)
+            controller.onCues(bitmapGroup)
+            controller.applySubtitleStyle()
+            // Changing style and clear cues must not put a bitmap back in window coordinates.
+            verify(contentFrame, times(1)).removeView(subtitleView)
+            controller.onCues(textGroup)
+            verify(contentFrame, times(2)).removeView(subtitleView)
+            verify(overlay).addView(subtitleView, 0, params.constructed()[2])
+        }
+    }
+
+    @Test
+    fun `bitmap arriving before style initialization stays in original video frame`() {
+        val subtitleView = host.playerView.subtitleView!!
+        val contentFrame = mock(FrameLayout::class.java)
+        `when`(subtitleView.parent).thenReturn(contentFrame)
+        controller.onCues(CueGroup(listOf(
+            Cue.Builder().setBitmap(mock(Bitmap::class.java)).build(),
+        ), 1L))
+        controller.applySubtitleStyle()
+        verify(contentFrame, never()).removeView(subtitleView)
+        verify(host.playerView.overlayFrameLayout!!, never())
+            .addView(eq(subtitleView), anyInt(), any(android.view.ViewGroup.LayoutParams::class.java))
     }
 }

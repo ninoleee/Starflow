@@ -46,7 +46,6 @@ class AppMediaQueryService {
       <String, _CachedEmbyLibraryMatchIndex>{};
 
   Future<List<MediaSourceConfig>> fetchSources() async {
-    await Future<void>.delayed(const Duration(milliseconds: 120));
     return _enabledSources;
   }
 

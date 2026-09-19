@@ -125,6 +125,7 @@ class DoubanEntry {
     this.actors = const [],
     this.sourceUrl = '',
     this.ratingLabel = '',
+    this.ratingCount = 0,
     this.subjectType = '',
   });
 
@@ -139,6 +140,7 @@ class DoubanEntry {
   final List<String> actors;
   final String sourceUrl;
   final String ratingLabel;
+  final int ratingCount;
   final String subjectType;
 }
 

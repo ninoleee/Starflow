@@ -4,13 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
+import 'package:starflow/features/discovery/data/discovery_repository.dart';
 import 'package:starflow/features/discovery/data/douban_network_guard.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -28,83 +29,107 @@ class HomeModuleCollectionPage extends ConsumerStatefulWidget {
 class _HomeModuleCollectionPageState
     extends ConsumerState<HomeModuleCollectionPage> {
   int _currentPage = 1;
+  final _headerFocusNode = FocusNode(debugLabel: 'home-module-header');
+
+  @override
+  void dispose() {
+    _headerFocusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    if (isTelevision) {
+      scheduleTvFocusRecovery(context: context, focusNode: _headerFocusNode);
+    }
     final pageRequest = _HomeModulePageRequest(
       module: widget.module,
       page: _currentPage,
     );
     final pageAsync = ref.watch(_homeModulePageProvider(pageRequest));
+    final title = Text(
+      widget.module.title,
+      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+          ),
+    );
 
-    return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          AppPageBackground(
-            child: RefreshIndicator(
-              onRefresh: () async {
-                ref
-                    .read(doubanNetworkGuardProvider)
-                    .allowManualProbe(reason: 'manual-home-module-refresh');
-                ref.invalidate(_homeModulePageProvider(pageRequest));
-                await ref.read(_homeModulePageProvider(pageRequest).future);
-              },
-              child: ListView(
-                padding: overlayToolbarPagePadding(context),
-                children: [
-                  Text(
-                    widget.module.title,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                        ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _moduleSubtitle(widget.module),
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xFF90A0BD),
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  const SizedBox(height: 20),
-                  pageAsync.when(
-                    data: (pageData) => _DoubanPagedGrid(
-                      entries: pageData.entries,
-                      currentPage: _currentPage,
-                      hasNextPage: pageData.hasNextPage,
-                      onPageChanged: (page) {
-                        setState(() {
-                          _currentPage = page;
-                        });
-                      },
+    return TvPageFocusScope(
+      isTelevision: isTelevision,
+      child: Scaffold(
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            AppPageBackground(
+              child: RefreshIndicator(
+                onRefresh: () async {
+                  ref
+                      .read(doubanNetworkGuardProvider)
+                      .allowManualProbe(reason: 'manual-home-module-refresh');
+                  ref.invalidate(_homeModulePageProvider(pageRequest));
+                  await ref.read(_homeModulePageProvider(pageRequest).future);
+                },
+                child: ListView(
+                  padding: overlayToolbarPagePadding(context),
+                  children: [
+                    if (isTelevision)
+                      TvFocusableAction(
+                        focusNode: _headerFocusNode,
+                        focusId: 'home-module:header',
+                        autofocus: isTelevision,
+                        onPressed: () => FocusScope.of(context).nextFocus(),
+                        child: title,
+                      )
+                    else
+                      title,
+                    const SizedBox(height: 6),
+                    Text(
+                      _moduleSubtitle(widget.module),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: const Color(0xFF90A0BD),
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (error, stackTrace) => Text('加载失败：$error'),
-                  ),
-                  appPageBottomSpacer(),
-                ],
+                    const SizedBox(height: 20),
+                    pageAsync.when(
+                      data: (pageData) => _DoubanPagedGrid(
+                        entries: pageData.entries,
+                        currentPage: _currentPage,
+                        hasNextPage: pageData.hasNextPage,
+                        onPageChanged: (page) {
+                          setState(() {
+                            _currentPage = page;
+                          });
+                        },
+                      ),
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (error, stackTrace) => Text('加载失败：$error'),
+                    ),
+                    appPageBottomSpacer(),
+                  ],
+                ),
               ),
             ),
-          ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: OverlayToolbar(
-              onBack: () => context.pop(),
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: OverlayToolbar(
+                onBack: () => context.pop(),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
 final _homeModulePageProvider =
-    FutureProvider.family<_HomeModulePageData, _HomeModulePageRequest>(
+    FutureProvider.autoDispose.family<_HomeModulePageData, _HomeModulePageRequest>(
   (ref, request) async {
     final repository = ref.read(discoveryRepositoryProvider);
     final entries = await repository.fetchEntries(
@@ -241,6 +266,7 @@ class _DoubanPagedGrid extends StatelessWidget {
                         ratingLabels: entry.ratingLabel.trim().isEmpty
                             ? const []
                             : [entry.ratingLabel],
+                        ratingCount: entry.ratingCount,
                         genres: entry.genres.isNotEmpty
                             ? entry.genres
                             : (entry.subjectType.trim().isEmpty

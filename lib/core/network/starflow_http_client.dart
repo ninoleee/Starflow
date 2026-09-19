@@ -94,9 +94,10 @@ class StarflowHttpClient extends http.BaseClient {
       originalUrl.toString(),
       headers: request.headers,
     );
-    final proxied = http.StreamedRequest(
+    final proxied = http.AbortableStreamedRequest(
       request.method,
       proxiedUrl ?? originalUrl,
+      abortTrigger: request is http.Abortable ? request.abortTrigger : null,
     )
       ..contentLength = request.contentLength
       ..followRedirects = request.followRedirects

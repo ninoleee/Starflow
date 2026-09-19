@@ -26,6 +26,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
           message: '确认退出当前播放吗？',
           barrierDismissible: false,
           allowSystemDismiss: false,
+          dialogWrapper: (dialog) => PlaybackMenuTheme(child: dialog),
           actions: const [
             StarflowDialogAction<bool>(
               label: '继续播放',
@@ -500,7 +501,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
           return Stack(
             fit: StackFit.expand,
             children: [
-              if (primary.isNotEmpty)
+              if (primary.isNotEmpty && !_mpvBitmapSubtitle)
                 _MpvPositionedSubtitleText(
                   text: primary,
                   positionPercent: _sessionPrimarySubtitlePosition,
@@ -1146,7 +1147,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
       return;
     }
 
-    await showDialog<void>(
+    await showPlaybackMenuDialog<void>(
       context: context,
       builder: (context) {
         final settings = _playbackSettings;
@@ -1251,10 +1252,31 @@ extension _PlayerPageStateControls on _PlayerPageState {
     SubtitleTrack current,
   ) async {
     final target = _resolvedTarget ?? widget.target;
+    if (target.isFntvTranscoding) {
+      final selected = await showPlaybackMenuDialog<String>(
+          context: context,
+          builder: (context) =>
+              SimpleDialog(title: const Text('字幕选择'), children: [
+                TvDialogOption(
+                    isTelevision: _isTelevisionPlaybackDevice,
+                    onPressed: () => Navigator.pop(context, ''),
+                    child: const Text('关闭')),
+                for (final stream in target.subtitleStreams)
+                  TvDialogOption(
+                      isTelevision: _isTelevisionPlaybackDevice,
+                      onPressed: () => Navigator.pop(context, stream.id),
+                      child: Text(_formatServerSubtitleStreamLabel(stream))),
+              ]));
+      if (selected != null && mounted) {
+        await _switchFntvPlayback(
+            player, target.copyWith(preferredSubtitleStreamId: selected));
+      }
+      return;
+    }
     final externalSubtitleStreams = target.subtitleStreams
         .where((stream) => stream.isExternal && stream.id.trim().isNotEmpty)
         .toList(growable: false);
-    final selection = await showDialog<Object>(
+    final selection = await showPlaybackMenuDialog<Object>(
       context: context,
       builder: (dialogContext) {
         return SimpleDialog(
@@ -1360,10 +1382,11 @@ extension _PlayerPageStateControls on _PlayerPageState {
       tracks: tracks,
       track: selectedTrack,
     );
-    if (selectedServerStream != null && mounted) {
+    if ((selectedServerStream != null || selectedTrack.id == 'no') && mounted) {
       setState(() {
         _resolvedTarget = target.copyWith(
-          preferredSubtitleStreamId: selectedServerStream.id,
+          preferredSubtitleStreamId: selectedServerStream?.id ?? '',
+          fntvTrackSelectionExplicit: true,
         );
       });
     }
@@ -1462,7 +1485,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     required String title,
     required List<SubtitleTrack> tracks,
   }) {
-    return showDialog<SubtitleTrack>(
+    return showPlaybackMenuDialog<SubtitleTrack>(
       context: context,
       builder: (dialogContext) => SimpleDialog(
         title: Text(title),
@@ -1487,9 +1510,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
         track.data) {
       return false;
     }
-    final codec = (track.codec ?? '').trim().toLowerCase();
-    return !const ['pgs', 'hdmv_pgs_subtitle', 'dvd_subtitle', 'dvb_subtitle']
-        .contains(codec);
+    return !isBitmapSubtitle(image: track.image, codec: track.codec);
   }
 
   Future<void> _disableMpvDualSubtitle(Player player) async {
@@ -1511,7 +1532,27 @@ extension _PlayerPageStateControls on _PlayerPageState {
     AudioTrack current,
   ) async {
     final target = _resolvedTarget ?? widget.target;
-    final selection = await showDialog<AudioTrack>(
+    if (target.isFntvTranscoding) {
+      final selected = await showPlaybackMenuDialog<PlaybackAudioStream>(
+          context: context,
+          builder: (context) =>
+              SimpleDialog(title: const Text('音轨选择'), children: [
+                for (final stream in target.audioStreams)
+                  TvDialogOption(
+                    isTelevision: _isTelevisionPlaybackDevice,
+                    onPressed: () => Navigator.pop(context, stream),
+                    child: Text([stream.title, stream.language, stream.codec]
+                        .where((s) => s.isNotEmpty)
+                        .join(' · ')),
+                  ),
+              ]));
+      if (selected != null && mounted) {
+        await _switchFntvPlayback(
+            player, target.copyWith(preferredAudioStreamId: selected.id));
+      }
+      return;
+    }
+    final selection = await showPlaybackMenuDialog<AudioTrack>(
       context: context,
       builder: (dialogContext) {
         return SimpleDialog(

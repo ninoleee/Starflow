@@ -2,11 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
+import 'package:starflow/features/discovery/data/discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
+import 'package:starflow/features/library/application/nas_media_index_revision.dart';
+import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -63,6 +65,11 @@ void main() {
     expect(container.read(homeSectionsProvider), [initialSection]);
     expect(discoveryRepository.fetchEntriesCallCount, 1);
     expect(cacheRepository.loadDetailTargetsBatchCallCount, 1);
+
+    container.read(nasMediaIndexRevisionProvider.notifier).state++;
+    container.read(libraryRefreshRevisionProvider.notifier).state++;
+    await container.read(homeSectionProvider(module.id).future);
+    expect(discoveryRepository.fetchEntriesCallCount, 1);
 
     final revisionNotifier =
         container.read(localStorageDetailCacheChangeProvider.notifier);

@@ -1,4 +1,5 @@
 import java.util.Calendar
+import groovy.json.JsonSlurper
 
 plugins {
     id("com.android.application")
@@ -12,12 +13,21 @@ val starflowMinSdk = 23
 fun computeStarflowVersionCode(versionName: String): Int {
     val sanitizedVersionName = versionName.substringBefore("+")
     val match = Regex("""^(\d+)\.(\d+)\.(\d+)$""").matchEntire(sanitizedVersionName)
-        ?: return 1
+        ?: error("Invalid Starflow release version: $versionName")
     val major = match.groupValues[1].toInt()
     val month = match.groupValues[2].toInt()
     val sequence = match.groupValues[3].toInt()
-    val yearOffset = Calendar.getInstance().get(Calendar.YEAR) - 2000
-    return (yearOffset * 1_000_000) + (major * 100_000) + (month * 100) + sequence
+    val policy = JsonSlurper().parse(rootProject.file("../config/release_version.json")) as Map<*, *>
+    fun value(key: String) = (policy[key] as Number).toLong()
+    val yearOffset = Calendar.getInstance().get(Calendar.YEAR) - value("epochYear")
+    val sequenceRadix = value("sequenceRadix")
+    val majorRadix = value("majorRadix")
+    require(month in 1..12 && major >= 0 && major < majorRadix &&
+        sequence >= 0 && sequence < sequenceRadix && yearOffset >= 0)
+    val code = value("baseCode") + (yearOffset * 12 + month - 1) *
+        majorRadix * sequenceRadix + major * sequenceRadix + sequence
+    require(code <= value("maxCode")) { "Android versionCode exhausted" }
+    return code.toInt()
 }
 
 android {

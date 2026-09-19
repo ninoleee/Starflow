@@ -95,22 +95,7 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
     if (!(ref.read(isTelevisionProvider).value ?? false)) {
       return;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          ModalRoute.of(context)?.isCurrent == false ||
-          _selectFocusNode.context == null ||
-          !_selectFocusNode.canRequestFocus) {
-        return;
-      }
-      final current = FocusManager.instance.primaryFocus;
-      if (current != null &&
-          current is! FocusScopeNode &&
-          current.context != null &&
-          current.canRequestFocus) {
-        return;
-      }
-      requestTvFocus(_selectFocusNode);
-    });
+    scheduleTvFocusRecovery(context: context, focusNode: _selectFocusNode);
   }
 
   @override

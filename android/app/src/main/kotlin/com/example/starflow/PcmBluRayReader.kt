@@ -3,6 +3,7 @@ package com.example.starflow
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.ParserException
 import androidx.media3.common.util.ParsableByteArray
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.extractor.ExtractorOutput
@@ -18,186 +19,144 @@ internal class PcmBluRayReader(
     private var output: TrackOutput? = null
     private var format: Format? = null
     private var formatId = ""
-    private var timeUs = C.TIME_UNSET
-    private var sampleFramesWritten = 0L
-    private var sampleRate = 0
-    private var headerBytesRead = 0
     private val header = ByteArray(4)
-    private val pending = ByteArray(6)
-    private var pendingBytes = 0
-    private var sampleBytesPerFrame = 0
-    private var bitsPerSample = 0
-    private var unsupported = false
+    private var headerBytesRead = 0
+    private val frame = ByteArray(24)
+    private var frameBytesRead = 0
+    private var frameSize = 0
+    private var bytesPerSample = 0
+    private var channels = intArrayOf(0, 1)
+    private var sampleRate = 0
+    private var payloadRemaining = 0
+    private var timeUs = C.TIME_UNSET
+    private var framesWritten = 0L
+    // At most 10 ms at 192 kHz, eight channels, PCM16. Reused for every PES.
+    private val pcm = ByteArray(30_720)
+    private val pcmData = ParsableByteArray(pcm)
+    private var pcmSize = 0
 
-    override fun createTracks(
-        extractorOutput: ExtractorOutput,
-        idGenerator: TsPayloadReader.TrackIdGenerator,
-    ) {
+    override fun createTracks(output: ExtractorOutput, idGenerator: TsPayloadReader.TrackIdGenerator) {
         idGenerator.generateNewId()
         formatId = idGenerator.formatId
-        output = extractorOutput.track(idGenerator.trackId, C.TRACK_TYPE_AUDIO)
+        this.output = output.track(idGenerator.trackId, C.TRACK_TYPE_AUDIO)
     }
 
     override fun packetStarted(pesTimeUs: Long, flags: Int) {
+        flush()
         if (pesTimeUs != C.TIME_UNSET) {
             timeUs = pesTimeUs
-            sampleFramesWritten = 0
+            framesWritten = 0
         }
         headerBytesRead = 0
-        pendingBytes = 0
-        unsupported = false
+        frameBytesRead = 0
+        payloadRemaining = 0
     }
 
     override fun consume(data: ParsableByteArray) {
-        if (!unsupported && headerBytesRead < header.size && !readHeader(data)) {
-            if (unsupported) data.skipBytes(data.bytesLeft())
-            return
+        if (headerBytesRead < 4) {
+            val count = minOf(4 - headerBytesRead, data.bytesLeft())
+            data.readBytes(header, headerBytesRead, count)
+            headerBytesRead += count
+            if (headerBytesRead < 4) return
+            parseHeader()
         }
-        if (unsupported) {
-            data.skipBytes(data.bytesLeft())
-            return
-        }
-        val trackOutput = output ?: return
-        val frameBytes = sampleBytesPerFrame
-        if (frameBytes <= 0) return
-
-        val available = data.bytesLeft()
-        if (available <= 0) return
-        val total = pendingBytes + available
-        val completeBytes = total - total % frameBytes
-        if (completeBytes == 0) {
-            copyToPending(data, available)
-            return
-        }
-
-        val source = ByteArray(completeBytes)
-        System.arraycopy(pending, 0, source, 0, pendingBytes)
-        // A TS payload can end mid-sample; only complete frames fit in source.
-        data.readBytes(source, pendingBytes, completeBytes - pendingBytes)
-        pendingBytes = total - completeBytes
-        if (pendingBytes > 0) {
-            data.readBytes(pending, 0, pendingBytes)
-        }
-
-        val converted = ByteArray(completeBytes / frameBytes * 4)
-        var inputPosition = 0
-        var outputPosition = 0
-        while (inputPosition < completeBytes) {
-            if (bitsPerSample == 16) {
-                converted[outputPosition] = source[inputPosition + 1]
-                converted[outputPosition + 1] = source[inputPosition]
-                converted[outputPosition + 2] = source[inputPosition + 3]
-                converted[outputPosition + 3] = source[inputPosition + 2]
-                inputPosition += 4
-            } else {
-                writeInt16(
-                    converted,
-                    outputPosition,
-                    readSigned24(source, inputPosition) shr 8,
-                )
-                writeInt16(
-                    converted,
-                    outputPosition + 2,
-                    readSigned24(source, inputPosition + 3) shr 8,
-                )
-                inputPosition += 6
+        while (data.bytesLeft() > 0 && payloadRemaining > 0) {
+            val count = minOf(frameSize - frameBytesRead, data.bytesLeft(), payloadRemaining)
+            data.readBytes(frame, frameBytesRead, count)
+            frameBytesRead += count
+            payloadRemaining -= count
+            if (frameBytesRead == frameSize) {
+                for (channel in channels) {
+                    val offset = channel * bytesPerSample
+                    pcm[pcmSize++] = frame[offset + 1]
+                    pcm[pcmSize++] = frame[offset]
+                }
+                frameBytesRead = 0
+                if (pcmSize >= sampleRate / 100 * channels.size * 2) flush()
             }
-            outputPosition += 4
         }
-        trackOutput.sampleData(
-            ParsableByteArray(converted),
-            converted.size,
-            TrackOutput.SAMPLE_DATA_PART_MAIN,
-        )
-        if (timeUs == C.TIME_UNSET) timeUs = 0
-        trackOutput.sampleMetadata(
-            timeUs + sampleFramesWritten * 1_000_000L / sampleRate,
-            C.BUFFER_FLAG_KEY_FRAME,
-            converted.size,
-            0,
-            null,
-        )
-        sampleFramesWritten += completeBytes / frameBytes
+        if (payloadRemaining == 0) {
+            if (frameBytesRead != 0) fail("Truncated Blu-ray LPCM sample frame")
+            flush()
+        }
+        data.skipBytes(data.bytesLeft())
     }
 
     override fun packetFinished(isEndOfInput: Boolean) {
-        pendingBytes = 0
+        if (headerBytesRead in 1..3) fail("Truncated Blu-ray LPCM header")
+        flush()
+        frameBytesRead = 0
     }
 
     override fun seek() {
-        timeUs = C.TIME_UNSET
-        sampleFramesWritten = 0
+        pcmSize = 0
+        frameBytesRead = 0
         headerBytesRead = 0
-        pendingBytes = 0
-        unsupported = false
+        payloadRemaining = 0
+        timeUs = C.TIME_UNSET
+        framesWritten = 0
     }
 
-    private fun readHeader(data: ParsableByteArray): Boolean {
-        val toRead = minOf(4 - headerBytesRead, data.bytesLeft())
-        if (toRead <= 0) return false
-        data.readBytes(header, headerBytesRead, toRead)
-        headerBytesRead += toRead
-        if (headerBytesRead < 4) return false
-
-        val channelLayout = (header[2].toInt() ushr 4) and 0x0F
-        val sampleRateCode = header[2].toInt() and 0x0F
-        val bitDepthCode = (header[3].toInt() ushr 6) and 0x03
-        val newSampleRate = when (sampleRateCode) {
+    private fun parseHeader() {
+        val layout = (header[2].toInt() ushr 4) and 15
+        // HDMV source order: FL FR FC SL BL BR SR LFE for 7.1.
+        channels = when (layout) {
+            1 -> MONO
+            3 -> STEREO
+            9 -> SURROUND_51
+            11 -> SURROUND_71
+            else -> fail("Unsupported Blu-ray LPCM channel layout: $layout; use MPV")
+        }
+        val rate = when (header[2].toInt() and 15) {
             1 -> 48_000
             4 -> 96_000
             5 -> 192_000
-            else -> 0
+            else -> fail("Invalid Blu-ray LPCM sample rate")
         }
-        bitsPerSample = when (bitDepthCode) {
-            1 -> 16
-            2, 3 -> 24
-            else -> 0
+        bytesPerSample = when ((header[3].toInt() ushr 6) and 3) {
+            1 -> 2
+            2, 3 -> 3
+            else -> fail("Invalid Blu-ray LPCM sample depth")
         }
-        if (channelLayout != 3 || newSampleRate <= 0 || bitsPerSample <= 0) {
-            unsupported = true
-            return false
+        frameSize = ((channels.size + 1) / 2 * 2) * bytesPerSample
+        payloadRemaining = ((header[0].toInt() and 255) shl 8) or (header[1].toInt() and 255)
+        if (payloadRemaining == 0 || payloadRemaining % frameSize != 0) {
+            fail("Invalid Blu-ray LPCM payload length")
         }
-        sampleBytesPerFrame = if (bitsPerSample == 16) 4 else 6
-        if (sampleRate != newSampleRate) {
-            if (timeUs != C.TIME_UNSET && sampleRate > 0) {
-                timeUs += sampleFramesWritten * 1_000_000L / sampleRate
-            }
-            sampleFramesWritten = 0
-            sampleRate = newSampleRate
+        if (sampleRate != rate) {
+            if (sampleRate > 0 && timeUs != C.TIME_UNSET) timeUs += framesWritten * 1_000_000L / sampleRate
+            framesWritten = 0
+            sampleRate = rate
         }
-
-        val trackOutput = output ?: return false
-        if (format?.sampleRate != sampleRate) {
-            val newFormat = Format.Builder()
-                .setId(formatId)
-                .setContainerMimeType(MimeTypes.VIDEO_MP2T)
-                .setSampleMimeType(MimeTypes.AUDIO_RAW)
-                .setPcmEncoding(C.ENCODING_PCM_16BIT)
-                .setChannelCount(2)
-                .setSampleRate(sampleRate)
-                .setLanguage(language)
-                .setRoleFlags(roleFlags)
-                .build()
-            trackOutput.format(newFormat)
-            format = newFormat
+        if (format?.sampleRate != rate || format?.channelCount != channels.size) {
+            val next = Format.Builder().setId(formatId)
+                .setContainerMimeType(MimeTypes.VIDEO_MP2T).setSampleMimeType(MimeTypes.AUDIO_RAW)
+                .setPcmEncoding(C.ENCODING_PCM_16BIT).setChannelCount(channels.size)
+                .setSampleRate(rate).setLanguage(language).setRoleFlags(roleFlags).build()
+            output!!.format(next)
+            format = next
         }
-        return true
     }
 
-    private fun copyToPending(data: ParsableByteArray, bytes: Int) {
-        val target = pendingBytes
-        data.readBytes(pending, target, bytes)
-        pendingBytes += bytes
+    private fun flush() {
+        if (pcmSize == 0) return
+        val track = output ?: return
+        if (timeUs == C.TIME_UNSET) timeUs = 0
+        pcmData.reset(pcm, pcmSize)
+        track.sampleData(pcmData, pcmSize, TrackOutput.SAMPLE_DATA_PART_MAIN)
+        track.sampleMetadata(timeUs + framesWritten * 1_000_000L / sampleRate,
+            C.BUFFER_FLAG_KEY_FRAME, pcmSize, 0, null)
+        framesWritten += pcmSize / (channels.size * 2)
+        pcmSize = 0
     }
 
-    private fun readSigned24(bytes: ByteArray, offset: Int): Int {
-        return (bytes[offset].toInt() shl 16) or
-            ((bytes[offset + 1].toInt() and 0xFF) shl 8) or
-            (bytes[offset + 2].toInt() and 0xFF)
-    }
+    private fun fail(message: String): Nothing =
+        throw ParserException.createForUnsupportedContainerFeature(message)
 
-    private fun writeInt16(bytes: ByteArray, offset: Int, value: Int) {
-        bytes[offset] = value.toByte()
-        bytes[offset + 1] = (value shr 8).toByte()
+    private companion object {
+        val MONO = intArrayOf(0)
+        val STEREO = intArrayOf(0, 1)
+        val SURROUND_51 = intArrayOf(0, 1, 2, 5, 3, 4)
+        val SURROUND_71 = intArrayOf(0, 1, 2, 7, 4, 5, 3, 6)
     }
 }

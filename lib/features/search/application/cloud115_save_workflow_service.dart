@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:starflow/features/search/application/cloud_save_postprocessing.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
@@ -72,8 +73,7 @@ class Cloud115SaveWorkflowService {
         skippedCount: result.skippedCount,
       ).buildSuccessMessage();
     }
-    final smartStrmDelay =
-        config.smartStrmDelaySeconds <= 0 ? 1 : config.smartStrmDelaySeconds;
+    final smartStrmDelay = cloudSaveDelaySeconds(config.smartStrmDelaySeconds);
     final nameOutcome = await processCloudSavedNames(
       characters: characters,
       savedCount: count,
@@ -110,33 +110,28 @@ class Cloud115SaveWorkflowService {
       appLogInfo('115.save', '115 SmartStrm trigger started', fields: {
         'delaySeconds': smartStrmDelay,
       });
-      try {
-        smartStrmResult = await smartStrm.triggerTask(
-          webhookUrl: config.smartStrmWebhookUrl,
-          taskName: config.cloud115SmartStrmTaskName,
-          storagePath: path == '/' ? '' : path,
-          delay: smartStrmDelay,
-        );
-        appLogInfo('115.save', '115 SmartStrm trigger accepted');
-      } catch (error) {
-        // Saving already succeeded; still attempt the independent refresh.
-        smartStrmFailure = error is SmartStrmWebhookException
-            ? error.message
-            : '请检查 SmartStrm 任务';
-        appLogWarning('115.save', '115 SmartStrm trigger failed', fields: {
-          'errorType': error.runtimeType.toString(),
-        });
-      }
+      final outcome = await triggerSavedCloudStrm(
+          drive: CloudSaveDrive.cloud115,
+          trigger: () => smartStrm.triggerTask(
+                webhookUrl: config.smartStrmWebhookUrl,
+                taskName: config.cloud115SmartStrmTaskName,
+                storagePath: path == '/' ? '' : path,
+                delay: smartStrmDelay,
+              ));
+      smartStrmResult = outcome.result;
+      smartStrmFailure = outcome.failure;
     }
     int? refreshDelay;
     if (config.refreshMediaSourceIds.isNotEmpty) {
-      refreshDelay =
-          config.refreshDelaySeconds <= 0 ? 1 : config.refreshDelaySeconds;
+      refreshDelay = cloudSaveDelaySeconds(config.refreshDelaySeconds);
       appLogInfo('115.save', '115 post-save media refresh scheduled', fields: {
         'sourceCount': config.refreshMediaSourceIds.length,
         'delaySeconds': refreshDelay,
       });
-      unawaited(_refreshInBackground(config.refreshMediaSourceIds, refreshDelay,
+      final delay = refreshDelay;
+      unawaited(refreshSavedCloudMedia(
+          drive: CloudSaveDrive.cloud115,
+          refresh: () => refresh(config.refreshMediaSourceIds, delay),
           onFailure: onBackgroundRefreshFailure));
     }
     return CloudSaveSummary(
@@ -153,18 +148,5 @@ class Cloud115SaveWorkflowService {
       smartStrmFailure: smartStrmFailure,
       refreshDelaySeconds: refreshDelay,
     ).buildSuccessMessage();
-  }
-
-  Future<void> _refreshInBackground(List<String> sourceIds, int delay,
-      {void Function(String)? onFailure}) async {
-    try {
-      await refresh(sourceIds, delay);
-    } catch (error) {
-      appLogWarning('115.save', '115 post-save media refresh failed', fields: {
-        'sourceCount': sourceIds.length,
-        'errorType': error.runtimeType.toString(),
-      });
-      onFailure?.call(CloudSaveDrive.cloud115.refreshFailureMessage);
-    }
   }
 }

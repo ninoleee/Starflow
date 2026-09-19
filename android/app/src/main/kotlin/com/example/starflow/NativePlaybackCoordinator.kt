@@ -174,6 +174,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
             }
 
             override fun onRenderedFirstFrame() {
+                diagnostics.awaitingVideoFrameAfterSeek = false
                 val isStartupFirstFrame = !diagnostics.playbackFirstFrameRendered
                 episodes.onPlaybackReady()
                 fntv.onReady()
@@ -206,7 +207,13 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                 )
                 runtime.resetPlaybackWatchdogProgress(newPosition.positionMs)
                 runtime.syncSkipFlagsWithCurrentPosition()
-                if (reason == Player.DISCONTINUITY_REASON_SEEK) runtime.onUserSeek()
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    diagnostics.awaitingVideoFrameAfterSeek =
+                        session.player?.currentTracks?.groups?.any {
+                            it.type == C.TRACK_TYPE_VIDEO && it.isSelected
+                        } == true
+                    runtime.onUserSeek()
+                }
                 systemSession.syncPlaybackSystemSession()
             }
 
@@ -226,6 +233,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                         "container=${target.decodePlaybackTargetObject().optString("container").trim()}",
                     error,
                 )
+                if (recovery.retryAudioWithSoftwareDecoder(error)) return
                 if (recovery.retrySmartStrmAsHlsIfNeeded(error)) {
                     return
                 }
@@ -238,8 +246,13 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                 diagnostics.logVideoTracks(tracks)
                 diagnostics.logSubtitleTracks(tracks)
                 recovery.fallbackToTranscodedVideoIfNeeded(tracks)
-                fntv.onTracksReady()
+                if (!session.restoreAudioTrack(tracks)) fntv.onTracksReady()
                 subtitles.applyAutomaticSubtitleSelection(tracks)
+            }
+
+            override fun onCues(cueGroup: androidx.media3.common.text.CueGroup) {
+                subtitleStyle.onCues(cueGroup)
+                diagnostics.logSubtitleCues(cueGroup)
             }
         }
 
@@ -400,6 +413,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
         )
         diagnostics.finishPlaybackPerformanceSession("destroyed")
         session.releasePlayer()
+        externalSubtitles.close()
         launch.dismissFailure()
         systemSession.playbackSystemSessionManager.release()
         NativePlaybackFormatting.logPlayback(

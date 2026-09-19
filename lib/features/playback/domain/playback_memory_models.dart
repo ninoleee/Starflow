@@ -1,4 +1,5 @@
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/playback/application/playback_policy_values.dart';
 
 class PlaybackProgressEntry {
   const PlaybackProgressEntry({
@@ -30,16 +31,17 @@ class PlaybackProgressEntry {
       return false;
     }
     final milliseconds = position.inMilliseconds;
-    if (milliseconds < 5000) {
+    if (milliseconds < PlaybackPolicyValues.memoryResumeMinimumMs) {
       return false;
     }
     if (duration > Duration.zero) {
       final remaining = duration - position;
-      if (remaining <= const Duration(seconds: 12)) {
+      if (remaining.inMilliseconds <=
+          PlaybackPolicyValues.memoryResumeRemainingMs) {
         return false;
       }
     }
-    return progress < 0.985;
+    return progress < PlaybackPolicyValues.memoryCompletedPermille / 1000;
   }
 
   PlaybackProgressEntry copyWith({
@@ -69,7 +71,15 @@ class PlaybackProgressEntry {
   Map<String, dynamic> toJson() {
     return {
       'key': key,
-      'target': target.toJson(),
+      'target': target
+          .copyWith(
+              streamUrl: target.isFntvTranscoding ? '' : null,
+              headers: target.isFntvTranscoding ? const {} : null,
+              fntvSessionLink: '',
+              fntvStartPositionMs: 0,
+              preferredPlaybackQualityIndex:
+                  target.isFntvTranscoding ? 0 : null)
+          .toJson(),
       'updatedAt': updatedAt.toIso8601String(),
       'seriesKey': seriesKey,
       'seriesTitle': seriesTitle,

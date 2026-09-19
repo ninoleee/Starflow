@@ -8,6 +8,8 @@ import 'package:flutter/painting.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/network/bounded_http_request.dart';
+import 'package:starflow/core/scheduling/async_work_pool.dart';
 import 'package:starflow/core/network/starflow_http_transport.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/core/storage/persistent_image_cache_api.dart';
@@ -28,6 +30,29 @@ class _IoPersistentImageCache implements PersistentImageCache {
   static const Duration _networkRequestTimeout = Duration(seconds: 15);
 
   final http.Client _client;
+  final _downloads = AsyncWorkPool(4);
+  final Map<String, _ImageLoadLease> _loadLeases = {};
+
+  Future<T> _withLoadLease<T>(String key, Future<void>? cancel,
+      Future<T> Function(Future<void> abort) operation, VoidCallback onUnused) {
+    final lease = _loadLeases.putIfAbsent(key, _ImageLoadLease.new);
+    lease.users++;
+    var released = false;
+    void release() {
+      if (released) return;
+      released = true;
+      lease.users--;
+      if (lease.users == 0) {
+        if (identical(_loadLeases[key], lease)) {
+          _loadLeases.remove(key);
+          onUnused();
+        }
+        if (!lease.abort.isCompleted) lease.abort.complete();
+      }
+    }
+    if (cancel != null) unawaited(cancel.then((_) => release()));
+    return operation(lease.abort.future).whenComplete(release);
+  }
   final LinkedHashMap<String, _MemoryImageEntry> _memoryCache = LinkedHashMap();
   final Map<String, Future<Uint8List>> _inflight =
       <String, Future<Uint8List>>{};
@@ -35,6 +60,39 @@ class _IoPersistentImageCache implements PersistentImageCache {
       <String, Future<ImageProvider<Object>>>{};
   Future<Directory>? _directoryFuture;
   int _memoryBytes = 0;
+  DateTime? _lastMaintenance;
+
+  void _scheduleDiskMaintenance() {
+    final now = DateTime.now();
+    if (_lastMaintenance != null &&
+        now.difference(_lastMaintenance!) < const Duration(hours: 1)) {
+      return;
+    }
+    _lastMaintenance = now;
+    unawaited(_pruneDisk().catchError((Object _) {}));
+  }
+
+  Future<void> _pruneDisk() async {
+    final directory = await _cacheDirectory();
+    final entries = <({File file, FileStat stat})>[];
+    var total = 0;
+    final now = DateTime.now();
+    await for (final entry in directory.list()) {
+      if (entry is! File || !entry.path.endsWith('.bin')) continue;
+      final stat = await entry.stat();
+      entries.add((file: entry, stat: stat));
+      total += stat.size;
+    }
+    entries.sort((a, b) => a.stat.modified.compareTo(b.stat.modified));
+    for (final entry in entries) {
+      final age = now.difference(entry.stat.modified);
+      if (age < const Duration(minutes: 5)) continue;
+      if (total <= 512 * 1024 * 1024 && age <= _diskEntryMaxAge) continue;
+      await _deleteIfExists(entry.file);
+      await _deleteIfExists(File(entry.file.path.replaceFirst(RegExp(r'\.bin$'), '.json')));
+      total -= entry.stat.size;
+    }
+  }
 
   @override
   Future<void> clear() async {
@@ -105,6 +163,16 @@ class _IoPersistentImageCache implements PersistentImageCache {
     String url, {
     Map<String, String>? headers,
     bool persist = true,
+    Future<void>? cancel,
+  }) => _withLoadLease('bytes:$persist:${_cacheIdentity(url.trim(), headers)}', cancel,
+      (abort) => _loadBytes(url, headers: headers, persist: persist, cancel: abort),
+      () { if (persist) _inflight.remove(_cacheIdentity(url.trim(), headers)); });
+
+  Future<Uint8List> _loadBytes(
+    String url, {
+    Map<String, String>? headers,
+    bool persist = true,
+    required Future<void> cancel,
   }) async {
     final trimmedUrl = url.trim();
     if (trimmedUrl.isEmpty) {
@@ -114,6 +182,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
       return _fetchNetworkBytes(
         url: trimmedUrl,
         headers: headers,
+        cancel: cancel,
       );
     }
     final cacheKey = _cacheIdentity(trimmedUrl, headers);
@@ -132,6 +201,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
       cacheKey: cacheKey,
       url: trimmedUrl,
       headers: headers,
+      cancel: cancel,
     );
     _inflight[cacheKey] = future;
     unawaited(
@@ -156,6 +226,16 @@ class _IoPersistentImageCache implements PersistentImageCache {
     String url, {
     Map<String, String>? headers,
     bool persist = true,
+    Future<void>? cancel,
+  }) => _withLoadLease('raster:$persist:${_cacheIdentity(url.trim(), headers)}', cancel,
+      (abort) => _resolveRaster(url, headers: headers, persist: persist, cancel: abort),
+      () { if (persist) _rasterProviderInflight.remove(_cacheIdentity(url.trim(), headers)); });
+
+  Future<ImageProvider<Object>> _resolveRaster(
+    String url, {
+    Map<String, String>? headers,
+    bool persist = true,
+    required Future<void> cancel,
   }) async {
     final trimmedUrl = url.trim();
     if (trimmedUrl.isEmpty) {
@@ -166,6 +246,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
       final bytes = await _fetchNetworkBytes(
         url: trimmedUrl,
         headers: normalizedHeaders,
+        cancel: cancel,
       );
       return MemoryImage(bytes);
     }
@@ -180,6 +261,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
       cacheKey: cacheKey,
       url: trimmedUrl,
       headers: normalizedHeaders,
+      cancel: cancel,
     );
     _rasterProviderInflight[cacheKey] = future;
     unawaited(
@@ -200,6 +282,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
   }
 
   Future<Uint8List> _loadOrFetch({
+    required Future<void> cancel,
     required String cacheKey,
     required String url,
     required Map<String, String>? headers,
@@ -208,7 +291,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
     final metadataFile = await _cacheMetadataFile(cacheKey);
     final metadata = await _loadMetadata(metadataFile);
     final diskBytes = await _readDiskImage(file);
-    final isFresh = _isDiskEntryFresh(metadata, file);
+    final isFresh = await _isDiskEntryFresh(metadata, file);
 
     if (diskBytes != null && isFresh) {
       _remember(cacheKey, diskBytes);
@@ -221,9 +304,11 @@ class _IoPersistentImageCache implements PersistentImageCache {
       final bytes = await _fetchNetworkBytes(
         url: url,
         headers: headers,
+        cancel: cancel,
       );
       await file.writeAsBytes(bytes, flush: false);
       await _saveMetadata(metadataFile, _buildMetadata());
+      _scheduleDiskMaintenance();
       _remember(cacheKey, bytes);
       return bytes;
     } catch (_) {
@@ -236,11 +321,13 @@ class _IoPersistentImageCache implements PersistentImageCache {
   }
 
   Future<ImageProvider<Object>> _resolvePersistentRasterProvider({
+    required Future<void> cancel,
     required String cacheKey,
     required String url,
     required Map<String, String> headers,
   }) async {
     final file = await _ensurePersistentFile(
+      cancel: cancel,
       cacheKey: cacheKey,
       url: url,
       headers: headers,
@@ -249,6 +336,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
   }
 
   Future<File> _ensurePersistentFile({
+    required Future<void> cancel,
     required String cacheKey,
     required String url,
     required Map<String, String> headers,
@@ -257,7 +345,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
     final metadataFile = await _cacheMetadataFile(cacheKey);
     final metadata = await _loadMetadata(metadataFile);
     final hasDiskEntry = await file.exists();
-    final isFresh = hasDiskEntry && _isDiskEntryFresh(metadata, file);
+    final isFresh = hasDiskEntry && await _isDiskEntryFresh(metadata, file);
 
     if (isFresh) {
       return file;
@@ -269,9 +357,11 @@ class _IoPersistentImageCache implements PersistentImageCache {
       final bytes = await _fetchNetworkBytes(
         url: url,
         headers: headers,
+        cancel: cancel,
       );
       await file.writeAsBytes(bytes, flush: false);
       await _saveMetadata(metadataFile, _buildMetadata());
+      _scheduleDiskMaintenance();
       return file;
     } catch (_) {
       if (staleFile != null && await staleFile.exists()) {
@@ -294,11 +384,21 @@ class _IoPersistentImageCache implements PersistentImageCache {
   }
 
   Future<Uint8List> _fetchNetworkBytes({
+    required Future<void> cancel,
     required String url,
     required Map<String, String>? headers,
   }) async {
-    final response = await _client.get(Uri.parse(url), headers: headers);
-    return validateNetworkImageHttpResponse(response, url: url);
+    var cancelled = false;
+    unawaited(cancel.then((_) => cancelled = true));
+    return _downloads.run(() async {
+      if (cancelled) throw http.RequestAbortedException(Uri.parse(url));
+      final response = await sendBoundedRequest(
+        _client, 'GET', Uri.parse(url), headers: headers,
+        timeout: _networkRequestTimeout, maxBytes: 32 * 1024 * 1024,
+        cancel: cancel,
+      );
+      return validateNetworkImageHttpResponse(response, url: url);
+    });
   }
 
   void _remember(String cacheKey, Uint8List bytes) {
@@ -405,13 +505,13 @@ class _IoPersistentImageCache implements PersistentImageCache {
     );
   }
 
-  bool _isDiskEntryFresh(Map<String, dynamic>? metadata, File file) {
+  Future<bool> _isDiskEntryFresh(Map<String, dynamic>? metadata, File file) async {
     final now = DateTime.now().toUtc();
-    final updatedAt = _resolveEntryUpdatedAt(metadata, file);
+    final updatedAt = await _resolveEntryUpdatedAt(metadata, file);
     return now.difference(updatedAt) <= _diskEntryMaxAge;
   }
 
-  DateTime _resolveEntryUpdatedAt(Map<String, dynamic>? metadata, File file) {
+  Future<DateTime> _resolveEntryUpdatedAt(Map<String, dynamic>? metadata, File file) async {
     final updatedAtMillis = (metadata?['updatedAt'] as num?)?.toInt() ?? 0;
     if (updatedAtMillis > 0) {
       return DateTime.fromMillisecondsSinceEpoch(
@@ -419,7 +519,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
         isUtc: true,
       );
     }
-    final stat = file.statSync();
+    final stat = await file.stat();
     return stat.modified.toUtc();
   }
 
@@ -434,6 +534,11 @@ class _MemoryImageEntry {
   const _MemoryImageEntry(this.bytes);
 
   final Uint8List bytes;
+}
+
+class _ImageLoadLease {
+  final abort = Completer<void>();
+  int users = 0;
 }
 
 String _stableHash(String value) {

@@ -11,7 +11,7 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_start_playback_resolver.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_hero_section.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';

@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.view.ViewGroup
 import android.view.accessibility.CaptioningManager
 import android.widget.FrameLayout
+import androidx.media3.common.text.CueGroup
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
@@ -29,6 +30,39 @@ internal class NativePlaybackSubtitleStyleController(private val host: Host) {
     var secondarySubtitlePosition = 90.0
 
     var secondarySubtitleScale = NativeDualSubtitleLayoutPolicy.SECONDARY_TEXT_SCALE_PERCENT
+
+    private var videoSubtitleParent: ViewGroup? = null
+    private var usesBitmapCoordinates = false
+
+    fun onCues(cueGroup: CueGroup) {
+        // Empty groups clear the view without changing its coordinate space between lines.
+        if (cueGroup.cues.isEmpty()) return
+        usesBitmapCoordinates = cueGroup.cues.any { it.bitmap != null }
+        updateSubtitleContainer()
+    }
+
+    private fun updateSubtitleContainer() {
+        val subtitleView = host.playerView.subtitleView ?: return
+        val overlay = host.playerView.overlayFrameLayout ?: return
+        val currentParent = subtitleView.parent as? ViewGroup ?: return
+        if (videoSubtitleParent == null && currentParent !== overlay) {
+            videoSubtitleParent = currentParent
+        }
+        // Bitmap coordinates describe the video plane, not the full window/letterbox bars.
+        val targetParent = if (usesBitmapCoordinates) videoSubtitleParent ?: return else overlay
+        if (currentParent === targetParent) return
+        currentParent.removeView(subtitleView)
+        val params = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+        )
+        if (targetParent === overlay) {
+            overlay.addView(subtitleView, 0, params)
+        } else {
+            // Above the video/shutter, while PlayerView controls remain outside this frame.
+            targetParent.addView(subtitleView, params)
+        }
+    }
 
     fun openSubtitleScalePicker() {
         openSubtitleNumberPicker(
@@ -119,19 +153,7 @@ internal class NativePlaybackSubtitleStyleController(private val host: Host) {
 
     fun applySubtitleStyle() {
         val subtitleView = host.playerView.subtitleView ?: return
-        // The default content frame follows the video aspect ratio and excludes letterbox bars.
-        val overlay = host.playerView.overlayFrameLayout
-        if (overlay != null && subtitleView.parent !== overlay) {
-            (subtitleView.parent as? ViewGroup)?.removeView(subtitleView)
-            overlay.addView(
-                subtitleView,
-                0,
-                FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                ),
-            )
-        }
+        updateSubtitleContainer()
         val style =
             NativeSubtitleStylePolicy.resolve(
                 rawScale = subtitleScale,

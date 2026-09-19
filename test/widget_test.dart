@@ -21,9 +21,10 @@ import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_episode_browser.dart';
+import 'package:starflow/features/discovery/data/douban_api_client.dart';
 import 'package:starflow/features/home/application/home_controller.dart';
 import 'package:starflow/features/home/presentation/home_page.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -125,6 +126,15 @@ void main() {
           ),
           localStorageCacheRepositoryProvider
               .overrideWithValue(cacheRepository),
+          doubanApiClientProvider.overrideWithValue(
+            DoubanApiClient(MockClient((request) async => http.Response(
+                  jsonEncode({
+                    'rating': {'value': 8.8, 'count': 1000},
+                  }),
+                  200,
+                  headers: const {'content-type': 'application/json'},
+                ))),
+          ),
           wmdbMetadataClientProvider.overrideWithValue(
             WmdbMetadataClient(
               MockClient((request) async {

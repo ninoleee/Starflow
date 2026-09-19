@@ -544,6 +544,7 @@ class _LibraryPagerSummary extends StatelessWidget {
           enabled: canGoPrevious,
           isTelevision: isTelevision,
           focusId: '$focusScopePrefix:previous',
+          focusableWhenDisabled: totalPages > 1,
           onTap: () => onPageChanged(currentPage - 1),
         ),
         const SizedBox(width: 8),
@@ -552,6 +553,7 @@ class _LibraryPagerSummary extends StatelessWidget {
           enabled: canGoNext,
           isTelevision: isTelevision,
           focusId: '$focusScopePrefix:next',
+          focusableWhenDisabled: totalPages > 1,
           onTap: () => onPageChanged(currentPage + 1),
         ),
       ],
@@ -565,6 +567,7 @@ class _PagerButton extends StatelessWidget {
     required this.enabled,
     required this.isTelevision,
     this.focusId,
+    this.focusableWhenDisabled = false,
     required this.onTap,
   });
 
@@ -572,6 +575,7 @@ class _PagerButton extends StatelessWidget {
   final bool enabled;
   final bool isTelevision;
   final String? focusId;
+  final bool focusableWhenDisabled;
   final VoidCallback onTap;
 
   @override
@@ -594,6 +598,7 @@ class _PagerButton extends StatelessWidget {
     if (isTelevision) {
       return TvFocusableAction(
         onPressed: enabled ? onTap : null,
+        focusableWhenDisabled: focusableWhenDisabled,
         focusId: focusId,
         borderRadius: BorderRadius.circular(999),
         child: child,

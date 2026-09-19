@@ -458,7 +458,7 @@ void main() {
     expect(target.preferredPlaybackQualityIndex, 1);
   });
 
-  test('Blu-ray PCM transport stream prefers the seek-safe range endpoint',
+  test('STRM Blu-ray PCM keeps the resolved direct link and provider headers',
       () async {
     final client = FntvApiClient(MockClient((request) async {
       if (request.url.path.endsWith('/play/info')) {
@@ -471,6 +471,9 @@ void main() {
         'audio_streams': [
           {'guid': 'audio', 'codec_name': 'pcm_bluray'},
         ],
+        'header': {
+          'User-Agent': ['ProviderPlayer'],
+        },
         'direct_link_qualities': [
           {'resolution': '1080P', 'url': 'https://cdn/episode.ts'},
         ],
@@ -482,9 +485,9 @@ void main() {
 
     expect(
       target.streamUrl,
-      'https://nas.example.com/v/api/v1/media/range/file'
-      '?direct_link_quality_index=0',
+      'https://cdn/episode.ts',
     );
+    expect(target.headers, {'User-Agent': 'ProviderPlayer'});
   });
 
   test('Blu-ray PCM in a non-transport container keeps the direct link',

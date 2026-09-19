@@ -275,6 +275,12 @@ void main() {
         ),
       ],
       networkStorage: const NetworkStorageConfig(
+        syncDelete115WebDavDirectories: [
+          NetworkStorageWebDavDirectory(
+              sourceId: 'nas-main',
+              sourceName: 'NAS',
+              directoryId: 'https://old.example.com/movies/strm/115/'),
+        ],
         syncDeleteQuarkWebDavDirectories: [
           NetworkStorageWebDavDirectory(
             sourceId: 'nas-main',
@@ -309,6 +315,10 @@ void main() {
     );
     expect(remappedModule.sourceName, '新 NAS');
     expect(
+        repository.settings.networkStorage.syncDelete115WebDavDirectories.single
+            .directoryId,
+        'https://new.example.com/dav/strm/115/');
+    expect(
       repository.settings.networkStorage.syncDeleteQuarkWebDavDirectories.single
           .directoryId,
       'https://new.example.com/dav/strm/quark/',
@@ -339,6 +349,11 @@ void main() {
       searchSourceIds: const ['source:nas-main'],
       networkStorage: const NetworkStorageConfig(
         refreshMediaSourceIds: ['nas-main'],
+        syncDelete115WebDavDirectories: [
+          NetworkStorageWebDavDirectory(
+              sourceId: 'nas-main',
+              directoryId: 'https://nas.example.com/dav/115/'),
+        ],
         syncDeleteQuarkWebDavDirectories: [
           NetworkStorageWebDavDirectory(
             sourceId: 'nas-main',
@@ -372,6 +387,8 @@ void main() {
     expect(repository.settings.libraryMatchSourceIds, isEmpty);
     expect(repository.settings.searchSourceIds, isEmpty);
     expect(repository.settings.networkStorage.refreshMediaSourceIds, isEmpty);
+    expect(repository.settings.networkStorage.syncDelete115WebDavDirectories,
+        isEmpty);
     expect(
       repository.settings.networkStorage.syncDeleteQuarkWebDavDirectories,
       isEmpty,

@@ -51,12 +51,19 @@ void main() {
       if (useSystemBack) {
         await tester.binding.handlePopRoute();
       } else {
-        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.escape);
       }
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
       expect(confirm.hasPrimaryFocus, isTrue);
       expect(missingAction.hasPrimaryFocus, isFalse);
+      if (!useSystemBack) {
+        await tester.sendKeyRepeatEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(confirm.hasPrimaryFocus, isTrue);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.escape);
+      }
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       expect(confirmed, isTrue);
@@ -64,7 +71,10 @@ void main() {
       if (useSystemBack) {
         await tester.binding.handlePopRoute();
       } else {
-        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.escape);
+        await tester.pump();
+        await tester.sendKeyRepeatEvent(LogicalKeyboardKey.escape);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.escape);
       }
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);

@@ -16,3 +16,6 @@
 - When user-facing behavior changes, keep `README.md` and the relevant files under `docs/` aligned with the implementation in the same change.
 - Treat `docs/architecture.md` as the source for component boundaries, `docs/development-network.md` as the source for runtime/build networking, and the two performance documents as the source for host and device measurements.
 - Do not describe application logging as disabled: the legacy trace helpers are silent, while the structured local logger, Android native exit capture, preview, filtering, clearing, and export flows are active.
+- Use `docs/code-map.md` for source navigation and `docs/subtitles.md` for subtitle pipeline boundaries. Keep dependency and resource READMEs scoped to the files they describe.
+- Record verification dates and distinguish host smoke/JVM/Swift strategy checks from real-device measurements. Keep historical review findings labeled as pre-fix snapshots when the implementation has changed; never turn an old test result into a current all-green claim.
+- Update authored Markdown, not generated dependency/build documentation. Documentation-only work should not invoke release presets that increment `pubspec.yaml` or regenerate binary assets.

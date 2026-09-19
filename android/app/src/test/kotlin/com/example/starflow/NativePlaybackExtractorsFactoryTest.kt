@@ -19,6 +19,19 @@ import org.mockito.Mockito.`when`
 
 class NativePlaybackExtractorsFactoryTest {
     @Test
+    fun pgsContinuityResetUsesOnlyItsRegisteredFormatId() {
+        val resets = mutableListOf<Set<String?>>()
+        val output = mock(ExtractorOutput::class.java)
+        `when`(output.track(anyInt(), anyInt())).thenReturn(mock(TrackOutput::class.java))
+        val info = TsPayloadReader.EsInfo(0x90, null, 0, null, byteArrayOf())
+        val reader = NativeTsPayloadReaderFactory(resetSubtitleParsers = { resets += it.toSet() })
+            .createPayloadReader(0x90, info)!!
+        reader.init(TimestampAdjuster(0), output, TsPayloadReader.TrackIdGenerator(7, 1))
+        reader.seek()
+        org.junit.Assert.assertEquals(listOf(setOf("7")), resets)
+    }
+
+    @Test
     fun ambiguousStreamRequiresExactCodecOrHdmvRegistration() {
         for (codec in listOf("", "pcm", "lpcm", "h264", "pcm_s16be", "pcm_bluray_extra")) {
             assertFalse(NativeTsPayloadReaderFactory(codec).shouldUseBluRayPcm(0x80, byteArrayOf()))
@@ -89,8 +102,8 @@ class NativePlaybackExtractorsFactoryTest {
         reader.consume(
             ParsableByteArray(
                 byteArrayOf(
-                    0x03,
-                    0xC0.toByte(),
+                    0,
+                    4,
                     0x31,
                     0x40,
                     0x12,

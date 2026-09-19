@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {"positionMs": 4999, "durationMs": 100000, "progress": 0.04999, "completed": false, "resumeMs": 0, "isCompleted": false},
+    {"positionMs": 5000, "durationMs": 100000, "progress": 0.05, "completed": false, "resumeMs": 5000, "isCompleted": false},
+    {"positionMs": 88000, "durationMs": 100000, "progress": 0.88, "completed": false, "resumeMs": 0, "isCompleted": false},
+    {"positionMs": 87999, "durationMs": 100000, "progress": 0.87999, "completed": false, "resumeMs": 87999, "isCompleted": false},
+    {"positionMs": 92000, "durationMs": 100000, "progress": 0.92, "completed": false, "resumeMs": 0, "isCompleted": true},
+    {"positionMs": 985000, "durationMs": 1000000, "progress": 0.985, "completed": false, "resumeMs": 0, "isCompleted": true},
+    {"positionMs": 984999, "durationMs": 1000000, "progress": 0.984999, "completed": false, "resumeMs": 984999, "isCompleted": false},
+    {"positionMs": 20000, "durationMs": 0, "progress": 0, "completed": false, "resumeMs": 20000, "isCompleted": false},
+    {"positionMs": 20000, "durationMs": 100000, "progress": 0.2, "completed": true, "resumeMs": 0, "isCompleted": false},
+    {"positionMs": 20000, "durationMs": 0, "progress": 0.995, "completed": false, "resumeMs": 0, "isCompleted": true}
+  ],
+  "timestamps": ["2026-09-20T10:00:00Z", "2026-09-20T18:00:00.000+08:00", "2026-09-20T10:00:00.000000Z", "2026-09-20T10:00:00.000900Z"],
+  "nextTimestamp": "2026-09-20T10:00:00.001Z"
+}

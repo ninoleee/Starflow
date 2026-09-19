@@ -9,10 +9,12 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/core/scheduling/async_work_pool.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
+import 'package:starflow/core/widgets/tv_text_input_launcher.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
@@ -21,7 +23,7 @@ import 'package:starflow/features/search/application/search_favorite_metadata_se
 import 'package:starflow/features/search/application/favorite_auto_sync.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
-import 'package:starflow/features/search/data/mock_search_repository.dart';
+import 'package:starflow/features/search/data/search_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
@@ -288,11 +290,20 @@ class _SearchPageState extends ConsumerState<SearchPage>
     _cancelSearchTasks();
   }
 
+  List<SearchResult>? _filteredInput;
+  SearchCloudType? _filteredCloud;
+  List<SearchResult> _filteredOutput = const [];
+
   List<SearchResult> get _displayedResults {
     if (_showFavoriteResults) return _favoriteResults;
     final selected = _selectedCloudType;
     if (selected == null) return _results;
-    return _results.where((result) {
+    if (identical(_filteredInput, _results) && _filteredCloud == selected) {
+      return _filteredOutput;
+    }
+    _filteredInput = _results;
+    _filteredCloud = selected;
+    return _filteredOutput = _results.where((result) {
       return resolveSearchCloudTypeCode(
             rawUrl: result.resourceUrl,
             hints: [result.cloudType],
@@ -788,9 +799,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
           },
         );
       }
-      if (mounted) {
-        setState(() {});
-      }
     } finally {
       if (!job.completer.isCompleted) {
         job.completer.complete(
@@ -884,9 +892,12 @@ class _SearchPageState extends ConsumerState<SearchPage>
     var completed = 0;
     var filteredCount = 0;
 
+    final pool = AsyncWorkPool(ref.read(appSettingsProvider).taskMaxConcurrency);
     for (final operation in operations) {
       unawaited(
-        _runSearchOperation(
+        pool.run(() async {
+          if (!mounted || requestId != _activeSearchRequestId) return;
+          await _runSearchOperation(
           requestId: requestId,
           operation: operation,
           aggregated: aggregated,
@@ -897,7 +908,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
           getCompleted: () => completed,
           onFiltered: (count) => filteredCount += count,
           getFiltered: () => filteredCount,
-        ),
+          );
+        }),
       );
     }
   }
@@ -1457,7 +1469,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _controller.text = result;
     });
     if (result.trim().isNotEmpty) {
-      await _performSearch();
+      unawaited(_performSearch());
     }
   }
 
@@ -2332,7 +2344,7 @@ class _TelevisionSearchInput extends StatelessWidget {
 
   final String query;
   final FocusNode? focusNode;
-  final VoidCallback onEditQuery;
+  final Future<void> Function() onEditQuery;
   final VoidCallback onSearch;
 
   @override
@@ -2340,38 +2352,43 @@ class _TelevisionSearchInput extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: TvFocusableAction(
-            onPressed: onEditQuery,
-            focusNode: focusNode,
-            focusId: 'search:query',
-            autofocus: true,
-            borderRadius: BorderRadius.circular(22),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outlineVariant,
+          child: TvTextInputLauncher(
+            onOpen: onEditQuery,
+            builder: (onPressed) => TvFocusableAction(
+              onPressed: onPressed,
+              focusNode: focusNode,
+              focusId: 'search:query',
+              autofocus: true,
+              borderRadius: BorderRadius.circular(22),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(22),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
                 ),
-              ),
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '搜索关键字',
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      query.isEmpty ? '按确认键输入电影、剧集或番剧资源' : query,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                  ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 18,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '搜索关键字',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        query.isEmpty ? '按确认键输入电影、剧集或番剧资源' : query,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

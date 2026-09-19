@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:starflow/core/storage/bounded_memory_map.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -24,7 +25,7 @@ class WmdbMetadataClient {
 
   final http.Client _client;
   final MetadataNetworkGuard _networkGuard;
-  final Map<String, MetadataMatchResult?> _resolvedMatches = {};
+  final Map<String, MetadataMatchResult?> _resolvedMatches = BoundedMemoryMap(512);
   final Map<String, Future<MetadataMatchResult?>> _inflightMatches = {};
 
   void clearCache() {

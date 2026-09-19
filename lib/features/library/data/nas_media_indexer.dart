@@ -1,5 +1,7 @@
 import 'dart:collection';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:starflow/core/utils/media_rating_labels.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
@@ -128,6 +130,7 @@ class NasMediaIndexer {
       <String, _RefreshTaskHandle>{};
   final Map<String, _NasLibraryMatchCache> _libraryMatchCaches =
       <String, _NasLibraryMatchCache>{};
+  final Map<String, Future<_NasLibraryMatchCache>> _libraryMatchLoads = {};
   final Map<String, int> _libraryMatchCacheInvalidationRevisions =
       <String, int>{};
   final Map<String, String> _libraryMatchCacheStateSignatures =
@@ -530,38 +533,30 @@ class NasMediaIndexer {
   }
 
   List<MediaItem> _materializeLibraryItems(List<NasMediaIndexRecord> records) {
-    return _NasMediaIndexerGroupingSupportX(this)
+    return _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh())
         .materializeLibraryItems(records);
-  }
-
-  List<MediaItem> _materializeLibraryItemsFromGroups(
-    List<NasMediaIndexRecord> records,
-    List<_SeriesRecordGroup> groups,
-  ) {
-    return _NasMediaIndexerGroupingSupportX(this)
-        .materializeLibraryItemsFromGroups(records, groups);
   }
 
   List<_SeriesRecordGroup> _groupSeriesRecords(
     List<NasMediaIndexRecord> records,
   ) {
-    return _NasMediaIndexerGroupingSupportX(this).groupSeriesRecords(records);
+    return _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh()).groupSeriesRecords(records);
   }
 
   List<_MovieVariantRecordGroup> _groupMovieVariantRecords(
     List<NasMediaIndexRecord> records,
   ) {
-    return _NasMediaIndexerGroupingSupportX(this)
+    return _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh())
         .groupMovieVariantRecords(records);
   }
 
   int _movieVariantRepresentativeScore(NasMediaIndexRecord record) {
-    return _NasMediaIndexerGroupingSupportX(this)
+    return _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh())
         .movieVariantRepresentativeScore(record);
   }
 
   MediaItem _buildSeriesItem(_SeriesRecordGroup group) {
-    return _NasMediaIndexerGroupingSupportX(this).buildSeriesItem(group);
+    return _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh()).buildSeriesItem(group);
   }
 
   MediaItem _buildSeasonItem(
@@ -570,14 +565,14 @@ class NasMediaIndexer {
     List<NasMediaIndexRecord> records,
   ) {
     return _NasMediaIndexerGroupingSupportX(
-      this,
+      _readSettingsForRefresh(),
     ).buildSeasonItem(group, seasonNumber, records);
   }
 
   List<MediaItem> _materializeEpisodeItems(
     Iterable<NasMediaIndexRecord> records,
   ) {
-    return _NasMediaIndexerGroupingSupportX(this)
+    return _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh())
         .materializeEpisodeItems(records);
   }
 
@@ -674,14 +669,6 @@ class NasMediaIndexer {
 
   bool _looksLikeSeasonFolderLabel(String value) {
     return looksLikeSeasonFolderLabel(value);
-  }
-
-  int? _parseSeasonNumberFromLabel(String value) {
-    return parseSeasonNumberFromFolderLabel(value);
-  }
-
-  bool _looksLikeNumericTopicSeason(String value) {
-    return looksLikeNumericTopicSeason(value);
   }
 
   List<int> _resolveWritableRecordIndices(
@@ -892,7 +879,7 @@ class NasMediaIndexer {
     List<String> current,
     List<String> next,
   ) {
-    return _dedupe([...current, ...next]);
+    return mergeDistinctRatingLabels(current, next);
   }
 
   bool _hasOnlineMetadataEnabled(AppSettings settings) {
@@ -1026,19 +1013,6 @@ class NasMediaIndexer {
         message.contains('dispose was called');
   }
 
-  static bool _hasRatingLabelKeyword(
-    Iterable<String> labels,
-    String keyword,
-  ) {
-    final normalizedKeyword = keyword.trim().toLowerCase();
-    if (normalizedKeyword.isEmpty) {
-      return false;
-    }
-    return labels.any(
-      (label) => label.trim().toLowerCase().contains(normalizedKeyword),
-    );
-  }
-
   MediaItem _applyManualMetadataToItem(
     MediaItem item, {
     MetadataMatchResult? metadataMatch,
@@ -1084,16 +1058,7 @@ class NasMediaIndexer {
   Future<_NasLibraryMatchCache> _loadLibraryMatchCache(String sourceId) =>
       _NasMediaIndexerStorageAccessX(this)._loadLibraryMatchCache(sourceId);
 
-  String _resolveLibraryMatchTvdbId(MediaItem item) =>
-      _NasMediaIndexerStorageAccessX(this)._resolveLibraryMatchTvdbId(item);
-
-  String _resolveLibraryMatchWikidataId(MediaItem item) =>
-      _NasMediaIndexerStorageAccessX(this)._resolveLibraryMatchWikidataId(item);
-
-  Map<String, String> _mergeProviderIdMaps(
-    Iterable<Map<String, String>> providerIdMaps,
-  ) =>
-      _NasMediaIndexerStorageAccessX(this)._mergeProviderIdMaps(
-        providerIdMaps,
-      );
+  List<String> _webDavSpecialEpisodeKeywordsForRecords(List<NasMediaIndexRecord> records) =>
+      _NasMediaIndexerGroupingSupportX(_readSettingsForRefresh())
+          ._webDavSpecialEpisodeKeywordsForRecords(records);
 }

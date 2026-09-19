@@ -1,16 +1,17 @@
+import 'package:starflow/features/details/domain/cached_metadata.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod/misc.dart';
 import 'package:starflow/core/logging/app_logger.dart';
-import 'package:starflow/core/utils/media_rating_labels.dart';
+import 'package:starflow/features/details/domain/cached_artwork.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
-import 'package:starflow/features/discovery/data/mock_discovery_repository.dart';
+import 'package:starflow/features/discovery/data/discovery_repository.dart';
 import 'package:starflow/features/discovery/data/douban_network_guard.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/home/application/home_feed_load_scheduler.dart';
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
@@ -101,34 +102,27 @@ class HomePageController {
   }
 
   Future<void> refreshModules(WidgetRef ref) async {
-    final stopwatch = Stopwatch()..start();
-    ref.invalidate(homeRecentItemsProvider);
-    ref.invalidate(homeRecentPlaybackEntriesProvider);
-    ref.invalidate(homeCarouselItemsProvider);
-    ref.invalidate(_homeSectionSeedProvider);
-    ref.invalidate(homeSectionProvider);
-    ref.read(homeExplicitRefreshRevisionProvider.notifier).state += 1;
-    ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
-    primeModulesWithReader(ref.read);
-    await Future<void>.delayed(const Duration(milliseconds: 140));
-    appLogInfo(
-      'home.refresh',
-      'Home refresh scheduled',
-      fields: <String, Object?>{'durationMs': stopwatch.elapsedMilliseconds},
-    );
+    _scheduleRefresh(read: ref.read, invalidate: ref.invalidate);
   }
 
   Future<void> refreshModulesFromRef(Ref ref) async {
+    _scheduleRefresh(read: ref.read, invalidate: ref.invalidate);
+  }
+
+  // Completion means scheduled; bootstrap separately waits for module results.
+  void _scheduleRefresh({
+    required T Function<T>(ProviderListenable<T> provider) read,
+    required void Function(ProviderOrFamily provider) invalidate,
+  }) {
     final stopwatch = Stopwatch()..start();
-    ref.invalidate(homeRecentItemsProvider);
-    ref.invalidate(homeRecentPlaybackEntriesProvider);
-    ref.invalidate(homeCarouselItemsProvider);
-    ref.invalidate(_homeSectionSeedProvider);
-    ref.invalidate(homeSectionProvider);
-    ref.read(homeExplicitRefreshRevisionProvider.notifier).state += 1;
-    ref.read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
-    primeModulesWithReader(ref.read);
-    await Future<void>.delayed(const Duration(milliseconds: 140));
+    invalidate(homeRecentItemsProvider);
+    invalidate(homeRecentPlaybackEntriesProvider);
+    invalidate(homeCarouselItemsProvider);
+    invalidate(_homeSectionSeedProvider);
+    invalidate(homeSectionProvider);
+    read(homeExplicitRefreshRevisionProvider.notifier).state += 1;
+    read(homeMetadataAutoRefreshRevisionProvider.notifier).state += 1;
+    primeModulesWithReader(read);
     appLogInfo(
       'home.refresh',
       'Home refresh scheduled',
@@ -274,14 +268,18 @@ final homeCarouselItemsProvider =
 
 final _homeSectionSeedProvider = FutureProvider.autoDispose
     .family<HomeSectionViewModel?, String>((ref, moduleId) async {
-  ref.watch(nasMediaIndexRevisionProvider);
-  ref.watch(libraryRefreshRevisionProvider);
   final module = ref.watch(_homeSectionModuleProvider(moduleId));
   if (module == null) {
     return null;
   }
   if (module.type == HomeModuleType.recentPlayback) {
     ref.watch(playbackHistoryRevisionProvider);
+  }
+  if (module.type == HomeModuleType.recentlyAdded ||
+      module.type == HomeModuleType.librarySection ||
+      module.type == HomeModuleType.hero) {
+    ref.watch(nasMediaIndexRevisionProvider);
+    ref.watch(libraryRefreshRevisionProvider);
   }
   final limits = ref.read(homeFeedLoadLimitsProvider);
   final homeFeedRepository = ref.read(homeFeedRepositoryProvider);

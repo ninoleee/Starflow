@@ -85,6 +85,16 @@ class AppNetworkImage extends ConsumerStatefulWidget {
 }
 
 class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
+  Completer<void>? _imageCancellation;
+
+  Future<void> get _imageCancelSignal =>
+      (_imageCancellation ??= Completer<void>()).future;
+
+  void _cancelImageRequest() {
+    final cancellation = _imageCancellation;
+    if (cancellation != null && !cancellation.isCompleted) cancellation.complete();
+    _imageCancellation = null;
+  }
   Future<Uint8List>? _resolvedSvgBytesFuture;
   Future<ImageProvider<Object>>? _resolvedRasterProviderFuture;
   _TvRasterImageLoadRequest? _tvRasterLoadRequest;
@@ -92,6 +102,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   Timer? _tvRasterLoadPermitTimeout;
   String? _tvRasterLoadIdentity;
   bool _tvRasterLoadSettled = false;
+  bool _imageLoaded = false;
   int _activeCandidateIndex = 0;
   bool _candidateAdvanceScheduled = false;
   Timer? _imageRetryTimer;
@@ -102,7 +113,10 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!TickerMode.valuesOf(context).enabled && !_tvRasterLoadSettled) {
+    if (!TickerMode.valuesOf(context).enabled && !_imageLoaded) {
+      _cancelImageRequest();
+      _resolvedSvgBytesFuture = null;
+      _resolvedRasterProviderFuture = null;
       _resetTvRasterLoadThrottle();
       _imageRetryTimer?.cancel();
       _imageRetryTimer = null;
@@ -127,6 +141,8 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     bool resetCandidateIndex = true,
     bool resetRetryState = false,
   }) {
+    _cancelImageRequest();
+    _imageLoaded = false;
     if (resetCandidateIndex) {
       _activeCandidateIndex = 0;
     }
@@ -171,6 +187,9 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!TickerMode.valuesOf(context).enabled && !_imageLoaded) {
+      return _buildLoading(context);
+    }
     final throttleRasterLoads = widget.throttleOnTelevision &&
         _shouldThrottleTvRasterLoads(ref.watch(isTelevisionProvider));
     final candidates = _buildCandidateSources();
@@ -205,6 +224,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
 
   @override
   void dispose() {
+    _cancelImageRequest();
     _imageRetryTimer?.cancel();
     _imageRetryTimer = null;
     _resetTvRasterLoadThrottle();
@@ -218,6 +238,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
     required int candidateIndex,
   }) {
     _resolvedSvgBytesFuture ??= persistentImageCache.load(
+      cancel: _imageCancelSignal,
       candidate.url,
       headers: candidate.headers,
       persist: candidate.cachePolicy == AppNetworkImageCachePolicy.persistent,
@@ -242,6 +263,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
           return _buildLoading(context);
         }
 
+        _imageLoaded = true;
         return SvgPicture.memory(
           bytes,
           width: widget.width,
@@ -358,12 +380,14 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         candidate.cachePolicy == AppNetworkImageCachePolicy.networkOnly
             ? persistentImageCache
                 .load(
+                  cancel: _imageCancelSignal,
                   candidate.url,
                   headers: candidate.headers,
                   persist: false,
                 )
                 .then<ImageProvider<Object>>((bytes) => MemoryImage(bytes))
             : persistentImageCache.resolveRasterProvider(
+                cancel: _imageCancelSignal,
                 candidate.url,
                 headers: candidate.headers,
                 persist: true,
@@ -601,6 +625,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   }
 
   void _markImageLoadSucceeded() {
+    _imageLoaded = true;
     if (_imageRetryAttempt > 0) {
       appLogTrace(
         'image.load',

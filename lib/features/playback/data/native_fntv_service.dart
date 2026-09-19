@@ -5,6 +5,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/subtitle_content_decoder.dart';
+import 'package:starflow/features/playback/application/subtitle_content_processing.dart';
+import 'package:starflow/features/playback/application/fntv_session_owner.dart';
+import 'package:starflow/features/playback/application/subtitle_render_policy.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 /// Protocol work stays in Dart; native playback only consumes resolved results.
@@ -20,6 +23,13 @@ class NativeFntvService {
   final Future<Directory> Function() temporaryDirectory;
   final List<Directory> _subtitleDirectories = [];
   bool _closed = false;
+  late final sessions = FntvSessionOwner((target) async {
+    final sessionClient = client;
+    if (sessionClient is MediaServerSessionClient) {
+      await (sessionClient as MediaServerSessionClient)
+          .releasePlaybackSession(source: source, target: target);
+    }
+  });
 
   Future<Map<String, Object?>> downloadSubtitle(
     PlaybackTarget target,
@@ -33,35 +43,16 @@ class NativeFntvService {
     final stream = target.subtitleStreams.firstWhere(
       (stream) => stream.id == subtitleId && stream.isExternal,
     );
-    if (stream.isBitmap ||
-        const [
-          'pgs',
-          'sup',
-          'hdmv_pgs_subtitle',
-          'dvd_subtitle',
-          'vobsub',
-          'idx',
-        ].contains(stream.codec.toLowerCase())) {
+    if (isBitmapSubtitle(image: stream.isBitmap, codec: stream.codec)) {
       throw const SubtitleContentException('位图字幕不能作为文本外挂字幕加载');
     }
     final bytes = await client.downloadExternalSubtitleBytes(
       source: source,
       subtitleId: subtitleId,
     );
-    final content = decodeSubtitleBytes(isSubtitleZipBytes(bytes)
-        ? extractSubtitleBytesFromZip(bytes, preferredName: stream.title)
-        : bytes);
-    final text = content.trimLeft();
-    final extension = text.startsWith('WEBVTT')
-        ? 'vtt'
-        : text.contains('[Script Info]') || text.contains('[Events]')
-            ? 'ass'
-            : text.contains('-->')
-                ? 'srt'
-                : null;
-    if (extension == null || content.trim().isEmpty) {
-      throw const SubtitleContentException('没有可加载的 SRT / ASS / SSA / VTT 字幕');
-    }
+    final content =
+        await processSubtitleContent(bytes, preferredName: stream.title);
+    final extension = detectSubtitleFormat(content);
     final root = await temporaryDirectory();
     if (_closed) throw StateError('播放会话已结束');
     final directory = await root.createTemp('starflow-fntv-');
@@ -83,6 +74,7 @@ class NativeFntvService {
 
   Future<void> close() async {
     _closed = true;
+    await sessions.close();
     final directories = List<Directory>.of(_subtitleDirectories);
     _subtitleDirectories.clear();
     for (final directory in directories) {

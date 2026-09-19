@@ -29,21 +29,8 @@ const kShellScrollContentBottomPadding = 0.0;
 const kAppPageHorizontalPadding = 14.0;
 const kBottomReservedSpacing = 80.0;
 
-/// 已弃用：主壳不再为底栏做 body 底部 inset，保留 API 以免外部引用报错。
-@Deprecated('Shell body no longer applies vertical inset.')
-double shellTabBodyBottomInset(BuildContext context) => 0;
-
-double appPageTopInset(BuildContext context) => 0;
-
-double appPageBottomInset(
-  BuildContext context, {
-  bool includeBottomNavigationBar = false,
-}) =>
-    0;
-
 EdgeInsets appPageContentPadding(
   BuildContext context, {
-  bool includeBottomNavigationBar = false,
   bool includeTopSafeArea = true,
   double bottomPadding = 0,
 }) {
@@ -61,7 +48,6 @@ double overlayToolbarTotalHeight(BuildContext context) {
 
 EdgeInsets overlayToolbarPagePadding(
   BuildContext context, {
-  bool includeBottomNavigationBar = false,
   double bottomPadding = 0,
 }) {
   return EdgeInsets.fromLTRB(

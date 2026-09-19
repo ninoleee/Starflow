@@ -1,8 +1,9 @@
+import 'package:starflow/features/details/domain/cached_metadata.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/utils/media_rating_labels.dart';
+import 'package:starflow/features/details/domain/cached_artwork.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -316,8 +317,9 @@ MediaItem _mergeCachedLibraryItem(
   MediaItem item,
   MediaDetailTarget cached,
 ) {
-  final resolvedTitle =
-      cached.title.trim().isNotEmpty ? cached.title : item.title;
+  final current = MediaDetailTarget.fromMediaItem(item);
+  final metadata = overlayCachedMetadata(current, cached);
+  final resolvedTitle = metadata.title;
   final resolvedOriginalTitle = cached.title.trim().isNotEmpty &&
           item.originalTitle.trim().isEmpty &&
           cached.title.trim() != item.title.trim()
@@ -325,52 +327,28 @@ MediaItem _mergeCachedLibraryItem(
       : item.originalTitle;
   final resolvedSortTitle =
       cached.title.trim().isNotEmpty ? cached.title : item.sortTitle;
-  final resolvedPosterUrl =
-      cached.posterUrl.trim().isNotEmpty ? cached.posterUrl : item.posterUrl;
-  final resolvedPosterHeaders = cached.posterUrl.trim().isNotEmpty
-      ? (cached.posterHeaders.isNotEmpty
-          ? cached.posterHeaders
-          : item.posterHeaders)
-      : (item.posterHeaders.isNotEmpty
-          ? item.posterHeaders
-          : cached.posterHeaders);
-  final resolvedBackdropUrl = item.backdropUrl.trim().isNotEmpty
-      ? item.backdropUrl
-      : cached.backdropUrl;
-  final resolvedBackdropHeaders = item.backdropHeaders.isNotEmpty
-      ? item.backdropHeaders
-      : cached.backdropHeaders;
-  final resolvedLogoUrl =
-      item.logoUrl.trim().isNotEmpty ? item.logoUrl : cached.logoUrl;
-  final resolvedLogoHeaders =
-      item.logoHeaders.isNotEmpty ? item.logoHeaders : cached.logoHeaders;
-  final resolvedBannerUrl =
-      item.bannerUrl.trim().isNotEmpty ? item.bannerUrl : cached.bannerUrl;
-  final resolvedBannerHeaders =
-      item.bannerHeaders.isNotEmpty ? item.bannerHeaders : cached.bannerHeaders;
-  final resolvedExtraBackdropUrls = item.extraBackdropUrls.isNotEmpty
-      ? item.extraBackdropUrls
-      : cached.extraBackdropUrls;
-  final resolvedExtraBackdropHeaders = item.extraBackdropHeaders.isNotEmpty
-      ? item.extraBackdropHeaders
-      : cached.extraBackdropHeaders;
-  final resolvedOverview =
-      item.overview.trim().isNotEmpty ? item.overview : cached.overview;
-  final resolvedDurationLabel = item.durationLabel.trim().isNotEmpty
-      ? item.durationLabel
-      : cached.durationLabel;
-  final resolvedGenres = item.genres.isNotEmpty ? item.genres : cached.genres;
-  final resolvedDirectors =
-      item.directors.isNotEmpty ? item.directors : cached.directors;
-  final resolvedActors = item.actors.isNotEmpty ? item.actors : cached.actors;
-  final resolvedDoubanId =
-      item.doubanId.trim().isNotEmpty ? item.doubanId : cached.doubanId;
-  final resolvedImdbId =
-      item.imdbId.trim().isNotEmpty ? item.imdbId : cached.imdbId;
-  final resolvedTmdbId =
-      item.tmdbId.trim().isNotEmpty ? item.tmdbId : cached.tmdbId;
-  final resolvedRatingLabels =
-      mergeDistinctRatingLabels(cached.ratingLabels, item.ratingLabels);
+  final artwork =
+      overlayCachedArtwork(current, cached, preserveLiveSecondaryArtwork: true);
+  final resolvedPosterUrl = artwork.posterUrl;
+  final resolvedPosterHeaders = artwork.posterHeaders;
+  final resolvedBackdropUrl = artwork.backdropUrl;
+  final resolvedBackdropHeaders = artwork.backdropHeaders;
+  final resolvedLogoUrl = artwork.logoUrl;
+  final resolvedLogoHeaders = artwork.logoHeaders;
+  final resolvedBannerUrl = artwork.bannerUrl;
+  final resolvedBannerHeaders = artwork.bannerHeaders;
+  final resolvedExtraBackdropUrls = artwork.extraBackdropUrls;
+  final resolvedExtraBackdropHeaders = artwork.extraBackdropHeaders;
+  final resolvedOverview = metadata.overview;
+  final resolvedDurationLabel = metadata.durationLabel;
+  final resolvedGenres = metadata.genres;
+  final resolvedDirectors = metadata.directors;
+  final resolvedActors = metadata.actors;
+  final resolvedDoubanId = metadata.doubanId;
+  final resolvedImdbId = metadata.imdbId;
+  final resolvedTmdbId = metadata.tmdbId;
+  final resolvedRatingLabels = metadata.ratingLabels;
+  final resolvedRatingCount = metadata.ratingCount;
 
   final hasChanges = resolvedTitle != item.title ||
       resolvedOriginalTitle != item.originalTitle ||
@@ -396,7 +374,8 @@ MediaItem _mergeCachedLibraryItem(
       resolvedDoubanId != item.doubanId ||
       resolvedImdbId != item.imdbId ||
       resolvedTmdbId != item.tmdbId ||
-      !_sameStringList(resolvedRatingLabels, item.ratingLabels);
+      !_sameStringList(resolvedRatingLabels, item.ratingLabels) ||
+      resolvedRatingCount != item.ratingCount;
   if (!hasChanges) {
     return item;
   }
@@ -424,6 +403,7 @@ MediaItem _mergeCachedLibraryItem(
     imdbId: resolvedImdbId,
     tmdbId: resolvedTmdbId,
     ratingLabels: resolvedRatingLabels,
+    ratingCount: resolvedRatingCount,
   );
 }
 
@@ -476,7 +456,8 @@ bool _libraryGridMediaItemsVisuallyEquivalent(MediaItem a, MediaItem b) {
   if (!mapEquals(a.posterHeaders, b.posterHeaders)) {
     return false;
   }
-  if (!listEquals(a.ratingLabels, b.ratingLabels)) {
+  if (!listEquals(a.ratingLabels, b.ratingLabels) ||
+      a.ratingCount != b.ratingCount) {
     return false;
   }
   return true;

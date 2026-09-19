@@ -30,7 +30,7 @@ void main() {
                         'large':
                             'https://img9.doubanio.com/view/photo/l/public/p2578474613.jpg',
                       },
-                      'rating': {'value': 9.6},
+                      'rating': {'value': 9.6, 'count': 315946},
                       'card_subtitle': '1997 / 意大利 / 剧情 喜剧 / 116分钟',
                       'description': '圭多用幽默守护家人。',
                       'genres': ['剧情', '喜剧'],
@@ -67,6 +67,7 @@ void main() {
       );
       expect(items.first.note, '圭多用幽默守护家人。');
       expect(items.first.ratingLabel, '豆瓣 9.6');
+      expect(items.first.ratingCount, 315946);
       expect(items.first.subjectType, '电影');
       expect(items.first.durationLabel, '116分钟');
       expect(items.first.genres, ['剧情', '喜剧']);
@@ -110,6 +111,7 @@ void main() {
         'https://img9.doubanio.com/view/photo/l/public/p511118051.jpg',
       );
       expect(items.first.ratingLabel, '豆瓣 0');
+      expect(items.first.ratingCount, 0);
     });
 
     test('maps interest items when poster only exists on outer interest item',

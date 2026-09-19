@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'widgets/player_controls_layout.dart';
+import 'widgets/player_menu_style.dart';
 import 'dart:math' as math;
 import 'package:starflow/features/playback/application/playback_reliability_policy.dart';
 
@@ -25,6 +26,7 @@ import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
+import 'package:starflow/features/playback/application/fntv_session_owner.dart';
 import 'package:starflow/features/playback/application/mpv_tuning_policy.dart';
 import 'package:starflow/features/playback/application/mpv_startup_scope.dart';
 import 'package:starflow/features/playback/application/mpv_buffer_progress.dart';
@@ -44,7 +46,9 @@ import 'package:starflow/features/playback/application/playback_startup_coordina
 import 'package:starflow/features/playback/application/playback_startup_executor.dart';
 import 'package:starflow/features/playback/application/playback_startup_routing.dart';
 import 'package:starflow/features/playback/application/playback_target_resolver.dart';
-import 'package:starflow/features/playback/application/subtitle_content_decoder.dart';
+import 'package:starflow/features/playback/application/subtitle_content_processing.dart';
+import 'package:starflow/features/playback/application/subtitle_render_policy.dart';
+import 'package:starflow/features/playback/application/mpv_subtitle_render_binding.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart'
     hide isLoopbackPlaybackRelayUrl;
@@ -148,6 +152,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Player? _player;
   VideoController? _videoController;
   StreamSubscription<String>? _playerErrorSubscription;
+  StreamSubscription<Track>? _playerSubtitleRenderSubscription;
+  StreamSubscription<Tracks>? _playerSubtitleTracksSubscription;
+  MpvSubtitleRenderBinding? _subtitleRenderBinding;
+  Future<void> Function()? _unobserveSubtitleSid;
+  bool _mpvBitmapSubtitle = false;
   StreamSubscription<PlayerLog>? _playerLogSubscription;
   StreamSubscription<bool>? _playerPlayingSubscription;
   StreamSubscription<bool>? _playerCompletedSubscription;
@@ -274,7 +283,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Duration _latestDuration = Duration.zero;
   DateTime? _lastProgressPersistedAt;
   Duration _lastPersistedPosition = Duration.zero;
-  bool _fntvProgressReportInFlight = false;
+  Future<void> _fntvProgressTail = Future<void>.value();
+  int _fntvProgressQueued = 0;
+  bool _fntvSwitchInProgress = false;
+  late final _fntvSessions = FntvSessionOwner((target) async {
+    final client = _providerContainer
+        .read(mediaServerClientProvider(MediaSourceKind.fntv));
+    if (client is MediaServerSessionClient) {
+      await (client as MediaServerSessionClient).releasePlaybackSession(
+          source: _sourceForTarget(target), target: target);
+    }
+  });
   Duration _lastPlaybackSystemSessionPosition = Duration.zero;
   Duration _lastPlaybackSystemSessionDuration = Duration.zero;
   bool _lastPlaybackSystemSessionPlaying = false;
@@ -388,6 +407,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _startupScope.cancel();
     _stopMpvPerformanceSampling();
     final player = _player;
+    unawaited(_subtitleRenderBinding?.close());
     _player = null;
     _videoController = null;
     _isReady = false;
@@ -407,6 +427,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     required bool persistProgress,
     required bool teardownPlatformState,
   }) async {
+    final sessionTarget = _resolvedTarget;
     await _finishMpvPerformanceSession(reason: reason, player: player);
     if (persistProgress) {
       await _persistPlaybackProgress(
@@ -422,9 +443,23 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (player != null) {
       await _enqueuePlayerShutdown(player, reason: reason);
     }
+    if (teardownPlatformState) {
+      await _fntvSessions.close();
+    } else if (!_fntvSwitchInProgress && sessionTarget != null) {
+      await _fntvSessions.release(sessionTarget);
+    }
   }
 
   Future<void> _cancelPlayerSubscriptions() async {
+    final subtitleRenderSubscription = _playerSubtitleRenderSubscription;
+    _playerSubtitleRenderSubscription = null;
+    final subtitleTracksSubscription = _playerSubtitleTracksSubscription;
+    _playerSubtitleTracksSubscription = null;
+    final binding = _subtitleRenderBinding;
+    _subtitleRenderBinding = null;
+    final unobserve = _unobserveSubtitleSid;
+    _unobserveSubtitleSid = null;
+    _mpvBitmapSubtitle = false;
     final errorSubscription = _playerErrorSubscription;
     final logSubscription = _playerLogSubscription;
     final playingSubscription = _playerPlayingSubscription;
@@ -448,7 +483,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _playerBufferingSubscription = null;
     _playerBufferingPercentageSubscription = null;
 
+    await binding?.close();
+    await unobserve?.call();
+    await subtitleTracksSubscription?.cancel();
     await errorSubscription?.cancel();
+    await subtitleRenderSubscription?.cancel();
     await logSubscription?.cancel();
     await playingSubscription?.cancel();
     await completedSubscription?.cancel();
@@ -842,13 +881,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       },
       child: Shortcuts(
         shortcuts: isTelevision
-            ? const <ShortcutActivator, Intent>{
+            ? tvPressOnlyShortcuts(const {
                 SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
                 SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
                 SingleActivator(LogicalKeyboardKey.backspace): DismissIntent(),
                 SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
                 SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
                 SingleActivator(LogicalKeyboardKey.numpadEnter):
+                    ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.gameButtonA):
                     ActivateIntent(),
                 SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
                 SingleActivator(LogicalKeyboardKey.mediaPlayPause):
@@ -864,7 +905,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     _OpenPlaybackOptionsIntent(),
                 SingleActivator(LogicalKeyboardKey.gameButtonY):
                     _OpenPlaybackOptionsIntent(),
-              }
+              })
             : const <ShortcutActivator, Intent>{},
         child: Actions(
           actions: <Type, Action<Intent>>{

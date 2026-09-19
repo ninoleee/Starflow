@@ -5,6 +5,7 @@ export 'package:starflow/features/details/presentation/detail_page_providers.dar
     show enrichedDetailTargetProvider;
 
 import 'package:flutter/foundation.dart';
+import 'package:starflow/features/details/application/detail_metadata_service.dart';
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,7 +14,6 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/navigation/retained_async_controller.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -23,7 +23,7 @@ import 'package:starflow/features/details/application/detail_library_match_servi
 import 'package:starflow/features/details/application/detail_online_resource_update_service.dart';
 import 'package:starflow/features/details/application/detail_page_actions.dart';
 import 'package:starflow/features/details/application/detail_page_controller.dart';
-import 'package:starflow/features/details/application/douban_rating_stats_service.dart';
+import 'package:starflow/features/details/application/detail_target_resolver.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/detail_page_providers.dart';
 import 'package:starflow/features/details/presentation/person_credits_page.dart';
@@ -35,7 +35,7 @@ import 'package:starflow/features/details/presentation/widgets/detail_shared_wid
 import 'package:starflow/features/details/presentation/widgets/detail_television_picker_dialog.dart';
 import 'package:starflow/features/discovery/data/douban_api_client.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
-import 'package:starflow/features/library/data/mock_media_repository.dart';
+import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/metadata_match_resolver.dart';
@@ -73,28 +73,6 @@ String _detailMetadataQuery(MediaDetailTarget target) {
 bool _prefersSeriesMetadata(MediaDetailTarget target) {
   final itemType = target.itemType.trim().toLowerCase();
   return itemType == 'series' || itemType == 'season' || itemType == 'episode';
-}
-
-bool _needsRatingLabel(MediaDetailTarget target, {required String keyword}) {
-  return !_hasRatingLabelKeyword(target.ratingLabels, keyword);
-}
-
-bool _hasRatingLabelKeyword(Iterable<String> labels, String keyword) {
-  final normalizedKeyword = keyword.trim().toLowerCase();
-  if (normalizedKeyword.isEmpty) {
-    return false;
-  }
-  return labels.any(
-    (label) => label.trim().toLowerCase().contains(normalizedKeyword),
-  );
-}
-
-bool _isEpisodeLikeTarget(MediaDetailTarget target) {
-  return target.itemType.trim().toLowerCase() == 'episode' &&
-      target.seasonNumber != null &&
-      target.seasonNumber! >= 0 &&
-      target.episodeNumber != null &&
-      target.episodeNumber! > 0;
 }
 
 bool _isOverviewMetadataRefreshTarget(MediaDetailTarget target) {
@@ -161,240 +139,6 @@ bool _shouldAutoRefreshOverviewMetadata({
     settings: settings,
     target: currentTarget,
   );
-}
-
-Future<String> _resolveTmdbBackdropForTarget({
-  required DetailEnrichmentSettings settings,
-  required TmdbMetadataClient tmdbMetadataClient,
-  required MediaDetailTarget target,
-  required TmdbMetadataMatch match,
-}) async {
-  if (_isEpisodeLikeTarget(target) &&
-      match.isSeries &&
-      match.tmdbId > 0 &&
-      settings.tmdbReadAccessToken.trim().isNotEmpty) {
-    try {
-      final stillUrl = await tmdbMetadataClient.fetchEpisodeStillUrl(
-        seriesId: match.tmdbId,
-        seasonNumber: target.seasonNumber!,
-        episodeNumber: target.episodeNumber!,
-        readAccessToken: settings.tmdbReadAccessToken.trim(),
-      );
-      if (stillUrl.trim().isNotEmpty) {
-        return stillUrl.trim();
-      }
-    } catch (_) {
-      // Ignore episode still failures and keep the title-level backdrop.
-    }
-  }
-  return match.backdropUrl.trim();
-}
-
-String _resolveTmdbBannerForTarget({
-  required MediaDetailTarget target,
-  required TmdbMetadataMatch match,
-  required String resolvedBackdropUrl,
-}) {
-  if (!_isEpisodeLikeTarget(target)) {
-    return '';
-  }
-  final seriesBackdrop = match.backdropUrl.trim();
-  if (seriesBackdrop.isEmpty || seriesBackdrop == resolvedBackdropUrl.trim()) {
-    return '';
-  }
-  return seriesBackdrop;
-}
-
-List<String> _resolveTmdbExtraBackdropUrlsForTarget({
-  required MediaDetailTarget target,
-  required TmdbMetadataMatch match,
-  required String resolvedBackdropUrl,
-}) {
-  final bannerUrl = _resolveTmdbBannerForTarget(
-    target: target,
-    match: match,
-    resolvedBackdropUrl: resolvedBackdropUrl,
-  );
-  return _mergeUniqueImageUrls([
-    if (bannerUrl.isNotEmpty) bannerUrl,
-    ...match.extraBackdropUrls,
-  ])
-      .where((item) => item != resolvedBackdropUrl.trim())
-      .toList(growable: false);
-}
-
-Future<MediaDetailTarget> _resolveAutomaticMetadataIfNeeded({
-  required DetailEnrichmentSettings settings,
-  required MediaDetailTarget target,
-  required WmdbMetadataClient wmdbMetadataClient,
-  required TmdbMetadataClient tmdbMetadataClient,
-  required DoubanApiClient doubanApiClient,
-  String doubanCookie = '',
-  bool forceSearch = false,
-  bool forceReplace = false,
-}) async {
-  var nextTarget = target;
-  final initialQuery = _detailMetadataQuery(target);
-  final traceKey = _detailTraceKey(target);
-  final initialDoubanId = nextTarget.doubanId.trim();
-
-  if (initialDoubanId.isNotEmpty) {
-    nextTarget = await enrichDetailTargetWithDoubanRatingStats(
-      target: nextTarget,
-      doubanApiClient: doubanApiClient,
-      cookie: doubanCookie,
-    );
-  }
-
-  if (settings.wmdbMetadataMatchEnabled &&
-      (forceSearch ||
-          nextTarget.needsMetadataMatch ||
-          _needsRatingLabel(nextTarget, keyword: '豆瓣') ||
-          nextTarget.needsImdbRatingMatch ||
-          nextTarget.doubanId.trim().isEmpty ||
-          nextTarget.imdbId.trim().isEmpty)) {
-    try {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'wmdb',
-        'request query=$initialQuery doubanId=${nextTarget.doubanId}',
-      );
-      final wmdbMatch = nextTarget.doubanId.trim().isNotEmpty
-          ? await wmdbMetadataClient.matchByDoubanId(
-              doubanId: nextTarget.doubanId,
-            )
-          : await wmdbMetadataClient.matchTitle(
-              query: initialQuery,
-              year: nextTarget.year,
-              preferSeries: _prefersSeriesMetadata(nextTarget),
-              actors: nextTarget.actors,
-            );
-      if (wmdbMatch != null) {
-        DebugTraceOnce.logMetadata(
-          traceKey,
-          'wmdb',
-          'matched title=${wmdbMatch.title} imdbId=${wmdbMatch.imdbId} '
-              'ratings=${wmdbMatch.ratingLabels.join(' | ')}',
-        );
-        nextTarget = _applyMetadataMatchToDetailTarget(
-          nextTarget,
-          wmdbMatch,
-          replaceExisting: forceReplace,
-        );
-      } else {
-        DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'no match');
-      }
-    } catch (_) {
-      DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'failed');
-      // Ignore WMDB failures and continue.
-    }
-  }
-
-  if (settings.tmdbMetadataMatchEnabled &&
-      settings.tmdbReadAccessToken.trim().isNotEmpty &&
-      (forceSearch || _detailMetadataQuery(nextTarget).isNotEmpty)) {
-    try {
-      final currentQuery = _detailMetadataQuery(nextTarget);
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'tmdb',
-        'request query=${currentQuery.isEmpty ? initialQuery : currentQuery} '
-            'year=${nextTarget.year} preferSeries=${_prefersSeriesMetadata(nextTarget)}',
-      );
-      final tmdbMatch = await tmdbMetadataClient.matchTitle(
-        query: currentQuery.isEmpty ? initialQuery : currentQuery,
-        readAccessToken: settings.tmdbReadAccessToken.trim(),
-        year: nextTarget.year,
-        preferSeries: _prefersSeriesMetadata(nextTarget),
-      );
-      if (tmdbMatch != null) {
-        DebugTraceOnce.logMetadata(
-          traceKey,
-          'tmdb',
-          'matched title=${tmdbMatch.title} imdbId=${tmdbMatch.imdbId}',
-        );
-        final resolvedBackdropUrl = await _resolveTmdbBackdropForTarget(
-          settings: settings,
-          tmdbMetadataClient: tmdbMetadataClient,
-          target: nextTarget,
-          match: tmdbMatch,
-        );
-        nextTarget = _applyMetadataMatchToDetailTarget(
-          nextTarget,
-          MetadataMatchResult(
-            provider: MetadataMatchProvider.tmdb,
-            title: tmdbMatch.title,
-            originalTitle: tmdbMatch.originalTitle,
-            posterUrl: tmdbMatch.posterUrl,
-            backdropUrl: resolvedBackdropUrl,
-            logoUrl: tmdbMatch.logoUrl,
-            bannerUrl: _resolveTmdbBannerForTarget(
-              target: nextTarget,
-              match: tmdbMatch,
-              resolvedBackdropUrl: resolvedBackdropUrl,
-            ),
-            extraBackdropUrls: _resolveTmdbExtraBackdropUrlsForTarget(
-              target: nextTarget,
-              match: tmdbMatch,
-              resolvedBackdropUrl: resolvedBackdropUrl,
-            ),
-            overview: tmdbMatch.overview,
-            year: tmdbMatch.year,
-            durationLabel: tmdbMatch.durationLabel,
-            genres: tmdbMatch.genres,
-            directors: tmdbMatch.directors,
-            directorProfiles: tmdbMatch.directorProfiles
-                .map(
-                  (item) => MetadataPersonProfile(
-                    name: item.name,
-                    avatarUrl: item.avatarUrl,
-                  ),
-                )
-                .toList(),
-            actors: tmdbMatch.actors,
-            actorProfiles: tmdbMatch.actorProfiles
-                .map(
-                  (item) => MetadataPersonProfile(
-                    name: item.name,
-                    avatarUrl: item.avatarUrl,
-                  ),
-                )
-                .toList(),
-            platforms: tmdbMatch.platforms,
-            platformProfiles: tmdbMatch.platformProfiles
-                .map(
-                  (item) => MetadataPersonProfile(
-                    name: item.name,
-                    avatarUrl: item.avatarUrl,
-                  ),
-                )
-                .toList(),
-            ratingLabels: tmdbMatch.ratingLabels,
-            imdbId: tmdbMatch.imdbId,
-            tmdbId: '${tmdbMatch.tmdbId}',
-          ),
-          replaceExisting: forceReplace,
-        );
-      } else {
-        DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'no match');
-      }
-    } catch (_) {
-      DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'failed');
-      // Ignore TMDB failures and continue.
-    }
-  }
-
-  final resolvedDoubanId = nextTarget.doubanId.trim();
-  if (resolvedDoubanId.isNotEmpty &&
-      (resolvedDoubanId != initialDoubanId || forceSearch)) {
-    nextTarget = await enrichDetailTargetWithDoubanRatingStats(
-      target: nextTarget,
-      doubanApiClient: doubanApiClient,
-      cookie: doubanCookie,
-    );
-  }
-
-  return _normalizeRatingLabelsInTarget(nextTarget);
 }
 
 String _detailTraceKey(MediaDetailTarget target) {
@@ -1208,18 +952,6 @@ String _resolveManualMatchWikidataId(MediaDetailTarget target) {
   return _detailLibraryMatchService.resolveManualMatchWikidataId(target);
 }
 
-MediaDetailTarget _applyMetadataMatchToDetailTarget(
-  MediaDetailTarget target,
-  MetadataMatchResult match, {
-  bool replaceExisting = false,
-}) {
-  return _detailLibraryMatchService.applyMetadataMatchToDetailTarget(
-    target,
-    match,
-    replaceExisting: replaceExisting,
-  );
-}
-
 bool _sameMaps(Map<String, String> left, Map<String, String> right) {
   if (left.length != right.length) {
     return false;
@@ -1230,55 +962,6 @@ bool _sameMaps(Map<String, String> left, Map<String, String> right) {
     }
   }
   return true;
-}
-
-MediaDetailTarget _normalizeRatingLabelsInTarget(MediaDetailTarget target) {
-  return target.copyWith(
-    ratingLabels: _mergeLabels(const [], target.ratingLabels),
-  );
-}
-
-List<String> _mergeLabels(List<String> primary, List<String> secondary) {
-  final seen = <String>{};
-  final merged = <String>[];
-  for (final value in [...primary, ...secondary]) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty) {
-      continue;
-    }
-    final key = _labelMergeKey(trimmed);
-    if (seen.add(key)) {
-      merged.add(trimmed);
-    }
-  }
-  return merged;
-}
-
-String _labelMergeKey(String value) {
-  final normalized = value.trim().toLowerCase();
-  if (normalized.contains('豆瓣') || normalized.contains('douban')) {
-    return 'rating:douban';
-  }
-  if (normalized.contains('imdb')) {
-    return 'rating:imdb';
-  }
-  if (normalized.contains('tmdb')) {
-    return 'rating:tmdb';
-  }
-  return normalized;
-}
-
-List<String> _mergeUniqueImageUrls(Iterable<String> values) {
-  final seen = <String>{};
-  final merged = <String>[];
-  for (final value in values) {
-    final trimmed = value.trim();
-    if (trimmed.isEmpty || !seen.add(trimmed)) {
-      continue;
-    }
-    merged.add(trimmed);
-  }
-  return merged;
 }
 
 class MediaDetailPage extends ConsumerStatefulWidget {
@@ -1303,6 +986,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   bool _showDeferredDetailContent = false;
   bool _detailEnrichmentReady = false;
   bool _seriesSourceReady = false;
+  late MediaDetailTarget _initialDisplayTarget;
+  Future<CachedDetailState?>? _initialDetailCacheFuture;
+  int _initialDetailCacheGeneration = 0;
   MediaDetailTarget? _retainedTargetSeed;
   DetailSeriesBrowserRequest? _retainedSeriesRequest;
   DetailSeriesBrowserRequest? _selectedSeasonRequest;
@@ -1336,13 +1022,19 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   void initState() {
     super.initState();
     _pageController = DetailPageController();
+    _prepareInitialDetailCache();
     _scrollController.addListener(_deferPrefetchForForegroundInteraction);
   }
 
   @override
   void didUpdateWidget(covariant MediaDetailPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.target.itemId != widget.target.itemId ||
+    if (oldWidget.target.sourceId != widget.target.sourceId ||
+        oldWidget.target.sourceKind != widget.target.sourceKind ||
+        oldWidget.target.itemId != widget.target.itemId ||
+        oldWidget.target.itemType != widget.target.itemType ||
+        oldWidget.target.seasonNumber != widget.target.seasonNumber ||
+        oldWidget.target.episodeNumber != widget.target.episodeNumber ||
         oldWidget.target.title != widget.target.title ||
         oldWidget.target.searchQuery != widget.target.searchQuery) {
       _cancelDetailTasks(
@@ -1359,10 +1051,73 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _pageController.resetForTargetChange();
       _retainedTargetAsync.clear();
       _retainedSeriesAsync.clear();
+      _prepareInitialDetailCache();
       if (isPageVisible) {
         _startDetailTasks();
       }
     }
+  }
+
+  void _prepareInitialDetailCache() {
+    final generation = ++_initialDetailCacheGeneration;
+    final seed = widget.target;
+    final cache = ref.read(localStorageCacheRepositoryProvider);
+    final cachedState = cache.peekDetailState(
+      seed,
+      allowStructuralMismatch: true,
+    );
+    if (cachedState != null) {
+      _initialDisplayTarget = _buildInitialDisplayTarget(seed, cachedState);
+      _initialDetailCacheFuture = Future.value(cachedState);
+      return;
+    }
+
+    // Do not request seed artwork until the local cache has been checked.
+    _initialDisplayTarget = seed.copyWith(
+      posterUrl: '',
+      posterHeaders: const {},
+      backdropUrl: '',
+      backdropHeaders: const {},
+      logoUrl: '',
+      logoHeaders: const {},
+      bannerUrl: '',
+      bannerHeaders: const {},
+      extraBackdropUrls: const [],
+      extraBackdropHeaders: const {},
+    );
+    _initialDetailCacheFuture = Future<CachedDetailState?>.sync(
+      () => cache.loadDetailState(seed, allowStructuralMismatch: true),
+    ).catchError((Object error, StackTrace stackTrace) {
+      detailResourceSwitchTrace(
+        'cache.initial.error',
+        fields: {'target': _detailResourceTraceTarget(seed)},
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return null;
+    }).then((state) {
+      if (mounted && generation == _initialDetailCacheGeneration) {
+        setState(() {
+          _initialDisplayTarget = _buildInitialDisplayTarget(seed, state);
+        });
+      }
+      return state;
+    });
+  }
+
+  MediaDetailTarget _buildInitialDisplayTarget(
+    MediaDetailTarget seed,
+    CachedDetailState? cachedState,
+  ) {
+    if (cachedState == null) {
+      return seed;
+    }
+    final plan = _detailCachedStateRestorer.buildPlan(
+      pageSeedTarget: seed,
+      cachedState: cachedState,
+    );
+    return plan.manualOverrideTarget ??
+        mergeCachedDetailArtwork(seed, cachedState.target);
   }
 
   @override
@@ -2040,14 +1795,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   Future<DetailMetadataRefreshStatus> _restoreCachedDetailState(
     int sessionId,
   ) async {
-    final cachedState =
-        await ref.read(localStorageCacheRepositoryProvider).loadDetailState(
+    final cachedState = await (_initialDetailCacheFuture ??
+        ref.read(localStorageCacheRepositoryProvider).loadDetailState(
               widget.target,
               allowStructuralMismatch: true,
-            );
+            ));
     if (!_isSessionActive(sessionId)) {
       return DetailMetadataRefreshStatus.never;
     }
+    _initialDetailCacheFuture = null;
     if (cachedState == null) {
       detailResourceSwitchTrace(
         'cache.restore.miss',
@@ -2612,6 +2368,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         );
 
     var changed = false;
+    var refreshOutcome = DetailMetadataOutcome.skipped;
     try {
       detailResourceSwitchTrace(
         'metadata.refresh.begin',
@@ -2623,7 +2380,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       );
       final settings = ref.read(detailEnrichmentSettingsProvider);
       final doubanAccount = ref.read(appSettingsProvider).doubanAccount;
-      final nextTarget = await _resolveAutomaticMetadataIfNeeded(
+      final result = await resolveDetailMetadata(
         settings: settings,
         target: currentTarget,
         wmdbMetadataClient: ref.read(wmdbMetadataClientProvider),
@@ -2633,7 +2390,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             doubanAccount.enabled ? doubanAccount.sessionCookie.trim() : '',
         forceSearch: true,
         forceReplace: true,
+        traceKey: _detailTraceKey(currentTarget),
       );
+      final nextTarget = result.target;
+      refreshOutcome = result.outcome;
       changed = _hasMetadataChanged(currentTarget, nextTarget);
 
       if (!_isSessionActive(activeSessionId)) {
@@ -2647,7 +2407,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
             resolvedTarget: nextTarget,
-            metadataRefreshStatus: DetailMetadataRefreshStatus.succeeded,
+            metadataRefreshStatus:
+                result.outcome == DetailMetadataOutcome.skipped
+                    ? null
+                    : result.hasFailure
+                        ? DetailMetadataRefreshStatus.failed
+                        : DetailMetadataRefreshStatus.succeeded,
           );
       detailResourceSwitchTrace(
         'metadata.refresh.done',
@@ -2655,6 +2420,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           'sessionId': activeSessionId,
           'target': _detailResourceTraceTarget(currentTarget),
           'changed': changed,
+          'outcome': refreshOutcome.name,
         },
       );
     } catch (error, stackTrace) {
@@ -2693,7 +2459,11 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(changed ? '已更新影片信息' : '没有可更新的信息'),
+        content: Text(switch (refreshOutcome) {
+          DetailMetadataOutcome.failed => '更新影片信息失败，请稍后重试',
+          DetailMetadataOutcome.partialFailure => '部分信息源更新失败，已保留可用信息',
+          _ => changed ? '已更新影片信息' : '没有可更新的信息',
+        }),
       ),
     );
   }
@@ -3099,6 +2869,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                       _pageController.manualOverrideTargetListenable,
                   builder: (context, manualOverrideTarget, _) {
                     final seedTarget = manualOverrideTarget ?? widget.target;
+                    final displayTarget =
+                        manualOverrideTarget ?? _initialDisplayTarget;
                     if (!identical(_retainedTargetSeed, seedTarget)) {
                       _retainedTargetSeed = seedTarget;
                       _retainedTargetAsync.clear();
@@ -3109,9 +2881,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                         : null;
                     final targetAsync = _retainedTargetAsync.resolve(
                       activeValue: watchedTargetAsync,
-                      fallbackValue: AsyncValue.data(seedTarget),
+                      fallbackValue: AsyncValue.data(displayTarget),
                     );
-                    final target = targetAsync.value ?? seedTarget;
+                    final target = targetAsync.value ?? displayTarget;
                     final seriesRequest = target.isSeries
                         ? DetailSeriesBrowserRequest.fromTarget(target)
                         : null;

@@ -15,6 +15,7 @@ import java.util.Locale
 internal class NativePlaybackTrackController(private val host: Host) {
     interface Host {
         val fntv: NativeFntvController
+        val externalSubtitles: NativePlaybackExternalSubtitleController
         val controllerView: NativePlaybackControllerView
         val session: NativePlaybackSession
         val subtitleStyle: NativePlaybackSubtitleStyleController
@@ -169,6 +170,7 @@ internal class NativePlaybackTrackController(private val host: Host) {
     }
 
     fun openAudioTrackSelectionDialog() {
+        if (host.fntv.openServerTrackPicker(subtitle = false)) return
         openTrackSelectionDialog(
             title = host.activity.getString(R.string.native_audio_track),
             trackType = C.TRACK_TYPE_AUDIO,
@@ -179,6 +181,7 @@ internal class NativePlaybackTrackController(private val host: Host) {
     }
 
     fun openSubtitleTrackSelectionDialog() {
+        if (host.fntv.openServerTrackPicker(subtitle = true)) return
         openTrackSelectionDialog(
             title = host.activity.getString(R.string.native_subtitle_track),
             trackType = C.TRACK_TYPE_TEXT,
@@ -263,7 +266,12 @@ internal class NativePlaybackTrackController(private val host: Host) {
                         host.fntv.loadSubtitle(serverSubtitles[which - choiceOffset - choices.size])
                         return@setSingleChoiceItems
                     }
-                    if (trackType == C.TRACK_TYPE_TEXT) pendingExternalSubtitleSelection = false
+                    if (trackType == C.TRACK_TYPE_TEXT) {
+                        pendingExternalSubtitleSelection = false
+                        val keepsExternal = which >= choiceOffset &&
+                            which < choiceOffset + choices.size && choices[which - choiceOffset].isExternal
+                        if (!keepsExternal) host.externalSubtitles.externalSubtitleSource = null
+                    }
                     val parameters =
                         currentPlayer.trackSelectionParameters
                             .buildUpon()

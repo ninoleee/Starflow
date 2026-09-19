@@ -1,5 +1,11 @@
 {
-  "version": 2,
+  "version": 3,
+  "memoryRecentLimit": 20,
+  "memoryResumeMinimumMs": 5000,
+  "memoryResumeRemainingMs": 12000,
+  "memoryCompletedRemainingMs": 8000,
+  "memoryCompletedPermille": 985,
+  "memoryUnknownCompletedPermille": 995,
   "maxPlayerAttempts": 3,
   "maxRuntimeRecoveries": 2,
   "startupHardLimitMs": 120000,
