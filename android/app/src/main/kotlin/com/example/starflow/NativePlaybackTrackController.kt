@@ -14,6 +14,7 @@ import java.util.Locale
 
 internal class NativePlaybackTrackController(private val host: Host) {
     interface Host {
+        val fntv: NativeFntvController
         val controllerView: NativePlaybackControllerView
         val session: NativePlaybackSession
         val subtitleStyle: NativePlaybackSubtitleStyleController
@@ -28,6 +29,7 @@ internal class NativePlaybackTrackController(private val host: Host) {
     }
 
     var automaticSubtitleSelectionApplied = false
+    var pendingExternalSubtitleSelection = false
 
     var subtitleSessionPreference: NativeSubtitleSessionPreference? = null
 
@@ -61,6 +63,18 @@ internal class NativePlaybackTrackController(private val host: Host) {
     }
 
     fun applyAutomaticSubtitleSelection(tracks: Tracks) {
+        if (pendingExternalSubtitleSelection) {
+            val player = host.session.player ?: return
+            val external = NativePlaybackTrackChoices.buildNativeTrackChoices(tracks, C.TRACK_TYPE_TEXT)
+                .firstOrNull { it.isExternal } ?: return
+            pendingExternalSubtitleSelection = false
+            automaticSubtitleSelectionApplied = true
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                .addOverride(external.override).build()
+            return
+        }
         if (automaticSubtitleSelectionApplied) {
             return
         }
@@ -189,7 +203,10 @@ internal class NativePlaybackTrackController(private val host: Host) {
                 trackType = trackType,
                 trackNameProvider = trackNameProvider,
             )
-        if (choices.isEmpty()) {
+        val serverSubtitles = if (trackType == C.TRACK_TYPE_TEXT) {
+            host.fntv.externalSubtitles()
+        } else emptyList()
+        if (choices.isEmpty() && serverSubtitles.isEmpty()) {
             host.showToast(emptyMessage)
             host.controllerView.restoreControllerFocusIfNeeded(focusTarget)
             return
@@ -220,6 +237,11 @@ internal class NativePlaybackTrackController(private val host: Host) {
                         )
                     }
                     addAll(choices.map(NativeTrackChoice::label))
+                    addAll(serverSubtitles.map {
+                        "飞牛 · " + it.optString("title").ifBlank {
+                            it.optString("language").ifBlank { "外挂字幕" }
+                        }
+                    })
                 }
                 .toTypedArray()
         val selectedChoiceIndex = choices.indexOfFirst(NativeTrackChoice::selected)
@@ -236,6 +258,12 @@ internal class NativePlaybackTrackController(private val host: Host) {
             AlertDialog.Builder(host.activity)
                 .setTitle(title)
                 .setSingleChoiceItems(labels, checkedIndex) { pickerDialog, which ->
+                    if (which >= choiceOffset + choices.size) {
+                        pickerDialog.dismiss()
+                        host.fntv.loadSubtitle(serverSubtitles[which - choiceOffset - choices.size])
+                        return@setSingleChoiceItems
+                    }
+                    if (trackType == C.TRACK_TYPE_TEXT) pendingExternalSubtitleSelection = false
                     val parameters =
                         currentPlayer.trackSelectionParameters
                             .buildUpon()

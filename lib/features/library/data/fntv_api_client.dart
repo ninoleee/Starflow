@@ -274,6 +274,26 @@ class FntvApiClient implements MediaServerClient {
     return items.take(limit).toList(growable: false);
   }
 
+  Future<void> requestLibraryRefresh(MediaSourceConfig source) async {
+    _requireSession(source);
+    if (source.hasExplicitNoSectionsSelected) return;
+    var sectionIds = source.selectedSectionIds.toList(growable: false);
+    if (sectionIds.isEmpty) {
+      sectionIds = (await fetchCollections(source))
+          .map((collection) => collection.id)
+          .where((id) => id.trim().isNotEmpty)
+          .toList(growable: false);
+    }
+    for (final sectionId in sectionIds) {
+      await _request(
+        source,
+        'item/refresh',
+        operation: '通知媒体库刷新',
+        body: {'item_guid': sectionId.trim()},
+      );
+    }
+  }
+
   @override
   Future<PlaybackTarget> resolvePlaybackTarget({
     required MediaSourceConfig source,
@@ -319,14 +339,25 @@ class FntvApiClient implements MediaServerClient {
         .whereType<PlaybackSubtitleStream>()
         .toList(growable: false);
     final cloud = _map(stream['cloud_storage_info']);
-    final qualities = _rows(stream['direct_link_qualities']);
+    final qualities = _rows(stream['direct_link_qualities'])
+        .asMap()
+        .entries
+        .map((entry) => _playbackQuality(entry.key, entry.value))
+        .whereType<FntvPlaybackQuality>()
+        .toList(growable: false);
     var url = _uri(source, 'media/range/${Uri.encodeComponent(mediaId)}');
     final cloudType = _number(cloud['cloud_storage_type']);
+    final selectedQuality = qualities.isEmpty
+        ? null
+        : qualities.firstWhere(
+            (quality) => quality.index == target.preferredPlaybackQualityIndex,
+            orElse: () => qualities.first,
+          );
     if (qualities.isNotEmpty) {
-      final quality = qualities.first;
+      final quality = selectedQuality!;
       if (const [2, 5, 9001].contains(cloudType) ||
-          (cloudType == 3 && quality['is_m3u8'] != true)) {
-        final direct = Uri.tryParse(_text(quality['url']));
+          (cloudType == 3 && !quality.isM3u8)) {
+        final direct = Uri.tryParse(quality.url);
         if (direct == null ||
             !const ['http', 'https'].contains(direct.scheme) ||
             direct.host.isEmpty) {
@@ -334,7 +365,9 @@ class FntvApiClient implements MediaServerClient {
         }
         url = direct;
       } else {
-        url = url.replace(queryParameters: {'direct_link_quality_index': '0'});
+        url = url.replace(queryParameters: {
+          'direct_link_quality_index': '${quality.index}',
+        });
       }
     }
     final sameOrigin = url.origin == baseUri(source.endpoint).origin;
@@ -373,6 +406,9 @@ class FntvApiClient implements MediaServerClient {
       subtitleStreams: subtitleStreams,
       preferredAudioStreamId: _text(info['audio_guid']),
       preferredSubtitleStreamId: _text(info['subtitle_guid']),
+      videoStreamId: _text(video['guid']),
+      playbackQualities: qualities,
+      preferredPlaybackQualityIndex: selectedQuality?.index,
     );
   }
 
@@ -410,6 +446,91 @@ class FntvApiClient implements MediaServerClient {
       source,
       'subtitle/dl/${Uri.encodeComponent(normalizedId)}',
       operation: '下载字幕',
+    );
+  }
+
+  @override
+  Future<List<int>> downloadExternalSubtitleBytes({
+    required MediaSourceConfig source,
+    required String subtitleId,
+  }) async {
+    _requireSession(source);
+    final normalizedId = subtitleId.trim();
+    if (normalizedId.isEmpty) {
+      throw const FntvApiException('没有可下载的飞牛字幕');
+    }
+    return _requestBytes(
+      source,
+      'subtitle/dl/${Uri.encodeComponent(normalizedId)}',
+      operation: '下载字幕',
+    );
+  }
+
+  @override
+  Future<void> reportPlaybackProgress({
+    required MediaSourceConfig source,
+    required PlaybackTarget target,
+    required Duration position,
+    required Duration duration,
+  }) async {
+    _requireSession(source);
+    final itemGuid = target.itemId.trim();
+    final mediaGuid = target.preferredMediaSourceId.trim();
+    final videoGuid = target.videoStreamId.trim();
+    if (itemGuid.isEmpty || mediaGuid.isEmpty || videoGuid.isEmpty) return;
+    final safeDuration = duration.inSeconds.clamp(0, 2147483647);
+    final safePosition = position.inSeconds.clamp(0, safeDuration);
+    final deviceId = source.deviceId.trim().isNotEmpty
+        ? source.deviceId.trim()
+        : md5
+            .convert(utf8.encode('${source.endpoint}\n${source.userId}'))
+            .toString();
+    final selectedQuality =
+        target.playbackQualities.cast<FntvPlaybackQuality?>().firstWhere(
+              (quality) =>
+                  quality?.index == (target.preferredPlaybackQualityIndex ?? 0),
+              orElse: () => null,
+            );
+    await _request(source, 'play/record', operation: '回写播放进度', body: {
+      'item_guid': itemGuid,
+      'media_guid': mediaGuid,
+      'video_guid': videoGuid,
+      'audio_guid': target.preferredAudioStreamId,
+      'subtitle_guid': target.preferredSubtitleStreamId,
+      'resolution': selectedQuality?.resolution.isNotEmpty == true
+          ? selectedQuality!.resolution
+          : target.resolutionLabel,
+      'bitrate': selectedQuality?.bitrate ?? target.bitrate ?? 0,
+      'ts': safePosition,
+      'duration': safeDuration,
+      'play_link': target.streamUrl,
+      'device_id': deviceId,
+      'direct_link_audio_index': -1,
+      'lan': 'zh-CN',
+      'device_name': 'Starflow',
+    });
+  }
+
+  FntvPlaybackQuality? _playbackQuality(
+    int index,
+    Map<String, dynamic> row,
+  ) {
+    final url = _text(row['url']);
+    final resolution = _text(row['resolution']).isNotEmpty
+        ? _text(row['resolution'])
+        : _text(row['resolution_type']);
+    final bitrate = _number(row['bitrate']) ?? _number(row['bps']) ?? 0;
+    final isM3u8 = row['is_m3u8'] == true || _number(row['is_m3u8']) == 1;
+    final progressive =
+        row['progressive'] == true || _number(row['progressive']) == 1;
+    if (url.isEmpty && resolution.isEmpty && bitrate <= 0) return null;
+    return FntvPlaybackQuality(
+      index: index,
+      resolution: resolution,
+      bitrate: bitrate,
+      url: url,
+      isM3u8: isM3u8,
+      progressive: progressive,
     );
   }
 
@@ -633,6 +754,39 @@ class FntvApiClient implements MediaServerClient {
           '飞牛影视$operation失败：HTTP ${response.statusCode}，请检查服务器地址');
     }
     return utf8.decode(response.bodyBytes, allowMalformed: true);
+  }
+
+  Future<List<int>> _requestBytes(
+    MediaSourceConfig source,
+    String route, {
+    String operation = '请求',
+  }) async {
+    final uri = _uri(source, route);
+    final request = http.Request('GET', uri)
+      ..followRedirects = false
+      ..headers.addAll({
+        'Accept': '*/*',
+        'User-Agent': 'Starflow',
+        'x-trim-client': 'web',
+        'x-trim-client-version': '616',
+        ...sessionHeaders(source),
+        'Authx': buildAuthx(
+          path: '$_apiPath/$route',
+          nonce: '${100000 + Random.secure().nextInt(900000)}',
+          timestamp: DateTime.now().millisecondsSinceEpoch,
+        ),
+      });
+    final response = await (() async =>
+            http.Response.fromStream(await _client.send(request)))()
+        .timeout(const Duration(seconds: 20));
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const FntvApiException('飞牛影视登录失效或无访问权限，请重新测试登录');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw FntvApiException(
+          '飞牛影视$operation失败：HTTP ${response.statusCode}，请检查服务器地址');
+    }
+    return response.bodyBytes;
   }
 
   static void _requireSession(MediaSourceConfig source) {

@@ -565,11 +565,7 @@ double clampPlaybackSecondarySubtitleScale(double value) {
     kPlaybackSecondarySubtitleScaleMin,
     kPlaybackSecondarySubtitleScaleMax,
   );
-  final steps = ((clamped - kPlaybackSecondarySubtitleScaleMin) /
-          kPlaybackSecondarySubtitleScaleStep)
-      .round();
-  return kPlaybackSecondarySubtitleScaleMin +
-      (steps * kPlaybackSecondarySubtitleScaleStep);
+  return clamped.roundToDouble();
 }
 
 double stepPlaybackSecondarySubtitleScale(double current, int delta) {

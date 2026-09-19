@@ -57,6 +57,37 @@ void main() {
     expect(find.byType(OverlayToolbar), findsOneWidget);
   });
 
+  testWidgets('standalone favorites page focuses its sync action on TV',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(const {});
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(
+            const AppSettings(
+              mediaSources: <MediaSourceConfig>[],
+              searchProviders: <SearchProviderConfig>[],
+              doubanAccount: DoubanAccountConfig(enabled: false),
+              homeModules: <HomeModuleConfig>[],
+            ),
+          ),
+        ],
+        child: const MaterialApp(
+          home: SearchPage(favoritesOnly: true),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'favorites-sync',
+    );
+  });
+
   testWidgets('detail search route push requests TV focus on query input',
       (tester) async {
     SharedPreferences.setMockInitialValues(const {});
@@ -227,6 +258,90 @@ void main() {
 
     expect(find.text('测试电影 4K'), findsOneWidget);
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'search-query');
+  });
+
+  testWidgets('search result update does not steal an actionable page focus',
+      (tester) async {
+    SharedPreferences.setMockInitialValues(const {});
+    final repository = _PendingSearchRepository();
+    final externalFocusNode = FocusNode(debugLabel: 'test-menu-entry');
+    addTearDown(externalFocusNode.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          searchRepositoryProvider.overrideWithValue(repository),
+          appSettingsProvider.overrideWithValue(
+            const AppSettings(
+              mediaSources: <MediaSourceConfig>[],
+              searchProviders: <SearchProviderConfig>[
+                SearchProviderConfig(
+                  id: 'online',
+                  name: 'Online',
+                  kind: SearchProviderKind.panSou,
+                  endpoint: 'https://example.com',
+                  enabled: true,
+                ),
+              ],
+              doubanAccount: DoubanAccountConfig(enabled: false),
+              homeModules: <HomeModuleConfig>[],
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          home: Column(
+            children: [
+              TvFocusableAction(
+                focusNode: externalFocusNode,
+                focusId: 'test-menu-entry',
+                onPressed: () {},
+                child: const SizedBox(width: 120, height: 44),
+              ),
+              const Expanded(
+                child: SearchPage(initialQuery: '测试电影'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    for (var i = 0; i < 10 && !repository.onlineStarted.isCompleted; i++) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(repository.onlineStarted.isCompleted, isTrue);
+
+    externalFocusNode.requestFocus();
+    await tester.pump();
+    expect(externalFocusNode.hasPrimaryFocus, isTrue);
+
+    repository.onlineResult.complete(
+      SearchFetchResult(
+        filteredCount: 0,
+        items: const [
+          SearchResult(
+            id: 'online-1',
+            title: '测试电影 4K',
+            posterUrl: '',
+            providerId: 'online',
+            providerName: 'Online',
+            quality: '4K',
+            sizeLabel: '10GB',
+            seeders: 0,
+            summary: 'online result',
+            resourceUrl: 'https://example.com/share/1',
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(externalFocusNode.hasPrimaryFocus, isTrue);
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'test-menu-entry');
   });
 
   for (final television in [false, true]) {

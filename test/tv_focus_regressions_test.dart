@@ -453,6 +453,141 @@ void main() {
     expect(regularTile.autofocus, isFalse);
   });
 
+  testWidgets('home moves up from the first section back to the Hero card',
+      (tester) async {
+    final settings = SeedData.defaultSettings.copyWith(
+      homeModules: const [
+        HomeModuleConfig(
+          id: HomeModuleConfig.heroModuleId,
+          type: HomeModuleType.hero,
+          title: 'Hero',
+          enabled: true,
+        ),
+        HomeModuleConfig(
+          id: 'first-module',
+          type: HomeModuleType.recentPlayback,
+          title: 'First',
+          enabled: true,
+        ),
+      ],
+      homeHeroBackgroundEnabled: false,
+      homeStartupAutoRefreshEnabled: false,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(settings),
+          homeResolvedSectionsProvider.overrideWith(
+            (ref) => const HomeResolvedSectionsState(
+              sections: [_singleHeroSection, _firstContentSection],
+            ),
+          ),
+          homeSectionProvider.overrideWith((ref, moduleId) async {
+            return switch (moduleId) {
+              'first-module' => _firstContentSection,
+              _ => null,
+            };
+          }),
+        ],
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final hero = tester.widget<TvFocusableAction>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TvFocusableAction &&
+            widget.focusId == 'home:hero:hero-item-1',
+      ),
+    );
+    final contentTile = tester.widget<MediaPosterTile>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is MediaPosterTile &&
+            widget.focusId == 'home:section:first-module:item:First Content',
+      ),
+    );
+
+    contentTile.focusNode!.requestFocus();
+    await tester.pump();
+    expect(contentTile.focusNode?.hasPrimaryFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+
+    expect(hero.focusNode?.hasPrimaryFocus, isTrue);
+  });
+
+  testWidgets('Hero keeps focus when moving up from the top boundary',
+      (tester) async {
+    final settings = SeedData.defaultSettings.copyWith(
+      homeModules: const [
+        HomeModuleConfig(
+          id: HomeModuleConfig.heroModuleId,
+          type: HomeModuleType.hero,
+          title: 'Hero',
+          enabled: true,
+        ),
+        HomeModuleConfig(
+          id: 'first-module',
+          type: HomeModuleType.recentPlayback,
+          title: 'First',
+          enabled: true,
+        ),
+      ],
+      homeHeroBackgroundEnabled: false,
+      homeStartupAutoRefreshEnabled: false,
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(settings),
+          homeResolvedSectionsProvider.overrideWith(
+            (ref) => const HomeResolvedSectionsState(
+              sections: [_singleHeroSection, _firstContentSection],
+            ),
+          ),
+          homeSectionProvider.overrideWith((ref, moduleId) async {
+            return switch (moduleId) {
+              'first-module' => _firstContentSection,
+              _ => null,
+            };
+          }),
+        ],
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final hero = tester.widget<TvFocusableAction>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TvFocusableAction &&
+            widget.focusId == 'home:hero:hero-item-1',
+      ),
+    );
+    final contentTile = tester.widget<MediaPosterTile>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is MediaPosterTile &&
+            widget.focusId == 'home:section:first-module:item:First Content',
+      ),
+    );
+
+    hero.focusNode!.requestFocus();
+    await tester.pump();
+    expect(hero.focusNode?.hasPrimaryFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+
+    expect(hero.focusNode?.hasPrimaryFocus, isTrue);
+    expect(contentTile.focusNode?.hasFocus, isFalse);
+  });
+
   testWidgets('late first-module content does not steal existing Home focus',
       (tester) async {
     final sectionsProvider = StateProvider<List<HomeSectionViewModel>>(

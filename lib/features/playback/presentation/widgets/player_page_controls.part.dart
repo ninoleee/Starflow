@@ -1173,6 +1173,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
             _resolvedTarget ?? widget.target,
           ),
           onConfigureSeriesSkip: () => _configureSeriesSkipPreference(player),
+          onSelectQuality: (quality) => _switchFntvPlaybackQuality(
+            player,
+            quality,
+          ),
           runtimeSettings: PlaybackMpvRuntimeSettings(
             backgroundPlaybackEnabled: _backgroundPlaybackEnabled,
             doubleTapToSeekEnabled: settings.playbackMpvDoubleTapToSeekEnabled,
@@ -1318,15 +1322,23 @@ extension _PlayerPageStateControls on _PlayerPageState {
       return;
     }
     if (selection is _ServerSubtitleSelection) {
+      final selectedTarget = target.copyWith(
+        preferredSubtitleStreamId: selection.stream.id,
+      );
       final applied = await _runPlayerCommand(
         () => _applyServerExternalSubtitle(
           player,
-          target,
+          selectedTarget,
           selection.stream,
         ),
         failureMessage: '加载飞牛字幕失败',
       );
       if (applied) {
+        if (mounted) {
+          setState(() {
+            _resolvedTarget = selectedTarget;
+          });
+        }
         await _persistMpvSeriesSubtitlePreference(target, null);
       }
       return;
@@ -1341,6 +1353,19 @@ extension _PlayerPageStateControls on _PlayerPageState {
     );
     if (!applied) {
       return;
+    }
+
+    final selectedServerStream = matchPlaybackSubtitleStreamForTrack(
+      target: target,
+      tracks: tracks,
+      track: selectedTrack,
+    );
+    if (selectedServerStream != null && mounted) {
+      setState(() {
+        _resolvedTarget = target.copyWith(
+          preferredSubtitleStreamId: selectedServerStream.id,
+        );
+      });
     }
     if (!selectedTrack.uri && !selectedTrack.data) {
       _subtitleSessionPreference = switch (selectedTrack.id) {
@@ -1511,10 +1536,25 @@ extension _PlayerPageStateControls on _PlayerPageState {
       return;
     }
 
-    await _runPlayerCommand(
+    final applied = await _runPlayerCommand(
       () => player.setAudioTrack(selection),
       failureMessage: '切换音轨失败',
     );
+    if (!applied) {
+      return;
+    }
+    final selectedServerStream = matchPlaybackAudioStreamForTrack(
+      target: target,
+      tracks: tracks,
+      track: selection,
+    );
+    if (selectedServerStream != null && mounted) {
+      setState(() {
+        _resolvedTarget = target.copyWith(
+          preferredAudioStreamId: selectedServerStream.id,
+        );
+      });
+    }
   }
 
   Future<bool> _runPlayerCommand(

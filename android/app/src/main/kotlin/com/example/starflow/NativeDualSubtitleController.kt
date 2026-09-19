@@ -152,8 +152,8 @@ class NativeDualSubtitleController {
         secondaryPositionPercent: Double,
         secondaryScalePercent: Double,
     ) {
-        primaryPosition = (primaryPositionPercent / 100).toFloat().coerceIn(0.5f, 0.95f)
-        secondaryPosition = (secondaryPositionPercent / 100).toFloat().coerceIn(0.5f, 0.95f)
+        primaryPosition = NativeSubtitlePositionPolicy.positionFraction(primaryPositionPercent, 80.0)
+        secondaryPosition = NativeSubtitlePositionPolicy.positionFraction(secondaryPositionPercent, 90.0)
         secondaryTextScale = (secondaryScalePercent / 100).toFloat().coerceIn(0.5f, 1.2f)
         if (isEnabled) {
             emitMergedCues()
@@ -181,7 +181,7 @@ class NativeDualSubtitleController {
         if (isEnabled) {
             emitMergedCues()
         } else {
-            emitCueGroup(cueGroup)
+            emitCueGroup(NativeSubtitlePositionPolicy.applyPrimaryPosition(cueGroup))
         }
     }
 
@@ -194,7 +194,7 @@ class NativeDualSubtitleController {
 
     private fun emitMergedCues() {
         if (!isEnabled) {
-            emitCueGroup(primaryCueGroup)
+            emitCueGroup(NativeSubtitlePositionPolicy.applyPrimaryPosition(primaryCueGroup))
             return
         }
         val primaryText = extractCueText(primaryCueGroup)
@@ -218,7 +218,7 @@ class NativeDualSubtitleController {
                 .setText(primaryText)
                 .setTextAlignment(Layout.Alignment.ALIGN_CENTER)
                 .setLine(primaryPosition, Cue.LINE_TYPE_FRACTION)
-                .setLineAnchor(Cue.ANCHOR_TYPE_MIDDLE)
+                .setLineAnchor(Cue.ANCHOR_TYPE_END)
                 .build()
         }
         if (secondaryText.isNotEmpty()) {
@@ -233,7 +233,7 @@ class NativeDualSubtitleController {
                 .setText(text)
                 .setTextAlignment(Layout.Alignment.ALIGN_CENTER)
                 .setLine(secondaryPosition, Cue.LINE_TYPE_FRACTION)
-                .setLineAnchor(Cue.ANCHOR_TYPE_MIDDLE)
+                .setLineAnchor(Cue.ANCHOR_TYPE_END)
                 .build()
         }
         emitCueGroup(

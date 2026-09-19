@@ -228,13 +228,21 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     if (!target.sourceKind.isMediaServer || stream.id.isEmpty) {
       return;
     }
+    if (stream.isBitmap) {
+      _showMessage('当前飞牛字幕是位图字幕，不能作为文本字幕加载');
+      return;
+    }
     final client = _providerContainer.read(
       mediaServerClientProvider(target.sourceKind),
     );
-    final content = await client.downloadExternalSubtitle(
+    final bytes = await client.downloadExternalSubtitleBytes(
       source: _sourceForTarget(target),
       subtitleId: stream.id,
     );
+    final subtitleBytes = _looksLikeZip(bytes)
+        ? extractSubtitleBytesFromZip(bytes, preferredName: stream.title)
+        : bytes;
+    final content = decodeSubtitleBytes(subtitleBytes);
     if (!mounted || !identical(_player, player) || content.trim().isEmpty) {
       return;
     }
@@ -249,6 +257,10 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     );
     _subtitleSessionPreference = null;
     _showMessage('已加载飞牛字幕：${stream.title.isEmpty ? '未命名字幕' : stream.title}');
+  }
+
+  bool _looksLikeZip(List<int> bytes) {
+    return isSubtitleZipBytes(bytes);
   }
 
   MediaSourceConfig _sourceForTarget(PlaybackTarget target) {
@@ -551,6 +563,79 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
               ? _latestDuration
               : player.state.duration,
         );
+    unawaited(_reportFntvPlaybackProgress(
+      target: target,
+      position: _latestPosition,
+      duration: _latestDuration > Duration.zero
+          ? _latestDuration
+          : player.state.duration,
+    ));
+  }
+
+  Future<void> _reportFntvPlaybackProgress({
+    required PlaybackTarget target,
+    required Duration position,
+    required Duration duration,
+  }) async {
+    if (target.sourceKind != MediaSourceKind.fntv ||
+        target.itemId.trim().isEmpty ||
+        target.preferredMediaSourceId.trim().isEmpty ||
+        target.videoStreamId.trim().isEmpty ||
+        _fntvProgressReportInFlight) {
+      return;
+    }
+    _fntvProgressReportInFlight = true;
+    try {
+      final client = _providerContainer.read(
+        mediaServerClientProvider(MediaSourceKind.fntv),
+      );
+      await client.reportPlaybackProgress(
+        source: _sourceForTarget(target),
+        target: target,
+        position: position,
+        duration: duration,
+      );
+    } catch (_) {
+      // Server progress is best effort and must never interrupt playback.
+    } finally {
+      _fntvProgressReportInFlight = false;
+    }
+  }
+
+  Future<void> _switchFntvPlaybackQuality(
+    Player player,
+    FntvPlaybackQuality quality,
+  ) async {
+    final target = _resolvedTarget ?? widget.target;
+    if (target.sourceKind != MediaSourceKind.fntv ||
+        quality.index == target.preferredPlaybackQualityIndex) {
+      return;
+    }
+    final position = player.state.position;
+    final duration = player.state.duration;
+    _latestPosition = position;
+    if (duration > Duration.zero) _latestDuration = duration;
+    await _persistPlaybackProgress(force: true);
+    if (!mounted || !identical(_player, player)) return;
+
+    final detachedPlayer = _detachActivePlayerState();
+    await _shutdownDetachedPlayer(
+      detachedPlayer,
+      reason: 'fntv-quality-switch',
+      persistProgress: false,
+      teardownPlatformState: false,
+    );
+    if (!mounted) return;
+    final nextTarget = target.copyWith(
+      streamUrl: '',
+      headers: const {},
+      preferredPlaybackQualityIndex: quality.index,
+    );
+    _nextEpisodeIsAutomatic = false;
+    await _initialize(initialTarget: nextTarget);
+    if (mounted && _isReady) {
+      _showMessage('已切换画质：${quality.label}');
+    }
   }
 
   /// Decides where the media should open, before the player is created, so a

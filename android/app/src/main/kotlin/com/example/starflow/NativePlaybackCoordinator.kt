@@ -47,7 +47,10 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     NativePlaybackExternalSubtitleController.Host,
     NativePlaybackRuntimeController.Host,
     NativePlaybackDiagnostics.Host,
+    NativeFntvController.Host,
     NativePlaybackSystemController.Host {
+    override var fntv = NativeFntvController(this)
+        private set
     override val session by lazy { NativePlaybackSession(this) }
     override val launch by lazy { NativePlaybackLaunchController(this) }
     override val recovery by lazy { NativePlaybackRecoveryController(this) }
@@ -135,11 +138,15 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                             tracks.groups.none { it.type == C.TRACK_TYPE_VIDEO }
                     ) {
                         episodes.onPlaybackReady()
+                        fntv.onReady()
                         launch.cancelPlaybackLaunchTimeout()
                         launch.reportPlaybackLaunchResult(RESULT_PLAYBACK_READY)
                     }
                     controllerView.updateControllerAutoHidePolicy()
                     runtime.maybeApplyAutoSkip()
+                }
+                if (playbackState == Player.STATE_ENDED) {
+                    runtime.persistPlaybackProgress(force = true)
                 }
                 if (
                     playbackState == Player.STATE_ENDED &&
@@ -169,6 +176,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
             override fun onRenderedFirstFrame() {
                 val isStartupFirstFrame = !diagnostics.playbackFirstFrameRendered
                 episodes.onPlaybackReady()
+                fntv.onReady()
                 diagnostics.playbackFirstFrameRendered = true
                 controllerView.updateControllerAutoHidePolicy()
                 if (isStartupFirstFrame) {
@@ -203,6 +211,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                if (fntv.recoverQualityFailure()) return
                 val httpStatus = NativePlaybackErrorPolicy.httpResponseCode(error)
                 NativeAppLogger.info(
                     "playback.reliability",
@@ -228,6 +237,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                 diagnostics.logAudioTracks(tracks)
                 diagnostics.logVideoTracks(tracks)
                 recovery.fallbackToTranscodedVideoIfNeeded(tracks)
+                fntv.onTracksReady()
                 subtitles.applyAutomaticSubtitleSelection(tracks)
             }
         }
@@ -313,6 +323,8 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
             message = "播放请求已被新的影片替换",
         )
         runtime.persistPlaybackProgress(force = true)
+        fntv.close()
+        fntv = NativeFntvController(this)
         diagnostics.finishPlaybackPerformanceSession("replaced")
         session.releasePlayer()
         launch.dismissFailure()
@@ -376,6 +388,8 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onDestroy() {
+        runtime.persistPlaybackProgress(force = true)
+        fntv.close()
         remote.resetInputState()
         controllerView.setFocusRequestsAllowed(false)
         episodes.invalidateResolution()

@@ -14,6 +14,71 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  for (final autoHide in [true, false]) {
+    testWidgets(
+      'TV sidebar keeps vertical focus inside its bounds (autoHide: $autoHide)',
+      (tester) async {
+        final router = _buildRouter();
+        addTearDown(router.dispose);
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              isTelevisionProvider.overrideWith((ref) => true),
+              appSettingsProvider.overrideWithValue(
+                _settings.copyWith(autoHideNavigationBarEnabled: autoHide),
+              ),
+            ],
+            child: MaterialApp.router(
+              theme: ThemeData.dark(),
+              routerConfig: router,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        if (autoHide) {
+          tester
+              .widget<TvMenuButtonScope>(find.byType(TvMenuButtonScope))
+              .onMenuButtonPressed();
+          await tester.pumpAndSettle();
+        }
+        final navigationNodes = tester
+            .widgetList<TvFocusableAction>(
+              find.byWidgetPredicate(
+                (widget) =>
+                    widget is TvFocusableAction &&
+                    (widget.focusNode?.debugLabel?.startsWith('tv-nav-') ??
+                        false),
+              ),
+            )
+            .map((action) => action.focusNode!)
+            .toList(growable: false);
+        expect(navigationNodes.length, greaterThanOrEqualTo(2));
+        final first = navigationNodes.first;
+        final last = navigationNodes.last;
+
+        first.requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await tester.pumpAndSettle();
+        expect(
+          first.hasPrimaryFocus,
+          isTrue,
+          reason: describeTvFocusNode(FocusManager.instance.primaryFocus),
+        );
+        expect(_contentNode(tester, 'home').hasFocus, isFalse);
+
+        last.requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+        expect(last.hasPrimaryFocus, isTrue);
+        expect(_contentNode(tester, 'home').hasFocus, isFalse);
+      },
+    );
+  }
+
   testWidgets(
     'TV sidebar restores focus after auto hide and remains traversable',
     (tester) async {

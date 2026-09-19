@@ -369,6 +369,7 @@ class AppMediaQueryService {
   }
 
   Future<void> _refreshEmbySourceCacheInternal(MediaSourceConfig source) async {
+    await _requestMediaServerLibraryRefresh(source);
     final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
     final refreshedAt = DateTime.now();
     var collections = const <MediaCollection>[];
@@ -442,6 +443,36 @@ class AppMediaQueryService {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _requestMediaServerLibraryRefresh(
+    MediaSourceConfig source,
+  ) async {
+    if (source.kind != MediaSourceKind.fntv) return;
+    final client = _serverClient(source);
+    if (client is! FntvApiClient) return;
+    try {
+      await client.requestLibraryRefresh(source);
+      appLogInfo(
+        'library.refresh',
+        'Media server library refresh request completed',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'sourceKind': source.kind.name,
+        },
+      );
+    } catch (error, stackTrace) {
+      appLogWarning(
+        'library.refresh',
+        'Media server library refresh request failed; continuing local refresh',
+        fields: <String, Object?>{
+          'sourceId': source.id,
+          'sourceKind': source.kind.name,
+        },
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
   }
 

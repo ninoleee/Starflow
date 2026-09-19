@@ -371,6 +371,161 @@ void main() {
     expect(requests, hasLength(3));
   });
 
+  test('direct-link qualities are mapped and selected by index', () async {
+    final client = FntvApiClient(MockClient((request) async {
+      if (request.url.path.endsWith('/play/info')) {
+        return ok({'media_guid': 'file'});
+      }
+      return ok({
+        'cloud_storage_info': {'cloud_storage_type': 9001},
+        'file_stream': {'guid': 'file', 'can_play': 1},
+        'video_stream': {'guid': 'video', 'width': 3840, 'height': 2160},
+        'direct_link_qualities': [
+          {
+            'resolution': '1080P',
+            'bitrate': 8000000,
+            'url': 'https://cdn/1080'
+          },
+          {'resolution': '4K', 'bitrate': 25000000, 'url': 'https://cdn/4k'},
+        ],
+      });
+    }));
+    final target = await client.resolvePlaybackTarget(
+      source: source,
+      target: _target().copyWith(preferredPlaybackQualityIndex: 1),
+    );
+    expect(target.streamUrl, 'https://cdn/4k');
+    expect(target.videoStreamId, 'video');
+    expect(target.playbackQualities.map((quality) => quality.label), [
+      '1080P · 8.0 Mbps',
+      '4K · 25.0 Mbps',
+    ]);
+    expect(target.preferredPlaybackQualityIndex, 1);
+  });
+
+  test(
+      'server library refresh targets selected roots and falls back to all roots',
+      () async {
+    final refreshRequests = <Map<String, dynamic>>[];
+    final client = FntvApiClient(MockClient((request) async {
+      if (request.url.path.endsWith('/mediadb/list')) {
+        return ok([
+          {'guid': 'movies', 'title': 'Movies', 'category': 'Movie'},
+          {'guid': 'shows', 'title': 'Shows', 'category': 'TV'},
+          {'guid': 'music', 'title': 'Music', 'category': 'Music'},
+        ]);
+      }
+      expect(request.url.path, '/v/api/v1/item/refresh');
+      refreshRequests.add(jsonDecode(request.body) as Map<String, dynamic>);
+      return ok(true);
+    }));
+
+    await client.requestLibraryRefresh(
+      source.copyWith(featuredSectionIds: ['movies', 'shows']),
+    );
+    expect(refreshRequests, [
+      {'item_guid': 'movies'},
+      {'item_guid': 'shows'},
+    ]);
+
+    refreshRequests.clear();
+    await client.requestLibraryRefresh(source);
+    expect(refreshRequests, [
+      {'item_guid': 'movies'},
+      {'item_guid': 'shows'},
+    ]);
+  });
+
+  test('server library refresh is skipped when no section is selected',
+      () async {
+    final client = FntvApiClient(MockClient((request) async {
+      fail('unexpected request: ${request.url}');
+    }));
+    await client.requestLibraryRefresh(
+      source.copyWith(featuredSectionIds: [kNoSectionsSelectedSentinel]),
+    );
+  });
+
+  test(
+      'quality selection retains server indices after empty entries are filtered',
+      () async {
+    final client = FntvApiClient(MockClient((request) async {
+      if (request.url.path.endsWith('/play/info')) {
+        return ok({'media_guid': 'file'});
+      }
+      return ok({
+        'file_stream': {'guid': 'file', 'can_play': 1},
+        'direct_link_qualities': [
+          {},
+          {'resolution': '1080P', 'url': 'https://cdn/1080'},
+          {'resolution': '4K', 'url': 'https://cdn/4k'},
+        ],
+      });
+    }));
+    final selected = await client.resolvePlaybackTarget(
+      source: source,
+      target: _target().copyWith(preferredPlaybackQualityIndex: 2),
+    );
+    expect(selected.playbackQualities.map((quality) => quality.index), [1, 2]);
+    expect(selected.preferredPlaybackQualityIndex, 2);
+    expect(
+        Uri.parse(selected.streamUrl)
+            .queryParameters['direct_link_quality_index'],
+        '2');
+    final fallback = await client.resolvePlaybackTarget(
+      source: source,
+      target: _target().copyWith(preferredPlaybackQualityIndex: 99),
+    );
+    expect(fallback.preferredPlaybackQualityIndex, 1);
+    expect(
+        Uri.parse(fallback.streamUrl)
+            .queryParameters['direct_link_quality_index'],
+        '1');
+  });
+
+  test('play record sends clamped progress without leaking into logs',
+      () async {
+    http.Request? recorded;
+    final client = FntvApiClient(MockClient((request) async {
+      recorded = request;
+      return ok({});
+    }));
+    final target = _target().copyWith(
+      preferredMediaSourceId: 'media',
+      videoStreamId: 'video',
+      preferredAudioStreamId: 'audio',
+      preferredSubtitleStreamId: 'subtitle',
+      width: 1920,
+      height: 1080,
+      bitrate: 6000000,
+      streamUrl: 'https://cdn.example.com/private.mkv?token=secret',
+    );
+    await client.reportPlaybackProgress(
+      source: source,
+      target: target,
+      position: const Duration(seconds: 120),
+      duration: const Duration(seconds: 90),
+    );
+    expect(recorded!.url.path, '/v/api/v1/play/record');
+    final body = jsonDecode(recorded!.body) as Map<String, dynamic>;
+    expect(body, {
+      'item_guid': 'movie',
+      'media_guid': 'media',
+      'video_guid': 'video',
+      'audio_guid': 'audio',
+      'subtitle_guid': 'subtitle',
+      'resolution': '1920x1080',
+      'bitrate': 6000000,
+      'ts': 90,
+      'duration': 90,
+      'play_link': 'https://cdn.example.com/private.mkv?token=secret',
+      'device_id': isA<String>(),
+      'direct_link_audio_index': -1,
+      'lan': 'zh-CN',
+      'device_name': 'Starflow',
+    });
+  });
+
   for (final token in ['session-token', ' refreshed-token ']) {
     test('stream negotiation includes session hash and player headers: $token',
         () async {

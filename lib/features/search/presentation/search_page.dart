@@ -150,6 +150,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
   late final TextEditingController _controller;
   final ScrollController _scrollController = ScrollController();
   final FocusNode _queryFocusNode = FocusNode(debugLabel: 'search-query');
+  final FocusNode _favoriteSyncFocusNode =
+      FocusNode(debugLabel: 'favorites-sync');
   List<SearchResult> _results = const [];
   List<SearchResult> _favoriteResults = const [];
   List<String> _recentQueries = const [];
@@ -246,6 +248,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
     _cancelShareLinkValidations(clearStates: true);
     _saveFeedback.dispose();
     _queryFocusNode.dispose();
+    _favoriteSyncFocusNode.dispose();
     _scrollController.dispose();
     _controller.dispose();
     super.dispose();
@@ -992,7 +995,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                     ),
                                   ),
                                   const SizedBox(width: 12),
-                                  const _FavoriteSyncButton(),
+                                  _FavoriteSyncButton(
+                                    focusNode: _favoriteSyncFocusNode,
+                                  ),
                                 ],
                               )
                             else
@@ -1310,8 +1315,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   void _scheduleInitialTelevisionFocus({int remainingAttempts = 4}) {
     if (_initialTelevisionFocusRequested ||
         _initialTelevisionFocusScheduled ||
-        !mounted ||
-        _showFavoriteResults) {
+        !mounted) {
       return;
     }
     final isTelevision = ref.read(isTelevisionProvider).value ?? false;
@@ -1336,7 +1340,13 @@ class _SearchPageState extends ConsumerState<SearchPage>
         }
         return;
       }
-      if (!_queryFocusNode.canRequestFocus) {
+      if (hasActionableTvFocus()) {
+        _initialTelevisionFocusRequested = true;
+        return;
+      }
+      final targetFocusNode =
+          _showFavoriteResults ? _favoriteSyncFocusNode : _queryFocusNode;
+      if (!targetFocusNode.canRequestFocus) {
         if (remainingAttempts > 0) {
           _scheduleInitialTelevisionFocus(
             remainingAttempts: remainingAttempts - 1,
@@ -1346,7 +1356,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
       }
       _initialTelevisionFocusRequested = true;
       requestTvFocus(
-        _queryFocusNode,
+        targetFocusNode,
         scope: FocusScope.of(context),
       );
     });
@@ -1371,7 +1381,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _televisionFocusRecoveryScheduled = false;
       if (!mounted ||
           !_canRequestInitialTelevisionFocus() ||
-          _hasFocusWithinSearchPage() ||
+          hasActionableTvFocus() ||
           !_queryFocusNode.canRequestFocus) {
         return;
       }
@@ -1380,25 +1390,6 @@ class _SearchPageState extends ConsumerState<SearchPage>
         scope: FocusScope.of(context),
       );
     });
-  }
-
-  bool _hasFocusWithinSearchPage() {
-    final focusedContext = FocusManager.instance.primaryFocus?.context;
-    if (focusedContext == null) {
-      return false;
-    }
-    if (identical(focusedContext, context)) {
-      return true;
-    }
-    var found = false;
-    focusedContext.visitAncestorElements((ancestor) {
-      if (identical(ancestor, context)) {
-        found = true;
-        return false;
-      }
-      return true;
-    });
-    return found;
   }
 
   Future<void> _openTelevisionQueryDialog() async {
@@ -1832,7 +1823,11 @@ class _SearchPageState extends ConsumerState<SearchPage>
 }
 
 class _FavoriteSyncButton extends ConsumerWidget {
-  const _FavoriteSyncButton();
+  const _FavoriteSyncButton({
+    required this.focusNode,
+  });
+
+  final FocusNode focusNode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1842,6 +1837,7 @@ class _FavoriteSyncButton extends ConsumerWidget {
       builder: (context, child) => StarflowIconButton(
         icon: sync.running ? Icons.hourglass_top_rounded : Icons.sync_rounded,
         tooltip: sync.running ? '收藏正在同步' : '手动同步收藏',
+        focusNode: focusNode,
         focusId: 'favorites:sync',
         focusableWhenDisabled: true,
         size: 42,

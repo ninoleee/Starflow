@@ -4,6 +4,10 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:starflow/core/utils/playback_trace.dart';
+import 'package:starflow/features/library/data/media_server_client.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/data/native_fntv_service.dart';
+import 'package:starflow/features/playback/application/subtitle_content_decoder.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_episode_queue.dart';
@@ -26,6 +30,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   final Ref _ref;
   NativePlaybackEpisodeResolver? _episodeResolver;
   String _resolverSessionId = '';
+  final Map<String, NativeFntvService> _fntvSessions = {};
 
   @override
   Future<NativePlaybackLaunchResult> launch(
@@ -72,10 +77,19 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       },
     );
     _episodeResolver = episodeResolver;
-    _resolverSessionId = episodeResolver == null
-        ? ''
-        : DateTime.now().microsecondsSinceEpoch.toString();
+    _resolverSessionId = DateTime.now().microsecondsSinceEpoch.toString();
+    final sessionId = _resolverSessionId;
     try {
+      if (Platform.isAndroid && target.sourceKind == MediaSourceKind.fntv) {
+        final source = _ref
+            .read(appSettingsProvider)
+            .mediaSources
+            .firstWhere((source) => source.id == target.sourceId);
+        _fntvSessions[sessionId] = NativeFntvService(
+          client: _ref.read(mediaServerClientProvider(MediaSourceKind.fntv)),
+          source: source,
+        );
+      }
       final launched = await _platformChannel.invokeMethod<bool>(
         'launchNativePlaybackContainer',
         {
@@ -97,7 +111,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'dualSubtitlePrimaryLanguage': dualSubtitlePrimaryLanguage.name,
           'dualSubtitleSecondaryLanguage': dualSubtitleSecondaryLanguage.name,
           'mediaMimeType': mediaMimeType,
-          'resolverSessionId': _resolverSessionId,
+          'resolverSessionId': sessionId,
           'playbackTargetJson': jsonEncode(target.toJson()),
           'playbackItemKey': buildPlaybackItemKey(target),
           'seriesKey': buildSeriesKeyForTarget(target),
@@ -114,11 +128,13 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'launched': launched == true,
         },
       );
+      if (launched != true) await _fntvSessions.remove(sessionId)?.close();
       return NativePlaybackLaunchResult(
         launched: launched == true,
         message: launched == true ? '' : '原生播放器启动失败。',
       );
     } catch (error, stackTrace) {
+      await _fntvSessions.remove(sessionId)?.close();
       _traceQuarkNativeLaunch(
         'quark.native-launch.invoke.failed',
         target: target,
@@ -137,6 +153,45 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   }
 
   Future<Object?> _handleResolverMethodCall(MethodCall call) async {
+    if (const [
+      'downloadNativeFntvSubtitle',
+      'reportNativeFntvProgress',
+      'closeNativeFntvSession'
+    ].contains(call.method)) {
+      final args = Map<String, dynamic>.from(call.arguments as Map);
+      final sessionId = args['resolverSessionId'] as String? ?? '';
+      final service = _fntvSessions[sessionId];
+      if (service == null) return {'ok': false, 'message': '飞牛播放会话已失效'};
+      if (call.method == 'closeNativeFntvSession') {
+        _fntvSessions.remove(sessionId);
+        await service.close();
+        return {'ok': true};
+      }
+      try {
+        final target = PlaybackTarget.fromJson(Map<String, dynamic>.from(
+          jsonDecode(args['playbackTargetJson'] as String) as Map,
+        ));
+        if (target.sourceKind != MediaSourceKind.fntv ||
+            target.sourceId != service.source.id) {
+          return {'ok': false, 'message': '媒体源已变化'};
+        }
+        if (call.method == 'downloadNativeFntvSubtitle') {
+          return await service.downloadSubtitle(
+              target, args['subtitleId'] as String);
+        }
+        await service.client.reportPlaybackProgress(
+          source: service.source,
+          target: target,
+          position: Duration(milliseconds: (args['positionMs'] as num).toInt()),
+          duration: Duration(milliseconds: (args['durationMs'] as num).toInt()),
+        );
+        return {'ok': true};
+      } on SubtitleContentException catch (error) {
+        return {'ok': false, 'message': error.message};
+      } catch (_) {
+        return {'ok': false, 'message': '飞牛请求未成功，请检查连接或重新登录'};
+      }
+    }
     if (call.method == 'saveNativePlaybackSubtitleStyle') {
       final arguments = Map<String, Object?>.from(
         call.arguments as Map<dynamic, dynamic>? ?? const {},

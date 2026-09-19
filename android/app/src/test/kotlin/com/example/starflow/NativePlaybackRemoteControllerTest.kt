@@ -51,6 +51,52 @@ class NativePlaybackRemoteControllerTest {
     }
 
     @Test
+    fun visibleControllerDownOpensSettingsWithoutAMenuKey() {
+        `when`(host.playerView.isControllerFullyVisible).thenReturn(true)
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN))
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN, repeat = 1))
+        verify(host.settings).openPlaybackSettingsDialog()
+        verify(host.episodes, never()).openEpisodeSelectionDialog()
+        verify(host.session, never()).togglePlayback()
+    }
+
+    @Test
+    fun hiddenControllerDownKeepsEpisodePickerWithSettingsFallback() {
+        `when`(host.playerView.isControllerFullyVisible).thenReturn(false)
+        `when`(host.episodes.openEpisodeSelectionDialog()).thenReturn(true)
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN))
+        verify(host.episodes).openEpisodeSelectionDialog()
+        verify(host.settings, never()).openPlaybackSettingsDialog()
+        `when`(host.episodes.openEpisodeSelectionDialog()).thenReturn(false)
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN, downTime = 200L))
+        verify(host.settings).openPlaybackSettingsDialog()
+    }
+
+    @Test
+    fun downInDialogsSubtitleSearchAndPhoneIsNotIntercepted() {
+        `when`(host.settings.isOverlayDialogVisible()).thenReturn(true)
+        assertFalse(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN))
+        `when`(host.settings.isOverlayDialogVisible()).thenReturn(false)
+        `when`(host.externalSubtitles.subtitleSearchActive).thenReturn(true)
+        assertFalse(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN))
+        `when`(host.externalSubtitles.subtitleSearchActive).thenReturn(false)
+        `when`(host.isTelevisionDevice).thenReturn(false)
+        assertFalse(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN))
+        verify(host.settings, never()).openPlaybackSettingsDialog()
+        verify(host.episodes, never()).openEpisodeSelectionDialog()
+    }
+
+    @Test
+    fun upThenDownReachesSettingsWithoutPausingPlayback() {
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.ACTION_DOWN))
+        verify(host.controllerView).showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
+        `when`(host.playerView.isControllerFullyVisible).thenReturn(true)
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN, downTime = 200L))
+        verify(host.settings).openPlaybackSettingsDialog()
+        verify(host.session, never()).togglePlayback()
+    }
+
+    @Test
     fun hiddenControllerConfirmConsumesRepeatsAndReleaseAfterFocusChanges() {
         for (key in confirmKeys) {
             clearInvocations(host.session, button)

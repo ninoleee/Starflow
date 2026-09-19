@@ -94,8 +94,15 @@ internal class NativePlaybackRemoteController(
             }
 
             KeyEvent.KEYCODE_DPAD_DOWN -> {
-                if (host.isTelevisionDevice && !host.playerView.isControllerFullyVisible) {
-                    if (!host.episodes.openEpisodeSelectionDialog()) {
+                if (host.isTelevisionDevice &&
+                    !host.externalSubtitles.subtitleSearchActive &&
+                    !host.settings.isOverlayDialogVisible() &&
+                    exitConfirmationDialog?.isShowing != true
+                ) {
+                    if (event.repeatCount != 0 || event.isCanceled) return true
+                    if (host.playerView.isControllerFullyVisible ||
+                        !host.episodes.openEpisodeSelectionDialog()
+                    ) {
                         host.settings.openPlaybackSettingsDialog()
                     }
                     return true

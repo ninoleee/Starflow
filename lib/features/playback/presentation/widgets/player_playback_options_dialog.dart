@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -81,6 +82,7 @@ class PlaybackOptionsDialog extends StatelessWidget {
     required this.onLoadExternalSubtitle,
     required this.onSearchSubtitlesOnline,
     required this.onConfigureSeriesSkip,
+    this.onSelectQuality,
     required this.runtimeSettings,
     required this.onApplyRuntimeSettings,
   });
@@ -102,6 +104,7 @@ class PlaybackOptionsDialog extends StatelessWidget {
   final Future<void> Function() onLoadExternalSubtitle;
   final Future<void> Function() onSearchSubtitlesOnline;
   final Future<void> Function() onConfigureSeriesSkip;
+  final Future<void> Function(FntvPlaybackQuality quality)? onSelectQuality;
   final PlaybackMpvRuntimeSettings runtimeSettings;
   final Future<void> Function(PlaybackMpvRuntimeSettings settings)
       onApplyRuntimeSettings;
@@ -146,6 +149,7 @@ class PlaybackOptionsDialog extends StatelessWidget {
             onOpenSubtitleOptionsDialog: _openSubtitleOptionsDialog,
             onSelectAudio: onSelectAudio,
             onConfigureSeriesSkip: onConfigureSeriesSkip,
+            onSelectQuality: onSelectQuality,
             runtimeSettings: runtimeSettings,
             onApplyRuntimeSettings: onApplyRuntimeSettings,
           ),
@@ -179,6 +183,7 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     required this.onOpenSubtitleOptionsDialog,
     required this.onSelectAudio,
     required this.onConfigureSeriesSkip,
+    this.onSelectQuality,
     required this.runtimeSettings,
     required this.onApplyRuntimeSettings,
   });
@@ -198,6 +203,7 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     AudioTrack current,
   ) onSelectAudio;
   final Future<void> Function() onConfigureSeriesSkip;
+  final Future<void> Function(FntvPlaybackQuality quality)? onSelectQuality;
   final PlaybackMpvRuntimeSettings runtimeSettings;
   final Future<void> Function(PlaybackMpvRuntimeSettings settings)
       onApplyRuntimeSettings;
@@ -362,6 +368,37 @@ class _PlaybackOptionsDialogBodyState
     await widget.player.setPlaylistMode(selection);
   }
 
+  Future<void> _selectPlaybackQuality() async {
+    final qualities = widget.target.playbackQualities;
+    final selected = await showDialog<FntvPlaybackQuality>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('画质'),
+        children: [
+          for (final quality in qualities)
+            TvDialogOption(
+              isTelevision: widget.isTelevision,
+              autofocus: quality.index ==
+                  (widget.target.preferredPlaybackQualityIndex ?? 0),
+              onPressed: () => Navigator.of(dialogContext).pop(quality),
+              child: Text(
+                quality.index ==
+                        (widget.target.preferredPlaybackQualityIndex ?? 0)
+                    ? '${quality.label}  当前'
+                    : quality.label,
+              ),
+            ),
+        ],
+      ),
+    );
+    if (selected != null && widget.onSelectQuality != null) {
+      await widget.onSelectQuality!(selected);
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
   Future<void> _openMoreOptionsDialog() {
     return showDialog<void>(
       context: context,
@@ -449,6 +486,24 @@ class _PlaybackOptionsDialogBodyState
             _viewState.currentTrack.audio,
           ),
         ),
+        if (widget.onSelectQuality != null &&
+            widget.target.sourceKind == MediaSourceKind.fntv &&
+            widget.target.playbackQualities.length > 1) ...[
+          const SizedBox(height: 8),
+          _PlaybackOptionTile(
+            isTelevision: widget.isTelevision,
+            title: '画质',
+            value: widget.target.playbackQualities
+                .firstWhere(
+                  (quality) =>
+                      quality.index ==
+                      (widget.target.preferredPlaybackQualityIndex ?? 0),
+                  orElse: () => widget.target.playbackQualities.first,
+                )
+                .label,
+            onPressed: _selectPlaybackQuality,
+          ),
+        ],
         const SizedBox(height: 8),
         _PlaybackOptionTile(
           isTelevision: widget.isTelevision,

@@ -850,6 +850,10 @@ class _HomePageState extends ConsumerState<HomePage>
                   autofocusFirstItem: shouldAutofocusHomeTarget &&
                       !hasHeroListSlot &&
                       module.id == firstFocusableSectionId,
+                  onMoveUpToHero:
+                      _hasHeroContent && module.id == firstFocusableSectionId
+                          ? _requestHeroFocus
+                          : null,
                   homeMetadataAutoRefreshRevision:
                       homeMetadataAutoRefreshRevision,
                   homeNavigationResetRevision: homeNavigationResetRevision,

@@ -1,5 +1,55 @@
 import 'package:starflow/features/library/domain/media_models.dart';
 
+class FntvPlaybackQuality {
+  const FntvPlaybackQuality({
+    required this.index,
+    this.resolution = '',
+    this.bitrate = 0,
+    this.url = '',
+    this.isM3u8 = false,
+    this.progressive = false,
+  });
+
+  final int index;
+  final String resolution;
+  final int bitrate;
+  final String url;
+  final bool isM3u8;
+  final bool progressive;
+
+  String get label {
+    final parts = <String>[
+      if (resolution.trim().isNotEmpty) resolution.trim(),
+      if (bitrate > 0)
+        bitrate >= 1000000
+            ? '${(bitrate / 1000000).toStringAsFixed(1)} Mbps'
+            : '${(bitrate / 1000).round()} Kbps',
+      if (isM3u8) 'HLS',
+    ];
+    return parts.isEmpty ? '画质 ${index + 1}' : parts.join(' · ');
+  }
+
+  Map<String, dynamic> toJson() => {
+        'index': index,
+        'resolution': resolution,
+        'bitrate': bitrate,
+        'url': url,
+        'isM3u8': isM3u8,
+        'progressive': progressive,
+      };
+
+  factory FntvPlaybackQuality.fromJson(Map<String, dynamic> json) {
+    return FntvPlaybackQuality(
+      index: (json['index'] as num?)?.toInt() ?? 0,
+      resolution: json['resolution'] as String? ?? '',
+      bitrate: (json['bitrate'] as num?)?.toInt() ?? 0,
+      url: json['url'] as String? ?? '',
+      isM3u8: json['isM3u8'] as bool? ?? false,
+      progressive: json['progressive'] as bool? ?? false,
+    );
+  }
+}
+
 class PlaybackAudioStream {
   const PlaybackAudioStream({
     required this.id,
@@ -125,6 +175,9 @@ class PlaybackTarget {
     this.subtitleStreams = const [],
     this.preferredAudioStreamId = '',
     this.preferredSubtitleStreamId = '',
+    this.videoStreamId = '',
+    this.playbackQualities = const [],
+    this.preferredPlaybackQualityIndex,
     this.seasonNumber,
     this.episodeNumber,
     this.width,
@@ -164,6 +217,9 @@ class PlaybackTarget {
   final List<PlaybackSubtitleStream> subtitleStreams;
   final String preferredAudioStreamId;
   final String preferredSubtitleStreamId;
+  final String videoStreamId;
+  final List<FntvPlaybackQuality> playbackQualities;
+  final int? preferredPlaybackQualityIndex;
   final int? seasonNumber;
   final int? episodeNumber;
   final int? width;
@@ -203,6 +259,9 @@ class PlaybackTarget {
     List<PlaybackSubtitleStream>? subtitleStreams,
     String? preferredAudioStreamId,
     String? preferredSubtitleStreamId,
+    String? videoStreamId,
+    List<FntvPlaybackQuality>? playbackQualities,
+    int? preferredPlaybackQualityIndex,
     int? seasonNumber,
     int? episodeNumber,
     int? width,
@@ -247,6 +306,10 @@ class PlaybackTarget {
           preferredAudioStreamId ?? this.preferredAudioStreamId,
       preferredSubtitleStreamId:
           preferredSubtitleStreamId ?? this.preferredSubtitleStreamId,
+      videoStreamId: videoStreamId ?? this.videoStreamId,
+      playbackQualities: playbackQualities ?? this.playbackQualities,
+      preferredPlaybackQualityIndex:
+          preferredPlaybackQualityIndex ?? this.preferredPlaybackQualityIndex,
       seasonNumber: seasonNumber ?? this.seasonNumber,
       episodeNumber: episodeNumber ?? this.episodeNumber,
       width: width ?? this.width,
@@ -407,6 +470,10 @@ class PlaybackTarget {
       'subtitleStreams': subtitleStreams.map((item) => item.toJson()).toList(),
       'preferredAudioStreamId': preferredAudioStreamId,
       'preferredSubtitleStreamId': preferredSubtitleStreamId,
+      'videoStreamId': videoStreamId,
+      'playbackQualities':
+          playbackQualities.map((item) => item.toJson()).toList(),
+      'preferredPlaybackQualityIndex': preferredPlaybackQualityIndex,
       'seasonNumber': seasonNumber,
       'episodeNumber': episodeNumber,
       'width': width,
@@ -465,6 +532,15 @@ class PlaybackTarget {
       preferredAudioStreamId: json['preferredAudioStreamId'] as String? ?? '',
       preferredSubtitleStreamId:
           json['preferredSubtitleStreamId'] as String? ?? '',
+      videoStreamId: json['videoStreamId'] as String? ?? '',
+      playbackQualities:
+          (json['playbackQualities'] as List<dynamic>? ?? const [])
+              .whereType<Map>()
+              .map((item) =>
+                  FntvPlaybackQuality.fromJson(Map<String, dynamic>.from(item)))
+              .toList(growable: false),
+      preferredPlaybackQualityIndex:
+          (json['preferredPlaybackQualityIndex'] as num?)?.toInt(),
       seasonNumber: (json['seasonNumber'] as num?)?.toInt(),
       episodeNumber: (json['episodeNumber'] as num?)?.toInt(),
       width: (json['width'] as num?)?.toInt(),

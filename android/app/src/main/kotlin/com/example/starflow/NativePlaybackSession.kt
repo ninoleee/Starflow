@@ -235,6 +235,7 @@ internal class NativePlaybackSession(private val host: Host) {
                 )
                 .build()
         host.subtitles.automaticSubtitleSelectionApplied = false
+        host.subtitles.pendingExternalSubtitleSelection = false
         host.diagnostics.playbackFirstFrameRendered = false
         host.diagnostics.playbackLastRuntimeLogAtMs = 0L
         val sessionSubtitleMode = host.subtitles.subtitleSessionPreference?.mode

@@ -9,6 +9,10 @@ const double _kHomeLandscapeTileWidth = 260;
 const double _kHomeLandscapeTileAspectRatio = 16 / 9;
 const double _kHomeLandscapeRailHeight = 196;
 
+class _HomeMoveUpToHeroIntent extends Intent {
+  const _HomeMoveUpToHeroIntent();
+}
+
 String _homeSectionViewAllFocusKey(HomeSectionViewModel section) {
   return 'view-all:${section.id}';
 }
@@ -20,6 +24,7 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
     required this.isPageVisible,
     required this.focusNodeForContent,
     required this.autofocusFirstItem,
+    this.onMoveUpToHero,
     required this.homeMetadataAutoRefreshRevision,
     required this.homeNavigationResetRevision,
   });
@@ -28,6 +33,7 @@ class _HomeSectionSlot extends ConsumerStatefulWidget {
   final bool isPageVisible;
   final FocusNode Function(String focusKey) focusNodeForContent;
   final bool autofocusFirstItem;
+  final VoidCallback? onMoveUpToHero;
   final int homeMetadataAutoRefreshRevision;
   final int homeNavigationResetRevision;
 
@@ -143,7 +149,7 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
       for (var index = 0; index < posterItemKeys.length; index += 1)
         posterItemKeys[index]: index,
     };
-    return _HomeSection(
+    final sectionWidget = _HomeSection(
       title: section.title,
       child: section.layout == HomeSectionLayout.carousel
           ? _HomeCarousel(
@@ -207,6 +213,26 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
                     ),
                   ),
                 ),
+    );
+    final onMoveUpToHero = widget.onMoveUpToHero;
+    if (onMoveUpToHero == null) {
+      return sectionWidget;
+    }
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.arrowUp): _HomeMoveUpToHeroIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _HomeMoveUpToHeroIntent: CallbackAction<_HomeMoveUpToHeroIntent>(
+            onInvoke: (_) {
+              onMoveUpToHero();
+              return null;
+            },
+          ),
+        },
+        child: sectionWidget,
+      ),
     );
   }
 }

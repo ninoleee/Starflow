@@ -21,6 +21,7 @@ internal class NativePlaybackLaunchController(
     private val now: () -> Long = SystemClock::elapsedRealtime,
 ) {
     interface Host {
+        val fntv: NativeFntvController
         val session: NativePlaybackSession
         val diagnostics: NativePlaybackDiagnostics
         val episodes: NativePlaybackEpisodeController
@@ -142,6 +143,7 @@ internal class NativePlaybackLaunchController(
     }
 
     fun handlePlaybackFailure(message: String) {
+        if (host.fntv.recoverQualityFailure()) return
         host.episodes.onPlaybackFailed()
         val launchPending = !launchResultDelivered
         cancelPlaybackLaunchTimeout()

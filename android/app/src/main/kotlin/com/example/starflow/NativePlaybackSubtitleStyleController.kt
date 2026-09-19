@@ -1,10 +1,11 @@
 package com.example.starflow
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.graphics.Color
 import android.graphics.Typeface
+import android.view.ViewGroup
 import android.view.accessibility.CaptioningManager
+import android.widget.FrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
@@ -30,43 +31,21 @@ internal class NativePlaybackSubtitleStyleController(private val host: Host) {
     var secondarySubtitleScale = NativeDualSubtitleLayoutPolicy.SECONDARY_TEXT_SCALE_PERCENT
 
     fun openSubtitleScalePicker() {
-        val options = SUBTITLE_SCALE_OPTIONS
-        val currentIndex =
-            options
-                .withIndex()
-                .minByOrNull { (_, value) -> kotlin.math.abs(value - subtitleScale) }
-                ?.index ?: 0
-        val labels =
-            options
-                .mapIndexed { index, value ->
-                    val label = NativePlaybackFormatting.formatSubtitleScaleLabel(value)
-                    if (index == currentIndex) "$label  当前" else label
-                }
-                .toTypedArray()
-        val dialog =
-            AlertDialog.Builder(host.activity)
-                .setTitle(host.activity.getString(R.string.native_subtitle_scale))
-                .setSingleChoiceItems(labels, currentIndex) { pickerDialog, which ->
-                    val selected = options[which]
-                    pickerDialog.dismiss()
-                    if (kotlin.math.abs(selected - subtitleScale) >= 0.5) {
-                        subtitleScale = selected
-                        applySubtitleStyle()
-                        persistGlobalSubtitleStyle()
-                        host.showToast(
-                            "主字幕大小已设为${NativePlaybackFormatting.formatSubtitleScaleLabel(selected)}"
-                        )
-                    }
-                }
-                .setNegativeButton("取消", null)
-                .create()
-        host.settings.showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
+        openSubtitleNumberPicker(
+            title = host.activity.getString(R.string.native_subtitle_scale),
+            range = 20..78,
+            current = subtitleScale,
+            format = NativePlaybackFormatting::formatSubtitleScaleLabel,
+        ) { selected ->
+            subtitleScale = selected
+            applySubtitleStyle()
+        }
     }
 
     fun openPrimarySubtitlePositionPicker() {
-        openSubtitlePercentPicker(
+        openSubtitleNumberPicker(
             title = "主字幕位置",
-            options = SUBTITLE_POSITION_OPTIONS,
+            range = 50..100,
             current = primarySubtitlePosition,
         ) { selected ->
             primarySubtitlePosition = selected
@@ -75,9 +54,9 @@ internal class NativePlaybackSubtitleStyleController(private val host: Host) {
     }
 
     fun openSecondarySubtitlePositionPicker() {
-        openSubtitlePercentPicker(
+        openSubtitleNumberPicker(
             title = "副字幕位置",
-            options = SUBTITLE_POSITION_OPTIONS,
+            range = 50..100,
             current = secondarySubtitlePosition,
         ) { selected ->
             secondarySubtitlePosition = selected
@@ -86,9 +65,9 @@ internal class NativePlaybackSubtitleStyleController(private val host: Host) {
     }
 
     fun openSecondarySubtitleScalePicker() {
-        openSubtitlePercentPicker(
+        openSubtitleNumberPicker(
             title = "副字幕大小",
-            options = SECONDARY_SUBTITLE_SCALE_OPTIONS,
+            range = 50..120,
             current = secondarySubtitleScale,
         ) { selected ->
             secondarySubtitleScale = selected
@@ -96,33 +75,23 @@ internal class NativePlaybackSubtitleStyleController(private val host: Host) {
         }
     }
 
-    private fun openSubtitlePercentPicker(
+    private fun openSubtitleNumberPicker(
         title: String,
-        options: List<Double>,
+        range: IntRange,
         current: Double,
+        format: (Double) -> String = NativePlaybackFormatting::formatSubtitlePercentLabel,
         onSelected: (Double) -> Unit,
     ) {
-        val currentIndex =
-            options
-                .withIndex()
-                .minByOrNull { (_, value) -> kotlin.math.abs(value - current) }
-                ?.index ?: 0
-        val labels =
-            options.map(NativePlaybackFormatting::formatSubtitlePercentLabel).toTypedArray()
-        val dialog =
-            AlertDialog.Builder(host.activity)
-                .setTitle(title)
-                .setSingleChoiceItems(labels, currentIndex) { pickerDialog, which ->
-                    val selected = options[which]
-                    pickerDialog.dismiss()
-                    onSelected(selected)
-                    persistGlobalSubtitleStyle()
-                    host.showToast(
-                        "$title 已设为${NativePlaybackFormatting.formatSubtitlePercentLabel(selected)}"
-                    )
-                }
-                .setNegativeButton("取消", null)
-                .create()
+        val dialog = NativePlaybackNumberPicker.create(
+            activity = host.activity,
+            title = title,
+            current = current,
+            range = range,
+            format = format,
+        ) { selected ->
+            onSelected(selected)
+            persistGlobalSubtitleStyle()
+        }
         host.settings.showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
     }
 
@@ -150,6 +119,19 @@ internal class NativePlaybackSubtitleStyleController(private val host: Host) {
 
     fun applySubtitleStyle() {
         val subtitleView = host.playerView.subtitleView ?: return
+        // The default content frame follows the video aspect ratio and excludes letterbox bars.
+        val overlay = host.playerView.overlayFrameLayout
+        if (overlay != null && subtitleView.parent !== overlay) {
+            (subtitleView.parent as? ViewGroup)?.removeView(subtitleView)
+            overlay.addView(
+                subtitleView,
+                0,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
         val style =
             NativeSubtitleStylePolicy.resolve(
                 rawScale = subtitleScale,
@@ -157,7 +139,7 @@ internal class NativePlaybackSubtitleStyleController(private val host: Host) {
             )
         subtitleView.setViewType(SubtitleView.VIEW_TYPE_CANVAS)
         subtitleView.setBottomPaddingFraction(
-            (1.0 - (primarySubtitlePosition / 100.0)).toFloat().coerceIn(0.05f, 0.5f)
+            NativeSubtitlePositionPolicy.bottomPaddingFraction(primarySubtitlePosition)
         )
 
         val captioningManager =

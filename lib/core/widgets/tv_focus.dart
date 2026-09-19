@@ -247,6 +247,14 @@ void requestTvFocus(
   focusNode.requestFocus();
 }
 
+bool hasActionableTvFocus([FocusNode? focusNode]) {
+  final node = focusNode ?? FocusManager.instance.primaryFocus;
+  return node != null &&
+      node is! FocusScopeNode &&
+      node.context != null &&
+      node.canRequestFocus;
+}
+
 class TvDirectionalFocusBoundary extends StatelessWidget {
   const TvDirectionalFocusBoundary({
     super.key,

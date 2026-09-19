@@ -502,6 +502,50 @@ class MainActivity : FlutterActivity() {
     }
 
     companion object {
+        fun invokeNativeFntv(
+            method: String,
+            arguments: Map<String, Any?>,
+            callback: (Map<String, Any?>) -> Unit,
+        ) {
+            val activity = activeInstance?.get()
+            if (activity == null) {
+                callback(mapOf("ok" to false))
+                return
+            }
+            activity.runOnUiThread {
+                val channel = activity.nativePlaybackResolverChannel
+                if (channel == null) {
+                    callback(mapOf("ok" to false))
+                    return@runOnUiThread
+                }
+                val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                var completed = false
+                val timeout = Runnable {
+                    if (!completed) {
+                        completed = true
+                        callback(mapOf("ok" to false, "message" to "飞牛请求超时"))
+                    }
+                }
+                fun complete(result: Map<String, Any?>) {
+                    if (completed) return
+                    completed = true
+                    handler.removeCallbacks(timeout)
+                    callback(result)
+                }
+                handler.postDelayed(timeout, 30_000)
+                channel.invokeMethod(method, arguments, object : MethodChannel.Result {
+                    override fun success(result: Any?) {
+                        @Suppress("UNCHECKED_CAST")
+                        complete(result as? Map<String, Any?> ?: mapOf("ok" to false))
+                    }
+                    override fun error(code: String, message: String?, details: Any?) {
+                        complete(mapOf("ok" to false, "message" to "飞牛请求失败"))
+                    }
+                    override fun notImplemented() { complete(mapOf("ok" to false)) }
+                })
+            }
+        }
+
         @Volatile
         private var activeInstance: WeakReference<MainActivity>? = null
 

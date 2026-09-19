@@ -22,6 +22,7 @@ internal class NativePlaybackEpisodeController(
         MainActivity::resolveNativePlaybackEpisode,
 ) {
     interface Host {
+        val fntv: NativeFntvController
         val controllerView: NativePlaybackControllerView
         val target: NativePlaybackTarget
         val runtime: NativePlaybackRuntimeController
@@ -251,6 +252,7 @@ internal class NativePlaybackEpisodeController(
         if (!isAddressRetry) host.launch.resetStartupDeadline()
         if (reason == "outro") host.runtime.markAutoSkipCompleted()
         else host.runtime.persistPlaybackProgress(force = true)
+        host.fntv.invalidateMedia()
         host.diagnostics.finishPlaybackPerformanceSession("episode-switch")
         host.session.releasePlayer()
         NativePlaybackFormatting.logPlayback(

@@ -52,6 +52,9 @@ void main() {
     final client = FntvApiClient(MockClient((request) async {
       requests++;
       if (failRefresh) return http.Response('', 503);
+      if (request.url.path.endsWith('/item/refresh')) {
+        return _ok(true);
+      }
       if (request.url.path.endsWith('/mediadb/list')) {
         return _ok([
           {'guid': 'movies', 'title': 'Movies', 'category': 'Movie'}
@@ -99,6 +102,48 @@ void main() {
     failRefresh = true;
     await expectLater(repository.refreshSource(sourceId: _source.id),
         throwsA(isA<FntvApiException>()));
+    expect((await repository.fetchLibrary(sourceId: _source.id)).single.id,
+        'movie');
+  });
+
+  test('failed server refresh request does not block local library refresh',
+      () async {
+    final paths = <String>[];
+    final client = FntvApiClient(MockClient((request) async {
+      paths.add(request.url.path);
+      if (request.url.path.endsWith('/item/refresh')) {
+        return http.Response('', 503);
+      }
+      if (request.url.path.endsWith('/mediadb/list')) {
+        return _ok([
+          {'guid': 'movies', 'title': 'Movies', 'category': 'Movie'}
+        ]);
+      }
+      expect(request.url.path, '/v/api/v1/item/list');
+      return _ok({
+        'total': 1,
+        'list': [
+          {
+            'guid': 'movie',
+            'title': 'Example Movie',
+            'type': 'Movie',
+            'ancestor_guid': 'movies',
+          }
+        ]
+      });
+    }));
+    final container = ProviderContainer(overrides: [
+      appSettingsProvider.overrideWithValue(
+          SeedData.defaultSettings.copyWith(mediaSources: [_source])),
+      fntvApiClientProvider.overrideWithValue(client),
+    ]);
+    addTearDown(container.dispose);
+    final repository = container.read(mediaRepositoryProvider);
+
+    await repository.refreshSource(sourceId: _source.id);
+
+    expect(paths.first, '/v/api/v1/item/refresh');
+    expect(paths, contains('/v/api/v1/item/list'));
     expect((await repository.fetchLibrary(sourceId: _source.id)).single.id,
         'movie');
   });

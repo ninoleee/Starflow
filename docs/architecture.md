@@ -107,6 +107,7 @@ lib/
 - App 外观由 `app/theme/app_colors.dart` 的固定近中性色阶与 `AppRadii`（12/18/28/999）控制；共享控件、首页和详情组件复用这些 token。`AppAccent` 是无 Flutter 依赖的设置枚举，`appAccent` 持久化为 bone/teal/indigo/coral/amber/rose/lime/violet，旧配置或未知值回退 teal。`StarflowApp` 只监听该字段重建主题；`ColorScheme` 保持中性，`AppActionColors` ThemeExtension 显式提供交互强调色：主行动、导航选中态、开关开启态、勾选/单选、筛选与排序选中项、线路选中标记、已收藏图标、进度/滑块和输入框聚焦描边。共享 `StarflowChipButton` 在聚焦时保留选中颜色，TV 外侧焦点框统一保持纯白；错误语义色、禁用弱化与中性背景不变。`surfaceTint` 固定透明，页面背景不绘制彩色光晕
 - 详情 Hero 的“继续播放 / 从头播放”继续使用与普通操作按钮相同的 `secondary` 中性样式，不读取 `AppActionColors`；详情线路选择使用淡强调色底、边框与选中图标；当前播放剧集使用中性白色选中样式。详情上次播放剧集由 `findLastPlayedEpisodeIndex` 匹配，在卡片简介区显示中性历史图标和“Last Played”文字，无匹配时不显示；不增加强调色边框，不改变卡片尺寸、滚动恢复或焦点行为。播放器显式绘制的已播放进度段同样读取 `AppActionColors`，缓冲段与未播放轨道保持中性
 - 首页在重新变为活动页以及 `hasPendingSections` 从 `true` 变为 `false` 时各安排一次下一帧检查；仅在主焦点为空、落在 `FocusScopeNode`、已卸载或不可请求时调用现有侧栏恢复入口，已有可操作焦点时不做任何处理
+- TV 菜单上下键按显示顺序在可见菜单项之间移动，首尾保持原位。搜索页异步结果只在主焦点为空、落在 `FocusScopeNode`、已卸载或不可请求时恢复到搜索输入框；收藏页优先恢复 `favorites:sync`，设置首页优先补到 `settings:header`。菜单或其他已挂载的可操作焦点不会被页面恢复逻辑抢占
 - TV 主壳处理返回键时先以 `UnfocusDisposition.scope` 清理当前焦点及作用域历史，再聚焦当前页面对应的侧栏入口；仅当该入口已经持有主焦点时，再次返回才进入退出确认
 - TV 主壳根据自动隐藏设置切换布局：关闭自动隐藏时使用 `Row`，菜单常驻并让内容区从左侧 `48dp` 后开始，面板颜色跟随主题 `surface`；开启自动隐藏时使用 `Stack`，内容区通过 `Positioned.fill` 保持全宽，侧栏作为 `Positioned` 浮层只做 `AnimatedSlide + AnimatedOpacity`，显隐不改变内容区布局，避免首页与媒体库网格重排。自动隐藏面板在启用透明磨砂时使用 `BackdropFilter`，关闭特效时使用半透明纯色。菜单栏仍为垂直居中的图标窄栏：栏宽 `48dp`、按钮 `44×44dp`、四周外边距为 `0`，图标保持 `24dp`。按钮统一 `18dp` 圆角；常驻 `Row` 面板保持直角，自动隐藏 `Stack` 面板使用 `28dp` 圆角。未选中项和聚焦描边均做了弱化，降低内容浏览时的视觉存在感
 - TV 菜单聚焦标签通过 `OverlayPortal` 和 `CompositedTransformFollower` 跟随按钮；浮层根部用仅指定 `left/top` 的 `Positioned` 解除 Overlay 全屏紧约束，标签以自身尺寸和按钮垂直居中、文字水平间隔 `12dp`，不参与页面布局。标签使用半透明强调色胶囊背景、文字使用对应强调色的对比色，无描边，不接收指针事件，失焦或目标卸载后不显示；两种 TV 菜单布局均有标签尺寸、锚点和卸载回归测试
@@ -403,6 +404,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 首页 `Hero`、背景图与海报图会按显示尺寸传递 decode 尺寸；移动端 `PageController` 也做了边界稳定化，降低首屏切换和大图解码抖动
 - 静态 Hero 与精简 Hero 视觉由一个界面开关原子更新，全屏背景图仍单独持久化
 - `TV` 首页会给 Hero、模块标题和内容区之间补齐明确的方向焦点路径，避免焦点停在 Hero 图片层后无法继续下移
+- 首页存在 Hero 时，首个有内容的普通模块通过局部上键动作直接请求 Hero 当前卡片；因此从该模块返回页头不会落到 Hero 的内部焦点作用域或不可用翻页按钮
 - `TV` 信息管理页的搜索输入框只用 `goBack / escape` 退出编辑状态，不在输入框外层覆盖 `backspace`；软键盘删除键因此继续交给 `EditableText` 删除字符并保持输入焦点
 - 桌面端首页普通横向内容流也会复用统一的左右翻页按钮，而不是只让 Hero 独占这套交互
 
@@ -429,10 +431,12 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - `AppMediaQueryService` 复用现有来源 / 分区缓存布局，内部 `Emby` 命名的快照和刷新 API 为兼容现有调用保留；所有分片按来源 ID 隔离，每分区当前最多 `200` 条。飞牛图片 URL 保留在分片中，鉴权头在读取时从当前会话恢复，仅对同源图片添加；失败的飞牛刷新不会替换旧快照。
 - `FntvApiClient` 的媒体库根列表按飞牛 Web 客户端契约传入完整浏览类型并排除了已归组的视频条目；直接目录浏览使用 `parent_guid` 并保留归组视频。剧集详情仍只通过 `season/list` 和 `episode/list` 建立季 / 集层级，不把根列表中的单集当作剧集。
 - 主页分区、媒体库筛选、本地搜索、详情匹配及版本选择包含飞牛；季 / 集通过服务端层级接口读取，连播队列不使用 NAS 索引。播放启动统一通过 `PlaybackTargetResolver` 重新解析飞牛地址，避免复用详情缓存中过期的临时链接。
+- 飞牛来源每次进入媒体服务器缓存刷新前，`FntvApiClient.requestLibraryRefresh` 会对当前选中分区逐一致 `POST item/refresh`，请求体仅含 `item_guid`；未限定分区时先读取 `mediadb/list` 后刷新除音乐 / 直播外的库根。通知失败被记录并降级为仅本地刷新，不阻止随后 `fetchCollections / item/list` 和缓存快照落盘。手动“更新”、启动同步及“转存后刷新媒体库”选中的飞牛来源共用该顺序。
 - `FntvApiClient` 在媒体流协商中传入当前会话摘要（协议字段 `ip`）及数组格式的 `header.User-Agent`，并向播放目标传递一致的默认 UA；服务端提供的外链 UA 优先。业务错误仅记录安全的阶段和错误码，不让请求体、会话摘要或响应正文进入日志。
-- `PlaybackTarget` 携带飞牛音轨 / 字幕流描述及服务端默认流 ID；`playback_server_track_resolver` 将服务端流映射到 media_kit 实际轨道。播放器启动只自动应用服务端默认轨道，已有剧集字幕偏好和“关闭字幕”设置优先；外挂字幕通过 `MediaServerClient.downloadExternalSubtitle` 下载后注入现有字幕选择器。
+- `PlaybackTarget` 携带飞牛音轨 / 字幕流描述、服务端默认流 ID 和 `direct_link_qualities`；`playback_server_track_resolver` 将服务端流映射到 media_kit 实际轨道。播放器启动只自动应用服务端默认轨道，已有剧集字幕偏好和“关闭字幕”设置优先；外挂字幕通过原始字节下载，播放器侧支持 ZIP 中的文本字幕和常见 UTF-8 / UTF-16 / GBK 编码，并拒绝位图字幕文本化。多个质量可在播放设置中选择，切换会保留当前位置并重新解析播放地址；播放器按节流策略调用 `play/record` 回写进度。
 - 媒体源编辑器在地址、用户名、密码变更时清除飞牛会话和分区；过期登录及分区请求结果不覆盖已修改的草稿。来源删除、账户切换及地址改变沿用 `MediaSourceCacheLifecycle`。
-- 飞牛与 Emby 共用后台刷新并发预算和启动刷新开关，进度标题按实际来源类型展示。该接入不新增扫描服务，不改 WebDAV / Quark 索引，不回写飞牛播放历史，也不请求服务端转码或 FN ID 中继发现。
+- Android Exo 的 `NativeFntvController` 接入原生设置、字幕、运行期和换集生命周期。播放设置按飞牛目标生成固定可见的“画质 / 音轨 / 字幕”标签，并附带当前画质、音轨数和内置 / 外挂字幕数；画质不足两项时给出不可切换原因。画质解析复用现有 episode resolver；字幕下载和进度通过同一 resolver channel 调用 Dart，`NativeFntvService` 持有来源与临时字幕目录，仍由 `FntvApiClient` 统一签名和鉴权。服务按 resolver session 隔离，退出后等待 `NativeFntvProgressQueue` 排空最后进度再关闭；初次画面就绪不是会话结束。换集 / 关闭使旧画质及字幕结果失效，质量切换首帧失败或启动超时会尝试回退；原生轨道偏好按新轨道匹配，不复用旧轨道组 override。
+- 飞牛与 Emby 共用后台刷新并发预算和启动刷新开关，进度标题按实际来源类型展示。该接入不新增扫描服务，不改 WebDAV / Quark 索引，也不请求服务端转码或 FN ID 中继发现。
 
 ### WebDAV
 
@@ -802,7 +806,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
   - 在线字幕搜索
   - Android 原生音轨/字幕选择、播放中音频输出切换、外挂字幕加载与外挂字幕偏移
   - Android 原生播放设置弹窗一级只保留本剧跳过片头片尾、音轨、字幕和选择剧集；播放速度、音频输出、主字幕大小、主/副字幕位置、副字幕大小、在线查找字幕、加载外部字幕和字幕偏移全部收进列表最下方的“更多”二级弹窗
-  - Android TV 原生控制层只让进度条参与遥控器焦点；播放/暂停及右下角字幕、音轨和更多按钮仍保留显示与点击，但不进入方向键焦点链。确定键由原生遥控器处理层直接切换播放状态，字幕/音轨/设置改用菜单键、字幕键等电视快捷键打开
+  - Android TV 原生控制层只让进度条参与遥控器焦点；播放/暂停及右下角字幕、音轨和更多按钮仍保留显示与点击，但不进入方向键焦点链。确定键由原生遥控器处理层直接切换播放状态。`NativePlaybackRemoteController` 在控制栏显示时按下打开播放设置，形成无菜单键遥控器“上 → 下”的可达路径；隐藏时按下保持选集优先、设置兜底。长按重复不重开，已有弹窗和字幕搜索中的下键交还原界面；菜单键、字幕键快捷入口不变
   - Android 原生播放器的主字幕大小可在“更多”里按 `20–78号` 调整，主/副位置和副字幕大小按百分比调整；改完立即重新套用 `NativeSubtitleStylePolicy / NativeDualSubtitleController`，并通过原生播放回调调用 Flutter `SettingsController` 的字幕样式窄保存入口。设置页、MPV 与 ExoPlayer 因而共用同一份全局值，不再保留原生会话临时覆盖
   - Android 原生音轨与字幕轨选择使用单选即应用的轻量弹窗；点选轨道或“关闭”会立即更新 Media3 `TrackSelectionParameters` 并关闭弹窗，不保留额外的确定步骤
 - Android `NativePlaybackActivity` 使用 `Theme.AppCompat.NoActionBar` 派生的全屏黑色主题；音轨、字幕轨与音频输出都使用原生单选对话框，选中即应用，不依赖额外确定按钮
@@ -1034,7 +1038,8 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 播放页放播放器内核、解码模式、ExoPlayer 音频输出、打开超时、后台播放、默认倍速
 - 字幕收拢到独立的“字幕”一级页：字幕默认状态、默认字幕、主字幕大小、主/副字幕位置、副字幕大小、在线字幕来源与凭据、在线字幕优先语言、单次最多验证条数
 - 主字幕大小、主字幕位置、副字幕位置和副字幕大小属于全局字段；设置页的步进项每次点击立即入有序保存队列，MPV 播放内修改走 `savePlaybackRuntimePreferences(...)`，Android 原生播放内修改经 Flutter 回调走 `savePlaybackSubtitleStylePreferences(...)`，三条路径最终写同一组 `AppSettings` 字段
-- 主/副字幕位置统一使用 `50%–100%` 范围；设置页使用 `1%` 精细步进，MPV 播放内“更多”和 Android 原生位置选择器使用 `5%` 快速步进。副字幕大小继续使用 `5%` 步进
+- 主/副字幕位置统一使用 `50%–100%` 范围；设置页使用 `1%` 步进，MPV 播放内“更多”使用 `5%` 步进。Exo 的 `NativePlaybackNumberPicker` 使用加减按钮与原生 `SeekBar`，并支持整数或小数步长：主字号 `20–78`、主/副位置 `50–100`、副字幕大小 `50–120` 均以 `1` 为步长，倍速 `0.75–2.0` 以 `0.05` 为步长，外挂字幕偏移 `-30s–+30s` 以 `100ms` 为步长。遥控器左右键及按键重复由 SeekBar 处理；打开时不写入设置，每次实际变化由对应控制器立即应用并走既有保存回调，完成/返回不回滚。字幕偏移连续输入按 `250ms` 合并后重建字幕，避免滑杆拖动时反复创建媒体项。弹窗置顶、不压暗背景、初始聚焦滑杆，关闭仍走 `showTransientDialog` 恢复焦点。设置页和 MPV 的副字幕大小仍为 `5%` 步进
+- Exo 的 `NativePlaybackSubtitleStyleController` 将现有 `SubtitleView` 挂入 `PlayerView.overlayFrameLayout`，保持 Media3 cue 更新与控制栏层级，字幕布局覆盖整个播放窗口而不受视频宽高比和上下黑边限制。`NativeSubtitlePositionPolicy` 将位置完整映射到 `0.5–1.0`，普通文本 cue 清除内嵌垂直 line 后使用 `0–0.5` 底部留白，保留其余样式和位图 cue；双字幕使用 `ANCHOR_TYPE_END` 使主/副字幕块底边分别对齐所选百分比。`100%` 不再被截到 `95%` 或强制保留 `5%` 底部安全区；字体自身的字面留白仍由 Media3 排版决定
 - 内置 MPV 的触屏交互、卡顿自动恢复和激进性能调优保留在全局设置的独立“MPV”一级页；播放器内的播放设置一级只提供“更多”入口，二级页复用同一组持久化字段，并额外集中提供后台播放与主/副字幕布局
 - 三个页面都不再维护需要手动提交的页面草稿：选择、开关和步进项修改后立即排入持久化队列，文本输入使用 `250ms` 合并窗口；返回时会先把最后草稿加入有序写入队列，再立即关闭页面，不再显示保存确认框或工具栏提交按钮
 - 三个全局设置页各自只写自己那段字段：播放页走 `savePlaybackPreferences(...)`、字幕页走 `savePlaybackSubtitlePreferences(...)`、MPV 页走 `savePlaybackMpvPreferences(...)`；播放器内二级“更多”使用 `savePlaybackRuntimePreferences(...)` 原子保存其当前完整快照，避免连续操作互相覆盖

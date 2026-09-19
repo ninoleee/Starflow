@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:starflow/app/shell_layout.dart';
+import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/network_proxy_config.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
@@ -477,9 +478,48 @@ class _SettingsPageVersionFooter extends StatelessWidget {
   }
 }
 
-class _SettingsPageState extends ConsumerState<SettingsPage> {
+class _SettingsPageState extends ConsumerState<SettingsPage>
+    with PageActivityMixin<SettingsPage> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _headerFocusNode = FocusNode(debugLabel: 'settings-header');
+  bool _initialTelevisionFocusScheduled = false;
+
+  @override
+  void onPageBecameActive() {
+    _scheduleInitialTelevisionFocus();
+  }
+
+  void _scheduleInitialTelevisionFocus({int remainingAttempts = 4}) {
+    if (!mounted ||
+        !isPageActive ||
+        _initialTelevisionFocusScheduled ||
+        !(ref.read(isTelevisionProvider).value ?? false)) {
+      return;
+    }
+    _initialTelevisionFocusScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initialTelevisionFocusScheduled = false;
+      if (!mounted ||
+          !isPageActive ||
+          !(ref.read(isTelevisionProvider).value ?? false) ||
+          hasActionableTvFocus()) {
+        return;
+      }
+      final focusContext = _headerFocusNode.context;
+      if (focusContext == null || !_headerFocusNode.canRequestFocus) {
+        if (remainingAttempts > 0) {
+          _scheduleInitialTelevisionFocus(
+            remainingAttempts: remainingAttempts - 1,
+          );
+        }
+        return;
+      }
+      requestTvFocus(
+        _headerFocusNode,
+        scope: FocusScope.of(focusContext),
+      );
+    });
+  }
 
   @override
   void dispose() {

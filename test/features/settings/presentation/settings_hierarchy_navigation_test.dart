@@ -12,8 +12,32 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/media_source_settings_page.dart';
 import 'package:starflow/features/settings/presentation/network_storage_settings_page.dart';
 import 'package:starflow/features/settings/presentation/search_service_settings_page.dart';
+import 'package:starflow/features/settings/presentation/settings_page.dart';
 
 void main() {
+  testWidgets('TV settings root focuses its visible header', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1920, 1080));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          appSettingsProvider.overrideWithValue(_settings),
+        ],
+        child: const MaterialApp(home: SettingsPage()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      _focusAction(tester, 'settings:header').focusNode!.hasPrimaryFocus,
+      isTrue,
+      reason: describeTvFocusNode(FocusManager.instance.primaryFocus),
+    );
+  });
+
   testWidgets('TV content directories expose a visible initial focus',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1920, 1080));

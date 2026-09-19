@@ -7,6 +7,7 @@ import androidx.media3.ui.PlayerView
 
 internal class NativePlaybackSettingsController(private val host: Host) {
     interface Host {
+        val fntv: NativeFntvController
         val controllerView: NativePlaybackControllerView
         val episodes: NativePlaybackEpisodeController
         val externalSubtitles: NativePlaybackExternalSubtitleController
@@ -54,18 +55,30 @@ internal class NativePlaybackSettingsController(private val host: Host) {
         }
 
         val actions = mutableListOf<Pair<String, () -> Unit>>()
+        host.fntv.qualitySettingsLabel()?.let { label ->
+            actions += label to { host.fntv.openQualityPicker() }
+        }
         actions +=
             "本剧跳过片头片尾 · ${formatSeriesSkipPreferenceSummary()}" to
                 {
                     openSeriesSkipPreferenceDialog()
                 }
+        NativeAppLogger.info(
+            "playback.fntv",
+            "Playback settings menu source=${host.target.decodePlaybackTargetObject().optString("sourceKind")} " +
+                "quality=${host.fntv.qualitySettingsLabel() ?: "-"} " +
+                "audio=${host.fntv.audioSettingsLabel() ?: "-"} " +
+                "subtitle=${host.fntv.subtitleSettingsLabel() ?: "-"}",
+        )
         actions +=
-            host.activity.getString(R.string.native_audio_track) to
+            (host.fntv.audioSettingsLabel()
+                ?: host.activity.getString(R.string.native_audio_track)) to
                 {
                     host.subtitles.openAudioTrackSelectionDialog()
                 }
         actions +=
-            host.activity.getString(R.string.native_subtitle_track) to
+            (host.fntv.subtitleSettingsLabel()
+                ?: host.activity.getString(R.string.native_subtitle_track)) to
                 {
                     host.subtitles.openSubtitleTrackSelectionDialog()
                 }
@@ -312,30 +325,21 @@ internal class NativePlaybackSettingsController(private val host: Host) {
 
     private fun openPlaybackSpeedPicker() {
         val currentPlayer = host.session.player ?: return
-        val speeds = PLAYBACK_SPEED_OPTIONS
-        val currentSpeed = currentPlayer.playbackParameters.speed
-        val currentIndex =
-            speeds
-                .withIndex()
-                .minByOrNull { (_, value) -> kotlin.math.abs(value - currentSpeed) }
-                ?.index ?: 0
-        val dialog =
-            AlertDialog.Builder(host.activity)
-                .setTitle(host.activity.getString(R.string.native_playback_speed))
-                .setSingleChoiceItems(
-                    speeds.map(NativePlaybackFormatting::formatPlaybackSpeedLabel).toTypedArray(),
-                    currentIndex,
-                ) { pickerDialog, which ->
-                    currentPlayer.playbackParameters =
-                        currentPlayer.playbackParameters.withSpeed(speeds[which])
-                    host.systemSession.syncPlaybackSystemSession()
-                    pickerDialog.dismiss()
-                    host.controllerView.restoreControllerFocusIfNeeded(
-                        ControllerFocusTarget.SETTINGS
-                    )
-                }
-                .setNegativeButton("取消", null)
-                .create()
+        val dialog = NativePlaybackNumberPicker.createStepped(
+            activity = host.activity,
+            title = host.activity.getString(R.string.native_playback_speed),
+            current = currentPlayer.playbackParameters.speed.toDouble(),
+            min = 0.75,
+            max = 2.0,
+            step = 0.05,
+            format = { value ->
+                NativePlaybackFormatting.formatPlaybackSpeedLabel(value.toFloat())
+            },
+        ) { value ->
+            currentPlayer.playbackParameters =
+                currentPlayer.playbackParameters.withSpeed(value.toFloat())
+            host.systemSession.syncPlaybackSystemSession()
+        }
         showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
     }
 

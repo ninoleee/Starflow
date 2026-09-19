@@ -43,6 +43,7 @@ import 'package:starflow/features/playback/application/playback_startup_coordina
 import 'package:starflow/features/playback/application/playback_startup_executor.dart';
 import 'package:starflow/features/playback/application/playback_startup_routing.dart';
 import 'package:starflow/features/playback/application/playback_target_resolver.dart';
+import 'package:starflow/features/playback/application/subtitle_content_decoder.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart'
     hide isLoopbackPlaybackRelayUrl;
@@ -268,6 +269,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Duration _latestDuration = Duration.zero;
   DateTime? _lastProgressPersistedAt;
   Duration _lastPersistedPosition = Duration.zero;
+  bool _fntvProgressReportInFlight = false;
   Duration _lastPlaybackSystemSessionPosition = Duration.zero;
   Duration _lastPlaybackSystemSessionDuration = Duration.zero;
   bool _lastPlaybackSystemSessionPlaying = false;

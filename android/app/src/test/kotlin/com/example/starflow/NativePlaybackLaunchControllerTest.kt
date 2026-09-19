@@ -60,6 +60,15 @@ class NativePlaybackLaunchControllerTest {
     }
 
     @Test
+    fun qualityFailureUsesRollbackBeforeShowingPlaybackFailure() {
+        `when`(host.fntv.recoverQualityFailure()).thenReturn(true)
+        launch.handlePlaybackFailure("quality failed")
+        verify(host.fntv).recoverQualityFailure()
+        verify(host.episodes, never()).onPlaybackFailed()
+        verify(host.session, never()).releasePlayer()
+    }
+
+    @Test
     fun loadingFlagWithoutActualProgressFailsAtThirtySeconds() {
         launch.schedulePlaybackLaunchTimeout()
         advanceBy(29_999L)

@@ -15,27 +15,3 @@ internal const val PLAYBACK_RUNTIME_INITIAL_DELAY_MS = 500L
 internal const val PLAYBACK_RUNTIME_INTERVAL_MS = 1_000L
 internal const val PLAYBACK_PROGRESS_PERSIST_INTERVAL_MS = 10_000L
 internal const val PLAYBACK_RUNTIME_LOG_INTERVAL_MS = 10_000L
-internal val SUBTITLE_DELAY_OPTIONS_MS =
-    listOf(-5_000L, -2_000L, -1_000L, -500L, 0L, 500L, 1_000L, 2_000L, 5_000L)
-internal val PLAYBACK_SPEED_OPTIONS = listOf(0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
-internal val SUBTITLE_SCALE_OPTIONS =
-    listOf(20.0, 24.0, 28.0, 32.0, 36.0, 42.0, 48.0, 56.0, 64.0, 78.0)
-internal val SUBTITLE_POSITION_OPTIONS = NativeSubtitlePositionPolicy.options
-internal val SECONDARY_SUBTITLE_SCALE_OPTIONS =
-    listOf(
-        50.0,
-        55.0,
-        60.0,
-        65.0,
-        70.0,
-        75.0,
-        80.0,
-        85.0,
-        90.0,
-        95.0,
-        100.0,
-        105.0,
-        110.0,
-        115.0,
-        120.0,
-    )

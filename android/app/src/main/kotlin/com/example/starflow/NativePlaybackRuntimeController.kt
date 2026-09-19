@@ -11,6 +11,7 @@ internal class NativePlaybackRuntimeController(
     val playbackWatchdogPolicy: NativePlaybackWatchdogPolicy = NativePlaybackWatchdogPolicy(),
 ) {
     interface Host {
+        val fntv: NativeFntvController
         val diagnostics: NativePlaybackDiagnostics
         val session: NativePlaybackSession
         val externalSubtitles: NativePlaybackExternalSubtitleController
@@ -281,6 +282,12 @@ internal class NativePlaybackRuntimeController(
             durationMs = resolvedDuration,
             synchronous = force,
             completedByAutoSkip = completedByAutoSkip,
+        )
+        host.fntv.report(
+            position = if (completedByAutoSkip || currentPlayer.playbackState == Player.STATE_ENDED) {
+                resolvedDuration
+            } else resolvedPosition,
+            duration = resolvedDuration,
         )
     }
 }

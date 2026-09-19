@@ -221,6 +221,22 @@ class EmbyApiClient implements MediaServerClient {
   }
 
   @override
+  Future<List<int>> downloadExternalSubtitleBytes({
+    required MediaSourceConfig source,
+    required String subtitleId,
+  }) {
+    throw UnsupportedError('Emby external subtitle download is not supported');
+  }
+
+  @override
+  Future<void> reportPlaybackProgress({
+    required MediaSourceConfig source,
+    required PlaybackTarget target,
+    required Duration position,
+    required Duration duration,
+  }) async {}
+
+  @override
   Future<List<MediaItem>> fetchChildren(
     MediaSourceConfig source, {
     required String parentId,

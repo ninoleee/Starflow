@@ -783,6 +783,26 @@ void main() {
     );
   });
 
+  test('Exo fine subtitle values survive global saving and JSON round trips',
+      () {
+    final settings = AppSettings.fromJson(const {}).copyWith(
+      playbackSubtitleScale: 33,
+      playbackPrimarySubtitlePosition: 97,
+      playbackSecondarySubtitlePosition: 99,
+      playbackSecondarySubtitleScale: 63,
+    );
+    final restored = AppSettings.fromJson(settings.toJson());
+    expect(restored.playbackSubtitleScale, 33);
+    expect(restored.playbackPrimarySubtitlePosition, 97);
+    expect(restored.playbackSecondarySubtitlePosition, 99);
+    expect(restored.playbackSecondarySubtitleScale, 63);
+    expect(formatPlaybackSecondarySubtitleScaleLabel(63), '63%');
+    expect(stepPlaybackSecondarySubtitleScale(63, 1), 68);
+    expect(stepPlaybackSecondarySubtitleScale(63, -1), 58);
+    expect(clampPlaybackSecondarySubtitleScale(49), 50);
+    expect(clampPlaybackSecondarySubtitleScale(121), 120);
+  });
+
   test('subtitle provider settings normalize invalid and missing values', () {
     final unknownSources = AppSettings.fromJson({
       'onlineSubtitleSources': ['invalid-source'],

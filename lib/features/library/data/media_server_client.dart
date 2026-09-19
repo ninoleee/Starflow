@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:convert';
 import 'package:starflow/features/library/data/emby_api_client.dart';
 import 'package:starflow/features/library/data/fntv_api_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -45,4 +46,21 @@ abstract interface class MediaServerClient {
     required MediaSourceConfig source,
     required String subtitleId,
   });
+
+  Future<List<int>> downloadExternalSubtitleBytes({
+    required MediaSourceConfig source,
+    required String subtitleId,
+  }) async {
+    return utf8.encode(await downloadExternalSubtitle(
+      source: source,
+      subtitleId: subtitleId,
+    ));
+  }
+
+  Future<void> reportPlaybackProgress({
+    required MediaSourceConfig source,
+    required PlaybackTarget target,
+    required Duration position,
+    required Duration duration,
+  }) async {}
 }

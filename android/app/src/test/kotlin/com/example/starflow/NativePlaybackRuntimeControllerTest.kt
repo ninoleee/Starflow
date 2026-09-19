@@ -30,6 +30,28 @@ class NativePlaybackRuntimeControllerTest {
     }
 
     @Test
+    fun finalAndAutoSkipProgressReportCompletionToServer() {
+        runtime.markAutoSkipCompleted()
+        verify(host.fntv).report(100_000L, 100_000L)
+        runtime.onUserSeek()
+        runtime.persistPlaybackProgress(force = true)
+        verify(host.fntv).report(60_000L, 100_000L)
+        `when`(host.session.player!!.playbackState).thenReturn(Player.STATE_ENDED)
+        runtime.persistPlaybackProgress(force = true)
+        verify(host.fntv, times(2)).report(100_000L, 100_000L)
+    }
+
+    @Test
+    fun periodicProgressIsThrottledButForcedSaveIsNot() {
+        runtime.persistPlaybackProgress()
+        position += 1_000L
+        runtime.persistPlaybackProgress()
+        verify(host.fntv, times(1)).report(anyLong(), anyLong())
+        runtime.persistPlaybackProgress(force = true)
+        verify(host.fntv).report(61_000L, 100_000L)
+    }
+
+    @Test
     fun outroRequestsNextWithoutSeekingOrPausing() {
         `when`(host.episodes.advanceToAdjacentEpisode(true, "outro")).thenReturn(true)
         runtime.maybeApplyAutoSkip()

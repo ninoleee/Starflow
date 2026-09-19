@@ -532,19 +532,11 @@ class _TelevisionNavigationShellState
 
   void _scheduleFocusRecoveryIfMissing() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _isExitDialogVisible || _hasActionablePrimaryFocus()) {
+      if (!mounted || _isExitDialogVisible || hasActionableTvFocus()) {
         return;
       }
       _focusCurrentDestination(onlyIfStillMissing: true);
     });
-  }
-
-  bool _hasActionablePrimaryFocus() {
-    final primaryFocus = FocusManager.instance.primaryFocus;
-    return primaryFocus != null &&
-        primaryFocus is! FocusScopeNode &&
-        primaryFocus.context != null &&
-        primaryFocus.canRequestFocus;
   }
 
   @override
@@ -560,7 +552,7 @@ class _TelevisionNavigationShellState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted ||
           _destinationFocusNodes.isEmpty ||
-          (onlyIfStillMissing && _hasActionablePrimaryFocus())) {
+          (onlyIfStillMissing && hasActionableTvFocus())) {
         return;
       }
       final currentDisplayIndex = widget.items.indexWhere(
@@ -778,12 +770,10 @@ class _TelevisionNavigationShellState
         ),
       ),
     );
-    final sidebarWithBoundary = widget.autoHideNavigationBarEnabled
-        ? _TelevisionSidebarFocusBoundary(
-            focusNodes: _destinationFocusNodes,
-            child: sidebarSlot,
-          )
-        : sidebarSlot;
+    final sidebarWithBoundary = _TelevisionSidebarFocusBoundary(
+      focusNodes: _destinationFocusNodes,
+      child: sidebarSlot,
+    );
 
     return TvMenuButtonScope(
       onMenuButtonPressed: _focusCurrentDestination,
@@ -801,7 +791,7 @@ class _TelevisionNavigationShellState
                 children: [
                   ColoredBox(
                     color: Theme.of(context).colorScheme.surface,
-                    child: sidebarSlot,
+                    child: sidebarWithBoundary,
                   ),
                   Expanded(
                     child: _TelevisionContentFocusBoundary(
@@ -826,7 +816,8 @@ class _TelevisionNavigationShellState
                     top: 0,
                     bottom: 0,
                     child: AnimatedSlide(
-                      offset: sidebarVisible ? Offset.zero : const Offset(-1, 0),
+                      offset:
+                          sidebarVisible ? Offset.zero : const Offset(-1, 0),
                       duration: sidebarAnimationDuration,
                       curve: Curves.easeOutCubic,
                       child: AnimatedOpacity(
@@ -914,10 +905,9 @@ class _TelevisionSidebarFocusBoundary extends StatelessWidget {
               if (currentIndex < 0) {
                 return null;
               }
-              final nextIndex =
-                  intent.direction == TraversalDirection.up
-                      ? currentIndex - 1
-                      : currentIndex + 1;
+              final nextIndex = intent.direction == TraversalDirection.up
+                  ? currentIndex - 1
+                  : currentIndex + 1;
               if (nextIndex < 0 || nextIndex >= focusNodes.length) {
                 return null;
               }
