@@ -89,11 +89,6 @@ extension _HomeHeroDisplayModeLayoutX on HomeHeroDisplayMode {
     };
   }
 
-  double get heroHeight => switch (this) {
-        HomeHeroDisplayMode.borderless => 500,
-        HomeHeroDisplayMode.normal => 440,
-      };
-
   double get viewportFraction => switch (this) {
         HomeHeroDisplayMode.borderless => 1,
         HomeHeroDisplayMode.normal => 0.78,
@@ -118,6 +113,18 @@ extension _HomeHeroDisplayModeLayoutX on HomeHeroDisplayMode {
         HomeHeroDisplayMode.borderless =>
           const EdgeInsets.fromLTRB(20, 28, 20, 22),
       };
+}
+
+@visibleForTesting
+double resolveHomeHeroHeight({
+  required double availableHeight,
+  required HomeHeroDisplayMode displayMode,
+}) {
+  final maximum = displayMode == HomeHeroDisplayMode.borderless ? 500.0 : 440.0;
+  final preferred = (availableHeight * 0.62).clamp(220.0, maximum);
+  // Reserve the pager, the next section heading and a visible strip of artwork.
+  final budget = (availableHeight - 140).clamp(0.0, maximum);
+  return preferred < budget ? preferred : budget;
 }
 
 double _resolveHeroTextWidthFactor(HomeHeroDisplayMode displayMode) {
@@ -381,11 +388,14 @@ class _FeaturedHero extends StatefulWidget {
     required this.items,
     required this.contentScopeId,
     required this.displayMode,
+    required this.height,
     required this.isTelevision,
     required this.staticModeEnabled,
     required this.lightweightVisualEnabled,
     required this.showPagerButtons,
     required this.logoTitleEnabled,
+    required this.autoPlayEnabled,
+    required this.pageScrollController,
     required this.translucentEffectsEnabled,
     required this.focusScopePrefix,
     required this.autofocusCurrentItem,
@@ -397,11 +407,14 @@ class _FeaturedHero extends StatefulWidget {
   final List<_FeaturedHeroItem> items;
   final String contentScopeId;
   final HomeHeroDisplayMode displayMode;
+  final double height;
   final bool isTelevision;
   final bool staticModeEnabled;
   final bool lightweightVisualEnabled;
   final bool showPagerButtons;
   final bool logoTitleEnabled;
+  final bool autoPlayEnabled;
+  final ScrollController pageScrollController;
   final bool translucentEffectsEnabled;
   final String focusScopePrefix;
   final bool autofocusCurrentItem;
@@ -413,7 +426,13 @@ class _FeaturedHero extends StatefulWidget {
   State<_FeaturedHero> createState() => _FeaturedHeroState();
 }
 
-class _FeaturedHeroState extends State<_FeaturedHero> {
+class _FeaturedHeroState extends State<_FeaturedHero>
+    with PageActivityMixin<_FeaturedHero> {
+  static const _autoPlayInterval = Duration(seconds: 6);
+  Timer? _autoPlayTimer;
+  bool _pointerDown = false;
+  bool _hovered = false;
+  bool _autoPlayMoving = false;
   late PageController _controller;
   final ValueNotifier<double> _pageNotifier = ValueNotifier<double>(0);
   final Map<String, FocusNode> _cardFocusNodes = <String, FocusNode>{};
@@ -433,6 +452,8 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     super.initState();
     _syncCardFocusNodes();
     _controller = _buildController();
+    FocusManager.instance.addListener(_resetAutoPlay);
+    widget.pageScrollController.addListener(_resetAutoPlay);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _notifyFocusedItem(0);
     });
@@ -441,6 +462,18 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   @override
   void didUpdateWidget(covariant _FeaturedHero oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.pageScrollController != widget.pageScrollController) {
+      oldWidget.pageScrollController.removeListener(_resetAutoPlay);
+      widget.pageScrollController.addListener(_resetAutoPlay);
+    }
+    if (oldWidget.autoPlayEnabled != widget.autoPlayEnabled ||
+        oldWidget.staticModeEnabled != widget.staticModeEnabled ||
+        oldWidget.contentScopeId != widget.contentScopeId ||
+        oldWidget.displayMode != widget.displayMode ||
+        !listEquals(oldWidget.items.map((item) => item.id).toList(),
+            widget.items.map((item) => item.id).toList())) {
+      _resetAutoPlay();
+    }
     final oldPageIndex = oldWidget.items.isEmpty
         ? 0
         : _page.round().clamp(0, oldWidget.items.length - 1);
@@ -507,6 +540,9 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
 
   @override
   void dispose() {
+    _autoPlayTimer?.cancel();
+    FocusManager.instance.removeListener(_resetAutoPlay);
+    widget.pageScrollController.removeListener(_resetAutoPlay);
     for (final focusNode in _cardFocusNodes.values) {
       focusNode.dispose();
     }
@@ -517,6 +553,88 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
       ..dispose();
     _pageNotifier.dispose();
     super.dispose();
+  }
+
+  @override
+  void onPageBecameActive() => _resetAutoPlay();
+
+  @override
+  void onPageBecameInactive() {
+    _autoPlayTimer?.cancel();
+    _autoPlayTimer = null;
+    _pointerDown = false;
+    _hovered = false;
+  }
+
+  bool get _canAutoPlay {
+    if (!mounted ||
+        !isPageVisible ||
+        !widget.autoPlayEnabled ||
+        widget.items.length < 2 ||
+        _pointerDown ||
+        _hovered ||
+        _autoPlayMoving ||
+        !_controller.hasClients) {
+      return false;
+    }
+    final scroll = widget.pageScrollController;
+    if (!scroll.hasClients ||
+        (scroll.offset - scroll.position.minScrollExtent).abs() > 1) {
+      return false;
+    }
+    // TV auto-focus stays on the visible card. Menus and pager controls pause it.
+    return !widget.isTelevision ||
+        isCurrentCardFocusNode(FocusManager.instance.primaryFocus ??
+            FocusManager.instance.rootScope);
+  }
+
+  void _resetAutoPlay() {
+    _autoPlayTimer?.cancel();
+    _autoPlayTimer = null;
+    if (_canAutoPlay) {
+      _autoPlayTimer = Timer(_autoPlayInterval, () {
+        _autoPlayTimer = null;
+        if (_canAutoPlay) {
+          unawaited(_advanceAutoPlay());
+        }
+      });
+    }
+  }
+
+  Future<void> _advanceAutoPlay() async {
+    final controller = _controller;
+    final previousFocus = FocusManager.instance.primaryFocus;
+    final contentScope = widget.contentScopeId;
+    final nextIndex = (_currentPageIndex + 1) % widget.items.length;
+    final nextItemId = widget.items[nextIndex].id;
+    _autoPlayMoving = true;
+    try {
+      if (widget.staticModeEnabled || nextIndex == 0) {
+        controller.jumpToPage(nextIndex);
+      } else {
+        await controller.animateToPage(
+          nextIndex,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+        );
+      }
+      await WidgetsBinding.instance.endOfFrame;
+      if (mounted &&
+          identical(controller, _controller) &&
+          isPageVisible &&
+          widget.contentScopeId == contentScope &&
+          widget.items.isNotEmpty &&
+          widget.items[_currentPageIndex].id == nextItemId &&
+          widget.autoPlayEnabled &&
+          widget.isTelevision &&
+          (identical(previousFocus, FocusManager.instance.primaryFocus) ||
+              !hasActionableTvFocus())) {
+        _focusCurrentCard();
+      }
+    } finally {
+      _autoPlayMoving = false;
+      if (mounted) _resetAutoPlay();
+    }
   }
 
   int get _currentPageIndex => widget.items.isEmpty
@@ -597,6 +715,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
     }
     final double page = _controller.hasClients ? _controller.page ?? 0.0 : 0.0;
     _commitPageChange(page);
+    _resetAutoPlay();
   }
 
   void _commitPageChange(double page) {
@@ -658,6 +777,7 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   }
 
   Future<void> _moveToIndex(int index) async {
+    _resetAutoPlay();
     if (index < 0 || index >= widget.items.length) {
       return;
     }
@@ -766,154 +886,200 @@ class _FeaturedHeroState extends State<_FeaturedHero> {
   Widget build(BuildContext context) {
     final simplifyVisualEffects = widget.lightweightVisualEnabled;
 
-    return Column(
-      children: [
-        SizedBox(
-          height: widget.displayMode.heroHeight,
-          child: Stack(
+    return MouseRegion(
+      onEnter: (_) {
+        _hovered = true;
+        _resetAutoPlay();
+      },
+      onExit: (_) {
+        _hovered = false;
+        _resetAutoPlay();
+      },
+      child: Listener(
+        onPointerDown: (_) {
+          _pointerDown = true;
+          _resetAutoPlay();
+        },
+        onPointerUp: (_) {
+          _pointerDown = false;
+          _resetAutoPlay();
+        },
+        onPointerCancel: (_) {
+          _pointerDown = false;
+          _resetAutoPlay();
+        },
+        child: Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          onKeyEvent: (_, event) {
+            _resetAutoPlay();
+            return KeyEventResult.ignored;
+          },
+          child: Column(
             children: [
-              Focus(
-                canRequestFocus: false,
-                skipTraversal: true,
-                descendantsAreFocusable: true,
-                child: PageView.builder(
-                  controller: _controller,
-                  physics: widget.isTelevision
-                      ? const NeverScrollableScrollPhysics()
-                      : const PageScrollPhysics(),
-                  itemCount: widget.items.length,
-                  findChildIndexCallback: (key) {
-                    for (var index = 0;
-                        index < widget.items.length;
-                        index += 1) {
-                      final itemKey = ValueKey<String>(
-                        '${widget.focusScopePrefix}:${widget.items[index].id}',
-                      );
-                      if (itemKey == key) {
-                        return index;
-                      }
-                    }
-                    return null;
-                  },
-                  itemBuilder: (context, index) {
-                    final item = widget.items[index];
-                    return Padding(
-                      key: ValueKey<String>(
-                        '${widget.focusScopePrefix}:${item.id}',
+              SizedBox(
+                height: widget.height,
+                child: Stack(
+                  children: [
+                    Focus(
+                      canRequestFocus: false,
+                      skipTraversal: true,
+                      descendantsAreFocusable: true,
+                      child: PageView.builder(
+                        controller: _controller,
+                        physics: widget.isTelevision
+                            ? const NeverScrollableScrollPhysics()
+                            : const PageScrollPhysics(),
+                        itemCount: widget.items.length,
+                        findChildIndexCallback: (key) {
+                          for (var index = 0;
+                              index < widget.items.length;
+                              index += 1) {
+                            final itemKey = ValueKey<String>(
+                              '${widget.focusScopePrefix}:${widget.items[index].id}',
+                            );
+                            if (itemKey == key) {
+                              return index;
+                            }
+                          }
+                          return null;
+                        },
+                        itemBuilder: (context, index) {
+                          final item = widget.items[index];
+                          return Padding(
+                            key: ValueKey<String>(
+                              '${widget.focusScopePrefix}:${item.id}',
+                            ),
+                            padding: EdgeInsets.only(
+                              right: index == widget.items.length - 1
+                                  ? 0
+                                  : widget.displayMode.cardGap,
+                            ),
+                            child: _FeaturedHeroCard(
+                              item: item,
+                              displayMode: widget.displayMode,
+                              isTelevision: widget.isTelevision,
+                              logoTitleEnabled: widget.logoTitleEnabled,
+                              translucentEffectsEnabled:
+                                  widget.translucentEffectsEnabled,
+                              simplifyVisualEffects: simplifyVisualEffects,
+                              focusNode: _focusNodeForItem(item.id),
+                              focusId: '${widget.focusScopePrefix}:${item.id}',
+                              autofocus: widget.autofocusCurrentItem &&
+                                  index == _currentPageIndex,
+                              onFocusPreviousControl: _focusPreviousControl,
+                              onFocusNextControl: _focusNextControl,
+                              onFocusBelowControl: widget.onFocusBelowControl,
+                              onFocused: widget.onHeroFocusGained,
+                            ),
+                          );
+                        },
                       ),
-                      padding: EdgeInsets.only(
-                        right: index == widget.items.length - 1
-                            ? 0
-                            : widget.displayMode.cardGap,
+                    ),
+                    if (widget.showPagerButtons && widget.items.length > 1)
+                      ValueListenableBuilder<double>(
+                        valueListenable: _pageNotifier,
+                        builder: (context, page, child) {
+                          final currentIndex =
+                              page.round().clamp(0, widget.items.length - 1);
+                          return Stack(
+                            children: [
+                              Positioned(
+                                left: 16,
+                                top: 0,
+                                bottom: 0,
+                                child: Center(
+                                  child: _HeroPagerButton(
+                                    isTelevision: widget.isTelevision,
+                                    staticModeEnabled: widget.staticModeEnabled,
+                                    icon: Icons.chevron_left_rounded,
+                                    focusNode: _previousPagerButtonFocusNode,
+                                    focusId:
+                                        '${widget.focusScopePrefix}:pager-prev',
+                                    enabled: currentIndex > 0,
+                                    onMoveRight: _focusCurrentCard,
+                                    onFocusBelowControl:
+                                        widget.onFocusBelowControl,
+                                    onFocused: widget.onHeroFocusGained,
+                                    onPressed: currentIndex > 0
+                                        ? () => _moveToIndex(currentIndex - 1)
+                                        : null,
+                                  ),
+                                ),
+                              ),
+                              Positioned(
+                                right: 16,
+                                top: 0,
+                                bottom: 0,
+                                child: Center(
+                                  child: _HeroPagerButton(
+                                    isTelevision: widget.isTelevision,
+                                    staticModeEnabled: widget.staticModeEnabled,
+                                    icon: Icons.chevron_right_rounded,
+                                    focusNode: _nextPagerButtonFocusNode,
+                                    focusId:
+                                        '${widget.focusScopePrefix}:pager-next',
+                                    enabled:
+                                        currentIndex < widget.items.length - 1,
+                                    onMoveLeft: _focusCurrentCard,
+                                    onFocusBelowControl:
+                                        widget.onFocusBelowControl,
+                                    onFocused: widget.onHeroFocusGained,
+                                    onPressed: currentIndex <
+                                            widget.items.length - 1
+                                        ? () => _moveToIndex(currentIndex + 1)
+                                        : null,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
-                      child: _FeaturedHeroCard(
-                        item: item,
-                        displayMode: widget.displayMode,
-                        isTelevision: widget.isTelevision,
-                        logoTitleEnabled: widget.logoTitleEnabled,
-                        translucentEffectsEnabled:
-                            widget.translucentEffectsEnabled,
-                        simplifyVisualEffects: simplifyVisualEffects,
-                        focusNode: _focusNodeForItem(item.id),
-                        focusId: '${widget.focusScopePrefix}:${item.id}',
-                        autofocus: widget.autofocusCurrentItem &&
-                            index == _currentPageIndex,
-                        onFocusPreviousControl: _focusPreviousControl,
-                        onFocusNextControl: _focusNextControl,
-                        onFocusBelowControl: widget.onFocusBelowControl,
-                        onFocused: widget.onHeroFocusGained,
-                      ),
-                    );
-                  },
+                  ],
                 ),
               ),
-              if (widget.showPagerButtons && widget.items.length > 1)
-                ValueListenableBuilder<double>(
-                  valueListenable: _pageNotifier,
-                  builder: (context, page, child) {
-                    final currentIndex =
-                        page.round().clamp(0, widget.items.length - 1);
-                    return Stack(
-                      children: [
-                        Positioned(
-                          left: 16,
-                          top: 0,
-                          bottom: 0,
-                          child: Center(
-                            child: _HeroPagerButton(
-                              isTelevision: widget.isTelevision,
-                              staticModeEnabled: widget.staticModeEnabled,
-                              icon: Icons.chevron_left_rounded,
-                              focusNode: _previousPagerButtonFocusNode,
-                              focusId: '${widget.focusScopePrefix}:pager-prev',
-                              enabled: currentIndex > 0,
-                              onMoveRight: _focusCurrentCard,
-                              onFocusBelowControl: widget.onFocusBelowControl,
-                              onFocused: widget.onHeroFocusGained,
-                              onPressed: currentIndex > 0
-                                  ? () => _moveToIndex(currentIndex - 1)
-                                  : null,
-                            ),
-                          ),
+              SizedBox(
+                height: 20,
+                child: widget.items.length > 1
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: ValueListenableBuilder<double>(
+                          valueListenable: _pageNotifier,
+                          builder: (context, page, child) {
+                            return Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children:
+                                  List.generate(widget.items.length, (index) {
+                                final isActive = (page - index).abs() < 0.5;
+                                return AnimatedContainer(
+                                  duration: widget.staticModeEnabled
+                                      ? Duration.zero
+                                      : const Duration(milliseconds: 180),
+                                  curve: Curves.easeOutCubic,
+                                  width: isActive ? 18 : 8,
+                                  height: 8,
+                                  margin:
+                                      const EdgeInsets.symmetric(horizontal: 4),
+                                  decoration: BoxDecoration(
+                                    color: isActive
+                                        ? Colors.white
+                                        : Colors.white.withValues(alpha: 0.34),
+                                    borderRadius:
+                                        BorderRadius.circular(AppRadii.pill),
+                                  ),
+                                );
+                              }),
+                            );
+                          },
                         ),
-                        Positioned(
-                          right: 16,
-                          top: 0,
-                          bottom: 0,
-                          child: Center(
-                            child: _HeroPagerButton(
-                              isTelevision: widget.isTelevision,
-                              staticModeEnabled: widget.staticModeEnabled,
-                              icon: Icons.chevron_right_rounded,
-                              focusNode: _nextPagerButtonFocusNode,
-                              focusId: '${widget.focusScopePrefix}:pager-next',
-                              enabled: currentIndex < widget.items.length - 1,
-                              onMoveLeft: _focusCurrentCard,
-                              onFocusBelowControl: widget.onFocusBelowControl,
-                              onFocused: widget.onHeroFocusGained,
-                              onPressed: currentIndex < widget.items.length - 1
-                                  ? () => _moveToIndex(currentIndex + 1)
-                                  : null,
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
+                      )
+                    : null,
+              ),
             ],
           ),
         ),
-        if (widget.items.length > 1) ...[
-          const SizedBox(height: 12),
-          ValueListenableBuilder<double>(
-            valueListenable: _pageNotifier,
-            builder: (context, page, child) {
-              return Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(widget.items.length, (index) {
-                  final isActive = (page - index).abs() < 0.5;
-                  return AnimatedContainer(
-                    duration: widget.staticModeEnabled
-                        ? Duration.zero
-                        : const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    width: isActive ? 18 : 8,
-                    height: 8,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: isActive
-                          ? Colors.white
-                          : Colors.white.withValues(alpha: 0.34),
-                      borderRadius: BorderRadius.circular(AppRadii.pill),
-                    ),
-                  );
-                }),
-              );
-            },
-          ),
-        ],
-      ],
+      ),
     );
   }
 }
@@ -1130,53 +1296,63 @@ class _FeaturedHeroCard extends StatelessWidget {
             ),
             Padding(
               padding: displayMode.textPadding,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Spacer(),
-                  if (item.metadata.trim().isNotEmpty)
-                    Text(
-                      item.metadata,
-                      style: const TextStyle(
-                        color: AppColors.foreground,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  if (item.metadata.trim().isNotEmpty)
-                    const SizedBox(height: 10),
-                  _HeroTitle(
-                    item: item,
-                    displayMode: displayMode,
-                    logoTitleEnabled: logoTitleEnabled,
-                    simplifyVisualEffects: simplifyVisualEffects,
-                  ),
-                  const SizedBox(height: 10),
-                  if (item.overview.trim().isNotEmpty)
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 460),
-                      child: Text(
-                        item.overview,
-                        maxLines: 3,
+              child: LayoutBuilder(builder: (context, constraints) {
+                final textScale =
+                    MediaQuery.textScalerOf(context).scale(15) / 15;
+                final showMetadata = item.metadata.trim().isNotEmpty &&
+                    constraints.maxHeight >= 130 * textScale;
+                final showOverview = item.overview.trim().isNotEmpty &&
+                    constraints.maxHeight >= 210 * textScale;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (showMetadata)
+                      Text(
+                        item.metadata,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: AppColors.foreground,
-                          fontSize: 15,
-                          height: 1.45,
-                          shadows: simplifyVisualEffects
-                              ? null
-                              : const [
-                                  Shadow(
-                                    color: Color(0x9A000000),
-                                    blurRadius: 16,
-                                    offset: Offset(0, 3),
-                                  ),
-                                ],
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    ),
-                ],
-              ),
+                    if (showMetadata) const SizedBox(height: 10),
+                    Flexible(
+                        child: _HeroTitle(
+                      item: item,
+                      displayMode: displayMode,
+                      logoTitleEnabled: logoTitleEnabled,
+                      simplifyVisualEffects: simplifyVisualEffects,
+                    )),
+                    if (showOverview) const SizedBox(height: 10),
+                    if (showOverview)
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 460),
+                        child: Text(
+                          item.overview,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppColors.foreground,
+                            fontSize: 15,
+                            height: 1.45,
+                            shadows: simplifyVisualEffects
+                                ? null
+                                : const [
+                                    Shadow(
+                                      color: Color(0x9A000000),
+                                      blurRadius: 16,
+                                      offset: Offset(0, 3),
+                                    ),
+                                  ],
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              }),
             ),
           ],
         ),

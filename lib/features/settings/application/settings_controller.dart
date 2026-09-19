@@ -529,6 +529,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(homeHeroLogoTitleEnabled: enabled));
   }
 
+  Future<void> setHomeHeroAutoPlayEnabled(bool enabled) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(current.copyWith(homeHeroAutoPlayEnabled: enabled));
+  }
+
   Future<void> setHomeStartupAutoRefreshEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(homeStartupAutoRefreshEnabled: enabled));

@@ -1181,6 +1181,7 @@ class AppSettings {
     this.homeHeroStyle = HomeHeroStyle.composite,
     this.homeHeroLogoTitleEnabled = false,
     this.homeHeroBackgroundEnabled = true,
+    this.homeHeroAutoPlayEnabled = false,
     this.homeStartupAutoRefreshEnabled = true,
     this.homeStartupAutoRefreshEmbyEnabled,
     this.homeNavigationSingleTapCleanupEnabled = true,
@@ -1264,6 +1265,7 @@ class AppSettings {
   final HomeHeroStyle homeHeroStyle;
   final bool homeHeroLogoTitleEnabled;
   final bool homeHeroBackgroundEnabled;
+  final bool homeHeroAutoPlayEnabled;
   final bool homeStartupAutoRefreshEnabled;
   // null = follow platform default (TV defaults to off, others default to on).
   final bool? homeStartupAutoRefreshEmbyEnabled;
@@ -1339,6 +1341,7 @@ class AppSettings {
     HomeHeroStyle? homeHeroStyle,
     bool? homeHeroLogoTitleEnabled,
     bool? homeHeroBackgroundEnabled,
+    bool? homeHeroAutoPlayEnabled,
     bool? homeStartupAutoRefreshEnabled,
     bool? homeStartupAutoRefreshEmbyEnabled,
     bool? homeNavigationSingleTapCleanupEnabled,
@@ -1416,6 +1419,8 @@ class AppSettings {
           homeHeroLogoTitleEnabled ?? this.homeHeroLogoTitleEnabled,
       homeHeroBackgroundEnabled:
           homeHeroBackgroundEnabled ?? this.homeHeroBackgroundEnabled,
+      homeHeroAutoPlayEnabled:
+          homeHeroAutoPlayEnabled ?? this.homeHeroAutoPlayEnabled,
       homeStartupAutoRefreshEnabled:
           homeStartupAutoRefreshEnabled ?? this.homeStartupAutoRefreshEnabled,
       // Nullable: copyWith never resets back to platform default; toggle setter
@@ -1581,6 +1586,7 @@ class AppSettings {
       'homeHeroStyle': homeHeroStyle.name,
       'homeHeroLogoTitleEnabled': homeHeroLogoTitleEnabled,
       'homeHeroBackgroundEnabled': homeHeroBackgroundEnabled,
+      'homeHeroAutoPlayEnabled': homeHeroAutoPlayEnabled,
       'homeStartupAutoRefreshEnabled': homeStartupAutoRefreshEnabled,
       'homeStartupAutoRefreshEmbyEnabled': homeStartupAutoRefreshEmbyEnabled,
       'homeNavigationSingleTapCleanupEnabled':
@@ -1709,6 +1715,8 @@ class AppSettings {
           json['homeHeroLogoTitleEnabled'] as bool? ?? false,
       homeHeroBackgroundEnabled:
           json['homeHeroBackgroundEnabled'] as bool? ?? true,
+      homeHeroAutoPlayEnabled:
+          json['homeHeroAutoPlayEnabled'] as bool? ?? false,
       homeStartupAutoRefreshEnabled:
           json['homeStartupAutoRefreshEnabled'] as bool? ?? true,
       homeStartupAutoRefreshEmbyEnabled:

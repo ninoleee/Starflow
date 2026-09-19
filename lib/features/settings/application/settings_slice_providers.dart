@@ -48,6 +48,7 @@ final settingsHeroSliceProvider = Provider<SettingsHeroSlice>(
         style: settings.homeHeroStyle,
         logoTitleEnabled: settings.homeHeroLogoTitleEnabled,
         backgroundEnabled: settings.homeHeroBackgroundEnabled,
+        autoPlayEnabled: settings.homeHeroAutoPlayEnabled,
         translucentEffectsEnabled: settings.translucentEffectsEnabled,
         performanceStaticHomeHeroEnabled:
             settings.performanceStaticHomeHeroEnabled,
@@ -173,6 +174,7 @@ class SettingsHeroSlice {
     required this.style,
     required this.logoTitleEnabled,
     required this.backgroundEnabled,
+    required this.autoPlayEnabled,
     required this.translucentEffectsEnabled,
     required this.performanceStaticHomeHeroEnabled,
     required this.performanceLightweightHomeHeroEnabled,
@@ -183,6 +185,7 @@ class SettingsHeroSlice {
   final HomeHeroStyle style;
   final bool logoTitleEnabled;
   final bool backgroundEnabled;
+  final bool autoPlayEnabled;
   final bool translucentEffectsEnabled;
   final bool performanceStaticHomeHeroEnabled;
   final bool performanceLightweightHomeHeroEnabled;
@@ -196,6 +199,7 @@ class SettingsHeroSlice {
             other.style == style &&
             other.logoTitleEnabled == logoTitleEnabled &&
             other.backgroundEnabled == backgroundEnabled &&
+            other.autoPlayEnabled == autoPlayEnabled &&
             other.translucentEffectsEnabled == translucentEffectsEnabled &&
             other.performanceStaticHomeHeroEnabled ==
                 performanceStaticHomeHeroEnabled &&
@@ -210,6 +214,7 @@ class SettingsHeroSlice {
         style,
         logoTitleEnabled,
         backgroundEnabled,
+        autoPlayEnabled,
         translucentEffectsEnabled,
         performanceStaticHomeHeroEnabled,
         performanceLightweightHomeHeroEnabled,

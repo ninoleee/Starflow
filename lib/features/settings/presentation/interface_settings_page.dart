@@ -107,7 +107,7 @@ class InterfaceSettingsPage extends ConsumerWidget {
           ),
           SettingsToggleTile(
             title: '简化首页 Hero',
-            subtitle: '关闭自动轮播与动态切换，并减少 Hero 的过渡和装饰效果。',
+            subtitle: '关闭翻页动画，并减少 Hero 的过渡和装饰效果。',
             value: settings.staticHomeHeroEnabled ||
                 settings.lightweightHomeHeroEnabled,
             focusId: 'performance-interface:simplified-hero',

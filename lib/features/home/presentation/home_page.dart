@@ -559,6 +559,10 @@ class _HomePageState extends ConsumerState<HomePage>
         (settings) => settings.homeHeroLogoTitleEnabled,
       ),
     );
+    final heroAutoPlayEnabled = ref.watch(
+      appSettingsProvider
+          .select((settings) => settings.homeHeroAutoPlayEnabled),
+    );
     final translucentEffectsEnabled = ref.watch(
       appSettingsProvider.select(
         (settings) => settings.translucentEffectsEnabled,
@@ -643,6 +647,7 @@ class _HomePageState extends ConsumerState<HomePage>
                   heroEnabled: heroModule?.enabled ?? false,
                   heroSourceModuleId: heroSourceModuleId,
                   heroLogoTitleEnabled: heroLogoTitleEnabled,
+                  heroAutoPlayEnabled: heroAutoPlayEnabled,
                   heroBackgroundEnabled: effectiveHeroBackgroundEnabled,
                   translucentEffectsEnabled: effectiveTranslucentEffectsEnabled,
                   staticHomeHeroEnabled: performanceStaticHomeHeroEnabled,
@@ -670,6 +675,7 @@ class _HomePageState extends ConsumerState<HomePage>
     required bool heroEnabled,
     required String heroSourceModuleId,
     required bool heroLogoTitleEnabled,
+    required bool heroAutoPlayEnabled,
     required bool heroBackgroundEnabled,
     required bool translucentEffectsEnabled,
     required bool staticHomeHeroEnabled,
@@ -781,105 +787,118 @@ class _HomePageState extends ConsumerState<HomePage>
       editListKey: moduleListOffset + visibleModules.length + 1,
     };
 
-    final content = RefreshIndicator(
-      color: AppActionColors.of(Theme.of(context)).primary,
-      backgroundColor: AppColors.neutral3,
-      onRefresh: () => refreshHomeModules(ref, allowNetworkProbe: true),
-      child: ListView.builder(
-        controller: _scrollController,
-        physics: const BouncingScrollPhysics(
-          parent: AlwaysScrollableScrollPhysics(),
-        ),
-        padding: EdgeInsets.zero,
-        itemCount: listItemCount,
-        findChildIndexCallback: (key) => listIndicesByKey[key],
-        itemBuilder: (context, index) {
-          if (hasHeroListSlot && index == 0) {
-            if (featuredItems.isNotEmpty) {
+    final content = LayoutBuilder(builder: (context, constraints) {
+      final heroPadding = heroDisplayMode.heroPadding(context);
+      final heroHeight = resolveHomeHeroHeight(
+        availableHeight: constraints.maxHeight - heroPadding.vertical,
+        displayMode: heroDisplayMode,
+      );
+      return RefreshIndicator(
+        color: AppActionColors.of(Theme.of(context)).primary,
+        backgroundColor: AppColors.neutral3,
+        onRefresh: () => refreshHomeModules(ref, allowNetworkProbe: true),
+        child: ListView.builder(
+          controller: _scrollController,
+          physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics(),
+          ),
+          padding: EdgeInsets.zero,
+          itemCount: listItemCount,
+          findChildIndexCallback: (key) => listIndicesByKey[key],
+          itemBuilder: (context, index) {
+            if (hasHeroListSlot && index == 0) {
+              if (featuredItems.isNotEmpty) {
+                return RepaintBoundary(
+                  key: heroListKey,
+                  child: _HomeKeepAlive(
+                    child: Padding(
+                      padding: heroPadding,
+                      child: _FeaturedHero(
+                        key: _featuredHeroKey,
+                        items: featuredItems,
+                        contentScopeId: featuredHeroSectionId,
+                        isTelevision: isTelevision,
+                        staticModeEnabled: staticHomeHeroEnabled,
+                        lightweightVisualEnabled: lightweightHomeHeroEnabled,
+                        showPagerButtons: _showHeroPagerButtons || isTelevision,
+                        logoTitleEnabled: heroLogoTitleEnabled,
+                        autoPlayEnabled: heroAutoPlayEnabled,
+                        pageScrollController: _scrollController,
+                        translucentEffectsEnabled: translucentEffectsEnabled,
+                        displayMode: heroDisplayMode,
+                        height: heroHeight,
+                        focusScopePrefix: 'home:hero',
+                        autofocusCurrentItem: shouldAutofocusHomeTarget,
+                        onFocusBelowControl: _focusBelowHeroContent,
+                        onHeroFocusGained: _jumpToHeroTop,
+                        onFocusedItemChanged: _handleFocusedHeroChanged,
+                      ),
+                    ),
+                  ),
+                );
+              }
               return RepaintBoundary(
                 key: heroListKey,
                 child: _HomeKeepAlive(
                   child: Padding(
-                    padding: heroDisplayMode.heroPadding(context),
-                    child: _FeaturedHero(
-                      key: _featuredHeroKey,
-                      items: featuredItems,
-                      contentScopeId: featuredHeroSectionId,
-                      isTelevision: isTelevision,
-                      staticModeEnabled: staticHomeHeroEnabled,
-                      lightweightVisualEnabled: lightweightHomeHeroEnabled,
-                      showPagerButtons: _showHeroPagerButtons || isTelevision,
-                      logoTitleEnabled: heroLogoTitleEnabled,
-                      translucentEffectsEnabled: translucentEffectsEnabled,
+                    padding: heroPadding,
+                    child: _HomeHeroPlaceholder(
                       displayMode: heroDisplayMode,
-                      focusScopePrefix: 'home:hero',
-                      autofocusCurrentItem: shouldAutofocusHomeTarget,
-                      onFocusBelowControl: _focusBelowHeroContent,
-                      onHeroFocusGained: _jumpToHeroTop,
-                      onFocusedItemChanged: _handleFocusedHeroChanged,
+                      height: heroHeight,
                     ),
                   ),
                 ),
               );
             }
-            return RepaintBoundary(
-              key: heroListKey,
-              child: _HomeKeepAlive(
+
+            final moduleIndex = index - moduleListOffset;
+            if (moduleIndex >= 0 && moduleIndex < visibleModules.length) {
+              final module = visibleModules[moduleIndex];
+              return RepaintBoundary(
+                key: moduleListKeys[module.id],
                 child: Padding(
-                  padding: heroDisplayMode.heroPadding(context),
-                  child: _HomeHeroPlaceholder(displayMode: heroDisplayMode),
+                  padding: EdgeInsets.only(
+                    top: !heroEnabled && moduleIndex == 0 ? 20 : 0,
+                    bottom: 26,
+                  ),
+                  child: _HomeSectionSlot(
+                    key: ValueKey<String>('home:section-slot:${module.id}'),
+                    module: module,
+                    isPageVisible: isPageVisible,
+                    focusNodeForContent: _focusNodeForContent,
+                    autofocusFirstItem: shouldAutofocusHomeTarget &&
+                        !hasHeroListSlot &&
+                        module.id == firstFocusableSectionId,
+                    onMoveUpToHero:
+                        _hasHeroContent && module.id == firstFocusableSectionId
+                            ? _requestHeroFocus
+                            : null,
+                    homeMetadataAutoRefreshRevision:
+                        homeMetadataAutoRefreshRevision,
+                    homeNavigationResetRevision: homeNavigationResetRevision,
+                  ),
                 ),
-              ),
-            );
-          }
+              );
+            }
 
-          final moduleIndex = index - moduleListOffset;
-          if (moduleIndex >= 0 && moduleIndex < visibleModules.length) {
-            final module = visibleModules[moduleIndex];
+            final trailingIndex = moduleIndex - visibleModules.length;
+            if (trailingIndex == 0) {
+              return const SizedBox(key: spacerListKey, height: 6);
+            }
             return RepaintBoundary(
-              key: moduleListKeys[module.id],
-              child: Padding(
-                padding: EdgeInsets.only(
-                  top: !heroEnabled && moduleIndex == 0 ? 20 : 0,
-                  bottom: 26,
-                ),
-                child: _HomeSectionSlot(
-                  key: ValueKey<String>('home:section-slot:${module.id}'),
-                  module: module,
-                  isPageVisible: isPageVisible,
-                  focusNodeForContent: _focusNodeForContent,
-                  autofocusFirstItem: shouldAutofocusHomeTarget &&
-                      !hasHeroListSlot &&
-                      module.id == firstFocusableSectionId,
-                  onMoveUpToHero:
-                      _hasHeroContent && module.id == firstFocusableSectionId
-                          ? _requestHeroFocus
-                          : null,
-                  homeMetadataAutoRefreshRevision:
-                      homeMetadataAutoRefreshRevision,
-                  homeNavigationResetRevision: homeNavigationResetRevision,
-                ),
+              key: editListKey,
+              child: _HomeEditButton(
+                focusNode:
+                    firstFocusableSectionId == null ? _homeEditFocusNode : null,
+                autofocus: shouldAutofocusHomeTarget &&
+                    !hasHeroListSlot &&
+                    firstFocusableSectionId == null,
               ),
             );
-          }
-
-          final trailingIndex = moduleIndex - visibleModules.length;
-          if (trailingIndex == 0) {
-            return const SizedBox(key: spacerListKey, height: 6);
-          }
-          return RepaintBoundary(
-            key: editListKey,
-            child: _HomeEditButton(
-              focusNode:
-                  firstFocusableSectionId == null ? _homeEditFocusNode : null,
-              autofocus: shouldAutofocusHomeTarget &&
-                  !hasHeroListSlot &&
-                  firstFocusableSectionId == null,
-            ),
-          );
-        },
-      ),
-    );
+          },
+        ),
+      );
+    });
 
     return ValueListenableBuilder<_HomeHeroSelection>(
       valueListenable: _heroSelectionNotifier,

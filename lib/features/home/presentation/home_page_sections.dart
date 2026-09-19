@@ -562,36 +562,39 @@ class _DynamicHeroBackdropLayer extends StatelessWidget {
 }
 
 class _HomeHeroPlaceholder extends StatelessWidget {
-  const _HomeHeroPlaceholder({required this.displayMode});
+  const _HomeHeroPlaceholder({required this.displayMode, required this.height});
 
   final HomeHeroDisplayMode displayMode;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
     final borderRadius = BorderRadius.circular(displayMode.cardBorderRadius);
 
-    return SizedBox(
-      height: displayMode.heroHeight,
-      child: ClipRRect(
-        borderRadius: borderRadius,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
+    return Padding(
+        padding: const EdgeInsets.only(bottom: 20),
+        child: SizedBox(
+          height: height,
+          child: ClipRRect(
             borderRadius: borderRadius,
-            gradient: LinearGradient(
-              colors: [
-                AppColors.neutral3,
-                AppColors.neutral2,
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: borderRadius,
+                gradient: LinearGradient(
+                  colors: [
+                    AppColors.neutral3,
+                    AppColors.neutral2,
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
+              child: const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
             ),
           ),
-          child: const Center(
-            child: CircularProgressIndicator(color: Colors.white),
-          ),
-        ),
-      ),
-    );
+        ));
   }
 }
 

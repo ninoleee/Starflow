@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/bootstrap/application/startup_crash_recovery.dart';
@@ -43,7 +45,10 @@ final bootstrapControllerProvider =
 );
 
 class BootstrapController extends Notifier<BootstrapState> {
+  static const startupTimeout = Duration(seconds: 10);
   bool _started = false;
+
+  bool get _canContinue => ref.mounted && !state.isComplete;
 
   @override
   BootstrapState build() {
@@ -61,6 +66,51 @@ class BootstrapController extends Notifier<BootstrapState> {
     }
     _started = true;
 
+    final deadline = Completer<void>();
+    var timedOut = false;
+    final timer = Timer(startupTimeout, () {
+      timedOut = true;
+      if (_canContinue) {
+        appLogWarning(
+          'app.bootstrap',
+          'Startup deadline reached; continuing to home',
+          fields: <String, Object?>{
+            'timeoutMs': startupTimeout.inMilliseconds,
+            'step': state.currentStep,
+          },
+        );
+      }
+      deadline.complete();
+    });
+    ref.onDispose(() {
+      timer.cancel();
+      if (!deadline.isCompleted) deadline.complete();
+    });
+
+    try {
+      await Future.any<void>([_runStartup(), deadline.future]);
+    } catch (error, stackTrace) {
+      appLogWarning(
+        'app.bootstrap',
+        'Startup failed; continuing to home',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    } finally {
+      timer.cancel();
+      if (_canContinue) {
+        state = state.copyWith(
+          progress: 1,
+          title: '准备完成',
+          subtitle: timedOut ? '先进入首页，资源会继续在后台补齐。' : '你的首页和片库已经就绪。',
+          currentStep: 3,
+          isComplete: true,
+        );
+      }
+    }
+  }
+
+  Future<void> _runStartup() async {
     await _setStage(
       progress: 0.18,
       currentStep: 0,
@@ -68,6 +118,7 @@ class BootstrapController extends Notifier<BootstrapState> {
       subtitle: '先把应用外壳、路由和首页容器准备好。',
       minDelay: const Duration(milliseconds: 40),
     );
+    if (!_canContinue) return;
 
     await _runStage(
       progress: 0.42,
@@ -78,12 +129,14 @@ class BootstrapController extends Notifier<BootstrapState> {
         final settings = await ref
             .read(settingsControllerProvider.future)
             .timeout(const Duration(seconds: 3));
+        if (!_canContinue) return;
         await ref
             .read(mediaSourceCacheLifecycleProvider)
             .reconcileSources(settings.mediaSources);
       },
       stageDelay: const Duration(milliseconds: 40),
     );
+    if (!_canContinue) return;
 
     await _runStage(
       progress: 0.76,
@@ -108,11 +161,13 @@ class BootstrapController extends Notifier<BootstrapState> {
         } else {
           primeHomeModules(ref);
         }
+        if (!_canContinue) return;
         await waitForHomeModules(ref);
       },
       nonBlockingErrorSubtitle: '媒体源响应偏慢，先进入应用，资源会继续在后台补齐。',
       stageDelay: const Duration(milliseconds: 30),
     );
+    if (!_canContinue) return;
 
     await _setStage(
       progress: 0.94,
@@ -120,14 +175,6 @@ class BootstrapController extends Notifier<BootstrapState> {
       title: '正在整理展示内容',
       subtitle: '马上进入首页。',
       minDelay: const Duration(milliseconds: 40),
-    );
-
-    state = state.copyWith(
-      progress: 1,
-      title: '准备完成',
-      subtitle: '你的首页和片库已经就绪。',
-      currentStep: 3,
-      isComplete: true,
     );
   }
 
@@ -147,6 +194,7 @@ class BootstrapController extends Notifier<BootstrapState> {
       subtitle: subtitle,
       minDelay: stageDelay,
     );
+    if (!_canContinue) return;
 
     try {
       await task();
@@ -162,7 +210,7 @@ class BootstrapController extends Notifier<BootstrapState> {
         error: error,
         stackTrace: stackTrace,
       );
-      if (nonBlockingErrorSubtitle != null) {
+      if (_canContinue && nonBlockingErrorSubtitle != null) {
         state = state.copyWith(subtitle: nonBlockingErrorSubtitle);
       }
     }

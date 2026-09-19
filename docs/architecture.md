@@ -401,6 +401,10 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 最近播放模块直接读取本地播放记忆，并优先尝试从详情缓存补海报
 - 最近播放卡片的主标题会优先显示电影名或剧集总名；对于单集，`SxxEyy`、进度等信息继续留在副标题，不再把具体集名作为首页主标题
 - Hero 当前主要外显配置是 Logo 形态标题、`normal / borderless` 展示方式和背景图
+- 首页滚动区外层 `LayoutBuilder` 按实际可用高度计算 Hero 高度：扣除 Hero 外边距后取 `62%`，常规下限 `220dp`，普通/无边框上限分别为 `440/500dp`；空间不足时以预留 `140dp` 给分页区、下一模块标题和卡片露出为优先。加载占位和真实内容共用计算值与 `20dp` 分页占位，单项也保留分页高度。简介最多两行，元信息限制一行；局部布局结合文字缩放在矮窗口下依次隐藏简介、元信息，优先保留片名。
+- `homeHeroAutoPlayEnabled` 默认 false，经设置模型、序列化、controller 和 `SettingsHeroSlice` 持久化；首页设置提供独立开关，TV 不禁用。`_FeaturedHeroState` 复用 `PageActivityMixin`，以可取消的单次 `6s` Timer 调度自动翻页；仅在首页活动、滚动区顶部且至少两项时准入，触摸按住、鼠标悬停、TV 焦点离开当前 Hero 卡时取消，恢复后重新计时。手动翻页与按键重置计时；列表或来源、展示模式、开关变化重置，dispose 释放 Timer 和监听。自动切换完成后仅在页面仍活动、来源和目标仍匹配且主焦点未被用户移开时跟随到可见 TV 卡片。
+- “简化首页 Hero”仅控制翻页动画和装饰效果，与自动轮播独立；TV 不强制开启。简化时自动切图不执行动画，末项回首项也直接切换。
+- 无边框自动翻页可能卸载旧卡片；旧焦点已卸载且当前没有可操作焦点时允许补到新的可见卡片，已有菜单或其他内容焦点时仍不抢焦点。
 - Hero 会根据横竖屏优先选择对应方向的素材；横屏优先横图、竖屏优先竖图，只有单张图可用时会直接按海报布局展示
 - `Hero` 当前项、翻页按钮和指示状态已经收口到局部监听；切换当前 Hero 时不会再带动首页根节点整块重建
 - 首次进入首页时，如果 Hero 条目信息不全且还没有 metadata refresh 成功 / 失败标记，会后台 best-effort 补一次信息，并把结果写回详情缓存
@@ -1202,12 +1206,13 @@ Android TV 下的设置页还额外做了遥控器适配：
 平台外部图标资源当前也统一走同一条导出链路：
 
 - `BootstrapController` 在原有首页预热/刷新调度后调用 `waitForHomeModules`，并发等待所有已启用模块的 `homeSectionProvider.future`（包括缓存整理）；各模块失败独立处理，5 秒超时由启动阶段降级逻辑放行。此等待仅用于启动，不改变首页手动刷新行为，也不等待海报解码或全库扫描
+- `BootstrapController.start()` 使用单个 `10s` 总截止计时器覆盖所有启动阶段，正常完成时提前取消，provider 销毁时取消并释放等待；配置读取 `3s`、首页模块 `5s` 阶段上限保持不变。总超时标记启动完成并记录 `app.bootstrap` 本地警告（阶段、超时毫秒数），不取消底层已发出的异步操作；各异步边界检查 provider 存活与启动完成状态，迟到成功/失败不覆盖完成状态、不继续触发后续阶段或重复首页刷新。此上限从 Flutter 启动编排开始计算，不覆盖原生初始化或主线程同步阻塞
 
 - 各平台应用显示名称、Web 安装名称及桌面窗口标题统一为 `Starflow`；平台包标识保持不变，macOS 产品名称与 Xcode scheme、测试宿主路径同步为 `Starflow.app`
 
 - 原生启动背景由 Android `launch_background.xml`、Android 12+ `LaunchTheme.windowSplashScreenBackground` 和 iOS `LaunchScreen.storyboard` 管理，均与 Flutter `BootstrapPage` 保持 `#121212` 一致；Flutter 启动字标使用白色与浅灰色，不再使用蓝色渐变背景
 - 原生启动页只保留背景：Android 的 layer-list 不加载位图，Android 12+ 显式使用 `transparent_splash_icon`，iOS storyboard 移除 LaunchImage 视图及其约束。Flutter 初始化流程保持不变；导出链保留的原生启动图片当前不参与展示
-- Flutter `BootstrapPage` 的 Logo 和字标固定大小与位置，仅执行 `820ms` 淡入；不再订阅启动进度来驱动视觉缩放，不执行入场位移或循环动画。减少动画模式直接静态显示，启动完成仍由独立的状态监听跳转首页
+- Flutter `BootstrapPage` 的 Logo 和字标始终静态显示，固定大小、位置与不透明度，不执行淡入、缩放、位移或循环动画；不订阅启动进度或减少动画设置来驱动视觉变化。启动完成由独立的状态监听注册帧后首页跳转，并调用 `ensureVisualUpdate()` 主动请求帧，避免静态页面在 release 模式空闲时一直等待回调；跳转前仍检查 `mounted`
 
 - Android、iOS、macOS、Web、Windows 的外部 App Icon 都由 `tool/generate_brand_assets.py` 生成
 - Android TV Banner 也由同一脚本生成

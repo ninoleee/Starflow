@@ -56,6 +56,13 @@ class HomeSettingsPage extends ConsumerWidget {
         const SizedBox(height: 14),
         ...buildSettingsTileGroup([
           SettingsToggleTile(
+            title: 'Hero 自动轮播',
+            value: heroSlice.autoPlayEnabled,
+            focusId: 'home-settings:hero-auto-play',
+            onChanged:
+                heroEnabled ? controller.setHomeHeroAutoPlayEnabled : null,
+          ),
+          SettingsToggleTile(
             title: '标题优先展示 Logo',
             value: heroSlice.logoTitleEnabled,
             onChanged:

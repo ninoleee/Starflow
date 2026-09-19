@@ -3,13 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/router/app_routes.dart';
 import 'package:starflow/features/bootstrap/application/bootstrap_controller.dart';
-import 'package:starflow/features/settings/application/settings_controller.dart';
-
-final _bootstrapReduceMotionProvider = Provider<bool>((ref) {
-  return ref.watch(appSettingsProvider.select(
-    (settings) => settings.performanceReduceMotionEnabled,
-  ));
-});
 
 class BootstrapPage extends ConsumerStatefulWidget {
   const BootstrapPage({super.key});
@@ -33,6 +26,8 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
               context.goNamed(AppRoutes.home.name);
             }
           });
+          // A static startup page may be idle; post-frame callbacks do not wake it.
+          WidgetsBinding.instance.ensureVisualUpdate();
         }
       },
     );
@@ -49,8 +44,6 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
 
   @override
   Widget build(BuildContext context) {
-    final reduceMotionEnabled = ref.watch(_bootstrapReduceMotionProvider);
-
     return Scaffold(
       backgroundColor: const Color(0xFF121212),
       body: DecoratedBox(
@@ -66,26 +59,10 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                 child: Center(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 320),
-                    child: reduceMotionEnabled
-                        ? const _BootstrapLogoMark(
-                            iconSize: 108,
-                            wordmarkSize: 34,
-                          )
-                        : TweenAnimationBuilder<double>(
-                            tween: Tween(begin: 0, end: 1),
-                            duration: const Duration(milliseconds: 820),
-                            curve: Curves.easeOutCubic,
-                            builder: (context, entrance, child) {
-                              return Opacity(
-                                opacity: 0.58 + entrance * 0.42,
-                                child: child,
-                              );
-                            },
-                            child: const _BootstrapLogoMark(
-                              iconSize: 108,
-                              wordmarkSize: 34,
-                            ),
-                          ),
+                    child: const _BootstrapLogoMark(
+                      iconSize: 108,
+                      wordmarkSize: 34,
+                    ),
                   ),
                 ),
               ),

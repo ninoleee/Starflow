@@ -1,5 +1,11 @@
+// Disable Riverpod's debug-only frame side effect to exercise release behavior.
+// ignore_for_file: invalid_use_of_internal_member
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// ignore: implementation_imports
+import 'package:flutter_riverpod/src/internals.dart'
+    show debugCanModifyProviders;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/router/app_routes.dart';
@@ -33,7 +39,7 @@ void main() {
   for (final size in [const Size(390, 844), const Size(1280, 720)]) {
     for (final reduceMotion in [false, true]) {
       testWidgets(
-          'bootstrap stays fixed at $size with reduceMotion=$reduceMotion',
+          'bootstrap stays static at $size with reduceMotion=$reduceMotion',
           (tester) async {
         await tester.binding.setSurfaceSize(size);
         addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -63,11 +69,14 @@ void main() {
           matching: find.byType(Opacity),
         );
         expect(initialLogo.size, const Size(108, 108));
-        if (reduceMotion) {
-          expect(opacity, findsNothing);
-        } else {
-          expect(tester.widget<Opacity>(opacity).opacity, closeTo(0.58, 0.001));
-        }
+        expect(opacity, findsNothing);
+        expect(
+          find.descendant(
+            of: find.byType(BootstrapPage),
+            matching: find.byType(TweenAnimationBuilder<double>),
+          ),
+          findsNothing,
+        );
 
         for (final progress in [0.18, 0.42, 0.76, 0.94, 1.0]) {
           controller.setProgress(progress);
@@ -75,15 +84,9 @@ void main() {
           expect(_paintedRect(tester, logo), initialLogo);
           expect(_paintedRect(tester, star), initialStar);
           expect(_paintedRect(tester, flow), initialFlow);
-          if (!reduceMotion && progress == 0.18) {
-            expect(tester.widget<Opacity>(opacity).opacity,
-                allOf(greaterThan(0.58), lessThan(1)));
-          }
+          expect(opacity, findsNothing);
         }
 
-        if (!reduceMotion) {
-          expect(tester.widget<Opacity>(opacity).opacity, 1);
-        }
         await tester.pumpAndSettle();
         final builders = tester.widgetList<AnimatedBuilder>(find.descendant(
           of: find.byType(BootstrapPage),
@@ -100,7 +103,8 @@ void main() {
     }
   }
 
-  testWidgets('bootstrap still navigates home on completion', (tester) async {
+  testWidgets('idle bootstrap schedules a frame and navigates on completion',
+      (tester) async {
     final controller = _ControlledBootstrapController();
     final router = GoRouter(
       initialLocation: '/bootstrap',
@@ -126,7 +130,18 @@ void main() {
         child: MaterialApp.router(routerConfig: router),
       ),
     );
-    controller.complete();
+    await tester.pumpAndSettle();
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    // Riverpod's debug-only mutation check schedules a frame that release lacks.
+    final debugCheck = debugCanModifyProviders;
+    try {
+      debugCanModifyProviders = null;
+      controller.complete();
+    } finally {
+      debugCanModifyProviders = debugCheck;
+    }
+    expect(tester.binding.hasScheduledFrame, isTrue,
+        reason: 'Completion must wake the static page without user input.');
     await tester.pumpAndSettle();
     expect(find.text('Home ready'), findsOneWidget);
     expect(find.byType(BootstrapPage), findsNothing);

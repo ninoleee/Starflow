@@ -15,6 +15,26 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('hero auto play persists independently of simplified visuals', () async {
+    final repository = _OutOfOrderSettingsRepository(SeedData.defaultSettings);
+    final container = ProviderContainer(overrides: [
+      appSettingsRepositoryProvider.overrideWithValue(repository),
+    ]);
+    addTearDown(container.dispose);
+    await container.read(settingsControllerProvider.future);
+    final controller = container.read(settingsControllerProvider.notifier);
+    expect(repository.settings.homeHeroAutoPlayEnabled, isFalse);
+    await controller.setHomeHeroAutoPlayEnabled(true);
+    await controller.setSimplifiedHomeHeroEnabled(true);
+    expect(repository.settings.homeHeroAutoPlayEnabled, isTrue);
+    expect(
+        AppSettings.fromCurrentJson(repository.settings.toJson())
+            .homeHeroAutoPlayEnabled,
+        isTrue);
+    await controller.setHomeHeroAutoPlayEnabled(false);
+    expect(repository.settings.homeHeroAutoPlayEnabled, isFalse);
+    expect(AppSettings.fromJson({}).homeHeroAutoPlayEnabled, isFalse);
+  });
   late Directory logDirectory;
   setUpAll(() async {
     logDirectory =
