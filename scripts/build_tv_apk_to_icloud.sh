@@ -110,6 +110,7 @@ echo "Building TV APK for starflow ($VERSION, $BUILD_DATE)..."
 
 flutter build apk \
   --release \
+  --target-platform android-arm,android-arm64 \
   --android-skip-build-dependency-validation \
   --build-name "$VERSION" \
   --dart-define "STARFLOW_BUILD_DATE=$BUILD_DATE"

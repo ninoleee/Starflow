@@ -158,7 +158,8 @@ lib/
 
 - `scripts/build_tv_apk.ps1` 默认把 TV 安装包输出到桌面
 - 支持按需临时嵌入配置 JSON，打包结束后自动清理
-- 内部默认使用 `flutter build apk --release --android-skip-build-dependency-validation`
+- TV 发布脚本内部固定使用 `flutter build apk --release --target-platform android-arm,android-arm64 --android-skip-build-dependency-validation`，单个 APK 仅保留 ARM 32 位与 ARM64，不包含 `x86_64`
+- `android/app/build.gradle.kts` 的 release ABI 过滤同步限定为 `armeabi-v7a` 与 `arm64-v8a`，防止第三方原生库带入 `x86_64`；debug 构建不受此限制
 - TV 文件名使用 `starflow-tv[-config]-主版本.月份.序号.apk`
 - 当前显示版本号按标准三段式 `主版本.月份.序号` 自动递增
 - macOS 的 TV/iOS iCloud 发布脚本可通过同一个 `STARFLOW_RELEASE_VERSION` 固定批次版本；省略时仍按月和序号分别自动递增
@@ -813,11 +814,11 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
   - 在线字幕搜索
   - Android 原生音轨/字幕选择、播放中音频输出切换、外挂字幕加载与外挂字幕偏移
   - Android 原生播放设置弹窗一级只保留本剧跳过片头片尾、音轨、字幕和选择剧集；播放速度、音频输出、主字幕大小、主/副字幕位置、副字幕大小、在线查找字幕、加载外部字幕和字幕偏移全部收进列表最下方的“更多”二级弹窗
-  - Android TV 原生控制层只让进度条参与遥控器焦点；播放/暂停及右下角字幕、音轨和更多按钮仍保留显示与点击，但不进入方向键焦点链。确定键由原生遥控器处理层直接切换播放状态。`NativePlaybackRemoteController` 在控制栏显示时按下打开播放设置，形成无菜单键遥控器“上 → 下”的可达路径；隐藏时按下保持选集优先、设置兜底。长按重复不重开，已有弹窗和字幕搜索中的下键交还原界面；菜单键、字幕键快捷入口不变
+  - Android TV 原生控制层只让进度条参与遥控器焦点；播放/暂停及右下角字幕、音轨和更多按钮仍保留显示与点击，但不进入方向键焦点链。确定键由原生遥控器处理层直接切换播放状态。`NativePlaybackRemoteController` 无论控制栏是否可见，按下都统一优先打开选集；没有选集才打开播放设置。选集直接叠加在当前画面上，不主动收起或重新显示控制栏。长按重复不重开，已有弹窗和字幕搜索中的下键交还原界面；菜单键、字幕键快捷入口不变
   - Android 原生播放器的主字幕大小可在“更多”里按 `20–78号` 调整，主/副位置和副字幕大小按百分比调整；改完立即重新套用 `NativeSubtitleStylePolicy / NativeDualSubtitleController`，并通过原生播放回调调用 Flutter `SettingsController` 的字幕样式窄保存入口。设置页、MPV 与 ExoPlayer 因而共用同一份全局值，不再保留原生会话临时覆盖
   - Android 原生音轨与字幕轨选择使用单选即应用的轻量弹窗；点选轨道或“关闭”会立即更新 Media3 `TrackSelectionParameters` 并关闭弹窗，不保留额外的确定步骤
 - Android `NativePlaybackActivity` 使用 `Theme.AppCompat.NoActionBar` 派生的全屏黑色主题；音轨、字幕轨与音频输出都使用原生单选对话框，选中即应用，不依赖额外确定按钮
-  - Exo 设置相关 `AlertDialog.Builder` 显式使用 `NativePlaybackSettingsDialogTheme`，以静态资源统一近黑底、白色主文字、浅灰值、弱分割线和零窗口 elevation，不改变 Activity 主题或错误弹窗。`NativePlaybackSettingsAppearance` 仅在菜单创建时给首个 ` · ` 及其后状态文字添加颜色 span；数值调节标签直接引用同一浅灰资源。不新增布局层级、轮询、动画或模糊，原菜单层级、焦点、回调、窗口位置和数值弹窗不压暗画面的规则不变
+  - Exo 设置、选季 / 集数范围、退出确认和播放失败的 `AlertDialog.Builder` 显式使用 `NativePlaybackSettingsDialogTheme`，以静态资源统一近黑底、白色主文字、浅灰值、弱分割线和零窗口 elevation，不改变 Activity 主题。`NativePlaybackEpisodePicker` 的面板背景与主 / 辅文字也直接引用同一组颜色资源，窗口 elevation 为零，保留选集焦点框及当前集高亮。`NativePlaybackSettingsAppearance` 仅在菜单创建时给首个 ` · ` 及其后状态文字添加颜色 span；数值调节标签直接引用同一浅灰资源。不新增布局层级、轮询、动画或模糊，原菜单层级、焦点、回调、窗口位置和数值弹窗不压暗画面的规则不变。顶底控制栏不单独铺设黑色长条，只由 `exo_controls_background` 提供整屏半透明遮罩；视频底色 / 黑边保留纯黑，系统文件选择器与 Toast 配色由系统负责
   - Android 原生字幕由 `NativeSubtitleStylePolicy` 把 Flutter 的 `20–78号` 设置分段映射到 `3.5%–9%` 画面高度，默认 `32号` 对应 Media3 的 `5.33%`；主位置默认 `80%`，副位置默认 `90%`，副字幕默认主字号的 `50%`。`SubtitleView` 默认使用 Canvas、白色中粗字、透明背景与黑色描边，保留 cue 内嵌样式但忽略内嵌字号；检测到系统 `CaptioningManager` 已启用时采用系统样式与字号，同时在双字幕模式保留应用设置的主/副布局
 - 播放器页与独立字幕搜索页复用同一个 `OnlineSubtitleRepository`；仓库内部已经收口为 `searchStructured(...)` 一条结构化链路
 - `searchStructured(...)` 会基于当前播放目标、详情外部 ID 和本地文件信息组装 `OnlineSubtitleSearchRequest`，优先尝试文件哈希、`IMDb ID / TMDB ID`、季集号、年份和标题
@@ -910,8 +911,9 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - Android 原生启动通过 `buildDeferredNativeEpisodeQueue` 携带当前季的完整未解析队列并保留真实 `currentIndex`，只用已解析目标替换当前条目；原生选集、上一集、下一集和播放结束自动续播统一通过 `starflow/native_playback_resolver` 回调 Flutter，按选中的单集执行 `PlaybackTargetResolver` 和必要的 SmartStrm MP4/HLS 探测。异步解析期间旧播放器不释放，成功后才更新队列条目并切换，失败或会话变化则保留当前视频
 - Android TV 原生播放器内切换远程剧集时，`releasePlayer()` 先清理旧 Exo、Surface、Analytics/带宽监听、运行循环、看门狗和系统媒体会话；新集不继承旧 URL、MediaSource 或缓冲数据。低内存 TV 的内部切集档使用 `minBuffer=30s / start=6s / rebuffer=12s / target=48 MB`，首次外部启动继续使用原快启档。`native.queue.old-player-released` 与 `native.buffer-policy episodeSwitchWarmup=true` 用于验证两段边界
 - 内置 MPV 的 TV、Material 和 Material Desktop 控制层都直接消费 `PlaybackEpisodeQueue`，不使用 media_kit 内部单媒体 playlist 的上一项/下一项按钮；三端统一显示边界可用状态和右侧选集面板。手动选集、相邻集及自动续播最终收口到 `_switchPlaybackQueueIndex`：先取用命中的预解析地址，否则用 `PlaybackTargetResolver` 解析目标单集并校验可播地址，成功后才保存旧集进度、关闭旧播放器并初始化新集，解析失败时队列索引和当前播放器保持不变
+- MPV 的 TV 下键由独立 `_OpenTvEpisodePickerIntent` 处理：有可浏览队列时直接打开选集，没有队列时打开播放设置；选集不主动收起或显示控制栏，控制栏是否可见保持进入前的状态
 - `PlaybackEpisodeBrowser` 负责选集会话内的季列表、单季元数据及 in-flight 缓存，失败清除对应缓存后可重试；`PlaybackEpisodeQueueResolver.loadSeasons/loadSeason` 复用媒体服务子列表和 NAS 本地索引，不解析播放地址。浏览其他季的队列使用 `currentIndex=-1`，通过 `PlaybackEpisodeSelection` 将候选队列与选择索引交给播放层，MPV 在地址解析成功且原队列仍有效后才提交。Android 经 `browseNativePlaybackEpisodes` 回调同一服务，`NativePlaybackEpisodePicker` 只负责面板；`NativePlaybackEpisodeController.selectedSeasonQueue` 暂存跨季候选，失败清除，成功才提交为播放队列。
-- 两端选集面板采用列表/四列网格，每段最多挂载 30 个轻量条目，按真实集号显示分段边界，遥控器移动可跨段。当前播放依据资源 key 标识而不是焦点位置；本地历史仅作显示，不修改历史保留策略。Flutter 关闭后恢复原 FocusNode，Android 优先恢复仍挂载的入口 View。单季加载带请求代次校验和 30 秒超时，关闭面板、定位当前集或切换请求后忽略迟到结果；不加载剧照、不预解析整季。
+- 两端选集面板采用列表/四列网格，TV 宽度为可用宽度的 `30%` 并夹紧在 `320–600dp`，窄屏继续占满可用宽度；每段最多挂载 30 个轻量条目，按真实集号显示分段边界，遥控器移动可跨段。当前播放依据资源 key 标识而不是焦点位置；本地历史仅作显示，不修改历史保留策略。Flutter 选集及季/范围弹窗使用 `AnimationStyle.noAnimation`；Android 对应窗口在显示前设置 `windowAnimations=0`，主面板的尺寸与位置也在显示前确定，避免默认窗口缩放和显示后扩张。Flutter 关闭后恢复原 FocusNode，Android 优先恢复仍挂载的入口 View。单季加载带请求代次校验和 30 秒超时，关闭面板、定位当前集或切换请求后忽略迟到结果；不加载剧照、不预解析整季。
 - MPV 的跳过与连续播放规则由 `playback_auto_skip_policy.dart` 提供，与 Kotlin `NativePlaybackStartPolicy` / `NativePlaybackSkipPolicy` 一一对应：`resolvePlaybackStartPosition` 在打开后、位置事件生效前决定起点（自动下一集忽略旧续播并应用片头，非自动入口按 allowResume 用续播点，无续播点才用片头，片头越界回到 0），随后置位片头标志，因此启动 seek 不会和续播互相覆盖；`resolvePlaybackEndBoundary` 给出结束边界，`shouldPrepareNextEpisode` 给出边界前 `30s` 的预解析窗口
 - MPV 起点在创建播放器之前算好，通过 media_kit `Media(start:)` 交给 mpv 的 `on_load` 钩子（`on_unload` 会自动复位），因此打开即定位，打开后不再有续播 seek，也不再需要第二轮 `_awaitStrictPlaybackReady` 确认；片头越界在时长事件里校验一次并回到 0，后端未应用起点时（相差超过 `10s`）才回落到一次 seek。开流后的异常由卡顿看门狗接管
 - MPV 的剧集队列只在没有队列时解析：切集和故障恢复复用内存队列并替换当前条目；冷启动的内嵌路线在开流后台解析队列，`launchSystemPlayer / launchNativeContainer` 两条路线仍在 executor 前同步解析

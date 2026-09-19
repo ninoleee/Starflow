@@ -8,7 +8,7 @@ import org.w3c.dom.Element
 
 class NativePlayerControlLayoutTest {
     @Test
-    fun `network speed has no separate background on phone and television`() {
+    fun `top and bottom controls rely on the shared scrim on phone and television`() {
         for (device in listOf("phone", "tv")) {
             val file = File("src/main/res/layout/native_player_control_view_$device.xml")
             val document = DocumentBuilderFactory.newInstance().apply {
@@ -20,7 +20,11 @@ class NativePlayerControlLayoutTest {
             assertEquals(device, "", speed.getAttributeNS(ANDROID_NS, "background"))
             val topBar = speed.parentNode as Element
             assertEquals(device, "@id/exo_top_controls", topBar.getAttributeNS(ANDROID_NS, "id"))
-            assertEquals(device, "@color/native_player_overlay_bar", topBar.getAttributeNS(ANDROID_NS, "background"))
+            assertEquals(device, "", topBar.getAttributeNS(ANDROID_NS, "background"))
+            val bottomBar = elementWithId(document, "@id/exo_bottom_bar")
+            assertEquals(device, "", bottomBar.getAttributeNS(ANDROID_NS, "background"))
+            val scrim = elementWithId(document, "@id/exo_controls_background")
+            assertEquals(device, "@color/native_player_overlay_scrim", scrim.getAttributeNS(ANDROID_NS, "background"))
         }
     }
 
@@ -65,5 +69,11 @@ class NativePlayerControlLayoutTest {
 
     companion object {
         private const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
+
+        private fun elementWithId(document: org.w3c.dom.Document, id: String): Element {
+            val views = document.getElementsByTagName("*")
+            return (0 until views.length).map { views.item(it) as Element }
+                .single { it.getAttributeNS(ANDROID_NS, "id") == id }
+        }
     }
 }

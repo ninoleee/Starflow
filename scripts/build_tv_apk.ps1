@@ -91,6 +91,7 @@ try {
   if (-not $SkipBuild) {
     flutter build apk `
       --release `
+      --target-platform android-arm,android-arm64 `
       --android-skip-build-dependency-validation `
       --build-name $version `
       --dart-define "STARFLOW_BUILD_DATE=$buildDate"

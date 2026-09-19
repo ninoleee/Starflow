@@ -49,6 +49,7 @@ Future<PlaybackEpisodeSelection?> showPlaybackEpisodePickerDialog({
   final origin = FocusManager.instance.primaryFocus;
   final result = await showDialog<PlaybackEpisodeSelection>(
     context: context,
+    animationStyle: AnimationStyle.noAnimation,
     barrierColor: Colors.black.withValues(alpha: 0.18),
     builder: (_) => _PlaybackEpisodePickerDialog(
       queue: queue,
@@ -187,6 +188,7 @@ class _PlaybackEpisodePickerDialogState
   Future<void> _chooseSeason() async {
     final season = await showDialog<PlaybackEpisodeSeason>(
         context: context,
+        animationStyle: AnimationStyle.noAnimation,
         builder: (context) => SimpleDialog(
               title: const Text('选择季'),
               children: _seasons
@@ -206,6 +208,7 @@ class _PlaybackEpisodePickerDialogState
   Future<void> _chooseRange() async {
     final page = await showDialog<int>(
         context: context,
+        animationStyle: AnimationStyle.noAnimation,
         builder: (context) => SimpleDialog(
               title: const Text('选择集数范围'),
               children: List.generate(
@@ -380,9 +383,10 @@ class _PlaybackEpisodePickerDialogState
       shape: const RoundedRectangleBorder(),
       backgroundColor: AppColors.neutral3,
       child: SizedBox(
+        key: const ValueKey<String>('player:episode-picker:panel'),
         width: size.width < 600
             ? size.width
-            : (size.width * .42).clamp(380.0, 600.0),
+            : (size.width * .30).clamp(320.0, 600.0),
         height: size.height,
         child: SafeArea(
             child: Padding(

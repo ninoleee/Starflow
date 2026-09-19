@@ -51,13 +51,22 @@ class NativePlaybackRemoteControllerTest {
     }
 
     @Test
-    fun visibleControllerDownOpensSettingsWithoutAMenuKey() {
+    fun visibleControllerDownOpensEpisodePickerWithoutAMenuKey() {
         `when`(host.playerView.isControllerFullyVisible).thenReturn(true)
+        `when`(host.episodes.openEpisodeSelectionDialog()).thenReturn(true)
         assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN))
         assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN, repeat = 1))
-        verify(host.settings).openPlaybackSettingsDialog()
-        verify(host.episodes, never()).openEpisodeSelectionDialog()
+        verify(host.episodes).openEpisodeSelectionDialog()
+        verify(host.settings, never()).openPlaybackSettingsDialog()
         verify(host.session, never()).togglePlayback()
+    }
+
+    @Test
+    fun visibleControllerDownFallsBackToSettingsWithoutEpisodes() {
+        `when`(host.playerView.isControllerFullyVisible).thenReturn(true)
+        `when`(host.episodes.openEpisodeSelectionDialog()).thenReturn(false)
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN))
+        verify(host.settings).openPlaybackSettingsDialog()
     }
 
     @Test

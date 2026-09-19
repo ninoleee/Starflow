@@ -100,9 +100,7 @@ internal class NativePlaybackRemoteController(
                     exitConfirmationDialog?.isShowing != true
                 ) {
                     if (event.repeatCount != 0 || event.isCanceled) return true
-                    if (host.playerView.isControllerFullyVisible ||
-                        !host.episodes.openEpisodeSelectionDialog()
-                    ) {
+                    if (!host.episodes.openEpisodeSelectionDialog()) {
                         host.settings.openPlaybackSettingsDialog()
                     }
                     return true
@@ -201,7 +199,7 @@ internal class NativePlaybackRemoteController(
         }
 
         exitConfirmationDialog =
-            AlertDialog.Builder(host.activity)
+            AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
                 .setTitle("退出播放")
                 .setMessage("确认退出当前播放吗？")
                 .setNegativeButton("继续播放", null)

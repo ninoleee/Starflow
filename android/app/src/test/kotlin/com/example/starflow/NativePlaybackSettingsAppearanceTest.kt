@@ -7,6 +7,7 @@ import android.text.style.ForegroundColorSpan
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.Mockito.*
 import org.w3c.dom.Element
@@ -74,6 +75,43 @@ class NativePlaybackSettingsAppearanceTest {
         val slider = layout.getElementsByTagName("SeekBar").item(0) as Element
         assertEquals("48dp", slider.getAttributeNS(ANDROID_NS, "layout_height"))
         assertEquals("true", slider.getAttributeNS(ANDROID_NS, "focusable"))
+    }
+
+    @Test
+    fun `every native playback alert explicitly shares the neutral theme`() {
+        val sources = File("src/main/kotlin/com/example/starflow").listFiles()!!
+            .filter { it.name.startsWith("Native") && it.extension == "kt" }
+        val builders = Regex("AlertDialog\\.Builder\\(([^)]*)\\)")
+        var count = 0
+        for (source in sources) {
+            for (builder in builders.findAll(source.readText())) {
+                count++
+                assertTrue(source.name, builder.groupValues[1].endsWith(
+                    ", R.style.NativePlaybackSettingsDialogTheme",
+                ))
+            }
+        }
+        assertTrue("Expected native playback dialogs", count > 0)
+    }
+
+    @Test
+    fun `episode panel shares palette while playback surfaces stay black and translucent`() {
+        val picker = File("src/main/kotlin/com/example/starflow/NativePlaybackEpisodePicker.kt").readText()
+        for (color in listOf("background", "title", "value")) {
+            assertTrue(picker.contains("activity.getColor(R.color.native_settings_$color)"))
+        }
+        assertTrue(picker.contains("decorView.elevation = 0f"))
+        for (device in listOf("phone", "tv")) {
+            val surface = parse("layout/native_player_view_$device.xml").documentElement
+            assertEquals("@android:color/black", surface.getAttributeNS(ANDROID_NS, "background"))
+        }
+        val colors = parse("values/native_player_colors.xml").getElementsByTagName("color")
+        val values = (0 until colors.length).associate {
+            val color = colors.item(it) as Element
+            color.getAttribute("name") to color.textContent
+        }
+        assertEquals("#181818", values["native_settings_background"])
+        assertEquals("#4D000000", values["native_player_overlay_scrim"])
     }
 
     private fun parse(path: String) = DocumentBuilderFactory.newInstance().apply {

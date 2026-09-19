@@ -171,7 +171,7 @@ internal class NativePlaybackLaunchController(
             return
         }
         playbackErrorDialog =
-            AlertDialog.Builder(host.activity)
+            AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
                 .setTitle("播放失败")
                 .setMessage(message)
                 .setCancelable(false)

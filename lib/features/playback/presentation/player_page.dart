@@ -80,6 +80,10 @@ class _OpenPlaybackOptionsIntent extends Intent {
   const _OpenPlaybackOptionsIntent();
 }
 
+class _OpenTvEpisodePickerIntent extends Intent {
+  const _OpenTvEpisodePickerIntent();
+}
+
 class _ShowTvPlaybackChromeIntent extends Intent {
   const _ShowTvPlaybackChromeIntent();
 }
@@ -855,7 +859,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 SingleActivator(LogicalKeyboardKey.arrowUp):
                     _ShowTvPlaybackChromeIntent(),
                 SingleActivator(LogicalKeyboardKey.arrowDown):
-                    _OpenPlaybackOptionsIntent(),
+                    _OpenTvEpisodePickerIntent(),
                 SingleActivator(LogicalKeyboardKey.contextMenu):
                     _OpenPlaybackOptionsIntent(),
                 SingleActivator(LogicalKeyboardKey.gameButtonY):
@@ -889,6 +893,25 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 _showPlaybackOptions(
                   isTelevision: isTelevision,
                 );
+                return null;
+              },
+            ),
+            _OpenTvEpisodePickerIntent:
+                CallbackAction<_OpenTvEpisodePickerIntent>(
+              onInvoke: (_) {
+                if (!isTelevision) {
+                  return null;
+                }
+                final queue = _episodeQueue;
+                if (queue != null &&
+                    queue.entries.isNotEmpty &&
+                    queue.hasCurrent) {
+                  unawaited(
+                    _openPlaybackEpisodePicker(isTelevision: true),
+                  );
+                } else {
+                  _showPlaybackOptions(isTelevision: true);
+                }
                 return null;
               },
             ),

@@ -15,6 +15,18 @@ import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_episode_picker_dialog.dart';
 
 void main() {
+  testWidgets('episode panel has no entrance or exit transition',
+      (tester) async {
+    await _openPicker(tester, _queue(currentIndex: 0));
+    final context = tester.element(find.byType(Dialog));
+    final route = ModalRoute.of(context)!;
+    expect(route.transitionDuration, Duration.zero);
+    expect(route.reverseTransitionDuration, Duration.zero);
+    await tester.tap(find.byTooltip('关闭'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(Dialog), findsNothing);
+  });
   test('formats season and episode numbers for the picker', () {
     expect(
       formatPlaybackEpisodePickerLabel(
@@ -144,6 +156,24 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.tap(find.byTooltip('网格'));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('TV panel uses about 30 percent of a wide screen',
+      (tester) async {
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await _openPicker(tester, _queue(currentIndex: 0));
+    final width = tester
+        .getSize(
+          find.byKey(
+            const ValueKey<String>('player:episode-picker:panel'),
+          ),
+        )
+        .width;
+    expect(width, closeTo(384, 0.1));
     expect(tester.takeException(), isNull);
   });
 

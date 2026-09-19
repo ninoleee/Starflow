@@ -4,8 +4,7 @@
     <color name="native_settings_title">#FFFFFF</color>
     <color name="native_settings_value">#BDBDBD</color>
     <color name="native_settings_divider">#2C2C2C</color>
-    <color name="native_player_overlay_scrim">#A6000000</color>
-    <color name="native_player_overlay_bar">#73000000</color>
+    <color name="native_player_overlay_scrim">#4D000000</color>
     <color name="native_player_secondary_text">#CCFFFFFF</color>
     <color name="native_player_timebar_played">#FFFFFFFF</color>
     <color name="native_player_timebar_buffered">#66FFFFFF</color>

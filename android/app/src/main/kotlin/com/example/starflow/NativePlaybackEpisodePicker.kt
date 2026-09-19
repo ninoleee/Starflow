@@ -45,14 +45,14 @@ internal class NativePlaybackEpisodePicker(
     private var popup: AlertDialog? = null
     private val target = JSONObject(original.currentEntry()?.playbackTargetJson ?: "{}")
     private val currentKey = original.currentEntry()?.playbackItemKey
-    private val muted = Color.rgb(170, 170, 176)
-    private val text = Color.rgb(232, 232, 236)
+    private val muted = activity.getColor(R.color.native_settings_value)
+    private val text = activity.getColor(R.color.native_settings_title)
 
     init {
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         root.orientation = LinearLayout.VERTICAL
         root.setPadding(dp(20), dp(16), dp(20), dp(12))
-        root.setBackgroundColor(Color.rgb(24, 24, 27))
+        root.setBackgroundColor(activity.getColor(R.color.native_settings_background))
         val header = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(label(target.optString("seriesTitle").ifBlank { "选择剧集" }, 22f).apply {
             maxLines = 2; ellipsize = TextUtils.TruncateAt.END
@@ -80,15 +80,17 @@ internal class NativePlaybackEpisodePicker(
         footer.gravity = Gravity.CENTER_VERTICAL
         root.addView(footer)
         setContentView(root)
+        window?.apply {
+            decorView.elevation = 0f
+            setWindowAnimations(0)
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setGravity(Gravity.END or Gravity.CENTER_VERTICAL)
+            val width = activity.resources.displayMetrics.widthPixels
+            setLayout(if (width < dp(600)) width else (width * .30).toInt().coerceIn(dp(320), dp(600)), ViewGroup.LayoutParams.MATCH_PARENT)
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(.18f)
+        }
         setOnShowListener {
-            window?.apply {
-                setBackgroundDrawableResource(android.R.color.transparent)
-                setGravity(Gravity.END or Gravity.CENTER_VERTICAL)
-                val width = activity.resources.displayMetrics.widthPixels
-                setLayout(if (width < dp(600)) width else (width * .42).toInt().coerceIn(dp(380), dp(600)), ViewGroup.LayoutParams.MATCH_PARENT)
-                addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                setDimAmount(.18f)
-            }
             render(); focus(focusedIndex); loadSeasons()
         }
     }
@@ -223,7 +225,10 @@ internal class NativePlaybackEpisodePicker(
     }
     private fun showOptions(title: String, labels: Array<String>, current: Int, action: (Int) -> Unit) {
         popup?.dismiss()
-        popup = AlertDialog.Builder(activity).setTitle(title).setSingleChoiceItems(labels, current) { dialog, index -> dialog.dismiss(); action(index) }.setNegativeButton("关闭", null).create().also { it.show() }
+        popup = AlertDialog.Builder(activity, R.style.NativePlaybackSettingsDialogTheme).setTitle(title).setSingleChoiceItems(labels, current) { dialog, index -> dialog.dismiss(); action(index) }.setNegativeButton("关闭", null).create().also {
+            it.window?.setWindowAnimations(0)
+            it.show()
+        }
     }
     private fun chooseRange() {
         val labels = (0 until (queue.entries.size + PAGE_SIZE - 1) / PAGE_SIZE).map { page ->

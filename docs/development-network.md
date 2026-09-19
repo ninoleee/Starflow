@@ -340,7 +340,7 @@ PowerShell 下推荐使用包装脚本运行 Flutter：
 - Web 调试需要代理时，优先用 `scripts/run_web_with_proxy.ps1`
 - 需要切回官方源时，用 `-UseOfficialSource`
 - TV 安装包默认用 `.\scripts\build_tv_apk.ps1` 生成，并直接输出到桌面
-- `build_tv_apk.ps1` 内部固定使用 `flutter build apk --release --android-skip-build-dependency-validation`，因为当前 TV 分支仍明确保留 `Android 6.0 / API 23` 兼容目标
+- `build_tv_apk.ps1` 与 `build_tv_apk_to_icloud.sh` 内部固定使用 `flutter build apk --release --target-platform android-arm,android-arm64 --android-skip-build-dependency-validation`，单个 APK 仅包含 ARM 32 位与 ARM64，不再构建或打包 `x86_64`，继续保留 `Android 6.0 / API 23` 兼容目标
 - `build_tv_apk.ps1` 只会在显式传入 `-SettingsJsonPath` 时临时嵌入配置 JSON
 - 当前 TV 显示版本号只保留标准三段式 `主版本.月份.序号`
 - 当前 Release APK 启用了 `v1 + v2` 签名，兼容老一些的电视安装器
