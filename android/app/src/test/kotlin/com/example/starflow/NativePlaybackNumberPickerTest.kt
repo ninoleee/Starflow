@@ -3,6 +3,7 @@ package com.example.starflow
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.DialogInterface
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.Window
@@ -84,11 +85,12 @@ class NativePlaybackNumberPickerTest {
             verify(slider).setProgress(33)
             verify(slider).setKeyProgressIncrement(1)
             verify(label).setText("83.0%")
+            verify(window).setGravity(Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+            verify(window).clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             val listener = ArgumentCaptor.forClass(DialogInterface.OnShowListener::class.java)
             verify(dialog).setOnShowListener(listener.capture())
             listener.value.onShow(dialog)
             verify(slider).requestFocus()
-            verify(window).clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
     }
 

@@ -654,6 +654,42 @@ class _DetailEpisodeCard extends ConsumerWidget {
                       style: titleStyle,
                     ),
                   ),
+                  if (lastPlayed)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.54),
+                            borderRadius: BorderRadius.circular(AppRadii.pill),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.history_rounded,
+                                  size: 16, color: AppColors.foreground),
+                              SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  'Last Played',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: AppColors.foreground,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   Positioned(
                     left: 12,
                     bottom: 12,
@@ -731,32 +767,10 @@ class _DetailEpisodeCard extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (lastPlayed) ...[
-                    const Row(
-                      children: [
-                        Icon(Icons.history_rounded,
-                            size: 16, color: AppColors.foreground),
-                        SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            'Last Played',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: AppColors.foreground,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                  ],
                   Flexible(
                     child: Text(
                       summary,
-                      maxLines: lastPlayed ? 2 : 3,
+                      maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: AppColors.foreground,

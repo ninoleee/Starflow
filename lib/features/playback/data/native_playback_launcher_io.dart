@@ -7,6 +7,8 @@ import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/data/native_fntv_service.dart';
+import 'package:starflow/features/playback/application/playback_episode_browser.dart';
+import 'package:starflow/features/playback/application/playback_episode_queue_resolver.dart';
 import 'package:starflow/features/playback/application/subtitle_content_decoder.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
@@ -31,6 +33,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   NativePlaybackEpisodeResolver? _episodeResolver;
   String _resolverSessionId = '';
   final Map<String, NativeFntvService> _fntvSessions = {};
+  PlaybackEpisodeBrowser? _episodeBrowser;
 
   @override
   Future<NativePlaybackLaunchResult> launch(
@@ -77,6 +80,10 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       },
     );
     _episodeResolver = episodeResolver;
+    _episodeBrowser = PlaybackEpisodeBrowser(
+      resolver: PlaybackEpisodeQueueResolver(read: _ref.read),
+      target: target,
+    );
     _resolverSessionId = DateTime.now().microsecondsSinceEpoch.toString();
     final sessionId = _resolverSessionId;
     try {
@@ -222,7 +229,8 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           );
       return true;
     }
-    if (call.method != 'resolveNativePlaybackEpisode') {
+    if (call.method != 'resolveNativePlaybackEpisode' &&
+        call.method != 'browseNativePlaybackEpisodes') {
       throw MissingPluginException('Unsupported native playback resolver call');
     }
     final arguments = Map<String, Object?>.from(
@@ -245,6 +253,30 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       final target = PlaybackTarget.fromJson(
         Map<String, dynamic>.from(jsonDecode(rawTargetJson) as Map),
       );
+      if (call.method == 'browseNativePlaybackEpisodes') {
+        final browser = _episodeBrowser;
+        if (browser == null ||
+            target.sourceId != browser.target.sourceId ||
+            buildSeriesKeyForTarget(target) !=
+                buildSeriesKeyForTarget(browser.target)) {
+          return {'ok': false, 'message': '剧集会话已变化'};
+        }
+        final seasons =
+            await browser.loadSeasons().timeout(const Duration(seconds: 30));
+        final seasonId = arguments['seasonId']?.toString();
+        if (seasonId == null) {
+          return {
+            'ok': true,
+            'seasons': seasons.map((s) => s.toJson()).toList()
+          };
+        }
+        final season = seasons.where((s) => s.id == seasonId).firstOrNull;
+        if (season == null) return {'ok': false, 'message': '找不到该季'};
+        final queue = await browser
+            .loadSeason(season)
+            .timeout(const Duration(seconds: 30));
+        return {'ok': true, 'queueJson': jsonEncode(queue.toJson())};
+      }
       final resolved = await resolver(target);
       final resolvedPlaybackItemKey = buildPlaybackItemKey(resolved.target);
       return <String, Object?>{

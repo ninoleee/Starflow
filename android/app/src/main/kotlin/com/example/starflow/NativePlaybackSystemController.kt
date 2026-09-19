@@ -40,7 +40,7 @@ internal class NativePlaybackSystemController(private val host: Host) {
                 buffering = currentPlayer.playbackState == Player.STATE_BUFFERING,
                 speed = currentPlayer.playbackParameters.speed,
                 canSeek = true,
-                hasEpisodeQueue = (host.episodes.episodeQueue?.entries?.size ?: 0) > 1,
+                hasEpisodeQueue = (host.episodes.episodeQueue?.entries?.size ?: 0) > 0,
                 hasPrevious = host.episodes.episodeQueue?.hasPrevious() == true,
                 hasNext = host.episodes.episodeQueue?.hasNext() == true,
             )

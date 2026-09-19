@@ -77,6 +77,23 @@ void main() {
         expect(find.text('Last Played'), hasHistory ? findsOneWidget : findsNothing);
         expect(find.byIcon(Icons.history_rounded),
             hasHistory ? findsOneWidget : findsNothing);
+        if (hasHistory) {
+          final marker = find.ancestor(
+            of: find.text('Last Played'),
+            matching: find.byType(Row),
+          ).first;
+          final artwork = find.ancestor(
+            of: marker,
+            matching: find.byType(AspectRatio),
+          );
+          expect(artwork, findsOneWidget);
+          final artworkBounds = tester.getRect(artwork);
+          final markerBounds = tester.getRect(marker);
+          expect(markerBounds.center.dx, closeTo(artworkBounds.center.dx, 0.1));
+          expect(markerBounds.center.dy, closeTo(artworkBounds.center.dy, 0.1));
+          final titleBounds = tester.getRect(find.text('e1'));
+          expect(markerBounds.top, greaterThanOrEqualTo(titleBounds.bottom));
+        }
         expect(tester.getSize(find.byType(DetailEpisodeBrowser)).height, 292);
         expect(tester.takeException(), isNull);
       }

@@ -1,5 +1,21 @@
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
+class PlaybackEpisodeSeason {
+  const PlaybackEpisodeSeason(
+      {required this.id, required this.number, required this.title});
+  final String id;
+  final int number;
+  final String title;
+
+  Map<String, dynamic> toJson() => {'id': id, 'number': number, 'title': title};
+}
+
+class PlaybackEpisodeSelection {
+  const PlaybackEpisodeSelection(this.queue, this.index);
+  final PlaybackEpisodeQueue queue;
+  final int index;
+}
+
 class PlaybackEpisodeQueueEntry {
   const PlaybackEpisodeQueueEntry({
     required this.target,
@@ -63,8 +79,7 @@ class PlaybackEpisodeQueue {
 
   bool get isEmpty => entries.isEmpty;
 
-  bool get hasCurrent =>
-      currentIndex >= 0 && currentIndex < entries.length;
+  bool get hasCurrent => currentIndex >= 0 && currentIndex < entries.length;
 
   bool get hasPrevious => currentIndex > 0 && currentIndex <= entries.length;
 

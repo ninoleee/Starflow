@@ -32,6 +32,7 @@ import 'package:starflow/features/playback/application/playback_subtitle_session
 import 'package:starflow/features/playback/application/native_playback_episode_queue_policy.dart';
 import 'package:starflow/features/playback/application/native_playback_media_type.dart';
 import 'package:starflow/features/playback/application/playback_episode_queue_resolver.dart';
+import 'package:starflow/features/playback/application/playback_episode_browser.dart';
 import 'package:starflow/features/playback/application/playback_performance_tracker.dart';
 import 'package:starflow/features/playback/application/playback_remote_preflight.dart';
 import 'package:starflow/features/playback/application/playback_server_track_resolver.dart';
@@ -949,7 +950,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                 final episodeQueue = _episodeQueue;
                                 final showEpisodeControls =
                                     episodeQueue != null &&
-                                        episodeQueue.entries.length > 1 &&
+                                        episodeQueue.entries.isNotEmpty &&
                                         episodeQueue.hasCurrent;
                                 return PlayerTvPlaybackChrome(
                                   title:

@@ -15,7 +15,16 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
     </style>
-    <!-- Media3's audio/subtitle picker is backed by an AppCompat dialog. -->
+    <style name="NativePlaybackSettingsDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:windowBackground">@drawable/native_settings_background</item>
+        <item name="android:colorBackground">@color/native_settings_background</item>
+        <item name="android:textColorPrimary">@color/native_settings_title</item>
+        <item name="android:textColorSecondary">@color/native_settings_value</item>
+        <item name="android:colorAccent">@color/native_settings_title</item>
+        <item name="android:windowElevation">0dp</item>
+        <item name="android:listDividerAlertDialog">@drawable/native_settings_divider</item>
+    </style>
+    <!-- The native playback container retains its existing AppCompat theme. -->
     <style name="NativePlaybackTheme" parent="Theme.AppCompat.NoActionBar">
         <item name="android:windowFullscreen">true</item>
         <item name="android:windowNoTitle">true</item>

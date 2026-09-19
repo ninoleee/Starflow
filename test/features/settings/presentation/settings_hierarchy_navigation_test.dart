@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +17,84 @@ import 'package:starflow/features/settings/presentation/search_service_settings_
 import 'package:starflow/features/settings/presentation/settings_page.dart';
 
 void main() {
+  for (final hidden in [false, true]) {
+    for (final keepFocus in [false, true]) {
+      testWidgets('delayed TV detection: hidden=$hidden existing=$keepFocus',
+          (tester) async {
+        final detected = Completer<bool>();
+        final otherFocus = FocusNode(debugLabel: 'existing-action');
+        addTearDown(otherFocus.dispose);
+        await tester.pumpWidget(ProviderScope(
+          overrides: [
+            isTelevisionProvider.overrideWith((ref) => detected.future),
+            settingsControllerProvider.overrideWith(_LoadedSettingsController.new),
+            appSettingsProvider.overrideWithValue(_settings),
+          ],
+          child: MaterialApp(home: Focus(
+            focusNode: otherFocus,
+            child: TickerMode(enabled: !hidden, child: const SettingsPage()),
+          )),
+        ));
+        await tester.pumpAndSettle();
+        if (keepFocus) {
+          otherFocus.requestFocus();
+          await tester.pumpAndSettle();
+        }
+        detected.complete(true);
+        await tester.pumpAndSettle();
+        if (!hidden) {
+          final header = _focusAction(tester, 'settings:header').focusNode!;
+          expect(header.hasPrimaryFocus, !keepFocus);
+        }
+        if (keepFocus) expect(otherFocus.hasPrimaryFocus, isTrue);
+        if (hidden && !keepFocus) expect(hasActionableTvFocus(), isFalse);
+      });
+    }
+  }
+
+  for (final keepFocus in [false, true]) {
+    testWidgets('idle settings activation restores only missing focus: $keepFocus',
+        (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1920, 1080));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final otherFocus = FocusNode(debugLabel: 'settings-existing-action');
+      addTearDown(otherFocus.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => true),
+          settingsControllerProvider.overrideWith(_LoadedSettingsController.new),
+          appSettingsProvider.overrideWithValue(_settings),
+        ],
+        child: MaterialApp(
+          home: Focus(focusNode: otherFocus, child: const SettingsPage()),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      final header = _focusAction(tester, 'settings:header').focusNode!;
+      if (keepFocus) {
+        otherFocus.requestFocus();
+        await tester.pumpAndSettle();
+      } else {
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
+        expect(hasActionableTvFocus(), isFalse);
+      }
+      final previous = FocusManager.instance.primaryFocus;
+      expect(tester.binding.hasScheduledFrame, isFalse);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await tester.idle();
+      expect(tester.binding.hasScheduledFrame, isTrue);
+      await tester.pumpAndSettle();
+      expect(header.hasPrimaryFocus, !keepFocus);
+      if (keepFocus) {
+        expect(FocusManager.instance.primaryFocus, same(previous));
+      }
+    });
+  }
+
   testWidgets('TV settings root focuses its visible header', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1920, 1080));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -199,6 +279,11 @@ void main() {
     expect(find.text('10 秒'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+}
+
+class _LoadedSettingsController extends SettingsController {
+  @override
+  Future<AppSettings> build() async => _settings;
 }
 
 Future<void> _pumpSettingsPage(

@@ -1,7 +1,7 @@
 package com.example.starflow
 
 import android.app.Activity
-import android.app.AlertDialog
+import android.app.Dialog
 import android.os.SystemClock
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -46,7 +46,8 @@ internal class NativePlaybackEpisodeController(
     private var preparedRetryEntry: NativeEpisodeQueueEntry? = null
     private var retryPositionMs = 0L
     private var transitionStartedAtMs = 0L
-    private var episodeSelectionDialog: AlertDialog? = null
+    private var episodeSelectionDialog: Dialog? = null
+    private var selectedSeasonQueue: NativeEpisodeQueue? = null
     val isDialogVisible: Boolean
         get() = episodeSelectionDialog?.isShowing == true
 
@@ -54,7 +55,7 @@ internal class NativePlaybackEpisodeController(
         get() = transition.isSwitching
 
     private fun preparationKey(index: Int): NativeEpisodePreparationKey? {
-        val queue = episodeQueue ?: return null
+        val queue = selectedSeasonQueue ?: episodeQueue ?: return null
         if (index !in queue.entries.indices) return null
         return NativeEpisodePreparationKey(
             queue,
@@ -68,6 +69,7 @@ internal class NativePlaybackEpisodeController(
     }
 
     fun advanceToAdjacentEpisode(forward: Boolean, reason: String): Boolean {
+        if (selectedSeasonQueue != null) return true
         if (transition.isSwitching) return true
         if (
             NativeEpisodeTransition.isAutomatic(reason) &&
@@ -76,6 +78,16 @@ internal class NativePlaybackEpisodeController(
             return false
         val queue = episodeQueue ?: return false
         return switchToEpisodeQueueIndex(queue.currentIndex + if (forward) 1 else -1, reason)
+    }
+
+    fun selectEpisode(queue: NativeEpisodeQueue, index: Int): Boolean {
+        if (transition.isSwitching || transition.reason != null || index !in queue.entries.indices) return false
+        if (queue.entries[index].playbackItemKey == episodeQueue?.currentEntry()?.playbackItemKey) return false
+        if (queue !== episodeQueue) {
+            transition.reset()
+            selectedSeasonQueue = queue.copy(currentIndex = -1)
+        }
+        return switchToEpisodeQueueIndex(index, "episode-picker")
     }
 
     private fun switchToEpisodeQueueIndex(index: Int, reason: String): Boolean {
@@ -106,7 +118,10 @@ internal class NativePlaybackEpisodeController(
     fun tick() {
         transition.expiredRequest()?.let { failResolution(it, "解析剧集超时，请手动重试。") }
         val request = transition.pending
-        if (request != null && preparationKey(request.key.index) != request.key) transition.reset()
+        if (request != null && preparationKey(request.key.index) != request.key) {
+            transition.reset()
+            selectedSeasonQueue = null
+        }
         val player = host.session.player ?: return
         if (!player.playWhenReady || host.externalSubtitles.subtitleSearchActive) {
             transition.cancelAutomaticAdvance()
@@ -174,6 +189,7 @@ internal class NativePlaybackEpisodeController(
                             preparationKey(request.key.index) != request.key
                     ) {
                         transition.reset()
+                        selectedSeasonQueue = null
                         return@runOnUiThread
                     }
                     if (
@@ -223,13 +239,14 @@ internal class NativePlaybackEpisodeController(
         if (transition.pending != request) return
         val timedOut = transition.isExpired(request)
         val reason = transition.fail(request)
+        selectedSeasonQueue = null
         NativePlaybackFormatting.logPlayback(
             "native.queue.resolve.failed index=${request.key.index} background=${reason == null} " +
                 "durationMs=${now() - request.startedAtMs} timedOut=$timedOut"
         )
         if (reason == "prepared-address-retry") host.launch.handlePlaybackFailure(message)
         else if (reason != null && !host.activity.isFinishing && !host.activity.isDestroyed) {
-            host.showToast(message)
+            host.showToast("剧集打开失败，仍播放当前集：$message")
             host.controllerView.restoreControllerFocusIfNeeded(ControllerFocusTarget.SETTINGS)
         }
     }
@@ -261,6 +278,7 @@ internal class NativePlaybackEpisodeController(
 
         val nextQueue = key.queue.replaceEntry(key.index, nextEntry).copy(currentIndex = key.index)
         episodeQueue = nextQueue
+        selectedSeasonQueue = null
         preparedRetryEntry = if (destination.prepared) key.queue.entries[key.index] else null
         host.recovery.resetForNewMedia()
         host.target.playbackTargetJson = nextEntry.playbackTargetJson
@@ -310,6 +328,7 @@ internal class NativePlaybackEpisodeController(
 
     fun onPlaybackFailed() {
         transition.onPlaybackFailed()
+        selectedSeasonQueue = null
         preparedRetryEntry = null
     }
 
@@ -333,36 +352,35 @@ internal class NativePlaybackEpisodeController(
     fun openEpisodeSelectionDialog(): Boolean {
         if (host.externalSubtitles.subtitleSearchActive) return false
         val queue = episodeQueue ?: return false
-        if (queue.entries.size <= 1) return false
+        if (queue.entries.isEmpty() || queue.currentEntry() == null) return false
         if (episodeSelectionDialog?.isShowing == true) return true
-        val labels =
-            queue.entries
-                .mapIndexed { index, entry ->
-                    NativePlaybackFormatting.formatEpisodeSelectionLabel(index, entry)
-                }
-                .toTypedArray()
+        if (transition.isSwitching || transition.reason != null) {
+            host.showToast("正在打开剧集，请稍候")
+            return true
+        }
+        val origin = host.activity.currentFocus
+        val targetJson = host.target.playbackTargetJson
         var switchedEpisode = false
         episodeSelectionDialog =
-            AlertDialog.Builder(host.activity)
-                .setTitle("选择剧集")
-                .setSingleChoiceItems(labels, queue.currentIndex) { dialog, which ->
-                    if (which == queue.currentIndex) {
-                        dialog.dismiss()
-                        return@setSingleChoiceItems
+            NativePlaybackEpisodePicker(host.activity, queue, host.memory,
+                browse = { seasonId, callback -> MainActivity.browseNativePlaybackEpisodes(
+                    host.target.resolverSessionId, targetJson, seasonId, callback,
+                ) },
+                select = { selected, which ->
+                    if (episodeQueue === queue && host.target.playbackTargetJson == targetJson &&
+                        selected.entries[which].playbackItemKey != queue.currentEntry()?.playbackItemKey) {
+                        switchedEpisode = true
                     }
-                    switchedEpisode = true
-                    dialog.dismiss()
-                    host.playerView.post { switchToEpisodeQueueIndex(which, "episode-picker") }
-                }
-                .setNegativeButton("关闭", null)
-                .create()
+                    episodeSelectionDialog?.dismiss()
+                    if (switchedEpisode) host.playerView.post { selectEpisode(selected, which) }
+                })
                 .apply {
                     setOnDismissListener {
                         if (episodeSelectionDialog === this) episodeSelectionDialog = null
-                        if (!switchedEpisode)
-                            host.controllerView.restoreControllerFocusIfNeeded(
-                                ControllerFocusTarget.SETTINGS
-                            )
+                        if (!switchedEpisode) {
+                            if (origin?.isAttachedToWindow == true && origin.isFocusable && origin.isShown) origin.requestFocus()
+                            else host.controllerView.restoreControllerFocusIfNeeded(ControllerFocusTarget.SETTINGS)
+                        }
                     }
                     show()
                 }
@@ -371,6 +389,7 @@ internal class NativePlaybackEpisodeController(
 
     fun invalidateResolution() {
         transition.reset()
+        selectedSeasonQueue = null
         preparedRetryEntry = null
     }
 

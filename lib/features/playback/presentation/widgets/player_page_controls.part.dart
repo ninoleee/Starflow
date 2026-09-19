@@ -809,7 +809,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
 
   bool get _hasPlaybackEpisodeQueue {
     final queue = _episodeQueue;
-    return queue != null && queue.entries.length > 1 && queue.hasCurrent;
+    return queue != null && queue.entries.isNotEmpty && queue.hasCurrent;
   }
 
   Widget _buildEpisodeQueueControlButton({

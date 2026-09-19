@@ -5,6 +5,14 @@ import 'package:starflow/features/playback/domain/playback_episode_queue.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
+  test('keeps a single episode queue so other seasons remain reachable', () {
+    final target = _target('https://media.example.com/current.mp4');
+    final queue = PlaybackEpisodeQueue(entries: [_entry(target)]);
+    expect(
+        buildDeferredNativeEpisodeQueue(queue: queue, resolvedTarget: target)
+            ?.entries,
+        hasLength(1));
+  });
   test('keeps unresolved strm entries as deferred native metadata', () {
     final queue = PlaybackEpisodeQueue(
       entries: [

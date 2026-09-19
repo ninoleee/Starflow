@@ -289,19 +289,25 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     required int index,
     required String reason,
     bool markCurrentCompleted = false,
+    PlaybackEpisodeQueue? selectedQueue,
   }) async {
     if (_episodeQueueAdvanceInProgress) {
       _showMessage('正在解析剧集，请稍候');
       return false;
     }
-    final queue = _episodeQueue;
+    final originalQueue = _episodeQueue;
+    final queue = selectedQueue ?? originalQueue;
     final player = _player;
-    if (queue == null || player == null || !queue.hasCurrent) {
+    if (queue == null ||
+        player == null ||
+        originalQueue == null ||
+        !originalQueue.hasCurrent) {
       return false;
     }
     if (index < 0 ||
         index >= queue.entries.length ||
-        index == queue.currentIndex) {
+        queue.entries[index].playbackItemKey ==
+            originalQueue.currentEntry!.playbackItemKey) {
       return false;
     }
     final requestedEntry = queue.entries[index];
@@ -309,9 +315,11 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
 
     _episodeQueueAdvanceInProgress = true;
     try {
-      final preparedTarget = _takePreparedEpisodeTarget(
-        _buildPreparedEpisodeSignature(index, requestedEntry),
-      );
+      final preparedTarget = selectedQueue == null
+          ? _takePreparedEpisodeTarget(
+              _buildPreparedEpisodeSignature(index, requestedEntry),
+            )
+          : null;
       _nextEpisodePrepareAttempt = null;
       if (preparedTarget == null && requestedEntry.target.needsResolution) {
         _showMessage(
@@ -331,7 +339,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       }
       if (!mounted ||
           !identical(_player, player) ||
-          !identical(_episodeQueue, queue)) {
+          !identical(_episodeQueue, originalQueue)) {
         return false;
       }
 
@@ -394,7 +402,8 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       return mounted && _isReady;
     } catch (error) {
       if (mounted && identical(_player, player)) {
-        _showMessage('解析剧集失败：${_buildPlaybackErrorMessage(error)}');
+        _showMessage(
+            '${formatPlaybackEpisodePickerLabel(requestedEntry, index)} 打开失败，仍播放当前集：${_buildPlaybackErrorMessage(error)}');
       }
       return false;
     } finally {
@@ -442,25 +451,30 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     required bool isTelevision,
   }) async {
     final queue = _episodeQueue;
-    if (queue == null || queue.entries.length <= 1 || !queue.hasCurrent) {
+    if (queue == null || queue.entries.isEmpty || !queue.hasCurrent) {
       return;
     }
-    final selectedIndex = await showPlaybackEpisodePickerDialog(
+    final selection = await showPlaybackEpisodePickerDialog(
       context: context,
       queue: queue,
       isTelevision: isTelevision,
+      browser: PlaybackEpisodeBrowser(
+          resolver: PlaybackEpisodeQueueResolver(read: _providerContainer.read),
+          target: queue.currentEntry!.target),
+      loadHistory: () => _providerContainer
+          .read(playbackMemoryRepositoryProvider)
+          .loadSnapshot(),
     );
     final activeQueue = _episodeQueue;
     if (!mounted ||
-        selectedIndex == null ||
+        selection == null ||
         activeQueue == null ||
-        selectedIndex < 0 ||
-        selectedIndex >= activeQueue.entries.length ||
-        selectedIndex == activeQueue.currentIndex) {
+        !identical(activeQueue, queue)) {
       return;
     }
     await _switchPlaybackQueueIndex(
-      index: selectedIndex,
+      index: selection.index,
+      selectedQueue: identical(selection.queue, queue) ? null : selection.queue,
       reason: 'episode-picker',
     );
   }

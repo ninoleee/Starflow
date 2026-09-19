@@ -19,6 +19,90 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  testWidgets('home focus recovery finishes when scrolling cannot reveal target',
+      (tester) async {
+    var menuRequests = 0;
+    final settings = _homeSettings.copyWith(homeModules: const [
+      HomeModuleConfig(
+        id: HomeModuleConfig.heroModuleId,
+        type: HomeModuleType.hero,
+        title: 'Hero',
+        enabled: false,
+      ),
+      HomeModuleConfig(
+        id: 'distant-content-module',
+        type: HomeModuleType.doubanList,
+        title: 'Content',
+        enabled: true,
+        doubanListUrl: 'https://example.com/content',
+      ),
+    ]);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        isTelevisionProvider.overrideWith((ref) => true),
+        appSettingsProvider.overrideWithValue(settings),
+        homeResolvedSectionsProvider.overrideWithValue(
+          const HomeResolvedSectionsState(sections: [_distantContentSection]),
+        ),
+        homeSectionProvider.overrideWith((ref, moduleId) async =>
+            moduleId == 'distant-content-module' ? _distantContentSection : null),
+      ],
+      child: MaterialApp(home: TvMenuButtonScope(
+        onMenuButtonPressed: () => menuRequests++,
+        child: const HomePage(),
+      )),
+    ));
+    await tester.pumpAndSettle();
+    final tile = tester.widget<MediaPosterTile>(find.byWidgetPredicate(
+      (widget) => widget is MediaPosterTile && widget.title == 'Distant Content',
+    ));
+    tile.focusNode!.canRequestFocus = false;
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    menuRequests = 0;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.idle();
+    expect(tester.binding.hasScheduledFrame, isTrue);
+    await tester.pumpAndSettle();
+    expect(menuRequests, 1);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('idle home activation schedules missing focus recovery',
+      (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        isTelevisionProvider.overrideWith((ref) => true),
+        appSettingsProvider.overrideWithValue(_homeSettings),
+        homeResolvedSectionsProvider.overrideWithValue(
+          const HomeResolvedSectionsState(sections: [_singleHeroSection]),
+        ),
+        homeSectionProvider.overrideWith((ref, moduleId) async => null),
+      ],
+      child: const MaterialApp(home: HomePage()),
+    ));
+    await tester.pumpAndSettle();
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    expect(hasActionableTvFocus(), isFalse);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.idle();
+    expect(tester.binding.hasScheduledFrame, isTrue);
+    await tester.pumpAndSettle();
+    final hero = tester.widget<TvFocusableAction>(find.byWidgetPredicate(
+      (widget) => widget is TvFocusableAction &&
+          widget.focusId == 'home:hero:hero-item-1',
+    ));
+    expect(hero.focusNode!.hasPrimaryFocus, isTrue);
+  });
+
   testWidgets('single-item TV Hero moves left back to the menu',
       (tester) async {
     var menuRequestCount = 0;

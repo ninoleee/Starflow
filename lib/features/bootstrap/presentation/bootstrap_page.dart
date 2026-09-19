@@ -49,8 +49,6 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(bootstrapControllerProvider);
-    final progress = state.progress.clamp(0.0, 1.0).toDouble();
     final reduceMotionEnabled = ref.watch(_bootstrapReduceMotionProvider);
 
     return Scaffold(
@@ -69,46 +67,23 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 320),
                     child: reduceMotionEnabled
-                        ? Stack(
-                            alignment: Alignment.center,
-                            clipBehavior: Clip.none,
-                            children: const [
-                              _BootstrapLogoMark(
-                                iconSize: 108,
-                                wordmarkSize: 34,
-                                animate: false,
-                              ),
-                            ],
+                        ? const _BootstrapLogoMark(
+                            iconSize: 108,
+                            wordmarkSize: 34,
                           )
                         : TweenAnimationBuilder<double>(
                             tween: Tween(begin: 0, end: 1),
                             duration: const Duration(milliseconds: 820),
                             curve: Curves.easeOutCubic,
                             builder: (context, entrance, child) {
-                              final scale = (0.92 + entrance * 0.08) *
-                                  (0.97 + progress * 0.04);
-                              final translateY = 18 * (1 - entrance) - 18;
-                              return Transform.translate(
-                                offset: Offset(0, translateY),
-                                child: Transform.scale(
-                                  scale: scale,
-                                  child: Opacity(
-                                    opacity: 0.58 + entrance * 0.42,
-                                    child: child,
-                                  ),
-                                ),
+                              return Opacity(
+                                opacity: 0.58 + entrance * 0.42,
+                                child: child,
                               );
                             },
-                            child: Stack(
-                              alignment: Alignment.center,
-                              clipBehavior: Clip.none,
-                              children: const [
-                                _BootstrapLogoMark(
-                                  iconSize: 108,
-                                  wordmarkSize: 34,
-                                  animate: true,
-                                ),
-                              ],
+                            child: const _BootstrapLogoMark(
+                              iconSize: 108,
+                              wordmarkSize: 34,
                             ),
                           ),
                   ),
@@ -122,107 +97,53 @@ class _BootstrapPageState extends ConsumerState<BootstrapPage> {
   }
 }
 
-class _BootstrapLogoMark extends StatefulWidget {
+class _BootstrapLogoMark extends StatelessWidget {
   const _BootstrapLogoMark({
     required this.iconSize,
     required this.wordmarkSize,
-    required this.animate,
   });
 
   final double iconSize;
   final double wordmarkSize;
-  final bool animate;
-
-  @override
-  State<_BootstrapLogoMark> createState() => _BootstrapLogoMarkState();
-}
-
-class _BootstrapLogoMarkState extends State<_BootstrapLogoMark>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 3000),
-    );
-    if (widget.animate) {
-      _controller.repeat(reverse: true);
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant _BootstrapLogoMark oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.animate == oldWidget.animate) {
-      return;
-    }
-    if (widget.animate) {
-      _controller
-        ..reset()
-        ..repeat(reverse: true);
-    } else {
-      _controller.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.animate) {
-      return _buildContent();
-    }
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) => child ?? const SizedBox.shrink(),
-      child: _buildContent(),
-    );
-  }
-
-  Widget _buildContent() {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         SizedBox(
-          width: widget.iconSize,
-          height: widget.iconSize,
+          width: iconSize,
+          height: iconSize,
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(widget.iconSize * 0.22),
+            borderRadius: BorderRadius.circular(iconSize * 0.22),
             child: Image.asset(
               'assets/branding/starflow_launch_logo.png',
-              width: widget.iconSize,
-              height: widget.iconSize,
+              width: iconSize,
+              height: iconSize,
               fit: BoxFit.cover,
               filterQuality: FilterQuality.high,
             ),
           ),
         ),
-        SizedBox(height: widget.iconSize * 0.16),
+        SizedBox(height: iconSize * 0.16),
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               'Star',
               style: TextStyle(
-                fontSize: widget.wordmarkSize,
+                fontSize: wordmarkSize,
                 fontWeight: FontWeight.w800,
-                letterSpacing: -widget.wordmarkSize * 0.03,
+                letterSpacing: -wordmarkSize * 0.03,
                 color: Colors.white,
               ),
             ),
             Text(
               'flow',
               style: TextStyle(
-                fontSize: widget.wordmarkSize,
+                fontSize: wordmarkSize,
                 fontWeight: FontWeight.w400,
-                letterSpacing: -widget.wordmarkSize * 0.04,
+                letterSpacing: -wordmarkSize * 0.04,
                 color: Colors.white.withValues(alpha: 0.64),
               ),
             ),

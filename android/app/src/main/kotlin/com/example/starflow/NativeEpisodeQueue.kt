@@ -132,7 +132,7 @@ internal data class NativeEpisodeQueue(
                 }
                 NativeEpisodeQueue(
                     entries = entries,
-                    currentIndex = json.optInt("currentIndex", 0).coerceIn(0, entries.lastIndex),
+                    currentIndex = json.optInt("currentIndex", 0).coerceIn(-1, entries.lastIndex),
                 )
             } catch (_: Throwable) {
                 null

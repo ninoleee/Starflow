@@ -82,7 +82,7 @@ internal class NativePlaybackSettingsController(private val host: Host) {
                 {
                     host.subtitles.openSubtitleTrackSelectionDialog()
                 }
-        if ((host.episodes.episodeQueue?.entries?.size ?: 0) > 1) {
+        if ((host.episodes.episodeQueue?.entries?.size ?: 0) > 0) {
             actions += "选择剧集" to { host.episodes.openEpisodeSelectionDialog() }
         }
         actions +=
@@ -92,9 +92,9 @@ internal class NativePlaybackSettingsController(private val host: Host) {
                 }
 
         playbackSettingsDialog =
-            AlertDialog.Builder(host.activity)
+            AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
                 .setTitle(host.activity.getString(R.string.native_playback_settings))
-                .setItems(actions.map { it.first }.toTypedArray()) { dialog, which ->
+                .setItems(NativePlaybackSettingsAppearance.labels(host.activity, actions.map { it.first })) { dialog, which ->
                     dialog.dismiss()
                     host.playerView.post { actions[which].second.invoke() }
                 }
@@ -161,9 +161,9 @@ internal class NativePlaybackSettingsController(private val host: Host) {
                 }
 
         val dialog =
-            AlertDialog.Builder(host.activity)
+            AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
                 .setTitle(host.activity.getString(R.string.native_more_actions))
-                .setItems(actions.map { it.first }.toTypedArray()) { pickerDialog, which ->
+                .setItems(NativePlaybackSettingsAppearance.labels(host.activity, actions.map { it.first })) { pickerDialog, which ->
                     pickerDialog.dismiss()
                     host.playerView.post { actions[which].second.invoke() }
                 }
@@ -175,7 +175,7 @@ internal class NativePlaybackSettingsController(private val host: Host) {
     private fun openAudioOutputModePicker() {
         val options = NativeAudioOutputMode.entries
         val currentIndex = options.indexOf(host.session.audioOutputMode).coerceAtLeast(0)
-        AlertDialog.Builder(host.activity)
+        AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
             .setTitle("选择音频输出")
             .setSingleChoiceItems(
                 options.map(NativeAudioOutputMode::displayLabel).toTypedArray(),
@@ -269,9 +269,9 @@ internal class NativePlaybackSettingsController(private val host: Host) {
                 }
 
         val dialog =
-            AlertDialog.Builder(host.activity)
+            AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
                 .setTitle("本剧跳过片头片尾")
-                .setItems(actions.map { it.first }.toTypedArray()) { pickerDialog, which ->
+                .setItems(NativePlaybackSettingsAppearance.labels(host.activity, actions.map { it.first })) { pickerDialog, which ->
                     pickerDialog.dismiss()
                     host.playerView.post {
                         actions[which].second.invoke()

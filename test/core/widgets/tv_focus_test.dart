@@ -11,6 +11,59 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  for (final adaptive in [false, true]) {
+    for (final keepFocusable in [false, true]) {
+      testWidgets('busy text button focus: adaptive=$adaptive keep=$keepFocusable',
+          (tester) async {
+        final node = FocusNode();
+        final busy = ValueNotifier(false);
+        addTearDown(node.dispose);
+        addTearDown(busy.dispose);
+        var activations = 0;
+        await tester.pumpWidget(ProviderScope(
+          overrides: [
+            isTelevisionProvider.overrideWith((ref) => true),
+            appSettingsProvider.overrideWithValue(const AppSettings(
+              mediaSources: [], searchProviders: [], homeModules: [],
+              doubanAccount: DoubanAccountConfig(enabled: false),
+            )),
+          ],
+          child: MaterialApp(home: Scaffold(body: ValueListenableBuilder<bool>(
+            valueListenable: busy,
+            builder: (context, disabled, child) => adaptive
+                ? TvAdaptiveButton(
+                    label: 'Action', icon: Icons.refresh,
+                    focusNode: node, focusableWhenDisabled: keepFocusable,
+                    onPressed: disabled ? null : () => activations++,
+                  )
+                : StarflowButton(
+                    label: 'Action', loading: disabled,
+                    focusNode: node, focusableWhenDisabled: keepFocusable,
+                    onPressed: () => activations++,
+                  ),
+          ))),
+        ));
+        await tester.pumpAndSettle();
+        node.requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        expect(activations, 1);
+        busy.value = true;
+        await tester.pump();
+        await tester.pump();
+        expect(node.hasPrimaryFocus, keepFocusable);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        expect(activations, 1);
+        busy.value = false;
+        await tester.pumpAndSettle();
+        node.requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        expect(activations, 2);
+      });
+    }
+  }
+
   for (final keepFocusable in [false, true]) {
     testWidgets('disabled icon button focus opt-in: $keepFocusable',
         (tester) async {

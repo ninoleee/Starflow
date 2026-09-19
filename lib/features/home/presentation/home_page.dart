@@ -284,6 +284,7 @@ class _HomePageState extends ConsumerState<HomePage>
       }
       unawaited(_recoverMissingHomeFocus(reason: reason));
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   Future<void> _recoverMissingHomeFocus({required String reason}) async {
@@ -1076,6 +1077,8 @@ class _HomePageState extends ConsumerState<HomePage>
         completer.complete();
       }
     });
+    // At a scroll boundary jumpTo may be a no-op, so no layout is pending.
+    WidgetsBinding.instance.ensureVisualUpdate();
     return completer.future;
   }
 

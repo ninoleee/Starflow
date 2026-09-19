@@ -26,6 +26,7 @@
             android:layout_width="match_parent"
             android:layout_height="32dp"
             android:gravity="center"
+            android:textColor="@color/native_settings_value"
             android:textSize="18sp"
             android:accessibilityLiveRegion="polite" />
 

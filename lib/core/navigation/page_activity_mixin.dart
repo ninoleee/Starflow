@@ -24,6 +24,13 @@ mixin PageActivityMixin<T extends StatefulWidget> on State<T> {
     final nextVisible = (route == null || route.isCurrent) &&
         TickerMode.valuesOf(context).enabled &&
         _appAllowsPageActivity(WidgetsBinding.instance.lifecycleState);
+    // Backgrounding can stop frames entirely. Cancel page work even if a
+    // route-driven deactivation is already queued for the end of a frame.
+    if (!_appAllowsPageActivity(WidgetsBinding.instance.lifecycleState)) {
+      _desiredPageActive = false;
+      _dispatchPageActivity();
+      return;
+    }
     if (_desiredPageActive == nextVisible &&
         (_activityDispatchScheduled || _isPageActive == nextVisible)) {
       return;
@@ -64,15 +71,20 @@ mixin PageActivityMixin<T extends StatefulWidget> on State<T> {
     _activityDispatchScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _activityDispatchScheduled = false;
-      if (!mounted || _isPageActive == _desiredPageActive) {
-        return;
-      }
-      _isPageActive = _desiredPageActive;
-      if (_isPageActive) {
-        onPageBecameActive();
-      } else {
-        onPageBecameInactive();
-      }
+      _dispatchPageActivity();
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _dispatchPageActivity() {
+    if (!mounted || _isPageActive == _desiredPageActive) {
+      return;
+    }
+    _isPageActive = _desiredPageActive;
+    if (_isPageActive) {
+      onPageBecameActive();
+    } else {
+      onPageBecameInactive();
+    }
   }
 }

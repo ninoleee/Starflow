@@ -565,6 +565,37 @@ class MainActivity : FlutterActivity() {
             return true
         }
 
+        fun browseNativePlaybackEpisodes(
+            resolverSessionId: String,
+            playbackTargetJson: String,
+            seasonId: String?,
+            callback: (Map<String, Any?>) -> Unit,
+        ): Boolean {
+            val activity = activeInstance?.get() ?: return false
+            activity.runOnUiThread {
+                val channel = activity.nativePlaybackResolverChannel
+                if (channel == null) {
+                    callback(mapOf("ok" to false, "message" to "剧集服务不可用"))
+                } else channel.invokeMethod("browseNativePlaybackEpisodes", mapOf(
+                    "resolverSessionId" to resolverSessionId,
+                    "playbackTargetJson" to playbackTargetJson,
+                    "seasonId" to seasonId,
+                ), object : MethodChannel.Result {
+                    override fun success(result: Any?) {
+                        @Suppress("UNCHECKED_CAST")
+                        callback(result as? Map<String, Any?> ?: emptyMap())
+                    }
+                    override fun error(code: String, message: String?, details: Any?) {
+                        callback(mapOf("ok" to false, "message" to (message ?: code)))
+                    }
+                    override fun notImplemented() {
+                        callback(mapOf("ok" to false, "message" to "剧集服务不可用"))
+                    }
+                })
+            }
+            return true
+        }
+
         fun saveNativePlaybackSubtitleStyle(
             subtitleScale: Double,
             primarySubtitlePosition: Double,

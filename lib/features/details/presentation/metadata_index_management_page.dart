@@ -723,6 +723,7 @@ class _MetadataIndexManagementPageState
                                         icon: Icons.refresh_rounded,
                                         focusNode: _autoRefreshFocusNode,
                                         focusId: 'detail:index:auto-refresh',
+                                        focusableWhenDisabled: true,
                                         onPressed: _isAutoRefreshing
                                             ? null
                                             : _runAutomaticRefresh,

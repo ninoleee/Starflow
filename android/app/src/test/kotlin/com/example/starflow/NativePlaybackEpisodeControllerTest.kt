@@ -58,6 +58,32 @@ class NativePlaybackEpisodeControllerTest {
     }
 
     @Test
+    fun browsingSeasonOnlyReplacesPlaybackQueueAfterResolution() {
+        val old = controller.episodeQueue
+        val otherSeason = NativeEpisodeQueue(listOf(next), -1)
+        assertTrue(controller.selectEpisode(otherSeason, 0))
+        assertSame(old, controller.episodeQueue)
+        verify(host.session, never()).releasePlayer()
+        callbacks.single()(resolved)
+        assertEquals(1, controller.episodeQueue?.entries?.size)
+        assertEquals(0, controller.episodeQueue?.currentIndex)
+        verify(host.session).initializePlayer()
+    }
+
+    @Test
+    fun failedSeasonSelectionRetainsOldQueueAndAllowsRetry() {
+        val old = controller.episodeQueue
+        val otherSeason = NativeEpisodeQueue(listOf(next), -1)
+        assertTrue(controller.selectEpisode(otherSeason, 0))
+        assertFalse(controller.selectEpisode(otherSeason, 0))
+        callbacks.single()(mapOf("ok" to false))
+        assertSame(old, controller.episodeQueue)
+        verify(host.session, never()).releasePlayer()
+        assertTrue(controller.selectEpisode(otherSeason, 0))
+        assertEquals(2, callbacks.size)
+    }
+
+    @Test
     fun preparationDoesNotChangeQueueAndOutrosUseItWithoutAnotherRequest() {
         val oldQueue = controller.episodeQueue
         controller.tick()
@@ -144,7 +170,7 @@ class NativePlaybackEpisodeControllerTest {
 
         assertEquals(0, controller.episodeQueue?.currentIndex)
         verify(host.session, never()).initializePlayer()
-        verify(host, times(1)).showToast("解析剧集超时，请手动重试。")
+        verify(host, times(1)).showToast("剧集打开失败，仍播放当前集：解析剧集超时，请手动重试。")
         controller.advanceToAdjacentEpisode(true, "ended")
         assertEquals(1, callbacks.size)
         controller.advanceToAdjacentEpisode(true, "remote-next")

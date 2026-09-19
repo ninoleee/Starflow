@@ -492,6 +492,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
   void _scheduleInitialTelevisionFocus({int remainingAttempts = 4}) {
     if (!mounted ||
         !isPageActive ||
+        !isPageVisible ||
         _initialTelevisionFocusScheduled ||
         !(ref.read(isTelevisionProvider).value ?? false)) {
       return;
@@ -501,6 +502,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
       _initialTelevisionFocusScheduled = false;
       if (!mounted ||
           !isPageActive ||
+          !isPageVisible ||
           !(ref.read(isTelevisionProvider).value ?? false) ||
           hasActionableTvFocus()) {
         return;
@@ -519,6 +521,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
         scope: FocusScope.of(focusContext),
       );
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override
@@ -530,6 +533,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<AsyncValue<bool>>(isTelevisionProvider, (previous, next) {
+      if (previous?.value != true && next.value == true) {
+        _scheduleInitialTelevisionFocus();
+      }
+    });
     return widget.buildPage(
       context,
       ref,

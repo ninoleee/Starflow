@@ -884,6 +884,7 @@ class StarflowButton extends ConsumerWidget {
     this.iconColor,
     this.variant = StarflowButtonVariant.primary,
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
     this.focusNode,
     this.focusId,
     this.onFocused,
@@ -899,6 +900,7 @@ class StarflowButton extends ConsumerWidget {
   final Color? iconColor;
   final StarflowButtonVariant variant;
   final bool autofocus;
+  final bool focusableWhenDisabled;
   final FocusNode? focusNode;
   final String? focusId;
   final VoidCallback? onFocused;
@@ -975,6 +977,7 @@ class StarflowButton extends ConsumerWidget {
     );
     return _TvOutlinedFocusableAction(
       onPressed: loading ? null : onPressed,
+      focusableWhenDisabled: focusableWhenDisabled,
       onFocused: onFocused,
       autofocus: autofocus,
       focusNode: focusNode,
@@ -1445,6 +1448,7 @@ class TvAdaptiveButton extends StatelessWidget {
     this.variant = TvButtonVariant.filled,
     this.compact = false,
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
     this.focusNode,
     this.focusId,
     this.focusScale = 1.0,
@@ -1457,6 +1461,7 @@ class TvAdaptiveButton extends StatelessWidget {
   final Color? iconColor;
   final bool compact;
   final bool autofocus;
+  final bool focusableWhenDisabled;
   final FocusNode? focusNode;
   final String? focusId;
   final double focusScale;
@@ -1476,6 +1481,7 @@ class TvAdaptiveButton extends StatelessWidget {
       iconColor: iconColor,
       compact: compact,
       autofocus: autofocus,
+      focusableWhenDisabled: focusableWhenDisabled,
       focusNode: focusNode,
       focusId: focusId,
       focusScale: focusScale,

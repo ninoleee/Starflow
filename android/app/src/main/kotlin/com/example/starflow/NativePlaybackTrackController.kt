@@ -255,7 +255,7 @@ internal class NativePlaybackTrackController(private val host: Host) {
                 else -> -1
             }
         val dialog =
-            AlertDialog.Builder(host.activity)
+            AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
                 .setTitle(title)
                 .setSingleChoiceItems(labels, checkedIndex) { pickerDialog, which ->
                     if (which >= choiceOffset + choices.size) {
@@ -342,7 +342,7 @@ internal class NativePlaybackTrackController(private val host: Host) {
             return
         }
         val dialog =
-            AlertDialog.Builder(host.activity)
+            AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
                 .setTitle("双字幕：选择上方中文")
                 .setItems(textChoices.map(NativeTrackChoice::label).toTypedArray()) {
                     pickerDialog,
@@ -387,7 +387,7 @@ internal class NativePlaybackTrackController(private val host: Host) {
             return
         }
         val dialog =
-            AlertDialog.Builder(host.activity)
+            AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
                 .setTitle("双字幕：选择下方英文")
                 .setItems(secondaryChoices.map(NativeTrackChoice::label).toTypedArray()) {
                     pickerDialog,

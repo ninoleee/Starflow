@@ -45,13 +45,13 @@ internal class NativePlaybackMemoryStore(
         return positionMs
     }
 
-    private fun loadPlaybackEntry(itemKey: String): JSONObject? {
+    fun loadPlaybackEntry(itemKey: String): JSONObject? {
         if (itemKey.isBlank()) {
             return null
         }
         val snapshot = loadPlaybackSnapshot()
         val items = snapshot.optJSONObject("items") ?: return null
-        return items.optJSONObject(itemKey)
+        return items.optJSONObject(itemKey)?.let { JSONObject(it.toString()) }
     }
 
     private fun loadPlaybackSnapshot(): JSONObject {

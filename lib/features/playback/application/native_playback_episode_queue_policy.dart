@@ -9,7 +9,7 @@ PlaybackEpisodeQueue? buildDeferredNativeEpisodeQueue({
     return null;
   }
   final entries = queue.entries.toList();
-  if (entries.length <= 1) {
+  if (entries.isEmpty) {
     return null;
   }
   entries[queue.currentIndex] = entries[queue.currentIndex].copyWith(

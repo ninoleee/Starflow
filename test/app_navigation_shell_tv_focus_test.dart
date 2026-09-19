@@ -15,6 +15,69 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
   for (final autoHide in [true, false]) {
+    for (final (index, path) in const [
+      'home',
+      'search',
+      'favorites',
+      'library',
+      'settings',
+    ].indexed) {
+      testWidgets(
+        'TV idle $path left edge schedules sidebar focus '
+        '(autoHide: $autoHide)',
+        (tester) async {
+          final router = _buildRouter(nestedPageFocusScope: true);
+          addTearDown(router.dispose);
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                isTelevisionProvider.overrideWith((ref) => true),
+                appSettingsProvider.overrideWithValue(
+                  _settings.copyWith(
+                    autoHideNavigationBarEnabled: autoHide,
+                    navigationDestinationIds: kAllNavigationDestinationIds,
+                  ),
+                ),
+              ],
+              child: MaterialApp.router(
+                theme: ThemeData.dark(),
+                routerConfig: router,
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          router.go('/$path');
+          await tester.pumpAndSettle();
+          final content = _contentNode(tester, path);
+          content.requestFocus();
+          await tester.pumpAndSettle();
+          expect(content.hasPrimaryFocus, isTrue);
+          expect(tester.binding.hasScheduledFrame, isFalse);
+
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+          await tester.idle();
+          // Do not let pumpAndSettle supply a frame the app never requested.
+          expect(tester.binding.hasScheduledFrame, isTrue);
+          await tester.pumpAndSettle();
+          expect(_navigationNode(tester, index).hasPrimaryFocus, isTrue);
+          expect(content.hasFocus, isFalse);
+
+          final nextIndex = index == 4 ? index - 1 : index + 1;
+          await tester.sendKeyEvent(
+            index == 4
+                ? LogicalKeyboardKey.arrowUp
+                : LogicalKeyboardKey.arrowDown,
+          );
+          await tester.pumpAndSettle();
+          expect(_navigationNode(tester, nextIndex).hasPrimaryFocus, isTrue);
+
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+          await tester.pumpAndSettle();
+          expect(content.hasPrimaryFocus, isTrue);
+        },
+      );
+    }
+
     testWidgets(
       'TV sidebar keeps vertical focus inside its bounds (autoHide: $autoHide)',
       (tester) async {
@@ -192,6 +255,40 @@ void main() {
     },
   );
 
+  testWidgets(
+    'TV left edge exits a nested page focus scope to the sidebar',
+    (tester) async {
+      final router = _buildRouter(nestedPageFocusScope: true);
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            isTelevisionProvider.overrideWith((ref) => true),
+            appSettingsProvider.overrideWithValue(_settings),
+          ],
+          child: MaterialApp.router(
+            theme: ThemeData.dark(),
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final homeNavigationNode = _navigationNode(tester, 0);
+      final contentNode = _contentNode(tester, 'home');
+      contentNode.requestFocus();
+      await tester.pump();
+      expect(contentNode.hasPrimaryFocus, isTrue);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await tester.pumpAndSettle();
+
+      expect(homeNavigationNode.hasPrimaryFocus, isTrue);
+      expect(contentNode.hasFocus, isFalse);
+    },
+  );
+
   testWidgets('TV permanent sidebar keeps the page offset in Row layout', (
     tester,
   ) async {
@@ -364,7 +461,7 @@ void main() {
   }
 }
 
-GoRouter _buildRouter() {
+GoRouter _buildRouter({bool nestedPageFocusScope = false}) {
   return GoRouter(
     initialLocation: '/home',
     routes: [
@@ -384,7 +481,10 @@ GoRouter _buildRouter() {
               routes: [
                 GoRoute(
                   path: '/$path',
-                  builder: (context, state) => _TestPage(id: path),
+                  builder: (context, state) => _TestPage(
+                    id: path,
+                    nestedPageFocusScope: nestedPageFocusScope,
+                  ),
                 ),
               ],
             ),
@@ -418,9 +518,10 @@ FocusNode _contentNode(WidgetTester tester, String id) {
 }
 
 class _TestPage extends StatefulWidget {
-  const _TestPage({required this.id});
+  const _TestPage({required this.id, this.nestedPageFocusScope = false});
 
   final String id;
+  final bool nestedPageFocusScope;
 
   @override
   State<_TestPage> createState() => _TestPageState();
@@ -439,7 +540,7 @@ class _TestPageState extends State<_TestPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    final page = Scaffold(
       key: ValueKey('page-${widget.id}'),
       body: Align(
         alignment: Alignment.centerLeft,
@@ -452,6 +553,9 @@ class _TestPageState extends State<_TestPage> {
         ),
       ),
     );
+    return widget.nestedPageFocusScope
+        ? TvPageFocusScope(isTelevision: true, child: page)
+        : page;
   }
 }
 

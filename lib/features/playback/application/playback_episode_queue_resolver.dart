@@ -15,6 +15,102 @@ class PlaybackEpisodeQueueResolver {
 
   final T Function<T>(ProviderListenable<T> provider) read;
 
+  Future<List<PlaybackEpisodeSeason>> loadSeasons(PlaybackTarget target) async {
+    final source = _findSource(target.sourceId);
+    if (source == null) return const [];
+    if (source.kind == MediaSourceKind.emby ||
+        source.kind == MediaSourceKind.fntv) {
+      if (!source.hasActiveSession || target.seriesId.isEmpty) return const [];
+      final children = await read(mediaServerClientProvider(source.kind))
+          .fetchChildren(source, parentId: target.seriesId, limit: 500);
+      final seasons = children
+          .where(_isSeasonItem)
+          .map((item) => PlaybackEpisodeSeason(
+                id: item.id,
+                number: item.seasonNumber ?? 0,
+                title: item.title.trim().isNotEmpty
+                    ? item.title
+                    : _seasonTitle(item.seasonNumber ?? 0),
+              ))
+          .toList()
+        ..sort((a, b) => a.number.compareTo(b.number));
+      return seasons;
+    }
+    final records =
+        await read(nasMediaIndexerProvider).loadSourceRecords(target.sourceId);
+    final current = _findIndexedCurrentRecord(records, target);
+    if (current == null) return const [];
+    final identity =
+        _resolveIndexedSeriesIdentity(target: target, record: current);
+    final numbers = records
+        .where((r) =>
+            _matchesIndexedSeriesIdentity(r, identity) &&
+            _resolvedEpisodeNumber(r) != null)
+        .map(_resolvedSeasonNumber)
+        .whereType<int>()
+        .toSet()
+        .toList()
+      ..sort();
+    return numbers
+        .map((n) =>
+            PlaybackEpisodeSeason(id: '$n', number: n, title: _seasonTitle(n)))
+        .toList();
+  }
+
+  Future<PlaybackEpisodeQueue> loadSeason(
+    PlaybackTarget target,
+    PlaybackEpisodeSeason season,
+  ) async {
+    final source = _findSource(target.sourceId);
+    if (source == null) throw StateError('媒体源不可用');
+    List<PlaybackEpisodeQueueEntry> entries;
+    if (source.kind == MediaSourceKind.emby ||
+        source.kind == MediaSourceKind.fntv) {
+      final children = await read(mediaServerClientProvider(source.kind))
+          .fetchChildren(source, parentId: season.id, limit: 500);
+      final episodes = children.where(_isEpisodeItem).toList()
+        ..sort(_compareEpisodes);
+      entries = episodes
+          .map((item) => _entryFromTarget(_buildEpisodeTarget(
+                item,
+                currentTarget: target,
+              ).copyWith(seasonNumber: season.number)))
+          .toList();
+    } else {
+      final records = await read(nasMediaIndexerProvider)
+          .loadSourceRecords(target.sourceId);
+      final current = _findIndexedCurrentRecord(records, target);
+      if (current == null) throw StateError('找不到当前剧集');
+      final identity =
+          _resolveIndexedSeriesIdentity(target: target, record: current);
+      final filtered = records
+          .where((r) =>
+              _matchesIndexedSeriesIdentity(r, identity) &&
+              _resolvedSeasonNumber(r) == season.number &&
+              _resolvedEpisodeNumber(r) != null)
+          .toList()
+        ..sort((a, b) => _compareIndexedRecords(a, b, currentRecord: current));
+      final seen = <int>{};
+      entries = filtered
+          .where((r) => seen.add(_resolvedEpisodeNumber(r)!))
+          .map((r) => _entryFromTarget(_buildIndexedEpisodeTarget(r,
+                      currentTarget: target,
+                      seriesTitle: _bestIndexedSeriesTitle(target, current))
+                  .copyWith(
+                seasonNumber: season.number,
+                episodeNumber: _resolvedEpisodeNumber(r),
+              )))
+          .toList();
+    }
+    if (entries.isEmpty) throw StateError('本季暂无可播放剧集');
+    // Browsing another season must not claim its first episode is playing.
+    final currentIndex = entries
+        .indexWhere((e) => e.playbackItemKey == buildPlaybackItemKey(target));
+    return PlaybackEpisodeQueue(entries: entries, currentIndex: currentIndex);
+  }
+
+  String _seasonTitle(int number) => number == 0 ? '特别篇' : '第 $number 季';
+
   Future<PlaybackEpisodeQueue?> resolve(PlaybackTarget target) async {
     if (!target.isEpisode) {
       return null;

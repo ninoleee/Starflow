@@ -91,18 +91,17 @@ internal object NativePlaybackNumberPicker {
             override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
         })
 
-        return AlertDialog.Builder(activity)
+        val dialog = AlertDialog.Builder(activity, R.style.NativePlaybackSettingsDialogTheme)
             .setTitle(title)
             .setView(view)
             .setPositiveButton("完成", null)
             .create()
-            .apply {
-                setOnShowListener {
-                    // Keep the lower picture visible while adjusting subtitle placement.
-                    window?.setGravity(Gravity.TOP or Gravity.CENTER_HORIZONTAL)
-                    window?.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-                    slider.requestFocus()
-                }
-            }
+        // Set the final window position before the first frame so it does not jump from center.
+        dialog.window?.setGravity(Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+        dialog.window?.clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+        dialog.setOnShowListener {
+            slider.requestFocus()
+        }
+        return dialog
     }
 }

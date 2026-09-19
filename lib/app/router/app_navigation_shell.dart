@@ -570,6 +570,9 @@ class _TelevisionNavigationShellState
         node,
       );
     });
+    // A visible sidebar does not rebuild, and post-frame callbacks alone do
+    // not schedule a frame. Complete the focus transfer even while idle.
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   bool get _isSidebarFocused => _destinationFocusNodes.any(

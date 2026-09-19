@@ -158,7 +158,7 @@ internal class NativeFntvController(
             return
         }
         val current = target().optInt("preferredPlaybackQualityIndex", 0)
-        val dialog = AlertDialog.Builder(host.activity).setTitle("画质")
+        val dialog = AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme).setTitle("画质")
             .setSingleChoiceItems(qualities.map {
                 buildList {
                     add(it.optString("resolution").ifBlank { "画质 ${it.optInt("index") + 1}" })
