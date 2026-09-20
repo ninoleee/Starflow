@@ -2,11 +2,13 @@ package com.example.starflow
 
 import android.app.Activity
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Tracks
 import androidx.media3.decoder.ffmpeg.FfmpegLibrary
 import androidx.media3.exoplayer.ExoPlaybackException
+import androidx.media3.exoplayer.audio.AudioSink
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_MEDIA_MIME_TYPE
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_URL
 
@@ -27,6 +29,7 @@ internal class NativePlaybackRecoveryController(
 
     private var transcodedVideoFallbackAttempted = false
     private var audioFallbackAttempted = false
+    private var pcmFallbackAttempted = false
     private val automaticRecoveryBudget = PlaybackRecoveryBudget()
     private var recoveryItemKey = ""
 
@@ -37,23 +40,86 @@ internal class NativePlaybackRecoveryController(
         recoveryItemKey = ""
         transcodedVideoFallbackAttempted = false
         audioFallbackAttempted = false
+        pcmFallbackAttempted = false
         smartStrmHlsFallbackAttempted = false
         host.session.resetAudioRecovery()
     }
 
     fun retryAudioWithSoftwareDecoder(error: PlaybackException): Boolean {
         val rendererError = error as? ExoPlaybackException ?: return false
-        val format = rendererError.rendererFormat ?: return false
-        val mime = format.sampleMimeType ?: return false
-        if (rendererError.type != ExoPlaybackException.TYPE_RENDERER ||
-            !MimeTypes.isAudio(mime) || format.cryptoType != C.CRYPTO_TYPE_NONE ||
-            format.drmInitData != null ||
-            rendererError.rendererName?.contains("ffmpeg", ignoreCase = true) == true ||
+        if (rendererError.type != ExoPlaybackException.TYPE_RENDERER) return false
+        val outputError = error.errorCode in setOf(
+                PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+                PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
+            )
+        if (!outputError && error.errorCode !in setOf(
+                PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+                PlaybackException.ERROR_CODE_DECODING_FAILED,
+            )) return false
+        val format = rendererError.rendererFormat
+        val rendererName = rendererError.rendererName?.substringAfterLast('.')
+        val isFfmpeg = rendererName == "FfmpegAudioRenderer"
+        val knownAudioRenderer = isFfmpeg || rendererName == "MediaCodecAudioRenderer"
+        val exceptionFormat = when (val cause = rendererError.rendererException) {
+            is AudioSink.ConfigurationException -> cause.format
+            is AudioSink.InitializationException -> cause.format
+            is AudioSink.WriteException -> cause.format
+            else -> null
+        }
+        if (rendererName?.endsWith("VideoRenderer") == true ||
+            (format != null && !MimeTypes.isAudio(format.sampleMimeType))) return false
+        if (format == null && (!outputError || !knownAudioRenderer ||
+                exceptionFormat == null || !MimeTypes.isAudio(exceptionFormat.sampleMimeType))) return false
+
+        // Sink formats may be decoded PCM with DRM metadata removed. Only current source
+        // tracks (not the cached sink state) can fill that gap for platform decoders.
+        val currentPlayer = host.session.player
+        val sourceFormats = buildList<Format> {
+            currentPlayer?.audioFormat?.takeIf { MimeTypes.isAudio(it.sampleMimeType) }?.let(::add)
+            currentPlayer?.currentTracks?.groups?.forEach { group ->
+                if (group.type == C.TRACK_TYPE_AUDIO) {
+                    for (index in 0 until group.length) {
+                        if (group.isTrackSelected(index)) add(group.getTrackFormat(index))
+                    }
+                }
+            }
+            format?.takeIf { it.sampleMimeType != MimeTypes.AUDIO_RAW || exceptionFormat == null }
+                ?.let(::add)
+        }
+        if (listOfNotNull(format, exceptionFormat).any(::hasDrm) || sourceFormats.any(::hasDrm)) return false
+        // FFmpeg rejects DRM at supportsFormat. All other renderers need positive source evidence.
+        if (sourceFormats.isEmpty() && !isFfmpeg) return false
+        val state = host.session.audioOutputState.snapshot
+        val sinkFormat = exceptionFormat ?: state.sinkInput ?:
+            format?.takeIf { it.sampleMimeType == MimeTypes.AUDIO_RAW }
+        val highResolution = sinkFormat?.sampleMimeType == MimeTypes.AUDIO_RAW &&
+            sinkFormat.pcmEncoding in setOf(C.ENCODING_PCM_24BIT, C.ENCODING_PCM_32BIT, C.ENCODING_PCM_FLOAT)
+        val passthrough = sinkFormat?.sampleMimeType?.let {
+            MimeTypes.isAudio(it) && it != MimeTypes.AUDIO_RAW
+        } == true
+        if (outputError && !pcmFallbackAttempted && !host.session.pcm16Fallback &&
+            (passthrough || (host.session.highPrecisionPcmEnabled &&
+                (highResolution || (sinkFormat == null && state.outputEncoding == C.ENCODING_PCM_FLOAT))))) {
+            pcmFallbackAttempted = true
+            host.session.preserveAudioSession()
+            host.session.pcm16Fallback = true
+            host.diagnostics.playbackPerformanceTracker.onRecovery()
+            NativeAppLogger.warning("playback.audio", "Audio fallback output=pcm16 " +
+                "reason=${if (passthrough) "passthrough-output" else "high-precision-output"} " +
+                "sinkMime=${sinkFormat?.sampleMimeType ?: "unknown"} " +
+                "input=${NativePlaybackAudioPolicy.encodingLabel(sinkFormat?.pcmEncoding)} " +
+                "output=${NativePlaybackAudioPolicy.encodingLabel(state.outputEncoding)} " +
+                "code=${error.errorCode} attempt=1 decoderPolicy=unchanged")
+            host.session.rebuildPlayer()
+            return true
+        }
+        // A sink failure does not establish a decoder failure. Do not spend its budget here.
+        if (outputError) return false
+        val mime = format?.sampleMimeType ?: return false
+        if (rendererError.rendererName?.contains("ffmpeg", ignoreCase = true) == true ||
             audioFallbackAttempted || host.session.audioFallbackMime != null ||
             error.errorCode !in setOf(PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
-                PlaybackException.ERROR_CODE_DECODING_FAILED,
-                PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
-                PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED) ||
+                PlaybackException.ERROR_CODE_DECODING_FAILED) ||
             !supportsSoftwareAudio(mime)) return false
         audioFallbackAttempted = true
         host.session.preserveAudioSession()
@@ -63,6 +129,9 @@ internal class NativePlaybackRecoveryController(
         host.session.rebuildPlayer()
         return true
     }
+
+    private fun hasDrm(format: Format): Boolean =
+        format.cryptoType != C.CRYPTO_TYPE_NONE || format.drmInitData != null
 
     fun fallbackToTranscodedVideoIfNeeded(tracks: Tracks) {
         if (transcodedVideoFallbackAttempted) {

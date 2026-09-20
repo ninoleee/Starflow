@@ -1,5 +1,6 @@
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
+import 'package:starflow/features/library/domain/tmdb_media_identity.dart';
 
 class ScoredMediaItem {
   const ScoredMediaItem({required this.item, required this.score});
@@ -66,6 +67,7 @@ List<MediaItem> listMediaItemsMatchingExternalIds(
   String doubanId = '',
   String imdbId = '',
   String tmdbId = '',
+  TmdbMediaType? tmdbMediaType,
   String tvdbId = '',
   String wikidataId = '',
 }) {
@@ -86,6 +88,12 @@ List<MediaItem> listMediaItemsMatchingExternalIds(
 
   void collect(bool Function(MediaItem item) matcher) {
     for (final item in library) {
+      final itemType = TmdbMediaType.fromItemType(item.itemType);
+      if (tmdbMediaType != null &&
+          itemType != null &&
+          tmdbMediaType != itemType) {
+        continue;
+      }
       if (matcher(item)) {
         matches[item.id] = item;
       }
@@ -98,8 +106,13 @@ List<MediaItem> listMediaItemsMatchingExternalIds(
   if (normalizedImdbId.isNotEmpty) {
     collect((item) => item.imdbId.trim().toLowerCase() == normalizedImdbId);
   }
-  if (normalizedTmdbId.isNotEmpty) {
-    collect((item) => item.tmdbId.trim() == normalizedTmdbId);
+  if (normalizedTmdbId.isNotEmpty && tmdbMediaType != null) {
+    final identity = TmdbMediaIdentity(
+      mediaType: tmdbMediaType,
+      id: normalizedTmdbId,
+    );
+    collect((item) =>
+        TmdbMediaIdentity.fromRaw(item.tmdbId, item.itemType) == identity);
   }
   if (normalizedTvdbId.isNotEmpty) {
     collect((item) => item.tvdbId.trim() == normalizedTvdbId);
@@ -118,6 +131,7 @@ MediaItem? matchMediaItemByExternalIds(
   String doubanId = '',
   String imdbId = '',
   String tmdbId = '',
+  TmdbMediaType? tmdbMediaType,
   String tvdbId = '',
   String wikidataId = '',
 }) {
@@ -126,6 +140,7 @@ MediaItem? matchMediaItemByExternalIds(
     doubanId: doubanId,
     imdbId: imdbId,
     tmdbId: tmdbId,
+    tmdbMediaType: tmdbMediaType,
     tvdbId: tvdbId,
     wikidataId: wikidataId,
   );

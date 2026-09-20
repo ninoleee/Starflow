@@ -1,11 +1,11 @@
+import 'package:starflow/core/logging/app_logger.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
-import 'package:starflow/core/utils/playback_trace.dart';
-import 'package:starflow/features/playback/data/external_playback_playlist.dart';
+import 'package:starflow/features/playback/data/external_playback_file_store.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:starflow/features/playback/data/system_playback_launcher.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -18,6 +18,7 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
   const DesktopAwareSystemPlaybackLauncher();
 
   static const _platformChannel = MethodChannel('starflow/platform');
+  static final _playlistFiles = ExternalPlaybackFileStore();
 
   @override
   Future<SystemPlaybackLaunchResult> launch(PlaybackTarget target) async {
@@ -65,56 +66,25 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
   Future<SystemPlaybackLaunchResult> _launchDesktopPlaylist(
     PlaybackTarget target,
   ) async {
-    final file = await _createPlaylistFile(target);
+    final file = await _playlistFiles.create(target);
     final launched = await _openDesktopPlaylist(file.path);
     if (launched) {
       unawaited(
         Future<void>.delayed(const Duration(minutes: 10), () async {
           try {
-            await file.delete();
+            await _playlistFiles.delete(file);
           } catch (_) {}
         }),
       );
     } else {
       try {
-        await file.delete();
+        await _playlistFiles.delete(file);
       } catch (_) {}
     }
     return SystemPlaybackLaunchResult(
       launched: launched,
       message: launched ? '' : '外部系统播放器启动失败。',
     );
-  }
-
-  Future<File> _createPlaylistFile(PlaybackTarget target) async {
-    await _cleanupStalePlaylistFiles();
-    final safeTitle = _sanitizeFileName(target.title);
-    final filename =
-        'starflow-$safeTitle-${DateTime.now().millisecondsSinceEpoch}.m3u';
-    final file = File(p.join(Directory.systemTemp.path, filename));
-    await file.writeAsString(
-      buildExternalPlaybackPlaylist(target),
-      flush: true,
-    );
-    return file;
-  }
-
-  Future<void> _cleanupStalePlaylistFiles() async {
-    final cutoff = DateTime.now().subtract(const Duration(hours: 1));
-    try {
-      await for (final entity
-          in Directory.systemTemp.list(followLinks: false)) {
-        if (entity is! File ||
-            !p.basename(entity.path).startsWith('starflow-') ||
-            p.extension(entity.path).toLowerCase() != '.m3u') {
-          continue;
-        }
-        final stat = await entity.stat();
-        if (stat.modified.isBefore(cutoff)) {
-          await entity.delete();
-        }
-      }
-    } catch (_) {}
   }
 
   Future<bool> _openDesktopPlaylist(String path) async {
@@ -212,11 +182,6 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
 
   Future<bool> _launchPlatformVideoIntent(PlaybackTarget target) async {
     final platformName = Platform.isIOS ? 'ios' : 'android';
-    _traceQuarkSystemLaunch(
-      'quark.system-launch.$platformName.channel.begin',
-      target: target,
-      fields: {'streamUrl': target.streamUrl},
-    );
     try {
       final launched =
           await _platformChannel.invokeMethod<bool>('launchSystemVideoPlayer', {
@@ -224,11 +189,6 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
         'title': target.title,
         'headersJson': jsonEncode(target.headers),
       });
-      _traceQuarkSystemLaunch(
-        'quark.system-launch.$platformName.channel.result',
-        target: target,
-        fields: {'launched': launched == true},
-      );
       if (launched == true) {
         return true;
       }
@@ -246,20 +206,10 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
     if (uri == null || !uri.hasScheme) {
       return false;
     }
-    _traceQuarkSystemLaunch(
-      'quark.system-launch.$platformName.url.begin',
-      target: target,
-      fields: {'streamUrl': target.streamUrl},
-    );
     try {
       final launched = await launchUrl(
         uri,
         mode: LaunchMode.externalNonBrowserApplication,
-      );
-      _traceQuarkSystemLaunch(
-        'quark.system-launch.$platformName.url.result',
-        target: target,
-        fields: {'launched': launched},
       );
       return launched;
     } catch (error, stackTrace) {
@@ -271,17 +221,6 @@ class DesktopAwareSystemPlaybackLauncher implements SystemPlaybackLauncher {
       );
       return false;
     }
-  }
-
-  String _sanitizeFileName(String raw) {
-    final sanitized = raw
-        .replaceAll(RegExp(r'[\\/:*?"<>|&^%!]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    if (sanitized.isEmpty) {
-      return 'playback';
-    }
-    return sanitized.length > 48 ? sanitized.substring(0, 48) : sanitized;
   }
 
   bool _requiresExternalPlaybackHeaders(PlaybackTarget target) {
@@ -299,15 +238,13 @@ void _traceQuarkSystemLaunch(
   if (target.sourceKind.name != 'quark') {
     return;
   }
-  playbackTrace(
-    stage,
-    fields: <String, Object?>{
-      'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
-      'sourceKind': target.sourceKind.name,
-      'container': target.container,
-      ...fields,
-    },
-    error: error,
-    stackTrace: stackTrace,
-  );
+  appLogError('playback', stage,
+      fields: <String, Object?>{
+        'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+        'sourceKind': target.sourceKind.name,
+        'container': target.container,
+        ...fields,
+      },
+      error: error,
+      stackTrace: stackTrace);
 }

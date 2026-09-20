@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'package:starflow/features/playback/application/playback_control_intents.dart';
+import 'package:starflow/features/playback/application/playback_recovery_intent.dart';
+import 'package:starflow/features/playback/application/playback_seek_coalescer.dart';
+import 'package:starflow/features/playback/application/playback_track_guard.dart';
 import 'widgets/player_controls_layout.dart';
 import 'widgets/player_menu_style.dart';
 import 'dart:math' as math;
@@ -16,11 +20,11 @@ import 'package:path/path.dart' as p;
 import 'package:starflow/core/platform/android_picture_in_picture.dart';
 import 'package:starflow/core/platform/background_playback.dart';
 import 'package:starflow/core/platform/playback_system_session.dart';
-import 'package:starflow/core/utils/playback_trace.dart';
-import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/logging/app_logger.dart';
+import 'package:starflow/core/logging/app_log_api.dart';
+import 'package:starflow/features/playback/application/mpv_playback_diagnostics.dart';
 import 'package:starflow/core/widgets/starflow_action_dialog.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -40,10 +44,16 @@ import 'package:starflow/features/playback/application/playback_episode_browser.
 import 'package:starflow/features/playback/application/playback_performance_tracker.dart';
 import 'package:starflow/features/playback/application/playback_remote_preflight.dart';
 import 'package:starflow/features/playback/application/playback_server_track_resolver.dart';
+import 'package:starflow/features/playback/application/fntv_quality_menu.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
 import 'package:starflow/features/playback/application/playback_auto_skip_policy.dart';
+import 'package:starflow/features/playback/application/playback_episode_advance_guard.dart';
+import 'package:starflow/features/playback/application/playback_completion_state.dart';
+import 'package:starflow/features/playback/application/playback_interaction_player.dart';
+import 'package:starflow/features/playback/application/playback_intro_start_guard.dart';
+import 'package:starflow/features/playback/application/playback_episode_preparation.dart';
 import 'package:starflow/features/playback/application/playback_startup_coordinator.dart';
 import 'package:starflow/features/playback/application/playback_startup_executor.dart';
 import 'package:starflow/features/playback/application/playback_startup_routing.dart';
@@ -207,6 +217,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   LogicalKeyboardKey? _tvSeekHoldKey;
   DateTime? _tvSeekHoldStartedAt;
   int _tvSeekHoldRepeatCount = 0;
+  PlaybackSeekCoalescer? _tvSeekCoalescer;
+  int _manualTrackRevision = 0;
+  bool get _startupTrackWorkIsCurrent => PlaybackTrackGuard.allowsWrite;
 
   List<FocusNode> get _tvChromeControlFocusNodes => <FocusNode>[
         _tvBackControlFocusNode,
@@ -268,12 +281,12 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   int _adaptiveGestureLevelsRevision = 0;
   bool _introSkipApplied = false;
   bool _outroSkipApplied = false;
+  final _completionState = PlaybackCompletionState();
   bool _playbackStartPositionApplied = false;
   Duration _pendingIntroStartValidation = Duration.zero;
   bool _nextEpisodeIsAutomatic = false;
-  bool _nextEpisodePrepareInProgress = false;
-  String? _nextEpisodePrepareAttempt;
-  _PreparedNextEpisode? _preparedNextEpisode;
+  final _episodePreparation = PlaybackEpisodePreparation();
+  Object? _episodePreparationContext;
   Duration _latestPosition = Duration.zero;
   Duration _latestDuration = Duration.zero;
   DateTime? _lastProgressPersistedAt;
@@ -293,8 +306,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Player? _iosBackgroundAudioOnlyPlayer;
   VideoTrack? _iosBackgroundPreviousVideoTrack;
   Future<void> _iosBackgroundAudioOnlyQueue = Future<void>.value();
-  int? _lastTracedVideoWidth;
-  int? _lastTracedVideoHeight;
   bool? _lastTracedBufferingState;
   int? _lastTracedBufferingBucket;
   late final ProviderContainer _providerContainer;
@@ -310,8 +321,15 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   int _runtimeMpvErrorBurstCount = 0;
   int _runtimeMpvErrorRecoveryAttempts = 0;
   final _automaticRecoveryBudget = PlaybackRecoveryBudget();
+  int? _recoveryStartupIntent;
+  late final _recoveryIntent = PlaybackRecoveryIntent(onInvalidated: () {
+    if (_recoveryStartupIntent != null) _startupScope.cancel();
+  });
   bool _runtimeMpvErrorRecoveryInProgress = false;
-  bool _episodeQueueAdvanceInProgress = false;
+  final _episodeAdvanceGuard = PlaybackEpisodeAdvanceGuard();
+  bool get _episodeQueueAdvanceInProgress => _episodeAdvanceGuard.isActive;
+  bool _subtitleSearchActive = false;
+  bool _skipPreferenceSaveInProgress = false;
   int? _androidMemoryClassMb;
   bool _androidMemoryClassResolved = false;
   PlaybackPerformanceTracker? _mpvPerformanceTracker;
@@ -355,6 +373,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   @override
   void dispose() {
+    _recoveryIntent.invalidate();
+    _tvSeekCoalescer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _tvPlaybackChromeHideTimer?.cancel();
     _stopMpvStallWatchdog();
@@ -374,6 +394,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         reason: 'player-page-dispose',
         persistProgress: true,
         teardownPlatformState: !_platformStateTornDownBeforePop,
+        closeSessionOwner: true,
       ),
     );
     _tvPlaybackStateNotifier.dispose();
@@ -389,12 +410,17 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   _DetachedPlayback _detachActivePlayerState({
     bool clearStallRecoveryFlag = true,
   }) {
+    _episodeAdvanceGuard.reset();
+    _resetPreparedNextEpisode();
+    _tvSeekCoalescer?.cancel();
+    _tvSeekCoalescer = null;
+    _resetTvSeekHold();
     _startupGeneration++;
     _startupScope.cancel();
     _stopMpvPerformanceSampling();
     final player = _player;
-    final resourcesClosed = _mpvLifecycle.close().catchError((Object error,
-        StackTrace stack) {
+    final resourcesClosed =
+        _mpvLifecycle.close().catchError((Object error, StackTrace stack) {
       appLogWarning('playback.dispose', 'MPV resource cleanup failed',
           error: error, stackTrace: stack);
     });
@@ -419,6 +445,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     required String reason,
     required bool persistProgress,
     required bool teardownPlatformState,
+    bool closeSessionOwner = false,
   }) async {
     final player = detached.player;
     final sessionTarget = detached.target;
@@ -437,7 +464,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     if (player != null) {
       await _enqueuePlayerShutdown(player, reason: reason);
     }
-    if (teardownPlatformState) {
+    if (closeSessionOwner) {
       await _fntvSessions.close();
     } else if (!_fntvSwitchInProgress && sessionTarget != null) {
       await _fntvSessions.release(sessionTarget);
@@ -450,6 +477,11 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _recoveryIntent.foreground(state == AppLifecycleState.resumed);
+    if (state != AppLifecycleState.resumed) {
+      _tvSeekCoalescer?.cancel();
+      _resetTvSeekHold();
+    }
     _playbackPageInForeground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       unawaited(_bindAdaptiveGestureSystemLevels());
@@ -560,31 +592,22 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return;
     }
     final target = _resolvedTarget ?? widget.target;
-    playbackTrace(
-      stage,
-      fields: <String, Object?>{
-        'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
-        'engine': 'embeddedMpv',
-        ...fields,
-      },
-      error: error,
-      stackTrace: stackTrace,
-    );
+    appLogError('playback', stage,
+        fields: <String, Object?>{
+          'title':
+              target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+          'engine': 'embeddedMpv',
+          ...fields,
+        },
+        error: error,
+        stackTrace: stackTrace);
   }
 
   Future<void> _waitForPendingPlayerShutdowns({
     required String reason,
   }) async {
     try {
-      _traceWindowsMpv(
-        'windows-mpv.shutdown.wait-begin',
-        fields: {'reason': reason},
-      );
       await _playerShutdownQueue;
-      _traceWindowsMpv(
-        'windows-mpv.shutdown.wait-end',
-        fields: {'reason': reason},
-      );
     } catch (error, stackTrace) {
       _traceWindowsMpv(
         'windows-mpv.shutdown.wait-error',
@@ -600,10 +623,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     required String reason,
   }) async {
     final shutdown = _playerShutdownQueue.then((_) async {
-      _traceWindowsMpv(
-        'windows-mpv.shutdown.begin',
-        fields: {'reason': reason},
-      );
       try {
         await player.pause();
       } catch (error, stackTrace) {
@@ -634,10 +653,6 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           stackTrace: stackTrace,
         );
       }
-      _traceWindowsMpv(
-        'windows-mpv.shutdown.end',
-        fields: {'reason': reason},
-      );
     });
     _playerShutdownQueue = shutdown.catchError((_) {});
     await shutdown;
@@ -646,22 +661,21 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Future<void> _stopPlaybackBeforeExit({
     required String reason,
   }) async {
-    _traceWindowsMpv(
-      'windows-mpv.exit.stop-before-pop',
-      fields: {'reason': reason},
-    );
+    _recoveryIntent.invalidate();
     final player = _detachActivePlayerState();
     await _shutdownDetachedPlayer(
       player,
       reason: reason,
       persistProgress: true,
       teardownPlatformState: true,
+      closeSessionOwner: true,
     );
   }
 
   Future<void> _requestExitPlayer({
     required String reason,
   }) async {
+    _recoveryIntent.invalidate();
     final inFlight = _exitPlaybackFuture;
     if (inFlight != null) {
       await inFlight;
@@ -696,6 +710,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
         reason: reason,
         persistProgress: true,
         teardownPlatformState: true,
+        closeSessionOwner: true,
       );
       return;
     }
@@ -710,6 +725,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       reason: reason,
       persistProgress: true,
       teardownPlatformState: true,
+      closeSessionOwner: true,
     );
   }
 
@@ -750,6 +766,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       return;
     }
     if (_hasFocusedTvChromeControl) {
+      _tvSeekCoalescer?.cancel();
+      _resetTvSeekHold();
       _tvPlaybackChromeHideTimer?.cancel();
       if (!_tvPlaybackChromeVisible && mounted) {
         setState(() {
@@ -772,6 +790,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
 
     final key = event.logicalKey;
     if (event is KeyUpEvent) {
+      if (_tvSeekHoldKey == key) _tvSeekCoalescer?.flush();
       _resetTvSeekHold(key: key);
       return KeyEventResult.handled;
     }
@@ -781,6 +800,27 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
 
     if (_tvSeekHoldKey != key || _tvSeekHoldStartedAt == null) {
+      if (event is KeyRepeatEvent) return KeyEventResult.handled;
+      _tvSeekCoalescer?.cancel();
+      final player = _player;
+      if (!_isReady || player == null) return KeyEventResult.handled;
+      late final PlaybackSeekCoalescer coalescer;
+      coalescer = PlaybackSeekCoalescer(seek: (target) async {
+        if (!mounted ||
+            !identical(_player, player) ||
+            !_isReady ||
+            !identical(_tvSeekCoalescer, coalescer)) {
+          return;
+        }
+        await player.seek(target);
+        if (!mounted ||
+            !identical(_player, player) ||
+            !identical(_tvSeekCoalescer, coalescer)) {
+          return;
+        }
+        _showTvPlaybackChrome();
+      });
+      _tvSeekCoalescer = coalescer;
       _tvSeekHoldKey = key;
       _tvSeekHoldStartedAt = DateTime.now();
       _tvSeekHoldRepeatCount = 0;
@@ -789,13 +829,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     }
 
     final heldFor = DateTime.now().difference(_tvSeekHoldStartedAt!);
+    _recoveryIntent.invalidate();
     final step = _resolveTvSeekStep(
       heldFor: heldFor,
       repeatCount: _tvSeekHoldRepeatCount,
     );
     final direction = key == LogicalKeyboardKey.arrowLeft ? -1 : 1;
     final delta = Duration(milliseconds: step.inMilliseconds * direction);
-    unawaited(_seekRelative(delta));
+    _tvSeekCoalescer?.add(delta,
+        position: _player?.state.position ?? Duration.zero,
+        duration: _player?.state.duration ?? Duration.zero);
     return KeyEventResult.handled;
   }
 
@@ -838,11 +881,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                 SingleActivator(LogicalKeyboardKey.gameButtonA):
                     ActivateIntent(),
                 SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-                SingleActivator(LogicalKeyboardKey.mediaPlayPause):
-                    ActivateIntent(),
-                SingleActivator(LogicalKeyboardKey.mediaPlay): ActivateIntent(),
-                SingleActivator(LogicalKeyboardKey.mediaPause):
-                    ActivateIntent(),
+                ...playbackMediaShortcuts,
                 SingleActivator(LogicalKeyboardKey.arrowUp):
                     _ShowTvPlaybackChromeIntent(),
                 SingleActivator(LogicalKeyboardKey.arrowDown):
@@ -855,6 +894,24 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             : const <ShortcutActivator, Intent>{},
         child: Actions(
           actions: <Type, Action<Intent>>{
+            PlaybackPlayIntent: CallbackAction<PlaybackPlayIntent>(
+              onInvoke: (_) {
+                unawaited(_setPlayWhenReady(true));
+                return null;
+              },
+            ),
+            PlaybackPauseIntent: CallbackAction<PlaybackPauseIntent>(
+              onInvoke: (_) {
+                unawaited(_setPlayWhenReady(false));
+                return null;
+              },
+            ),
+            PlaybackToggleIntent: CallbackAction<PlaybackToggleIntent>(
+              onInvoke: (_) {
+                unawaited(_togglePlayback());
+                return null;
+              },
+            ),
             DismissIntent: CallbackAction<DismissIntent>(
               onInvoke: (_) {
                 if (isTelevision) {
@@ -916,8 +973,14 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
             autofocus: true,
             canRequestFocus: isTelevision,
             onKeyEvent: (_, event) => _handleTvSeekKeyEvent(event),
+            onFocusChange: (focused) {
+              if (!focused) {
+                _tvSeekCoalescer?.cancel();
+                _resetTvSeekHold();
+              }
+            },
             child: Scaffold(
-              key: _isReady ? const ValueKey<String>('player:ready') : null,
+              key: const ValueKey<String>('player:surface'),
               backgroundColor: Colors.black,
               body: !isTelevision
                   ? KeyedSubtree(
@@ -1094,12 +1157,14 @@ class _OpenedPlayback {
     required this.videoController,
     required this.errorSubscription,
     required this.logSubscription,
+    required this.effectiveStartPosition,
   });
 
   final Player player;
   final VideoController videoController;
   final StreamSubscription<String> errorSubscription;
   final StreamSubscription<PlayerLog> logSubscription;
+  final PlaybackStartPosition effectiveStartPosition;
 
   Future<void> cancelSubscriptions() async {
     await errorSubscription.cancel();

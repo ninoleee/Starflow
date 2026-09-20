@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:starflow/core/network/bounded_http_request.dart';
 import 'package:starflow/core/network/network_failure.dart';
 import 'package:starflow/core/network/network_request_guard.dart';
 
@@ -29,7 +30,23 @@ class MetadataNetworkGuard {
     http.Client client,
     Uri uri, {
     Map<String, String>? headers,
+    int? maxBytes,
   }) {
+    if (maxBytes != null) {
+      return _delegate.run<http.Response>(
+        uri: uri,
+        idempotent: true,
+        request: () => sendBoundedRequest(
+          client,
+          'GET',
+          uri,
+          headers: headers,
+          timeout: _delegate.policy.requestTimeout,
+          maxBytes: maxBytes,
+        ),
+        statusCodeOf: (response) => response.statusCode,
+      );
+    }
     return _delegate.get(client, uri, headers: headers);
   }
 

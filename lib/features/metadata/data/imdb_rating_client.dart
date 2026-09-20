@@ -1,9 +1,11 @@
 import 'dart:convert';
 
-import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/storage/bounded_memory_map.dart';
+import 'package:starflow/features/metadata/data/imdb_rating_dataset.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
 
@@ -19,16 +21,26 @@ class ImdbRatingClient {
   ImdbRatingClient(
     this._client, {
     MetadataNetworkGuard? networkGuard,
-  }) : _networkGuard = networkGuard ?? MetadataNetworkGuard();
+    @visibleForTesting
+    Future<ImdbRatingDataset> Function(Uint8List)? decodeDataset,
+  })  : _networkGuard = networkGuard ?? MetadataNetworkGuard(),
+        _decodeDataset = decodeDataset ?? _decodeInBackground;
 
   final http.Client _client;
   final MetadataNetworkGuard _networkGuard;
-  Future<List<int>>? _ratingsDatasetFuture;
-  final Map<String, ImdbRatingMatch?> _lookupCache = {};
-  final Map<String, List<_ImdbSuggestionItem>> _suggestionCache = {};
+  final Future<ImdbRatingDataset> Function(Uint8List) _decodeDataset;
+  Future<ImdbRatingDataset>? _ratingsDatasetFuture;
+  final Map<String, ImdbRatingMatch?> _lookupCache = BoundedMemoryMap(512);
+  final Map<String, List<_ImdbSuggestionItem>> _suggestionCache =
+      BoundedMemoryMap(512);
   final Map<String, Future<List<_ImdbSuggestionItem>>> _suggestionInflight = {};
+  int _cacheGeneration = 0;
+
+  static Future<ImdbRatingDataset> _decodeInBackground(Uint8List bytes) =>
+      compute(decodeImdbRatingDataset, bytes);
 
   void clearCache({bool includeDataset = false}) {
+    _cacheGeneration++;
     _lookupCache.clear();
     _suggestionCache.clear();
     _suggestionInflight.clear();
@@ -37,85 +49,13 @@ class ImdbRatingClient {
     }
   }
 
-  Future<ImdbRatingPreview?> previewMatch({
-    required String query,
-    int year = 0,
-    bool preferSeries = false,
-  }) async {
-    final cleanedQuery = _cleanQuery(query);
-    if (cleanedQuery.isEmpty) {
-      return null;
-    }
-
-    final best = await _matchSuggestion(
-      query: cleanedQuery,
-      year: year,
-      preferSeries: preferSeries,
-    );
-    if (best == null) {
-      return null;
-    }
-
-    final rating = await _lookupRating(best.id);
-    return ImdbRatingPreview(
-      imdbId: best.id,
-      title: best.title,
-      year: best.year,
-      typeLabel: best.type,
-      posterUrl: best.posterUrl,
-      ratingLabel: rating == null
-          ? ''
-          : 'IMDb ${rating.averageRating.toStringAsFixed(1)}',
-      voteCount: rating?.voteCount ?? 0,
-    );
-  }
-
-  Future<List<ImdbRatingPreview>> previewMatches({
-    required String query,
-    int year = 0,
-    bool preferSeries = false,
-    int maxResults = 3,
-  }) async {
-    final cleanedQuery = _cleanQuery(query);
-    if (cleanedQuery.isEmpty || maxResults <= 0) {
-      return const <ImdbRatingPreview>[];
-    }
-
-    final matches = await _matchSuggestions(
-      query: cleanedQuery,
-      year: year,
-      preferSeries: preferSeries,
-    );
-    if (matches.isEmpty) {
-      return const <ImdbRatingPreview>[];
-    }
-
-    final previews = <ImdbRatingPreview>[];
-    for (final match in matches.take(maxResults)) {
-      final rating = await _lookupRating(match.id);
-      previews.add(
-        ImdbRatingPreview(
-          imdbId: match.id,
-          title: match.title,
-          year: match.year,
-          typeLabel: match.type,
-          posterUrl: match.posterUrl,
-          ratingLabel: rating == null
-              ? ''
-              : 'IMDb ${rating.averageRating.toStringAsFixed(1)}',
-          voteCount: rating?.voteCount ?? 0,
-        ),
-      );
-    }
-    return previews;
-  }
-
   Future<ImdbRatingMatch?> matchRating({
     required String query,
     int year = 0,
     bool preferSeries = false,
     String imdbId = '',
   }) async {
+    final generation = _cacheGeneration;
     final resolvedId = imdbId.trim().isNotEmpty
         ? imdbId.trim()
         : await _matchImdbId(
@@ -130,7 +70,8 @@ class ImdbRatingClient {
       return _lookupCache[resolvedId];
     }
 
-    final rating = await _lookupRating(resolvedId);
+    final dataset = await _loadRatingsDataset();
+    final rating = dataset.lookup(resolvedId);
     final result = rating == null
         ? ImdbRatingMatch(imdbId: resolvedId, ratingLabel: '')
         : ImdbRatingMatch(
@@ -138,7 +79,7 @@ class ImdbRatingClient {
             ratingLabel: 'IMDb ${rating.averageRating.toStringAsFixed(1)}',
             voteCount: rating.voteCount,
           );
-    _lookupCache[resolvedId] = result;
+    if (generation == _cacheGeneration) _lookupCache[resolvedId] = result;
     return result;
   }
 
@@ -194,6 +135,7 @@ class ImdbRatingClient {
     if (inflight != null) {
       return inflight;
     }
+    final generation = _cacheGeneration;
     final future = _matchSuggestionsUncached(
       cleanedQuery: cleanedQuery,
       year: year,
@@ -202,10 +144,12 @@ class ImdbRatingClient {
     _suggestionInflight[cacheKey] = future;
     try {
       final result = await future;
-      _suggestionCache[cacheKey] = result;
+      if (generation == _cacheGeneration) _suggestionCache[cacheKey] = result;
       return result;
     } finally {
-      _suggestionInflight.remove(cacheKey);
+      if (identical(_suggestionInflight[cacheKey], future)) {
+        _suggestionInflight.remove(cacheKey);
+      }
     }
   }
 
@@ -249,38 +193,10 @@ class ImdbRatingClient {
     );
   }
 
-  Future<_ImdbRatingEntry?> _lookupRating(String imdbId) async {
-    final responseBytes = await _loadRatingsDataset();
-    final decodedBytes = GZipDecoder().decodeBytes(responseBytes);
-    final lines = const LineSplitter().convert(
-      utf8.decode(decodedBytes, allowMalformed: true),
-    );
-    for (final line in lines.skip(1)) {
-      if (line.trim().isEmpty) {
-        continue;
-      }
-      final fields = line.split('\t');
-      if (fields.length < 3) {
-        continue;
-      }
-      if (fields[0].trim() != imdbId) {
-        continue;
-      }
-      final averageRating = double.tryParse(fields[1].trim());
-      final voteCount = int.tryParse(fields[2].trim());
-      if (averageRating == null || voteCount == null) {
-        return null;
-      }
-      return _ImdbRatingEntry(
-        averageRating: averageRating,
-        voteCount: voteCount,
-      );
-    }
-    return null;
-  }
-
-  Future<List<int>> _loadRatingsDataset() {
-    return _ratingsDatasetFuture ??= () async {
+  Future<ImdbRatingDataset> _loadRatingsDataset() async {
+    final existing = _ratingsDatasetFuture;
+    if (existing != null) return existing;
+    final future = () async {
       final response = await _networkGuard.get(
         _client,
         Uri.parse('https://datasets.imdbws.com/title.ratings.tsv.gz'),
@@ -288,14 +204,24 @@ class ImdbRatingClient {
           'Accept': 'application/gzip',
           'User-Agent': 'Starflow/1.0',
         },
+        maxBytes: maxImdbDatasetDownloadBytes,
       );
       if (response.statusCode != 200) {
         throw ImdbRatingException(
           'IMDb 评分数据加载失败：HTTP ${response.statusCode}',
         );
       }
-      return response.bodyBytes;
+      return _decodeDataset(response.bodyBytes);
     }();
+    _ratingsDatasetFuture = future;
+    try {
+      return await future;
+    } catch (_) {
+      if (identical(_ratingsDatasetFuture, future)) {
+        _ratingsDatasetFuture = null;
+      }
+      rethrow;
+    }
   }
 
   Uri _buildSuggestionUri(String query) {
@@ -406,26 +332,6 @@ class ImdbRatingMatch {
   bool get hasRating => ratingLabel.trim().isNotEmpty;
 }
 
-class ImdbRatingPreview {
-  const ImdbRatingPreview({
-    required this.imdbId,
-    required this.title,
-    this.year = 0,
-    this.typeLabel = '',
-    this.posterUrl = '',
-    this.ratingLabel = '',
-    this.voteCount = 0,
-  });
-
-  final String imdbId;
-  final String title;
-  final int year;
-  final String typeLabel;
-  final String posterUrl;
-  final String ratingLabel;
-  final int voteCount;
-}
-
 class ImdbRatingException implements Exception {
   const ImdbRatingException(this.message);
 
@@ -433,16 +339,6 @@ class ImdbRatingException implements Exception {
 
   @override
   String toString() => message;
-}
-
-class _ImdbRatingEntry {
-  const _ImdbRatingEntry({
-    required this.averageRating,
-    required this.voteCount,
-  });
-
-  final double averageRating;
-  final int voteCount;
 }
 
 class _ImdbSuggestionItem {
@@ -453,7 +349,6 @@ class _ImdbSuggestionItem {
     required this.rank,
     required this.type,
     required this.typeId,
-    this.posterUrl = '',
   });
 
   final String id;
@@ -462,7 +357,6 @@ class _ImdbSuggestionItem {
   final int rank;
   final String type;
   final String typeId;
-  final String posterUrl;
 
   bool get isSeries =>
       typeId.toLowerCase().contains('tv') ||
@@ -490,14 +384,6 @@ class _ImdbSuggestionItem {
       rank: json['rank'] as int? ?? 999999,
       type: '${json['q'] ?? ''}',
       typeId: '${json['qid'] ?? ''}',
-      posterUrl: _resolvePosterUrl(json['i']),
     );
-  }
-
-  static String _resolvePosterUrl(Object? raw) {
-    if (raw is! Map) {
-      return '';
-    }
-    return '${raw['imageUrl'] ?? raw['url'] ?? ''}'.trim();
   }
 }

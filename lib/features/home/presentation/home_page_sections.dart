@@ -327,6 +327,14 @@ class _HomePosterTile extends StatelessWidget {
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0,
                 fontSize: 19,
+                shadows: const [
+                  Shadow(color: Colors.black, blurRadius: 2),
+                  Shadow(
+                    color: Colors.black87,
+                    offset: Offset(0, 1),
+                    blurRadius: 4,
+                  ),
+                ],
               ),
       tvPosterFocusOutlineOnly: true,
       tvPosterFocusShowBorder: false,

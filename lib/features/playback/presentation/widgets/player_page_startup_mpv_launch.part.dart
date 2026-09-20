@@ -11,20 +11,7 @@ const _nativeSmartStrmProbeOptions = PlaybackRemotePreflightOptions(
 
 extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
   Future<void> _launchWithSystemPlayer(PlaybackTarget target) async {
-    _traceQuarkPlaybackStartup(
-      'quark.launch.system.begin',
-      target: target,
-      fields: {'streamUrl': target.streamUrl},
-    );
     final result = await _launchSystemPlaybackTarget(target);
-    _traceQuarkPlaybackStartup(
-      'quark.launch.system.result',
-      target: target,
-      fields: {
-        'launched': result.launched,
-        'message': result.message,
-      },
-    );
     _ensureExternalLaunchSucceeded(
       launched: result.launched,
       message: result.message,
@@ -35,38 +22,25 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
 
   Future<void> _launchWithNativeContainer(PlaybackTarget target) async {
     final nativeLaunchStartedAt = DateTime.now();
-    _traceQuarkPlaybackStartup(
-      'quark.launch.native.begin',
-      target: target,
-      fields: {
-        'streamUrl': target.streamUrl,
-        'decodeMode': _playbackDecodeMode.name,
-        'audioOutputMode': _playbackSettings.nativeAudioOutputMode.name,
-      },
-    );
     final result = await _launchNativePlaybackTarget(target);
     appLogInfo(
       'playback.performance',
       'Native playback launch completed',
       fields: <String, Object?>{
-        'engine': 'exo',
+        'engine':
+            defaultTargetPlatform == TargetPlatform.iOS ? 'avplayer' : 'exo',
         'targetResolutionMs': _playbackTargetResolutionMs,
         'nativeLaunchMs':
             DateTime.now().difference(nativeLaunchStartedAt).inMilliseconds,
-        'startupToFirstFrameMs': _playbackStartupStartedAt == null
-            ? 0
-            : DateTime.now()
-                .difference(_playbackStartupStartedAt!)
-                .inMilliseconds,
+        (defaultTargetPlatform == TargetPlatform.iOS
+                ? 'startupToContainerPresentedMs'
+                : 'startupToFirstFrameMs'):
+            _playbackStartupStartedAt == null
+                ? 0
+                : DateTime.now()
+                    .difference(_playbackStartupStartedAt!)
+                    .inMilliseconds,
         'launched': result.launched,
-      },
-    );
-    _traceQuarkPlaybackStartup(
-      'quark.launch.native.result',
-      target: target,
-      fields: {
-        'launched': result.launched,
-        'message': result.message,
       },
     );
     _ensureExternalLaunchSucceeded(
@@ -84,15 +58,10 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     final launcher = _providerContainer.read(nativePlaybackLauncherProvider);
     final queueSnapshot = _episodeQueue;
     final resolvedTargetSnapshot = _resolvedTarget;
-    final nativeEpisodeQueue = defaultTargetPlatform == TargetPlatform.android
-        ? buildDeferredNativeEpisodeQueue(
-            queue: queueSnapshot,
-            resolvedTarget: resolvedTargetSnapshot,
-          )
-        : await _resolveNativePlayableEpisodeQueue(
-            queue: queueSnapshot,
-            resolvedTarget: resolvedTargetSnapshot,
-          );
+    final nativeEpisodeQueue = buildDeferredNativeEpisodeQueue(
+      queue: queueSnapshot,
+      resolvedTarget: resolvedTargetSnapshot,
+    );
     return launcher.launch(
       target,
       decodeMode: _playbackDecodeMode,
@@ -112,9 +81,7 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
           _playbackSettings.playbackDualSubtitleSecondaryLanguage,
       episodeQueue: nativeEpisodeQueue,
       mediaMimeType: mediaMimeType ?? '',
-      episodeResolver: defaultTargetPlatform == TargetPlatform.android
-          ? _buildNativeEpisodeResolver()
-          : null,
+      episodeResolver: _buildNativeEpisodeResolver(),
     );
   }
 
@@ -155,18 +122,6 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
       options: _nativeSmartStrmProbeOptions,
     );
     final resolvedMimeType = resolveNativePlaybackMimeType(preflight);
-    playbackTrace(
-      'native.smartstrm-media-probe',
-      fields: <String, Object?>{
-        'statusCode': preflight.statusCode,
-        'contentType': preflight.contentType ?? '',
-        'finalPath': preflight.finalUri?.path ?? '',
-        'durationMs': preflight.duration.inMilliseconds,
-        'sampledBytes': preflight.sampledBytes,
-        'resolvedMimeType': resolvedMimeType ?? '',
-        'failureReason': preflight.failureReason.name,
-      },
-    );
     return resolvedMimeType;
   }
 
@@ -235,41 +190,30 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     unawaited(_syncPlaybackSystemSession(force: true));
   }
 
-  Future<PlaybackEpisodeQueue?> _resolveNativePlayableEpisodeQueue({
-    PlaybackEpisodeQueue? queue,
-    PlaybackTarget? resolvedTarget,
-  }) async {
-    if (queue == null || resolvedTarget == null || !queue.hasCurrent) {
-      return null;
-    }
-
-    final targetResolver =
-        PlaybackTargetResolver(read: _providerContainer.read);
-    final resolvedEntries = <PlaybackEpisodeQueueEntry>[];
-    for (var index = queue.currentIndex;
-        index < queue.entries.length;
-        index++) {
-      final entry = queue.entries[index];
-      PlaybackTarget resolvedEntryTarget;
-      if (index == queue.currentIndex) {
-        resolvedEntryTarget = resolvedTarget;
-      } else {
-        try {
-          resolvedEntryTarget = await targetResolver.resolve(entry.target);
-        } catch (_) {
-          break;
-        }
-      }
-      resolvedEntries.add(entry.copyWith(target: resolvedEntryTarget));
-    }
-    if (resolvedEntries.length <= 1) {
-      return null;
-    }
-    return PlaybackEpisodeQueue(entries: resolvedEntries);
-  }
-
   bool _isAutomaticPlaybackQueueReason(String reason) =>
       reason == 'outro' || reason == 'playback-completed';
+
+  void _cancelPendingAutomaticAdvance() {
+    if (_episodeAdvanceGuard.invalidateAutomaticPending()) {
+      _outroSkipApplied = false;
+    }
+  }
+
+  bool _canCommitAutomaticAdvance(Player player, String reason) {
+    if (_subtitleSearchActive || _skipPreferenceSaveInProgress) return false;
+    if (reason == 'playback-completed') return player.state.completed;
+    final preference = _seriesSkipPreference;
+    final duration = player.state.duration;
+    final boundary = resolvePlaybackEndBoundary(
+      duration: duration,
+      skipEnabled: preference?.enabled ?? false,
+      outroDuration: preference?.outroDuration ?? Duration.zero,
+    );
+    return (player.state.playing || player.state.completed) &&
+        boundary > Duration.zero &&
+        boundary < duration &&
+        player.state.position >= boundary;
+  }
 
   Future<bool> _movePlaybackQueue({
     required bool forward,
@@ -293,7 +237,8 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     bool markCurrentCompleted = false,
     PlaybackEpisodeQueue? selectedQueue,
   }) async {
-    if (_episodeQueueAdvanceInProgress || _fntvSwitchInProgress) {
+    if (!_isAutomaticPlaybackQueueReason(reason)) _recoveryIntent.invalidate();
+    if (_fntvSwitchInProgress) {
       _showMessage('正在解析剧集，请稍候');
       return false;
     }
@@ -314,55 +259,70 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
     }
     final requestedEntry = queue.entries[index];
     final automaticNext = _isAutomaticPlaybackQueueReason(reason);
-
-    _episodeQueueAdvanceInProgress = true;
+    if (automaticNext && !_canCommitAutomaticAdvance(player, reason)) {
+      return false;
+    }
+    final request = _episodeAdvanceGuard.begin(
+      key: _buildPreparedEpisodeSignature(index, requestedEntry),
+      automatic: automaticNext,
+    );
+    if (request == null) {
+      if (!automaticNext) _showMessage('正在打开剧集，请稍候');
+      return false;
+    }
+    var failed = false;
     try {
-      final preparedTarget = selectedQueue == null
-          ? _takePreparedEpisodeTarget(
-              _buildPreparedEpisodeSignature(index, requestedEntry),
-            )
-          : null;
-      _nextEpisodePrepareAttempt = null;
-      if (preparedTarget == null && requestedEntry.target.needsResolution) {
+      _syncEpisodePreparationContext();
+      final preparationContext = _episodePreparationContext;
+      if (requestedEntry.target.needsResolution) {
         _showMessage(
           '正在解析 ${formatPlaybackEpisodePickerLabel(requestedEntry, index)}',
         );
       }
-      final resolvedTarget = preparedTarget ??
-          await PlaybackTargetResolver(
-            read: _providerContainer.read,
-          ).resolve(requestedEntry.target).timeout(
-                kPlaybackEpisodeResolveTimeout,
-                onTimeout: () => throw TimeoutException('解析剧集超时，请手动重试'),
-              );
+      final prepared = await _episodePreparation.resolve(
+        key: (
+          identical(selectedQueue, originalQueue) ? null : selectedQueue,
+          request.key
+        ),
+        resolver: () => _resolveEpisodeAddress(requestedEntry.target),
+        retryFailed: !automaticNext,
+      );
+      final resolvedTarget = prepared.target;
       if (resolvedTarget.streamUrl.trim().isEmpty ||
           resolvedTarget.needsResolution) {
         throw StateError('没有取得可播放地址');
       }
       if (!mounted ||
+          !_episodeAdvanceGuard.isCurrent(request) ||
           !identical(_player, player) ||
           !identical(_episodeQueue, originalQueue)) {
         return false;
       }
+      _syncEpisodePreparationContext();
+      if (_episodePreparationContext != preparationContext) return false;
+      if (automaticNext && !_canCommitAutomaticAdvance(player, reason)) {
+        _cancelPendingAutomaticAdvance();
+        return false;
+      }
+      if (!_episodeAdvanceGuard.commit(request)) return false;
 
       final resolvedDuration = player.state.duration;
       final resolvedPosition = player.state.position;
       if (markCurrentCompleted && resolvedDuration > Duration.zero) {
         _latestDuration = resolvedDuration;
-        _latestPosition = resolvedDuration;
+        _latestPosition = resolvedPosition;
+        _completionState.markCompletedByAutoSkip();
       } else {
         _latestDuration = resolvedDuration > Duration.zero
             ? resolvedDuration
             : _latestDuration;
         _latestPosition = resolvedPosition;
       }
-      await _persistPlaybackProgress(force: true);
-
       final detachedPlayer = _detachActivePlayerState();
       await _shutdownDetachedPlayer(
         detachedPlayer,
         reason: 'player-page-$reason',
-        persistProgress: false,
+        persistProgress: true,
         teardownPlatformState: false,
       );
 
@@ -385,8 +345,11 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
         _lastPersistedPosition = Duration.zero;
       });
       _nextEpisodeIsAutomatic = automaticNext;
-      await _initialize(initialTarget: resolvedTarget);
-      if (preparedTarget != null && mounted && !_isReady && _error != null) {
+      await _initialize(
+        initialTarget: resolvedTarget,
+        targetAlreadyResolved: true,
+      );
+      if (prepared.wasPrepared && mounted && !_isReady && _error != null) {
         await _retryEpisodeSwitchWithFreshAddress(
           entry: requestedEntry,
           index: index,
@@ -401,15 +364,19 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
           }
         });
       }
+      failed = mounted && !_isReady;
       return mounted && _isReady;
     } catch (error) {
-      if (mounted && identical(_player, player)) {
+      failed = true;
+      if (mounted &&
+          _episodeAdvanceGuard.isCurrent(request) &&
+          identical(_player, player)) {
         _showMessage(
             '${formatPlaybackEpisodePickerLabel(requestedEntry, index)} 打开失败，仍播放当前集：${_buildPlaybackErrorMessage(error)}');
       }
       return false;
     } finally {
-      _episodeQueueAdvanceInProgress = false;
+      _episodeAdvanceGuard.finish(request, failed: failed);
     }
   }
 
@@ -443,7 +410,10 @@ extension _PlayerPageStateStartupMpvLaunch on _PlayerPageState {
         _error = null;
       });
       _nextEpisodeIsAutomatic = automaticNext;
-      await _initialize(initialTarget: refreshedTarget);
+      await _initialize(
+        initialTarget: refreshedTarget,
+        targetAlreadyResolved: true,
+      );
     } catch (_) {
       // Keep the original playback error on screen.
     }

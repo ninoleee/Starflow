@@ -4,6 +4,20 @@ import 'package:http/testing.dart';
 import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
 
 void main() {
+  test('bounded reads reject oversized bodies and allow later valid requests',
+      () async {
+    var requests = 0;
+    final client = MockClient((_) async {
+      requests++;
+      return http.Response(requests == 1 ? 'oversized' : '{}', 200);
+    });
+    final guard = MetadataNetworkGuard();
+    final uri = Uri.parse('https://metadata.example.com/dataset');
+    await expectLater(guard.get(client, uri, maxBytes: 4),
+        throwsA(isA<http.ClientException>()));
+    expect((await guard.get(client, uri, maxBytes: 4)).body, '{}');
+    expect(requests, 2);
+  });
   test('opens a per-host circuit after repeated transport failures', () async {
     var requests = 0;
     final client = MockClient((request) async {

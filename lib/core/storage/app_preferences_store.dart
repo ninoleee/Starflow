@@ -15,6 +15,10 @@ abstract class PreferencesStore {
   Future<void> remove(String key);
 }
 
+abstract interface class EnumerablePreferencesStore {
+  Future<Set<String>> getKeys();
+}
+
 String normalizePreferencesKey(String key) {
   final trimmed = key.trim();
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
@@ -23,7 +27,8 @@ String normalizePreferencesKey(String key) {
   return trimmed;
 }
 
-class AppPreferencesStore implements PreferencesStore {
+class AppPreferencesStore
+    implements PreferencesStore, EnumerablePreferencesStore {
   AppPreferencesStore({
     SharedPreferencesAsync? preferences,
     SharedPreferences? sharedPreferences,
@@ -34,6 +39,19 @@ class AppPreferencesStore implements PreferencesStore {
 
   SharedPreferencesAsync? _preferences;
   SharedPreferences? _sharedPreferences;
+
+  @override
+  Future<Set<String>> getKeys() async {
+    final asyncPreferences = _resolveAsyncPreferences();
+    final keys = asyncPreferences != null
+        ? await asyncPreferences.getKeys()
+        : (await _resolveSharedPreferences()).getKeys();
+    final prefix = normalizePreferencesKey('');
+    return keys
+        .where((key) => key.startsWith(prefix))
+        .map((key) => key.substring(prefix.length))
+        .toSet();
+  }
 
   @override
   Future<String?> getString(String key) async {
@@ -117,7 +135,8 @@ class AppPreferencesStore implements PreferencesStore {
   }
 }
 
-class SharedPreferencesStore implements PreferencesStore {
+class SharedPreferencesStore
+    implements PreferencesStore, EnumerablePreferencesStore {
   SharedPreferencesStore(SharedPreferences preferences)
       : _preferences = preferences,
         _reloadBeforeRead = false;
@@ -128,6 +147,10 @@ class SharedPreferencesStore implements PreferencesStore {
 
   SharedPreferences? _preferences;
   final bool _reloadBeforeRead;
+
+  @override
+  Future<Set<String>> getKeys() async =>
+      (await _resolvePreferences(forRead: true)).getKeys();
 
   @override
   Future<String?> getString(String key) async {

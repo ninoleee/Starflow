@@ -110,6 +110,21 @@ void main() {
     expect(requests.length, 2);
   });
 
+  test('explicit missing audio fails before allocating a transcode session',
+      () async {
+    await expectLater(
+        client.resolvePlaybackTarget(
+            source: source,
+            target: target.copyWith(
+              preferredAudioStreamId: 'removed',
+              fntvTrackSelectionExplicit: true,
+              preferredPlaybackQualityIndex: -1,
+            )),
+        throwsA(isA<FntvApiException>()));
+    expect(requests.any((request) => request.url.path.endsWith('/play/play')),
+        false);
+  });
+
   test(
       'selected quality starts signed H264/AAC session with position and tracks',
       () async {

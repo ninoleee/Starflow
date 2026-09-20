@@ -1,7 +1,7 @@
+import 'package:starflow/core/logging/app_logger.dart';
 import 'dart:async';
 import 'dart:io';
 
-import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -37,14 +37,6 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
     if (upstreamUri == null || !upstreamUri.hasScheme) {
       return target;
     }
-    _traceQuarkRelay(
-      'quark.relay.prepare.begin',
-      target: target,
-      fields: {
-        'upstreamUrl': upstreamUri.toString(),
-        'headers': target.headers.keys.join('|'),
-      },
-    );
 
     await _ensureServer();
     await clear(reason: 'replace-playback-relay-session');
@@ -78,14 +70,6 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       streamUrl: relayUri.toString(),
       actualAddress: upstreamUri.toString(),
       headers: const <String, String>{},
-    );
-    _traceQuarkRelay(
-      'quark.relay.prepare.ready',
-      target: relayTarget,
-      fields: {
-        'relayUrl': relayUri.toString(),
-        'fallbackContentType': session.fallbackContentType,
-      },
     );
     return relayTarget;
   }
@@ -156,18 +140,6 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       request.response.statusCode = upstream.statusCode;
       _copyUpstreamHeaders(upstream.headers, request.response.headers);
       _applyFallbackResponseHeaders(session, request.response.headers);
-      _traceQuarkRelay(
-        'quark.relay.request.ready',
-        fields: {
-          'method': request.method,
-          'path': request.uri.path,
-          'statusCode': upstream.statusCode,
-          'contentType':
-              request.response.headers.value(HttpHeaders.contentTypeHeader) ??
-                  '',
-          'upstreamUrl': session.currentUri.toString(),
-        },
-      );
 
       if (request.method == 'HEAD') {
         await upstream.drain<void>();
@@ -204,15 +176,6 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
         forwardedHeaders: const <String, List<String>>{
           HttpHeaders.rangeHeader: <String>['bytes=0-0'],
           HttpHeaders.acceptHeader: <String>['*/*'],
-        },
-      );
-      _traceQuarkRelay(
-        'quark.relay.warmup.ready',
-        fields: {
-          'statusCode': response.statusCode,
-          'upstreamUrl': session.currentUri.toString(),
-          'contentType':
-              response.headers.value(HttpHeaders.contentTypeHeader) ?? '',
         },
       );
       await response.drain<void>();
@@ -569,16 +532,15 @@ void _traceQuarkRelay(
   Object? error,
   StackTrace? stackTrace,
 }) {
-  playbackTrace(
-    stage,
-    fields: <String, Object?>{
-      if (target != null)
-        'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
-      if (target != null) 'sourceKind': target.sourceKind.name,
-      if (target != null) 'container': target.container,
-      ...fields,
-    },
-    error: error,
-    stackTrace: stackTrace,
-  );
+  appLogError('playback', stage,
+      fields: <String, Object?>{
+        if (target != null)
+          'title':
+              target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+        if (target != null) 'sourceKind': target.sourceKind.name,
+        if (target != null) 'container': target.container,
+        ...fields,
+      },
+      error: error,
+      stackTrace: stackTrace);
 }

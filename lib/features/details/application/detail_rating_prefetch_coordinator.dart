@@ -357,6 +357,7 @@ class DetailRatingPrefetchCoordinator {
       target.doubanId.trim(),
       target.imdbId.trim().toLowerCase(),
       target.tmdbId.trim(),
+      target.itemType.trim().toLowerCase(),
       target.title.trim().toLowerCase(),
       target.searchQuery.trim().toLowerCase(),
     ].where((item) => item.isNotEmpty).toList(growable: false);

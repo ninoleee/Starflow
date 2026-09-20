@@ -23,7 +23,7 @@
 | `web/` | 浏览器入口、manifest 和图标；媒体后端受浏览器能力限制 |
 | `packages/` | Android / iOS full libmpv 依赖覆盖，公共插件身份不变，不是业务仓库副本 |
 | `config/` | 播放可靠性策略与跨发布脚本 / Gradle 的数字版本码策略 |
-| `assets/` | 品牌资源、bootstrap 目录和本地性能样本；嵌入设置只由显式发布参数临时写入 |
+| `assets/` | 品牌资源、bootstrap 目录和本地性能样本；只打包两张运行时 Logo 和 bootstrap，设计源图/样本保留但不打包；嵌入设置只由显式发布参数临时写入 |
 | `scripts/` | 发布、环境准备、依赖重建及平台检查；部分脚本修改版本和构建目录 |
 | `tool/` | 代码生成、主机计时、Web 开发代理与手动诊断 |
 | `test/` | Dart 单元 / 组件 / smoke 测试及跨语言 fixture |
@@ -42,7 +42,7 @@
 | `features/bootstrap/application/bootstrap_controller.dart` | 配置 / 缓存 / 首页启动编排与 10s 总截止时间；不覆盖此前初始化或同步阻塞 |
 | `features/bootstrap/application/startup_crash_recovery.dart` | 启动标记及异常启动恢复，不代替原生崩溃日志 |
 | `app/router/app_routes.dart`、`app_router.dart`、`app_navigator.dart` | 壳页和详情、人物、播放器、设置、搜索等附加路由 |
-| `app/router/app_navigation_shell.dart`、`app/shell_layout.dart` | home / search / favorites / library / settings 五个壳路由，默认隐藏收藏，菜单可配置 |
+| `app/router/app_navigation_shell.dart`、`app/shell_layout.dart` | home / search / favorites / library / settings / live-tv 六个壳路由，默认隐藏收藏，旧配置保留菜单选择 |
 | `app/lifecycle/app_runtime_recovery_boundary.dart` | 后台、前台、低内存和退出弹窗的调度准入租约 |
 | `core/navigation/` | `PageActivityMixin` 和 RetainedAsync 控制器，暂停工作但保留稳定页面结果 |
 | `core/network/` | 共享 HTTP、IO 代理、Web 转发、失败分类、超时与按主机熔断；详见网络文档 |
@@ -52,11 +52,11 @@
 | `core/scheduling/queue_wait_diagnostics.dart` | 队列等待诊断，不自行执行网络请求 |
 | `core/state/riverpod_retry.dart` | provider 重试策略 |
 | `core/widgets/` | TV 焦点、图片并发门、海报、对话框、横向翻页、Logo 等共享 UI |
-| `core/utils/` | 文本、评分、图片 headers、默认 seed；旧 trace helper 静音但结构化日志活跃 |
+| `core/utils/` | 文本、评分、图片 headers、默认 seed；旧静默 trace helper 已删除，结构化日志与错误记录保持活跃 |
 
 本节路径除 `lib/main.dart` 外相对于 `lib/`。`SeedData` 提供默认配置，不应将已经接入真实数据的仓库称为 mock 仓库。
 
-## 十个业务模块
+## 业务模块
 
 以下路径相对于 `lib/features/`。
 
@@ -67,8 +67,9 @@
 | `discovery` | `data/discovery_repository.dart`、`douban_api_client.dart`、`douban_network_guard.dart` | 豆瓣列表与详情数据，提供给首页 / 详情；不单独占一个默认主导航 tab |
 | `library` | `data/media_repository.dart`、`application/app_media_query_service.dart` | AppMediaRepository 管刷新 / 删除，query service 管读；media_server_client 协调 Emby / 飞牛，NAS 索引覆盖 WebDAV / 夸克 |
 | `details` | `application/detail_page_controller.dart`、`detail_target_resolver.dart`、`detail_metadata_service.dart` | 详情恢复、统一元数据执行、本地匹配、评分预取、版本选择与从头播放；季集 UI 按目标懒加载 |
-| `metadata` | `data/metadata_match_resolver.dart`、`wmdb_metadata_client.dart`、`tmdb_metadata_client.dart` | WMDB / TMDB 匹配、结果复用、网络 guard 与共享限流；IMDb 客户端文件存在不等于已进入默认自动评分链 |
+| `metadata` | `data/metadata_match_resolver.dart`、`wmdb_metadata_client.dart`、`tmdb_metadata_client.dart` | WMDB / TMDB 匹配、结果复用、网络 guard 与共享限流；IMDb 为默认关闭的 NAS 配置功能，`imdb_rating_dataset.dart` 后台构建有界字节/行偏移索引，客户端共享下载与解析 |
 | `playback` | `application/playback_startup_coordinator.dart`、`presentation/player_page.dart` | 启动、路由、播放会话、可靠性、字幕、播放记忆及平台适配 |
+| `live_tv` | `data/live_repository.dart`、`live_playlist_parser.dart`、`live_epg_parser.dart`、`application/live_playback_controller.dart` | 独立订阅/频道/节目单存储、MPV/Exo 直播会话；`presentation/live_tv_page.dart / live_sources_page.dart / live_player_page.dart` 为界面入口 |
 | `search` | `data/search_repository.dart`、`presentation/search_page.dart` | PanSou / CloudSaver / 本地来源搜索、分享验证、收藏及网盘保存工作流 |
 | `settings` | `application/settings_controller.dart`、`settings_slice_providers.dart`、`domain/app_settings.dart` | 配置模型、窄字段保存、来源生命周期、自动保存、导入导出、日志、代理与 WebDAV 同步 |
 | `storage` | `data/local_storage_cache_repository.dart`、`application/local_storage_cache_revision.dart` | 本地详情及媒体服务器分片缓存、统计与清理，revision 驱动本地派生刷新 |
@@ -91,6 +92,10 @@ MediaDetailPage -> DetailPageController -> DetailTargetResolver
 详情缓存 revision 只驱动装饰层本地重算，不应重新抓取整轮首页来源。详情被播放器覆盖时保留剧集组件、季选择和滚动，活动状态控制订阅及新增任务。
 
 `detail_library_match_coordinator.dart` 负责优先来源与后备来源两阶段读取、最多两路并发、逐批候选和取消检查；`detail_library_match_service.dart` 提供候选类型、评分与合并规则。页面不再维护另一套同构候选模型，焦点、弹窗和缓存恢复仍属于页面生命周期。
+
+2026-09-20 M01–M04 修复边界：最终版本展开在每次来源读取前后检查页面 session / 匹配 controller，返回后在页面候选、手动目标和缓存提交前再次校验；取消不撤销取消前已经展示的逐批候选。`library/domain/tmdb_media_identity.dart` 将 TMDB 身份限定为 movie / TV + ID，详情匹配与在线更新排除明确相反类型；未知旧类型保留标题及其他外部 ID 匹配，不以裸 TMDB ID 判定精确命中，也不迁移已有存储格式。TMDB 搜索去重保留同数字 ID 的电影和剧集，详情元数据转换保留媒体类型。
+
+TMDB / WMDB 标题和 ID 查询缓存以 generation 隔离清空前请求，finally 仅删除自身 future 的占位；旧请求仍可向原调用者返回，但不能回填清空后的缓存或移除新请求。仅缓存非空结果，null（包括 TMDB 详情 404）下次可重试；TMDB 详情鉴权、限流和服务错误抛异常，不再作为“没有匹配”持久复用。覆盖文件：`test/metadata_cache_race_test.dart`、`test/tmdb_media_identity_test.dart`、`test/media_detail_match_cancellation_test.dart`；这些是主机 MockClient / completer / widget 回归，不是设备或真实元数据服务测量。十方向审查报告仍是修复前快照。
 
 ### 媒体库与存储
 
@@ -130,6 +135,41 @@ SearchPage -> SearchRequest -> SearchSession -> SearchRepository
 
 收藏由 `search_preferences_repository.dart` 持久化，`favorite_auto_sync.dart` 控制可选同步触发，`favorite_sync_document / favorite_sync_payload` 定义版本与精简传输，`settings/data/webdav_sync_service.dart` 负责 WebDAV IO。手动配置快照与每设备收藏文件是不同协议，收藏没有启动定时同步或轮询。
 
+### 直播电视
+
+以下相对 `lib/features/live_tv/`，按 2026-09-20 当前实现核对，不使用 [早期接口契约](live-tv-contract.md) 中尚未落地的文件名或具名播放路由。
+
+| 入口 | 职责与边界 |
+| --- | --- |
+| `domain/live_models.dart` | `LiveSource / LiveChannel / LiveLine / LivePreference / LiveProgramme / LiveSnapshot`；来源内频道身份、偏好覆盖、可见列表与节目区间 |
+| `data/live_repository.dart` | Sembast store、串行事务、来源代次、同源刷新合并、到期检查、频道/EPG 分阶段提交与本地节目查询 |
+| `data/live_database.dart` 及 `live_database_io / web / stub.dart` | 条件导出；IO 应用支持目录 `starflow-db/live_tv.db`，Web `starflow-live-tv`，其他目标明确不支持 |
+| `data/live_playlist_parser.dart / live_epg_parser.dart` | M3U/TXT、媒体 headers、XMLTV/时区及保留窗口；Gzip 有界解压由仓库入口执行 |
+| `data/live_logo_provider.dart` | 独立四路、15s/2 MiB 台标请求和取消，不是影视图片磁盘缓存 |
+| `application/live_playback_controller.dart` | `LiveEngine` 的 MPV/Exo 适配、单实例串行所有权、换台合并、失效事件、有限重连及全局清理注册 |
+| `presentation/live_tv_page.dart` | 频道列表、搜索/收藏/分组、映射/隐藏/排序、主页面活动状态和本地 now/next 更新 |
+| `presentation/live_sources_page.dart` | 来源编辑、文件导入草稿、保存后刷新、启停、更新及删除确认；TV 手机扫码，其他平台本地选文件 |
+| `data/live_playlist_transfer_service{,_io,_stub}.dart` | 单次 LAN 文件接收、随机令牌/来源校验、8 MiB/30s 边界及会话关闭；不保存来源 |
+| `presentation/live_playlist_transfer_dialog.dart` | 复用 `LanTransferQrAddressCard`，拥有 TV 扫码弹窗、后台/退出清理和迟到会话隔离 |
+| `presentation/live_player_page.dart / live_widgets.dart` | 独立全屏页、Flutter TV 焦点、频道/节目单叠层、音轨/静音/线路/内核及共享直播按钮 |
+
+```text
+AppRoutes.liveTv (/live-tv) -> LiveTvPage -> LiveRepository -> 独立直播数据库
+                                       -> LiveSourcesPage (MaterialPageRoute)
+                                       -> LivePlayerPage (root Navigator)
+                                          -> LivePlaybackController
+                                             -> MpvLiveEngine / ExoLiveEngine
+                                                -> Android LiveTvView
+```
+
+设置“内容与来源”另提供直播与订阅入口。直播不调用点播 `PlaybackTargetResolver`、影视观看历史或 NAS 匹配；独立库及直播内核偏好不随配置 JSON/WebDAV 配置备份/影视收藏同步。实现边界见 [直播电视](live-tv.md)，焦点见 [TV 清单](tv-focus.md#直播焦点边界2026-09-20)。
+
+扫码导入专项：`test/live_playlist_transfer_service_test.dart` 覆盖真实本机 HTTP、原始编码、鉴权、上传边界和清理，`test/live_playlist_transfer_page_test.dart` 覆盖 TV 分流、共享二维码、草稿确认、返回/后台及迟到启动；不等于手机到电视的跨设备验收。
+
+测试导航：`test/live_tv_test.dart` 为解析/仓库/控制器，`test/live_tv_data_test.dart` 为数据边界，`test/live_playback_lifecycle_test.dart` 为串行所有权/迟到事件/恢复预算，`test/live_tv_page_test.dart` 为布局/模拟遥控器，`test/live_exo_bridge_test.dart` 为 mock MethodChannel。路由、菜单配置和设置层级另见 `test/app/router/app_routes_test.dart`、`test/app_navigation_shell_tv_focus_test.dart`、`test/app_settings_test.dart`、`test/features/settings/presentation/settings_hierarchy_navigation_test.dart`。合并后这 9 文件共 132 项通过，最终统计见 [主机记录](performance.md#2026-09-20-直播前置验证快照)。Android 的 `LiveTvPolicyTest / LiveTvHttpTransportTest` 覆盖会话、画面比例、同源 headers、重定向与 HTTP 字节范围，共 17 项主机 JVM 测试。
+
+收尾补充 `test/live_tv_data_test.dart` 为数据边界专项，与 `live_tv_test.dart` 的该次集合 38 项通过，不作为最终总数。仓库的 `channelOwners / epgLogos` 分别记录历史频道归属及 EPG 台标，偏好携带来源归属；解析上限为 10000 频道/单频道 64 线路/全表 50000 线路。generation 隔离删除、禁用和同 ID 重建；EPG 失败不清除旧节目/台标，手动排序后新增频道追加。`LivePlaybackController` 的 15s 计时不取消底层 open，永久挂起仍阻塞串行清理，详见直播文档。
+
 ### 播放与字幕
 
 ```text
@@ -140,11 +180,14 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 ```
 
 - `player_page.dart` 是页面壳；`presentation/widgets/player_page_*.part.dart` 共享该 library 的状态，分别承载 MPV 启动、调参、恢复、控制、系统会话、运行动作和性能采集。
+- `playback_seek_coalescer.dart` 累计和合并 TV 定位输入；`playback_track_guard.dart` 给异步自动选轨提供会话/手动操作边界；`external_playback_file_store.dart` 只清理专属播放列表分配目录，不扫描系统临时根目录。
 - `MpvPlaybackLifecycle` 持有单实例订阅及 `MpvSubtitleSession`，关闭时先失效回调并捕获旧资源的清理 Future；页面级恢复预算不随实例重建重置。`PlaybackPlatformSessionOwner` 持有系统媒体会话绑定、发布快照与生命周期代次，页面继续提供播放状态及遥控命令适配。
 - 非 TV 控件基于 media_kit Adaptive Material / MaterialDesktop，TV 使用专用遥控层；Web 的 `embeddedMpv` 枚举值实际路由浏览器后端，不是浏览器里运行 libmpv。
 - `playback_engine_support.dart` 是平台选项边界；`native_playback_launcher_io.dart` 桥接 Android Exo / iOS AVPlayer，`system_playback_launcher_io.dart` 负责外部应用 / 系统打开。
 - `FntvSessionOwner` 与 `native_fntv_service.dart` 负责转码会话所有权和原生回调，失败 / 迟到的新会话也需释放；Exo 不另写一套 Authx 客户端。
 - `playback_episode_browser.dart` 管季集浏览缓存，queue / next-episode 策略只预解析一个目标，不预建第二个播放器。
+- `playback_episode_advance_guard.dart` 管自动切集取消、手动优先、失败去重和提交令牌；`playback_episode_preparation.dart` 管地址缓存、在途复用及一次前台期限。两者分别拥有操作意图和网络结果。
+- `playback_interaction_player.dart` 在后端命令前截获手动 seek / 播放意图；`playback_intro_start_guard.dart` 在启动期间校验片头越界与就绪基线；`playback_completion_state.dart` 保存独立于真实进度的会话完成标记。
 - `playback_remote_preflight.dart` 保留给原生 SmartStrm 格式探测，不应据文件名推断 MPV 仍执行 Range 启动预检。
 - 在线字幕的 provider protocol、IO repository、validation pipeline 与共享 content processing 分工见 [subtitles.md](subtitles.md)；搜索结果不等于已经下载验证。
 - `mpv_subtitle_render_binding.dart` 串行合并每个 Player 的字幕可见性属性写入；`player_menu_style.dart` 为播放菜单提供共享半透明主题，不改变解码逻辑。
@@ -153,6 +196,8 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 ## 原生平台
 
 ### Android
+
+直播专用 `LiveTvView.kt` 由 `MainActivity.configureFlutterEngine` 注册，视图类型 `starflow/live_tv`、实例通道 `starflow/live_tv/<viewId>`。Flutter 使用 `open / stop / volume / audioTracks / audio`；原生另有 `pause / play` 分支，但直播 UI 没有暂停/时移入口。状态携带换台 generation，TextureView 非焦点；不进入点播 NativePlaybackActivity，也不继承其自定义 FFmpeg/TS/双字幕/音频输出策略。能力边界见 [直播电视](live-tv.md)。
 
 主要目录：`android/app/src/main/kotlin/com/example/starflow/`。
 
@@ -163,7 +208,9 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 | `NativePlaybackSource / Target / Options` | Dart JSON 契约、媒体源与会话设置 |
 | `NativePlaybackRuntimeController / RecoveryController` 及各 `*Policy` | tick、启动进展、缓冲、恢复、错误、HLS、TV seek 和焦点规则 |
 | `NativePlaybackRenderersFactory / AudioPolicy / AudioTracks` | renderer / sink、实际 MIME 输出策略、音轨身份恢复 |
-| `NativePlaybackExtractorsFactory / PcmBluRayReader / PgsReader` | 有证据的 TS 扩展解析、LPCM 转 PCM16、PGS 显示集 |
+| `NativeAudioOutputState` | 每个播放器的 sink 输入、decoder 与实际输出观测，供倍速重建判断及输出故障分类；不跨实例复用 |
+| `NativeAudioPrecisionHistory / NativeAudioDecoderPrecisionPolicy` | 当前媒体按源音轨身份记录倍速临时降精度，恢复只尝试一次；FFmpeg float 恢复候选排除固定 PCM16 的 AC-3 |
+| `NativePlaybackExtractorsFactory / PcmBluRayReader / PgsReader` | 有证据的 TS 扩展解析、LPCM 保位深转 PCM16/PCM24、PGS 显示集；高精度/兼容输出由 AudioPolicy、Session 和默认 AudioSink 决定 |
 | `NativeDualSubtitleController / NativeSubtitleOutput / NativeSubtitleContent` | 主副字幕 renderer、过期 UI 更新合并、文本与 cue 处理 |
 | `NativeSubtitleParserFactory / BitmapSubtitleLimits / BoundedPgsParser` | PGS / DVB 输入、缓存及像素分配边界；VobSub 的 `BoundedVobsubParser.java` 位于相邻 `src/main/java` 目录 |
 | `NativePlaybackExternalSubtitleController / SubtitleFiles / SubtitleStyleController` | 文本外挂、受锁播放副本、偏移、样式与清理 |
@@ -181,6 +228,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 
 - `ios/Runner/AppDelegate.swift` 承载 Flutter 通道和宿主装配；`NativePlaybackViewController.swift` 管 AVPlayer 容器，`NativePlaybackModels.swift` 管请求、剧集队列及字幕偏好模型，`NativePlaybackMemoryStore.swift` 管播放记忆，`SettingsDocumentExporter.swift` 管文档导出。`PlaybackSystemSessionBridge.swift` 继续管共享音频会话、Now Playing、封面及远程控制。
 - `NativePlaybackStartupGate / BufferingTuning / StallRecovery / Metrics` 分别管 AVPlayer 启动、缓冲、卡顿和指标；`NativeSubtitleLanguagePolicy.swift` 与 Dart / Kotlin 共用语言 fixture。
+- `scripts/test_native_playback_startup.swift` 是 AVPlayer 策略主机 runner，验证预热在途、失败/取消和 HLS 分类；不是设备解码或像素首帧测试。iOS Metrics 的 `playingAtIso8601 / playingLatencyMs` 只表示播放状态信号。
 - `ios/Runner/SceneDelegate.swift`、storyboard、Info.plist 和 Xcode 工程属于宿主配置。原生启动页只有深色底，Flutter Logo 是另一层。
 - macOS 的 AppDelegate / MainFlutterWindow、Windows runner、Linux runner 主要负责 Flutter 宿主，不能据目录存在推断有 Android 同等原生播放器或后台会话能力。
 

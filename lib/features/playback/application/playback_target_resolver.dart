@@ -1,5 +1,5 @@
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:riverpod/misc.dart';
-import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -27,27 +27,8 @@ class PlaybackTargetResolver {
           preparedTarget.copyWith(streamUrl: '', headers: const {});
     }
     try {
-      _traceQuarkResolve(
-        'quark.resolve.begin',
-        target: preparedTarget,
-        fields: {
-          'needsResolution': preparedTarget.needsResolution,
-          'hasStreamUrl': preparedTarget.streamUrl.trim().isNotEmpty,
-          'hasHeaders': preparedTarget.headers.isNotEmpty,
-          'itemId': preparedTarget.itemId,
-        },
-      );
       preparedTarget = await _prepareDirectTargetIfNeeded(preparedTarget);
       if (!preparedTarget.needsResolution) {
-        _traceQuarkResolve(
-          'quark.resolve.skip',
-          target: preparedTarget,
-          fields: {
-            'reason': 'no-resolution-needed',
-            'streamUrl': preparedTarget.streamUrl,
-            'headers': preparedTarget.headers.length,
-          },
-        );
         return preparedTarget;
       }
 
@@ -85,31 +66,12 @@ class PlaybackTargetResolver {
           cookie: cookie,
           fid: resolvedFid,
         );
-        _traceQuarkResolve(
-          'quark.resolve.download-ready',
-          target: preparedTarget,
-          fields: {
-            'fid': resolvedFid,
-            'downloadUrl': resolved.url,
-            'headers': resolved.headers.keys.join('|'),
-            'fileSizeBytes':
-                resolved.fileSizeBytes ?? preparedTarget.fileSizeBytes ?? 0,
-          },
-        );
         final directTarget = preparedTarget.copyWith(
           streamUrl: resolved.url,
           actualAddress: resolved.url,
           headers: resolved.headers,
           itemId: resolvedFid,
           fileSizeBytes: resolved.fileSizeBytes ?? preparedTarget.fileSizeBytes,
-        );
-        _traceQuarkResolve(
-          'quark.resolve.direct-ready',
-          target: directTarget,
-          fields: {
-            'streamUrl': directTarget.streamUrl,
-            'headers': directTarget.headers.keys.join('|'),
-          },
         );
         return directTarget;
       }
@@ -134,15 +96,6 @@ class PlaybackTargetResolver {
     if (identical(sanitized, target)) {
       return target;
     }
-    _traceQuarkResolve(
-      'quark.resolve.stale-relay-reset',
-      target: target,
-      fields: {
-        'relayUrl': target.streamUrl,
-        'actualAddress': target.actualAddress,
-        'itemId': target.itemId,
-      },
-    );
     return sanitized;
   }
 
@@ -153,14 +106,6 @@ class PlaybackTargetResolver {
     if (target.streamUrl.trim().isEmpty || target.headers.isEmpty) {
       return Future<PlaybackTarget>.value(target);
     }
-    _traceQuarkResolve(
-      'quark.resolve.direct-pass-through',
-      target: target,
-      fields: {
-        'streamUrl': target.streamUrl,
-        'headers': target.headers.keys.join('|'),
-      },
-    );
     return Future<PlaybackTarget>.value(
       target.copyWith(
         actualAddress: target.actualAddress.trim().isNotEmpty
@@ -196,18 +141,16 @@ void _traceQuarkResolve(
   if (target.sourceKind != MediaSourceKind.quark) {
     return;
   }
-  playbackTrace(
-    stage,
-    fields: <String, Object?>{
-      'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
-      'sourceKind': target.sourceKind.name,
-      'container': target.container,
-      'actualAddress': target.actualAddress,
-      ...fields,
-    },
-    error: error,
-    stackTrace: stackTrace,
-  );
+  appLogError('playback', stage,
+      fields: <String, Object?>{
+        'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+        'sourceKind': target.sourceKind.name,
+        'container': target.container,
+        'actualAddress': target.actualAddress,
+        ...fields,
+      },
+      error: error,
+      stackTrace: stackTrace);
 }
 
 _ParsedQuarkResourceId? _parseQuarkResourceId(String raw) {

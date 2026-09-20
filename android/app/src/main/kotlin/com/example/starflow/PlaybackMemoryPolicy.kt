@@ -32,8 +32,10 @@ internal object PlaybackMemoryPolicy {
     fun nextTimestamp(now: String, existing: Iterable<String>): String {
         var next = timestamp(now)
         for (raw in existing) next = maxOf(next, timestamp(raw) + 1)
-        return SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("UTC")
-        }.format(Date(next))
+        return formatTimestamp(next)
     }
+
+    fun formatTimestamp(value: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date(value))
 }

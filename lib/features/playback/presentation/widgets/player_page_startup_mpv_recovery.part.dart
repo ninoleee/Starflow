@@ -5,12 +5,35 @@ part of '../player_page.dart';
 enum _MpvRuntimeRecoveryResult { recovered, buffering, failed }
 
 extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
+  Future<void> _finishCancelledRecovery(int generation, int? intent) async {
+    if (intent == null ||
+        !_isCurrentStartup(generation) ||
+        _recoveryIntent.allows(intent)) {
+      return;
+    }
+    // A cancelled rebuild has no usable old player. Offer explicit retry,
+    // rather than leaving a loading surface or automatically resuming it.
+    final detached = _detachActivePlayerState();
+    _recoveryStartupIntent = null;
+    setState(() => _error = '自动恢复已取消，请重试播放。');
+    await _shutdownDetachedPlayer(detached,
+        reason: 'mpv-recovery-cancelled',
+        persistProgress: false,
+        teardownPlatformState: true);
+  }
+
   Future<void> _handleRuntimeMpvError(
     Player player,
     PlaybackTarget target,
     String message,
   ) async {
-    if (!mounted || _player != player) {
+    final intent = _recoveryIntent.revision;
+    bool isCurrent() =>
+        mounted &&
+        _player == player &&
+        _error == null &&
+        _recoveryIntent.allows(intent);
+    if (!isCurrent()) {
       return;
     }
     final fatal = _isFatalRuntimeMpvError(message);
@@ -54,7 +77,9 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
       final recoveredWithoutAction = await _awaitRuntimeMpvErrorRecoveryWindow(
         player,
         baselinePosition: baselinePosition,
+        isCurrent: isCurrent,
       );
+      if (!isCurrent()) return;
       if (recoveredWithoutAction == _MpvRuntimeRecoveryResult.recovered) {
         _markRuntimeMpvErrorRecovered();
         return;
@@ -72,11 +97,15 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
       await _attemptSoftRuntimeMpvErrorRecovery(
         player,
         position: baselinePosition,
+        intent: intent,
       );
+      if (!isCurrent()) return;
       final recoveredAfterSoft = await _awaitRuntimeMpvErrorRecoveryWindow(
         player,
         baselinePosition: baselinePosition,
+        isCurrent: isCurrent,
       );
+      if (!isCurrent()) return;
       if (recoveredAfterSoft == _MpvRuntimeRecoveryResult.recovered) {
         _markRuntimeMpvErrorRecovered();
         return;
@@ -90,6 +119,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
           player,
           target,
           message: message,
+          intent: intent,
         );
         return;
       }
@@ -137,6 +167,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
   Future<_MpvRuntimeRecoveryResult> _awaitRuntimeMpvErrorRecoveryWindow(
     Player player, {
     required Duration baselinePosition,
+    required bool Function() isCurrent,
   }) async {
     final remote =
         _isLikelyRemotePlaybackTarget(_resolvedTarget ?? widget.target);
@@ -154,7 +185,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     DateTime? lastBufferProgressAt;
     while (DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 250));
-      if (!mounted || _player != player || _error != null) {
+      if (!isCurrent()) {
         return _MpvRuntimeRecoveryResult.failed;
       }
       final state = player.state;
@@ -185,9 +216,10 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
   Future<void> _attemptSoftRuntimeMpvErrorRecovery(
     Player player, {
     required Duration position,
+    required int intent,
   }) async {
     try {
-      await _playAndSeekWithTimeout(player, position);
+      await _playAndSeekWithTimeout(player, position, intent: intent);
     } catch (error, stackTrace) {
       _traceWindowsMpv(
         'windows-mpv.player.error.recover-soft-failed',
@@ -202,18 +234,12 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     Player player,
     PlaybackTarget target, {
     required String message,
+    required int intent,
   }) async {
-    if (_player != player) {
+    if (_player != player || !_recoveryIntent.allows(intent)) {
       return;
     }
     if (!_takeAutomaticRecovery(player, 'runtime-error')) return;
-    _traceWindowsMpv(
-      'windows-mpv.player.error.reinitialize',
-      fields: {
-        'message': message,
-        'positionMs': player.state.position.inMilliseconds,
-      },
-    );
     _latestPosition = player.state.position;
     if (player.state.duration > Duration.zero) {
       _latestDuration = player.state.duration;
@@ -234,12 +260,14 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
       persistProgress: true,
       teardownPlatformState: true,
     );
-    if (!_isCurrentStartup(generation)) {
+    if (!_isCurrentStartup(generation) || !_recoveryIntent.allows(intent)) {
+      await _finishCancelledRecovery(generation, intent);
       return;
     }
     await _initialize(
       initialTarget: _buildRuntimeMpvRecoveryTarget(target),
       automaticRecovery: true,
+      recoveryIntent: intent,
     );
     if (_error == null) {
       _markRuntimeMpvErrorRecovered();
@@ -302,10 +330,17 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
 
   Future<void> _playAndSeekWithTimeout(
     Player player,
-    Duration position,
-  ) async {
-    await player.play().timeout(const Duration(seconds: 2));
-    await player.seek(position).timeout(const Duration(seconds: 2));
+    Duration position, {
+    int? intent,
+  }) async {
+    await _recoveryIntent.playAndSeek(
+      revision: intent ?? _recoveryIntent.revision,
+      isCurrent: () => mounted && _player == player && _error == null,
+      play: () =>
+          _playPlayerAutomatically(player).timeout(const Duration(seconds: 2)),
+      seek: () => _seekPlayerAutomatically(player, position)
+          .timeout(const Duration(seconds: 2)),
+    );
   }
 
   Future<void> _performSoftMpvStallRecovery(
@@ -313,15 +348,6 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     MpvStallDecision decision, {
     required String stageLabel,
   }) async {
-    _traceWindowsMpv(
-      'windows-mpv.stall.recover-soft',
-      fields: {
-        'stage': stageLabel,
-        'positionMs': decision.position.inMilliseconds,
-        'bufferingForMs': decision.bufferingFor.inMilliseconds,
-        'stagnantForMs': decision.stagnantFor.inMilliseconds,
-      },
-    );
     await _playAndSeekWithTimeout(player, decision.position);
   }
 
@@ -385,6 +411,7 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
         _mpvStallRecoveryInProgress) {
       return;
     }
+    if (!_recoveryIntent.allows(_recoveryIntent.revision)) return;
     final watchdog = _mpvStallWatchdog;
     if (watchdog == null) {
       return;
@@ -417,6 +444,8 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     PlaybackTarget target,
     MpvStallDecision decision,
   ) async {
+    final intent = _recoveryIntent.revision;
+    if (!_recoveryIntent.allows(intent)) return;
     if (_mpvStallRecoveryInProgress || _player != player) {
       return;
     }
@@ -427,15 +456,6 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
     if (!_takeAutomaticRecovery(player, 'stall')) return;
     _mpvStallRecoveryInProgress = true;
     _mpvPerformanceTracker?.recordRecovery();
-    _traceWindowsMpv(
-      'windows-mpv.stall.recover-hard',
-      fields: {
-        'positionMs': decision.position.inMilliseconds,
-        'bufferingForMs': decision.bufferingFor.inMilliseconds,
-        'stagnantForMs': decision.stagnantFor.inMilliseconds,
-        'targetTitle': target.title,
-      },
-    );
     try {
       _latestPosition = decision.position;
       if (player.state.duration > Duration.zero) {
@@ -458,12 +478,14 @@ extension _PlayerPageStateStartupMpvRecovery on _PlayerPageState {
         persistProgress: true,
         teardownPlatformState: true,
       );
-      if (!_isCurrentStartup(generation)) {
+      if (!_isCurrentStartup(generation) || !_recoveryIntent.allows(intent)) {
+        await _finishCancelledRecovery(generation, intent);
         return;
       }
       await _initialize(
         initialTarget: _buildRuntimeMpvRecoveryTarget(target),
         automaticRecovery: true,
+        recoveryIntent: intent,
       );
     } catch (error, stackTrace) {
       _traceWindowsMpv(

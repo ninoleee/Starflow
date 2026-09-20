@@ -5,6 +5,7 @@ import 'package:starflow/features/playback/data/online_subtitle_repository_stub.
     as impl;
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_operation.dart';
 
 final onlineSubtitleRepositoryProvider = Provider<OnlineSubtitleRepository>((
   ref,
@@ -22,9 +23,11 @@ abstract class OnlineSubtitleRepository {
     ],
     int maxResults = 0,
     int maxValidated = 0,
+    SubtitleOperation? operation,
   });
 
-  Future<SubtitleDownloadResult> download(SubtitleSearchResult result);
+  Future<SubtitleDownloadResult> download(SubtitleSearchResult result,
+      {SubtitleOperation? operation});
 
   Future<LocalStorageCacheSummary> inspectCacheSummary();
 

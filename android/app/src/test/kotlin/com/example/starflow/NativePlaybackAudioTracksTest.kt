@@ -45,4 +45,60 @@ class NativePlaybackAudioTracksTest {
         target.put("preferredAudioStreamId", "")
         assertNull(NativePlaybackAudioTracks.serverDefault(listOf(english), target))
     }
+
+    @Test fun reverseMappingRetainsUnsupportedPositionsAndRejectsMissingRows() {
+        val target = JSONObject("""{"audioStreams":[{"id":"a","index":0},{"id":"b","index":1}]}""")
+        val first = track("1", "zh", false)
+        val second = track("2", "en")
+        assertEquals("b", NativePlaybackAudioTracks.serverStream(listOf(first, second), second, target)?.optString("id"))
+        assertNull(NativePlaybackAudioTracks.serverStream(listOf(second), second, target))
+    }
+
+    @Test fun reverseMappingNormalizesLanguageAndUsesChannels() {
+        val target = JSONObject("""{"audioStreams":[{"id":"a","index":0,"language":"zh"},{"id":"b","index":1,"language":"eng","channels":2}]}""")
+        val english = track("1", "en")
+        assertEquals("b", NativePlaybackAudioTracks.serverStream(listOf(english), english, target)?.optString("id"))
+    }
+
+    @Test fun codecDisambiguatesSameLanguageWithoutOrdinalGuess() {
+        val target = JSONObject("""{"preferredAudioStreamId":"aac","audioStreams":[{"id":"ac3","index":0,"language":"eng","codec":"ac3"},{"id":"aac","index":1,"language":"eng","codec":"aac"}]}""")
+        val aac = track("1", "en")
+        assertEquals("aac", NativePlaybackAudioTracks.serverStream(listOf(aac), aac, target)?.optString("id"))
+        assertSame(aac, NativePlaybackAudioTracks.serverDefault(listOf(aac), target))
+    }
+
+    @Test fun missingAc3CannotMatchOnlyAacByIdenticalMetadata() {
+        val target = JSONObject("""{"preferredAudioStreamId":"ac3","audioStreams":[{"id":"ac3","index":0,"language":"eng","channels":2,"codec":"ac3"},{"id":"aac","index":1,"language":"eng","channels":2,"codec":"aac"}]}""")
+        val aac = track("1", "en")
+        assertNull(NativePlaybackAudioTracks.serverDefault(listOf(aac), target))
+        assertEquals("aac", NativePlaybackAudioTracks.serverStream(listOf(aac), aac, target)?.optString("id"))
+    }
+
+    @Test fun codecContradictionRejectsMetadataAndOrdinalInBothDirections() {
+        val aac = track("1", "en")
+        for (metadata in listOf("", "\"language\":\"eng\",\"channels\":2,")) {
+            val target = JSONObject("""{"preferredAudioStreamId":"ac3","audioStreams":[{${metadata}"id":"ac3","index":0,"codec":"ac3"}]}""")
+            assertNull(NativePlaybackAudioTracks.serverDefault(listOf(aac), target))
+            assertNull(NativePlaybackAudioTracks.serverStream(listOf(aac), aac, target))
+        }
+    }
+
+    @Test fun unknownCodecStillAllowsMetadataOrUncompressedOrdinal() {
+        val aac = track("1", "en")
+        for (codec in listOf("", "unrecognized-codec")) {
+            val target = JSONObject("""{"preferredAudioStreamId":"a","audioStreams":[{"id":"a","codec":"$codec"}]}""")
+            assertSame(aac, NativePlaybackAudioTracks.serverDefault(listOf(aac), target))
+            assertEquals("a", NativePlaybackAudioTracks.serverStream(listOf(aac), aac, target)?.optString("id"))
+        }
+    }
+
+    @Test fun genericServerCodecDoesNotContradictKnownCodecExtension() {
+        for ((codec, mime) in listOf("eac3" to MimeTypes.AUDIO_E_AC3_JOC, "dts" to MimeTypes.AUDIO_DTS_HD)) {
+            val format = Format.Builder().setSampleMimeType(mime).build()
+            val track = NativeAudioTrack(format, TrackSelectionOverride(TrackGroup(format), 0), true, true)
+            val target = JSONObject("""{"preferredAudioStreamId":"a","audioStreams":[{"id":"a","codec":"$codec"}]}""")
+            assertSame(track, NativePlaybackAudioTracks.serverDefault(listOf(track), target))
+            assertEquals("a", NativePlaybackAudioTracks.serverStream(listOf(track), track, target)?.optString("id"))
+        }
+    }
 }

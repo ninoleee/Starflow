@@ -12,7 +12,7 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(queue.moveToPrevious())
     let next = queue.moveToNext()!
     XCTAssertNil(next.moveToNext())
-    XCTAssertEqual(NativeEpisodeQueue.fromJsonString(next.toJsonString())?.currentEntry?.request.playbackItemKey, "second")
+    XCTAssertEqual(NativeEpisodeQueue.fromJsonString(next.toJsonString())?.currentEntry?.request?.playbackItemKey, "second")
   }
 
   func testSubtitlePreferenceRoundTrip() {

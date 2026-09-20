@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:starflow/features/playback/domain/playback_memory_policy.dart';
+import 'package:starflow/features/playback/data/native_playback_memory_preferences.dart';
 import 'package:starflow/features/playback/application/playback_policy_values.dart';
 
 import 'package:flutter/foundation.dart';
@@ -127,7 +128,21 @@ class PlaybackMemoryRepository {
   int _cacheGeneration = 0;
 
   Future<void> _mutate(Future<void> Function() action) {
-    final operation = _mutationTail.then((_) => action());
+    final operation = _mutationTail.then((_) async {
+      for (var attempt = 0;; attempt++) {
+        if (_preferences is NativePlaybackMemoryPreferences) {
+          invalidateSnapshotCache();
+          await _loadSnapshot();
+        }
+        try {
+          await action();
+          return;
+        } on PlaybackMemoryWriteConflict {
+          invalidateSnapshotCache();
+          if (attempt >= 7) rethrow;
+        }
+      }
+    });
     _mutationTail =
         operation.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return operation;
@@ -348,10 +363,13 @@ class PlaybackMemoryRepository {
         _notifyChanged?.call();
       });
 
+  /// Callers retain [completedByAutoSkip] for the active session and clear it
+  /// after a manual seek; previous stored completion is never carried forward.
   Future<void> saveProgress({
     required PlaybackTarget target,
     required Duration position,
     required Duration duration,
+    bool completedByAutoSkip = false,
   }) =>
       _mutate(() async {
         final itemKey = buildPlaybackItemKey(target);
@@ -369,11 +387,12 @@ class PlaybackMemoryRepository {
             ? 0.0
             : (safePosition.inMilliseconds / clampedDuration.inMilliseconds)
                 .clamp(0.0, 1.0);
-        final completed = playbackMemoryCompleted(
-          positionMs: safePosition.inMilliseconds,
-          durationMs: clampedDuration.inMilliseconds,
-          progress: progress,
-        );
+        final completed = completedByAutoSkip ||
+            playbackMemoryCompleted(
+              positionMs: safePosition.inMilliseconds,
+              durationMs: clampedDuration.inMilliseconds,
+              progress: progress,
+            );
         final snapshot = await _loadSnapshot();
         final now = _nextUpdatedAt(snapshot);
 
@@ -704,7 +723,7 @@ PreferencesStore _defaultPlaybackMemoryPreferencesStore() {
   if (!kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS)) {
-    return SharedPreferencesStore.reloading();
+    return NativePlaybackMemoryPreferences();
   }
   return AppPreferencesStore();
 }

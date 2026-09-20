@@ -129,6 +129,11 @@ abstract class AppLogService {
   Future<void> clear();
 }
 
+extension AppLogRecording on AppLogService {
+  bool isRecording(AppLogLevel level) =>
+      isEnabled && recordedLevels.contains(level);
+}
+
 class AppLogFormatter {
   const AppLogFormatter._();
 
@@ -143,6 +148,10 @@ class AppLogFormatter {
   );
   static final RegExp _inlineSecret = RegExp(
     r'((?:access[_-]?token|token|api[_-]?key|auth[_-]?key|password|cookie|authorization|secret|sign(?:ature)?|session|x-amz-(?:credential|signature|security-token))=)[^&\s,;]+',
+    caseSensitive: false,
+  );
+  static final RegExp _urlUserInfo = RegExp(
+    r'([a-z][a-z0-9+.-]*://|//)[^\s/<>"\x00-\x1f]*@',
     caseSensitive: false,
   );
 
@@ -197,7 +206,11 @@ class AppLogFormatter {
   }
 
   static String _sanitizeString(String value, {required int maxLength}) {
-    var sanitized = value.replaceAll(_bearerValue, 'Bearer $redactedValue');
+    var sanitized = value.replaceAllMapped(
+      _urlUserInfo,
+      (match) => '${match.group(1)}$redactedValue@',
+    );
+    sanitized = sanitized.replaceAll(_bearerValue, 'Bearer $redactedValue');
     sanitized = sanitized.replaceAllMapped(
       _inlineSecret,
       (match) => '${match.group(1)}$redactedValue',

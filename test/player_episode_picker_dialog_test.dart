@@ -55,7 +55,8 @@ void main() {
       entries[15] = _entry(season: 1, episode: 16, title: '穿过漫长的夜晚，在海边等待黎明');
       final queue = PlaybackEpisodeQueue(entries: entries, currentIndex: 15);
       await _openPicker(tester, queue, television: width > 600);
-      expect(find.byTooltip('关闭'), findsNothing);
+      expect(find.byTooltip('关闭'),
+          width > 600 ? findsNothing : findsOneWidget);
       expect(
           Theme.of(tester.element(find.byType(Dialog)))
               .dialogTheme
@@ -115,6 +116,174 @@ void main() {
       expect(tester.widget<TvFocusableAction>(episode(0)).focusNode!.hasFocus,
           isTrue);
     }
+  });
+
+  for (final grid in [false, true]) {
+    for (final index in grid ? [0, 1, 2, 3] : [0]) {
+      testWidgets('top episode $index enters season before tools grid=$grid',
+          (tester) async {
+        SharedPreferences.setMockInitialValues(
+            {'episode_picker_layout': grid ? 'grid' : 'list'});
+        final queue = _queue(currentIndex: index, count: 65);
+        await _openPicker(tester, queue,
+            browser: PlaybackEpisodeBrowser(
+                resolver: _PickerResolver(), target: queue.currentEntry!.target));
+
+        bool toolHasFocus(String label) => Focus.of(tester.element(
+            find.descendant(of: find.byTooltip(label), matching: find.byType(Icon))
+                .first)).hasFocus;
+
+        Future<void> press(LogicalKeyboardKey key) async {
+          await tester.sendKeyEvent(key);
+          await tester.pumpAndSettle();
+        }
+
+        await press(LogicalKeyboardKey.arrowUp);
+        expect(toolHasFocus('选择季'), isTrue);
+        await press(LogicalKeyboardKey.arrowDown);
+        expect(tester.widget<TvFocusableAction>(episode(index)).focusNode!.hasFocus,
+            isTrue);
+        await press(LogicalKeyboardKey.arrowUp);
+        await press(LogicalKeyboardKey.enter);
+        expect(find.text('第一季'), findsOneWidget);
+        await press(LogicalKeyboardKey.escape);
+        expect(toolHasFocus('选择季'), isTrue);
+        await press(LogicalKeyboardKey.arrowUp);
+        expect(toolHasFocus('列表'), isTrue);
+        await press(LogicalKeyboardKey.arrowDown);
+        expect(toolHasFocus('选择季'), isTrue);
+        await press(LogicalKeyboardKey.arrowUp);
+        await press(LogicalKeyboardKey.arrowRight);
+        expect(toolHasFocus('网格'), isTrue);
+        await press(LogicalKeyboardKey.arrowDown);
+        expect(toolHasFocus('选择季'), isTrue);
+        await press(LogicalKeyboardKey.arrowDown);
+        expect(tester.widget<TvFocusableAction>(episode(index)).focusNode!.hasFocus,
+            isTrue);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
+  for (final grid in [false, true]) {
+    testWidgets('single season skips the disabled selector grid=$grid',
+        (tester) async {
+      SharedPreferences.setMockInitialValues(
+          {'episode_picker_layout': grid ? 'grid' : 'list'});
+      final queue = _queue(currentIndex: 0);
+      final resolver = _PickerResolver()..singleSeason = true;
+      await _openPicker(tester, queue,
+          browser: PlaybackEpisodeBrowser(
+              resolver: resolver, target: queue.currentEntry!.target));
+      final selector = tester.widget<TvFocusableAction>(find.descendant(
+          of: find.byTooltip('选择季'), matching: find.byType(TvFocusableAction)));
+      expect(selector.onPressed, isNull);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pumpAndSettle();
+      final list = tester.widget<TvFocusableAction>(find.descendant(
+          of: find.byTooltip('列表'), matching: find.byType(TvFocusableAction)));
+      expect(list.focusNode!.hasFocus, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pumpAndSettle();
+      final gridTool = tester.widget<TvFocusableAction>(find.descendant(
+          of: find.byTooltip('网格'), matching: find.byType(TvFocusableAction)));
+      expect(gridTool.focusNode!.hasFocus, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TvFocusableAction>(episode(0)).focusNode!.hasFocus,
+          isTrue);
+      expect(selector.focusNode!.hasFocus, isFalse);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final size in [
+    const Size(320, 720),
+    const Size(844, 390),
+    const Size(1280, 720),
+  ]) {
+    for (final grid in [false, true]) {
+      testWidgets('automatic positioning keeps whole rows at $size grid=$grid',
+          (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        SharedPreferences.setMockInitialValues(
+            {'episode_picker_layout': grid ? 'grid' : 'list'});
+        final television = size.width > 1000;
+
+        void expectAligned(int current, {required bool grid}) {
+          final viewportFinder = find.byType(SingleChildScrollView);
+          final viewport = tester.getRect(viewportFinder);
+          final scroll = tester
+              .widget<SingleChildScrollView>(viewportFinder)
+              .controller!;
+          expect(scroll.offset % 72, closeTo(0, .01));
+          final first = current ~/ 30 * 30 +
+              (scroll.offset / 72).round() * (grid ? 4 : 1);
+          expect(tester.getRect(episode(first)).top,
+              closeTo(viewport.top + 4, .01));
+          final currentRect = tester.getRect(episode(current));
+          expect(currentRect.top, greaterThanOrEqualTo(viewport.top));
+          expect(currentRect.bottom, lessThanOrEqualTo(viewport.bottom));
+          expect(tester.takeException(), isNull);
+        }
+
+        await _openPicker(tester, _queue(currentIndex: 15, count: 65),
+            television: television, settle: false);
+        expectAligned(15, grid: grid);
+        final firstRect = tester.getRect(episode(15));
+        await tester.pumpAndSettle();
+        expect(tester.getRect(episode(15)), firstRect);
+        expectAligned(15, grid: grid);
+        if (television) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+          await tester.pumpAndSettle();
+          expectAligned(grid ? 19 : 16, grid: grid);
+        }
+        await tester.tap(find.byTooltip('下一段'));
+        await tester.pumpAndSettle();
+        expectAligned(30, grid: grid);
+        await tester.tap(find.byTooltip('下一段'));
+        await tester.pumpAndSettle();
+        expectAligned(60, grid: grid);
+        await tester.tap(find.byTooltip('定位当前集'));
+        await tester.pump();
+        expectAligned(15, grid: grid);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip(grid ? '列表' : '网格'));
+        await tester.pump();
+        expectAligned(15, grid: !grid);
+        await tester.pumpAndSettle();
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        SharedPreferences.setMockInitialValues(
+            {'episode_picker_layout': grid ? 'grid' : 'list'});
+        await _openPicker(tester, _queue(currentIndex: 29, count: 30),
+            television: television, settle: false);
+        expectAligned(29, grid: grid);
+        await tester.pumpAndSettle();
+        expectAligned(29, grid: grid);
+      });
+    }
+  }
+
+  testWidgets('mobile drag remains free between row boundaries',
+      (tester) async {
+    await _openPicker(tester, _queue(currentIndex: 15, count: 65),
+        television: false);
+    final viewport = find.byType(SingleChildScrollView);
+    final scroll = tester.widget<SingleChildScrollView>(viewport).controller!;
+    final initial = scroll.offset;
+    final gesture = await tester.startGesture(tester.getCenter(viewport));
+    await gesture.moveBy(const Offset(0, -53));
+    await tester.pump(const Duration(milliseconds: 300));
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(scroll.offset, greaterThan(initial));
+    expect(scroll.offset % 72, isNot(closeTo(0, .01)));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('layout changes and locate are positioned before painting',
@@ -386,6 +555,85 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final size in [const Size(320, 640), const Size(844, 390)]) {
+    for (final grid in [false, true]) {
+      testWidgets(
+          'mobile bottom-left close cancels at $size with grid=$grid',
+          (tester) async {
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        SharedPreferences.setMockInitialValues(
+            {'episode_picker_layout': grid ? 'grid' : 'list'});
+        final result = Completer<PlaybackEpisodeSelection?>();
+        final queue = _queue(currentIndex: 15, count: 65);
+        await _openPicker(tester, queue,
+            television: false, onResult: result.complete);
+
+        final close = find.byTooltip('关闭');
+        final panel = tester.getRect(
+            find.byKey(const ValueKey('player:episode-picker:panel')));
+        final closeRect = tester.getRect(close);
+        final previousRect = tester.getRect(find.byTooltip('上一段'));
+        expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+        expect(closeRect.size, const Size(44, 44));
+        expect(closeRect.left, closeTo(panel.left + 20, .1));
+        expect(panel.bottom - closeRect.bottom, inInclusiveRange(8, 24));
+        expect(closeRect.right, lessThanOrEqualTo(previousRect.left));
+        expect(closeRect.center.dy, closeTo(previousRect.center.dy, .1));
+        expect(tester.takeException(), isNull);
+
+        await tester.tap(close);
+        await tester.pumpAndSettle();
+        expect(find.byType(Dialog), findsNothing);
+        expect(find.text('打开'), findsOneWidget);
+        expect(result.isCompleted, isTrue);
+        expect(await result.future, isNull);
+        expect(queue.currentIndex, 15);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
+  for (final fails in [false, true]) {
+    testWidgets('mobile close ignores late season result with fails=$fails',
+        (tester) async {
+      final queue = _queue(currentIndex: 1);
+      final pending = Completer<PlaybackEpisodeQueue>();
+      final resolver = _PickerResolver()..pending = pending;
+      final result = Completer<PlaybackEpisodeSelection?>();
+      await _openPicker(tester, queue,
+          television: false,
+          onResult: result.complete,
+          browser: PlaybackEpisodeBrowser(
+              resolver: resolver, target: queue.currentEntry!.target));
+      await tester.tap(find.byTooltip('选择季'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('第二季'));
+      await tester.pumpAndSettle();
+      expect(find.text('正在加载剧集'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('关闭'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+      expect(result.isCompleted, isTrue);
+      expect(await result.future, isNull);
+
+      if (fails) {
+        pending.completeError(StateError('offline'));
+      } else {
+        pending.complete(PlaybackEpisodeQueue(currentIndex: -1, entries: [
+          _entry(season: 2, episode: 1, title: '迟到结果'),
+        ]));
+      }
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+      expect(queue.currentIndex, 1);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('TV panel uses about 30 percent of a wide screen',
       (tester) async {
     tester.view.physicalSize = const Size(1280, 720);
@@ -469,13 +717,15 @@ void main() {
 class _PickerResolver extends PlaybackEpisodeQueueResolver {
   _PickerResolver() : super(read: <T>(provider) => throw UnimplementedError());
   bool fail = false;
+  bool singleSeason = false;
   Completer<PlaybackEpisodeQueue>? pending;
   @override
   Future<List<PlaybackEpisodeSeason>> loadSeasons(
           PlaybackTarget target) async =>
-      const [
-        PlaybackEpisodeSeason(id: '1', number: 1, title: '第一季'),
-        PlaybackEpisodeSeason(id: '2', number: 2, title: '第二季'),
+      [
+        const PlaybackEpisodeSeason(id: '1', number: 1, title: '第一季'),
+        if (!singleSeason)
+          const PlaybackEpisodeSeason(id: '2', number: 2, title: '第二季'),
       ];
   @override
   Future<PlaybackEpisodeQueue> loadSeason(
@@ -493,6 +743,7 @@ Future<void> _openPicker(WidgetTester tester, PlaybackEpisodeQueue queue,
     {bool television = true,
     bool settle = true,
     PlaybackEpisodeBrowser? browser,
+    ValueChanged<PlaybackEpisodeSelection?>? onResult,
     Future<PlaybackMemorySnapshot> Function()? loadHistory}) async {
   await tester.pumpWidget(ProviderScope(
       overrides: [isTelevisionProvider.overrideWith((ref) => television)],
@@ -509,12 +760,16 @@ Future<void> _openPicker(WidgetTester tester, PlaybackEpisodeQueue queue,
               home: Scaffold(
                   body: Builder(
                       builder: (context) => ElevatedButton(
-                            onPressed: () => showPlaybackEpisodePickerDialog(
-                                context: context,
-                                queue: queue,
-                                browser: browser,
-                                loadHistory: loadHistory,
-                                isTelevision: television),
+                            onPressed: () async {
+                              final result =
+                                  await showPlaybackEpisodePickerDialog(
+                                      context: context,
+                                      queue: queue,
+                                      browser: browser,
+                                      loadHistory: loadHistory,
+                                      isTelevision: television);
+                              onResult?.call(result);
+                            },
                             child: const Text('打开'),
                           )))))));
   await tester.tap(find.text('打开'));

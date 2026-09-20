@@ -2,6 +2,8 @@ package com.example.starflow
 
 import android.content.SharedPreferences
 import org.json.JSONObject
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal class NativePlaybackMemoryStore(
     private val readSnapshot: () -> String?,
@@ -9,12 +11,112 @@ internal class NativePlaybackMemoryStore(
     private val now: () -> String = NativePlaybackFormatting::isoNow,
     private val log: (String) -> Unit = { NativePlaybackFormatting.logPlayback(it) },
     private val decodeSnapshot: (String) -> JSONObject = ::JSONObject,
+    private val backgroundPreferences: Boolean = false,
+    private val onPersisted: () -> Unit = {},
 ) {
     private var cachedRaw: String? = null
     private var cachedSnapshot: JSONObject? = null
+    private var maximumTimestamp = 0L
+    private val pendingLock = Any()
+    private val pendingProgress = mutableMapOf<String, () -> Unit>()
+    private val pendingTokens = mutableMapOf<String, Any>()
+    @Volatile private var publishedSkips: Map<String, String>? = null
+    @Volatile private var publishedRaw: String? = null
+    private val refreshPending = AtomicBoolean(false)
+
+    private fun publishReadView(snapshot: JSONObject, raw: String?) {
+        val skips = snapshot.optJSONObject("skipPreferences") ?: JSONObject()
+        publishedSkips = skips.keys().asSequence().associateWith {
+            skips.optJSONObject(it)?.toString() ?: "{}"
+        }
+        publishedRaw = raw
+    }
+
+    fun peekSeriesSkipPreference(seriesKey: String): JSONObject? {
+        val current = publishedSkips ?: return loadSeriesSkipPreference(seriesKey)
+        if (readSnapshot() != publishedRaw && refreshPending.compareAndSet(false, true)) {
+            writer.execute {
+                try { loadPlaybackSnapshot() } finally { refreshPending.set(false) }
+            }
+        }
+        return current[seriesKey]?.let(::JSONObject)
+    }
+
+    companion object {
+        private val isWriter = ThreadLocal<Boolean>()
+        private val writer = Executors.newSingleThreadExecutor { runnable ->
+            Thread({ isWriter.set(true); runnable.run() }, "starflow-playback-memory").apply { isDaemon = true }
+        }
+
+        fun readShared(preferences: SharedPreferences, completion: (String?) -> Unit) {
+            writer.execute { completion(preferences.getString(PLAYBACK_MEMORY_STORAGE_KEY, null)) }
+        }
+
+        fun compareAndSetShared(preferences: SharedPreferences, expected: String?, value: String?,
+            completion: (Boolean?, Throwable?) -> Unit) {
+            writer.execute {
+                try {
+                    if (preferences.getString(PLAYBACK_MEMORY_STORAGE_KEY, null) != expected) {
+                        completion(false, null)
+                    } else {
+                        val editor = preferences.edit()
+                        if (value == null) editor.remove(PLAYBACK_MEMORY_STORAGE_KEY)
+                        else editor.putString(PLAYBACK_MEMORY_STORAGE_KEY, value)
+                        check(editor.commit()) { "Playback memory persistence failed" }
+                        completion(true, null)
+                    }
+                } catch (error: Throwable) { completion(null, error) }
+            }
+        }
+    }
+
+    private fun <T> readOrdered(operation: () -> T): T =
+        if (isWriter.get() == true) operation() else writer.submit<T> { operation() }.get()
+
+    private fun writePreference(operation: () -> Unit) {
+        if (backgroundPreferences && isWriter.get() != true) writer.execute(operation)
+        else readOrdered(operation)
+    }
+
+    fun enqueuePlaybackEntry(
+        targetJson: String, itemKey: String, seriesKey: String,
+        positionMs: Long, durationMs: Long, synchronous: Boolean,
+        completedByAutoSkip: Boolean = false,
+    ) {
+        val operation = {
+            savePlaybackEntry(targetJson, itemKey, seriesKey, positionMs, durationMs,
+                synchronous, completedByAutoSkip)
+        }
+        synchronized(pendingLock) {
+            if (synchronous) {
+                pendingProgress.remove(itemKey)
+                pendingTokens.remove(itemKey)
+                writer.execute(operation)
+            } else {
+                val queued = pendingProgress.containsKey(itemKey)
+                pendingProgress[itemKey] = operation
+                if (!queued) {
+                    val token = Any()
+                    pendingTokens[itemKey] = token
+                    writer.execute {
+                        val next = synchronized(pendingLock) {
+                            if (pendingTokens[itemKey] !== token) null else {
+                                pendingTokens.remove(itemKey)
+                                pendingProgress.remove(itemKey)
+                            }
+                        }
+                        next?.invoke()
+                    }
+                }
+            }
+        }
+    }
+
+    fun awaitPendingWrites() { writer.submit {}.get() }
 
     constructor(
-        preferences: SharedPreferences
+        preferences: SharedPreferences,
+        onPersisted: () -> Unit = {},
     ) : this(
         readSnapshot = { preferences.getString(PLAYBACK_MEMORY_STORAGE_KEY, null) },
         writeSnapshot = { value, synchronous ->
@@ -25,9 +127,12 @@ internal class NativePlaybackMemoryStore(
                 true
             }
         },
+        backgroundPreferences = true,
+        onPersisted = onPersisted,
     )
 
-    fun loadResumePositionMs(itemKey: String): Long {
+    fun loadResumePositionMs(itemKey: String): Long = readOrdered { loadResumePositionNow(itemKey) }
+    private fun loadResumePositionNow(itemKey: String): Long {
         val entry = loadPlaybackEntry(itemKey) ?: return 0L
         val positionMs = entry.optLong("positionMs", 0L)
         val durationMs = entry.optLong("durationMs", 0L)
@@ -36,7 +141,8 @@ internal class NativePlaybackMemoryStore(
         return PlaybackMemoryPolicy.resume(positionMs, durationMs, progress, completed)
     }
 
-    fun loadPlaybackEntry(itemKey: String): JSONObject? {
+    fun loadPlaybackEntry(itemKey: String): JSONObject? = readOrdered { loadPlaybackEntryNow(itemKey) }
+    private fun loadPlaybackEntryNow(itemKey: String): JSONObject? {
         if (itemKey.isBlank()) {
             return null
         }
@@ -55,6 +161,13 @@ internal class NativePlaybackMemoryStore(
         }
         cachedRaw = raw
         cachedSnapshot = snapshot
+        publishReadView(snapshot, raw)
+        maximumTimestamp = listOf("items", "series").flatMap { name ->
+            val group = snapshot.optJSONObject(name) ?: JSONObject()
+            group.keys().asSequence().map {
+                PlaybackMemoryPolicy.timestamp(group.optJSONObject(it)?.optString("updatedAt") ?: "")
+            }.toList()
+        }.maxOrNull() ?: 0L
         return snapshot
     }
 
@@ -62,15 +175,21 @@ internal class NativePlaybackMemoryStore(
         // Writers mutate the cached object. Do not retain it if persistence fails.
         cachedSnapshot = null
         val raw = snapshot.toString()
+        publishReadView(snapshot, raw)
         val written = writeSnapshot(raw, synchronous)
         if (written) {
             cachedRaw = raw
             cachedSnapshot = snapshot
+            onPersisted()
+        } else {
+            publishedSkips = null
         }
         return written
     }
 
-    fun loadSeriesSubtitlePreference(seriesKey: String): NativeSubtitleSessionPreference? {
+    fun loadSeriesSubtitlePreference(seriesKey: String): NativeSubtitleSessionPreference? =
+        readOrdered { loadSeriesSubtitlePreferenceNow(seriesKey) }
+    private fun loadSeriesSubtitlePreferenceNow(seriesKey: String): NativeSubtitleSessionPreference? {
         val normalizedSeriesKey = seriesKey.trim()
         if (normalizedSeriesKey.isEmpty()) {
             return null
@@ -92,7 +211,9 @@ internal class NativePlaybackMemoryStore(
         )
     }
 
-    fun saveSeriesSubtitlePreference(
+    fun saveSeriesSubtitlePreference(seriesKey: String, preference: NativeSubtitleSessionPreference?) =
+        writePreference { saveSeriesSubtitlePreferenceNow(seriesKey, preference) }
+    private fun saveSeriesSubtitlePreferenceNow(
         seriesKey: String,
         preference: NativeSubtitleSessionPreference?,
     ) {
@@ -110,7 +231,8 @@ internal class NativePlaybackMemoryStore(
         persistSnapshot(snapshot, false)
     }
 
-    fun clearSeriesSubtitlePreference(seriesKey: String) {
+    fun clearSeriesSubtitlePreference(seriesKey: String) = writePreference { clearSeriesSubtitlePreferenceNow(seriesKey) }
+    private fun clearSeriesSubtitlePreferenceNow(seriesKey: String) {
         val normalizedSeriesKey = seriesKey.trim()
         if (normalizedSeriesKey.isEmpty()) {
             return
@@ -123,6 +245,13 @@ internal class NativePlaybackMemoryStore(
     }
 
     fun savePlaybackEntry(
+        targetJson: String, itemKey: String, seriesKey: String,
+        positionMs: Long, durationMs: Long, synchronous: Boolean,
+        completedByAutoSkip: Boolean = false,
+    ) = readOrdered { savePlaybackEntryNow(targetJson, itemKey, seriesKey, positionMs,
+        durationMs, synchronous, completedByAutoSkip) }
+
+    private fun savePlaybackEntryNow(
         targetJson: String,
         itemKey: String,
         seriesKey: String,
@@ -189,14 +318,14 @@ internal class NativePlaybackMemoryStore(
             targetObject.put("fntvStartPositionMs", 0)
         }
 
+        val timestamp = PlaybackMemoryPolicy.nextTimestamp(now(), listOf(
+            PlaybackMemoryPolicy.formatTimestamp(maximumTimestamp)))
+        maximumTimestamp = PlaybackMemoryPolicy.timestamp(timestamp)
         val entry =
             JSONObject().apply {
                 put("key", itemKey)
                 put("target", targetObject)
-                put("updatedAt", PlaybackMemoryPolicy.nextTimestamp(now(),
-                    listOf(items, series).flatMap { group ->
-                        group.keys().asSequence().map { group.optJSONObject(it)?.optString("updatedAt") ?: "" }.toList()
-                    }))
+                put("updatedAt", timestamp)
                 put("seriesKey", seriesKey)
                 put("seriesTitle", seriesTitle)
                 put("positionMs", safePosition)
@@ -245,7 +374,8 @@ internal class NativePlaybackMemoryStore(
         keyedEntries.drop(RECENT_ENTRY_LIMIT).forEach { (key, _) -> items.remove(key) }
     }
 
-    fun loadSeriesSkipPreference(seriesKey: String): JSONObject? {
+    fun loadSeriesSkipPreference(seriesKey: String): JSONObject? = readOrdered { loadSeriesSkipPreferenceNow(seriesKey) }
+    private fun loadSeriesSkipPreferenceNow(seriesKey: String): JSONObject? {
         if (seriesKey.isBlank()) {
             return null
         }
@@ -253,7 +383,11 @@ internal class NativePlaybackMemoryStore(
             ?.let { JSONObject(it.toString()) }
     }
 
-    fun saveSeriesSkipPreference(
+    fun saveSeriesSkipPreference(seriesKey: String, seriesTitle: String, enabled: Boolean,
+        introDurationMs: Long, outroDurationMs: Long) = writePreference {
+        saveSeriesSkipPreferenceNow(seriesKey, seriesTitle, enabled, introDurationMs, outroDurationMs)
+    }
+    private fun saveSeriesSkipPreferenceNow(
         seriesKey: String,
         seriesTitle: String,
         enabled: Boolean,

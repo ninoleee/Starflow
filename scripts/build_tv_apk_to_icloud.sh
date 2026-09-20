@@ -36,6 +36,11 @@ if ! command -v flutter >/dev/null 2>&1; then
 fi
 
 # Version stepping is shared with the PowerShell presets.
+dart "$PROJECT_ROOT/tool/verify_tv_release.dart" --preflight
+if [[ -n "${1:-}" && ! -f "$1" ]]; then
+  echo "Error: settings JSON not found: $1" >&2
+  exit 1
+fi
 
 VERSION="$(dart "$PROJECT_ROOT/tool/release_version.dart" pubspec.yaml)"
 BUILD_DATE="$(date +%Y-%m-%d)"
@@ -78,6 +83,11 @@ if [[ ! -f "$SOURCE_APK" ]]; then
 fi
 
 TARGET_NAME="${NAME_PREFIX}-${VERSION}.apk"
+VERIFY_ARGS=("$PROJECT_ROOT/tool/verify_tv_release.dart" "$SOURCE_APK" "$VERSION")
+if [[ -n "$SETTINGS_JSON_PATH" ]]; then
+  VERIFY_ARGS+=("$SETTINGS_JSON_PATH")
+fi
+dart "${VERIFY_ARGS[@]}"
 mkdir -p "$ICLOUD_INSTALLER_DIR"
 cp -f "$SOURCE_APK" "$ICLOUD_INSTALLER_DIR/$TARGET_NAME"
 

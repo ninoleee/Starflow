@@ -14,7 +14,7 @@ enum NativePlaybackBufferingTuning {
     ) {
       self.url = url
       self.headers = headers
-      self.isLiveStream = isLiveStream ?? Self.detectLiveStream(url: url)
+      self.isLiveStream = isLiveStream ?? false
     }
 
     var isRemoteURL: Bool {
@@ -22,22 +22,6 @@ enum NativePlaybackBufferingTuning {
       return scheme == "http" || scheme == "https"
     }
 
-    private static func detectLiveStream(url: URL) -> Bool {
-      let path = url.path.lowercased()
-      if path.hasSuffix(".m3u8") {
-        return true
-      }
-
-      guard let host = url.host?.lowercased() else {
-        return false
-      }
-      if host.contains("live") {
-        return true
-      }
-
-      let query = url.query?.lowercased() ?? ""
-      return query.contains("m3u8") || query.contains("live=1") || query.contains("livestream")
-    }
   }
 
   enum PeakBitRateProfile {

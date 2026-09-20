@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
-import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
 import 'package:starflow/features/details/application/detail_page_controller.dart';
@@ -120,22 +119,6 @@ class DetailResourceInfoSection extends StatelessWidget {
     final resourceFacts = _buildDetailResourceFacts(target);
     final doubanSourceUri = _resolveDoubanSourceUri(target);
     final showLibrarySwitcher = libraryView.choices.length > 1;
-    detailResourceSwitchTrace(
-      'resource.ui.visibility',
-      dedupeKey: _detailResourceTraceKey(target),
-      fields: {
-        'title': target.title,
-        'itemType': target.itemType,
-        'isPlayable': target.isPlayable,
-        'availability': target.availabilityLabel,
-        'choices': libraryView.choices.length,
-        'selectedIndex': libraryView.selectedIndex,
-        'effectiveIndex': libraryView.effectiveSelectedIndex,
-        'showLibrary': showLibrarySwitcher,
-        'selectedChoice': _detailResourceSelectedChoiceLabel(libraryView),
-        'choiceSample': _detailResourceChoiceSample(libraryView.choices),
-      },
-    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -481,17 +464,6 @@ class _DetailLinkedFactAction extends StatelessWidget {
   }
 }
 
-String _detailResourceTraceKey(MediaDetailTarget target) {
-  final parts = [
-    target.sourceKind?.name ?? '',
-    target.sourceId.trim(),
-    target.itemId.trim(),
-    target.title.trim().toLowerCase(),
-    target.searchQuery.trim().toLowerCase(),
-  ].where((item) => item.isNotEmpty).toList(growable: false);
-  return parts.isEmpty ? 'detail-resource-ui' : parts.join('|');
-}
-
 Uri? _resolveDoubanSourceUri(MediaDetailTarget target) {
   final doubanId = _resolveDoubanId(target);
   if (doubanId.isEmpty) {
@@ -527,22 +499,6 @@ Future<void> _openDetailExternalUri(BuildContext context, Uri uri) async {
   ScaffoldMessenger.of(context).showSnackBar(
     const SnackBar(content: Text('无法打开链接')),
   );
-}
-
-String _detailResourceSelectedChoiceLabel(
-    DetailLibraryMatchViewState viewData) {
-  if (viewData.choices.isEmpty) {
-    return '';
-  }
-  final selected = viewData.choices[viewData.effectiveSelectedIndex];
-  return detailPlayableVariantOptionLabel(selected);
-}
-
-String _detailResourceChoiceSample(List<MediaDetailTarget> choices) {
-  if (choices.isEmpty) {
-    return '';
-  }
-  return choices.take(4).map(detailPlayableVariantOptionLabel).join(' || ');
 }
 
 class DetailPlayableVariantSelector extends StatelessWidget {

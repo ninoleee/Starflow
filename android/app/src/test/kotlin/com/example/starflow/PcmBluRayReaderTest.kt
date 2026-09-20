@@ -17,6 +17,33 @@ import org.mockito.Mockito.*
 
 class PcmBluRayReaderTest {
     @Test
+    fun bitDepthChangesAtSameRateKeepLowBitsAndClock() {
+        val fixture = Fixture()
+        fixture.reader.packetStarted(0, 0)
+        fixture.consume(header(1920) + ByteArray(1920))
+        fixture.reader.packetStarted(C.TIME_UNSET, 0)
+        val payload = byteArrayOf(0, 0, 1, -1, -1, -1)
+        fixture.consume(header(6, depthCode = 3) + payload)
+        fixture.reader.packetStarted(C.TIME_UNSET, 0)
+        fixture.consume(header(4) + ByteArray(4))
+        assertEquals(listOf(C.ENCODING_PCM_16BIT, C.ENCODING_PCM_24BIT, C.ENCODING_PCM_16BIT),
+            fixture.track.formats.map { it.pcmEncoding })
+        assertArrayEquals(byteArrayOf(1, 0, 0, -1, -1, -1), fixture.track.bytes.toByteArray().copyOfRange(1920, 1926))
+        assertEquals(listOf(0L, 10_000L, 10_020L), fixture.track.timestamps)
+    }
+
+    @Test
+    fun maximumRateSurroundPcm24BatchesWithoutOverflow() {
+        val fixture = Fixture()
+        val payload = ByteArray(57_600) { (it * 17).toByte() }
+        val header = header(payload.size, depthCode = 3, rateCode = 5).apply { this[2] = 0xB5.toByte() }
+        fixture.reader.packetStarted(0, 0)
+        for (chunk in (header + payload).asList().chunked(166)) fixture.consume(chunk.toByteArray())
+        assertEquals(payload.size, fixture.track.bytes.size())
+        assertEquals(listOf(0L, 10_000L), fixture.track.timestamps)
+    }
+
+    @Test
     fun optionalRealLpcmPacketsMatchReferenceDecoder() {
         val input = System.getenv("STARFLOW_LPCM_PACKETS")
         val reference = System.getenv("STARFLOW_LPCM_REFERENCE")
@@ -74,7 +101,7 @@ class PcmBluRayReaderTest {
             assertEquals(0, data.bytesLeft())
             assertEquals(0, fixture.track.bytes.size())
             fixture.consume(payload.copyOfRange(166, 168))
-            assertArrayEquals(toPcm16(payload, 2), fixture.track.bytes.toByteArray())
+            assertArrayEquals(toLittleEndian(payload, 2), fixture.track.bytes.toByteArray())
             assertEquals(listOf(123_456L), fixture.track.timestamps)
         }
     }
@@ -89,7 +116,9 @@ class PcmBluRayReaderTest {
                 fixture.reader.packetStarted(1_000L, 0)
                 fixture.consume(packet.copyOfRange(0, split))
                 fixture.consume(packet.copyOfRange(split, packet.size))
-                assertArrayEquals(toPcm16(payload, bytesPerSample), fixture.track.bytes.toByteArray())
+                assertArrayEquals(toLittleEndian(payload, bytesPerSample), fixture.track.bytes.toByteArray())
+                assertEquals(if (bytesPerSample == 3) C.ENCODING_PCM_24BIT else C.ENCODING_PCM_16BIT,
+                    fixture.track.formats.single().pcmEncoding)
             }
         }
     }
@@ -102,7 +131,7 @@ class PcmBluRayReaderTest {
         for (byte in header(payload.size, depthCode = 2) + payload) {
             fixture.consume(byteArrayOf(byte))
         }
-        assertArrayEquals(toPcm16(payload, 3), fixture.track.bytes.toByteArray())
+        assertArrayEquals(toLittleEndian(payload, 3), fixture.track.bytes.toByteArray())
     }
 
     @Test
@@ -114,7 +143,7 @@ class PcmBluRayReaderTest {
             fixture.consume(header(payload.size) + payload)
             fixture.reader.packetFinished(false)
         }
-        assertArrayEquals(toPcm16(payload + payload, 2), fixture.track.bytes.toByteArray())
+        assertArrayEquals(toLittleEndian(payload + payload, 2), fixture.track.bytes.toByteArray())
         assertEquals(listOf(10_000L, 20_000L), fixture.track.timestamps)
     }
 
@@ -141,7 +170,7 @@ class PcmBluRayReaderTest {
         fixture.reader.packetStarted(4_000_000L, 0)
         val payload = byteArrayOf(0x12, 0x34, 0x56, 0x78)
         fixture.consume(header(4) + payload)
-        assertArrayEquals(toPcm16(payload, 2), fixture.track.bytes.toByteArray())
+        assertArrayEquals(toLittleEndian(payload, 2), fixture.track.bytes.toByteArray())
         assertEquals(listOf(4_000_000L), fixture.track.timestamps)
     }
 
@@ -187,7 +216,7 @@ class PcmBluRayReaderTest {
                     fixture.consume(packet.copyOfRange(0, split))
                     fixture.consume(packet.copyOfRange(split, packet.size))
                     assertEquals(order.size, fixture.track.formats.single().channelCount)
-                    assertArrayEquals(order.flatMap { listOf((it + 1).toByte(), (it + 1).toByte()) }.toByteArray(), fixture.track.bytes.toByteArray())
+                    assertArrayEquals(order.flatMap { channel -> List(sampleBytes) { (channel + 1).toByte() } }.toByteArray(), fixture.track.bytes.toByteArray())
                 }
             }
         }
@@ -223,7 +252,7 @@ class PcmBluRayReaderTest {
         fixture.consume(header(6, depthCode = 3, rateCode = 4) + ByteArray(6))
         verify(fixture.output, times(1)).track(anyInt(), eq(C.TRACK_TYPE_AUDIO))
         assertEquals(listOf(48_000, 96_000), fixture.track.formats.map { it.sampleRate })
-        assertEquals(8, fixture.track.bytes.size())
+        assertEquals(10, fixture.track.bytes.size())
     }
 
     private class Fixture {
@@ -289,6 +318,6 @@ class PcmBluRayReaderTest {
             (depthCode shl 6).toByte(),
         )
 
-    private fun toPcm16(payload: ByteArray, bytesPerSample: Int): ByteArray =
-        payload.toList().chunked(bytesPerSample).flatMap { listOf(it[1], it[0]) }.toByteArray()
+    private fun toLittleEndian(payload: ByteArray, bytesPerSample: Int): ByteArray =
+        payload.toList().chunked(bytesPerSample).flatMap { it.reversed() }.toByteArray()
 }

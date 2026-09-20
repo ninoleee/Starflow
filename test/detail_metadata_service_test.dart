@@ -19,7 +19,6 @@ void main() {
         wmdbMetadataMatchEnabled: wmdb,
         tmdbMetadataMatchEnabled: tmdb,
         tmdbReadAccessToken: 'token',
-        imdbRatingMatchEnabled: false,
       );
 
   Future<DetailMetadataResult> resolve({

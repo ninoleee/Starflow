@@ -1,3 +1,4 @@
+import 'package:starflow/core/logging/app_logger.dart';
 import 'dart:async';
 
 export 'package:starflow/features/details/presentation/detail_page_providers.dart'
@@ -13,7 +14,6 @@ import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/navigation/page_activity_mixin.dart';
 import 'package:starflow/core/navigation/retained_async_controller.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
-import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
@@ -156,10 +156,11 @@ String _detailResourceTraceTarget(MediaDetailTarget? target) {
     return '';
   }
   final playback = target.playbackTarget;
-  final path = _normalizeLibraryMatchPath(
+  final path = _detailLibraryMatchService.normalizeLibraryMatchPath(
     playback?.actualAddress ?? target.resourcePath,
   );
-  final stream = _normalizeLibraryMatchPath(playback?.streamUrl ?? '');
+  final stream = _detailLibraryMatchService
+      .normalizeLibraryMatchPath(playback?.streamUrl ?? '');
   final identity = path.isNotEmpty ? path : stream;
   return [
     target.sourceName.trim().isEmpty ? '-' : target.sourceName.trim(),
@@ -171,10 +172,6 @@ String _detailResourceTraceTarget(MediaDetailTarget? target) {
   ].join(' | ');
 }
 
-String _detailResourceTraceChoiceSample(Iterable<MediaDetailTarget> choices) {
-  return choices.take(4).map(_detailResourceTraceTarget).join(' || ');
-}
-
 bool _hasMetadataChanged(
   MediaDetailTarget current,
   MediaDetailTarget next,
@@ -183,24 +180,24 @@ bool _hasMetadataChanged(
       current.backdropUrl != next.backdropUrl ||
       current.logoUrl != next.logoUrl ||
       current.bannerUrl != next.bannerUrl ||
-      !_sameStrings(current.extraBackdropUrls, next.extraBackdropUrls) ||
+      !listEquals(current.extraBackdropUrls, next.extraBackdropUrls) ||
       current.overview != next.overview ||
       current.year != next.year ||
       current.durationLabel != next.durationLabel ||
-      !_sameStrings(current.ratingLabels, next.ratingLabels) ||
+      !listEquals(current.ratingLabels, next.ratingLabels) ||
       current.ratingCount != next.ratingCount ||
-      !_sameStrings(current.genres, next.genres) ||
-      !_sameStrings(current.directors, next.directors) ||
+      !listEquals(current.genres, next.genres) ||
+      !listEquals(current.directors, next.directors) ||
       !_samePeople(
         current.directorProfiles,
         next.directorProfiles,
       ) ||
-      !_sameStrings(current.actors, next.actors) ||
+      !listEquals(current.actors, next.actors) ||
       !_samePeople(
         current.actorProfiles,
         next.actorProfiles,
       ) ||
-      !_sameStrings(current.platforms, next.platforms) ||
+      !listEquals(current.platforms, next.platforms) ||
       !_samePeople(
         current.platformProfiles,
         next.platformProfiles,
@@ -211,19 +208,7 @@ bool _hasMetadataChanged(
       current.tvdbId != next.tvdbId ||
       current.wikidataId != next.wikidataId ||
       current.tmdbSetId != next.tmdbSetId ||
-      !_sameMaps(current.providerIds, next.providerIds);
-}
-
-bool _sameStrings(List<String> left, List<String> right) {
-  if (left.length != right.length) {
-    return false;
-  }
-  for (var index = 0; index < left.length; index++) {
-    if (left[index] != right[index]) {
-      return false;
-    }
-  }
-  return true;
+      !mapEquals(current.providerIds, next.providerIds);
 }
 
 bool _samePeople(
@@ -263,37 +248,15 @@ Future<MetadataMatchResult?> _tryPreferredMetadataMatch({
       ),
     );
   } catch (error, stackTrace) {
-    detailResourceSwitchTrace(
-      'resource.match.metadata.error',
-      fields: {
-        'target': target.title,
-        'query': query,
-      },
-      error: error,
-      stackTrace: stackTrace,
-    );
+    appLogError('detail-resource', 'resource.match.metadata.error',
+        fields: {
+          'target': target.title,
+          'query': query,
+        },
+        error: error,
+        stackTrace: stackTrace);
     return null;
   }
-}
-
-List<MediaSourceConfig> _resolveLibraryMatchSources(AppSettings settings) {
-  return _detailLibraryMatchService.resolveLibraryMatchSources(settings);
-}
-
-List<MediaDetailTarget> _candidatesToMergedTargets(
-  MediaDetailTarget current,
-  List<DetailLibraryMatchCandidate> candidates,
-  String query,
-) {
-  return _detailLibraryMatchService.candidatesToMergedTargets(
-    current,
-    candidates,
-    query,
-  );
-}
-
-String _normalizeLibraryMatchPath(String value) {
-  return _detailLibraryMatchService.normalizeLibraryMatchPath(value);
 }
 
 List<MediaDetailTarget> _mergeExpandedLibraryChoices(
@@ -416,13 +379,13 @@ int _resolveExpandedLibraryMatchIndex({
     return byKey;
   }
 
-  final targetPath = _normalizeLibraryMatchPath(
+  final targetPath = _detailLibraryMatchService.normalizeLibraryMatchPath(
     target.playbackTarget?.actualAddress ?? target.resourcePath,
   );
   if (targetPath.isNotEmpty) {
     final byPath = choices.indexWhere(
       (choice) =>
-          _normalizeLibraryMatchPath(
+          _detailLibraryMatchService.normalizeLibraryMatchPath(
             choice.playbackTarget?.actualAddress ?? choice.resourcePath,
           ) ==
           targetPath,
@@ -447,10 +410,12 @@ int _resolveExpandedLibraryMatchIndex({
 
 String _libraryMatchTargetKey(MediaDetailTarget target) {
   final playback = target.playbackTarget;
-  final normalizedAddress = _normalizeLibraryMatchPath(
+  final normalizedAddress =
+      _detailLibraryMatchService.normalizeLibraryMatchPath(
     playback?.actualAddress ?? target.resourcePath,
   );
-  final normalizedStreamUrl = _normalizeLibraryMatchPath(
+  final normalizedStreamUrl =
+      _detailLibraryMatchService.normalizeLibraryMatchPath(
     playback?.streamUrl ?? '',
   );
   final variantIdentity =
@@ -463,18 +428,6 @@ String _libraryMatchTargetKey(MediaDetailTarget target) {
     playback?.preferredMediaSourceId.trim() ?? '',
     variantIdentity,
   ].join('|');
-}
-
-bool _sameMaps(Map<String, String> left, Map<String, String> right) {
-  if (left.length != right.length) {
-    return false;
-  }
-  for (final entry in left.entries) {
-    if (right[entry.key] != entry.value) {
-      return false;
-    }
-  }
-  return true;
 }
 
 class MediaDetailPage extends ConsumerStatefulWidget {
@@ -551,7 +504,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         oldWidget.target.title != widget.target.title ||
         oldWidget.target.searchQuery != widget.target.searchQuery) {
       _cancelDetailTasks(
-        reason: 'target.change',
         additionalTargets: [oldWidget.target],
       );
       _selectedSeasonIdNotifier.value = '';
@@ -601,12 +553,10 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     _initialDetailCacheFuture = Future<CachedDetailState?>.sync(
       () => cache.loadDetailState(seed, allowStructuralMismatch: true),
     ).catchError((Object error, StackTrace stackTrace) {
-      detailResourceSwitchTrace(
-        'cache.initial.error',
-        fields: {'target': _detailResourceTraceTarget(seed)},
-        error: error,
-        stackTrace: stackTrace,
-      );
+      appLogError('detail-resource', 'cache.initial.error',
+          fields: {'target': _detailResourceTraceTarget(seed)},
+          error: error,
+          stackTrace: stackTrace);
       return null;
     }).then((state) {
       if (mounted && generation == _initialDetailCacheGeneration) {
@@ -635,7 +585,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
   @override
   void dispose() {
-    _cancelActiveLibraryMatch(reason: 'dispose');
+    _cancelActiveLibraryMatch();
     _saveFeedback.dispose();
     _pageController.dispose();
     _selectedSeasonIdNotifier.dispose();
@@ -673,7 +623,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   @override
   void onPageBecameInactive() {
     _cancelDetailTasks(
-      reason: 'page.inactive',
       invalidateProviders: false,
     );
     if (!mounted) {
@@ -812,16 +761,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         quarkSaveClient: ref.read(quarkSaveClientProvider),
         cloud115SaveClient: ref.read(cloud115SaveClientProvider),
       );
-      detailResourceSwitchTrace(
-        'online-update.check.done',
-        fields: <String, Object?>{
-          'target': _detailResourceTraceTarget(target),
-          'hasUpdates': result.hasUpdates,
-          'localVideoCount': result.localVideoCount,
-          'onlineVideoCount': result.onlineVideoCount,
-          'updatedEpisodeCount': result.updatedEpisodeLabels.length,
-        },
-      );
       if (!isCurrent()) return;
       setState(() => _isCheckingOnlineResourceUpdate = false);
       final shouldSave = await _showOnlineResourceUpdateDialog(
@@ -838,14 +777,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         networkStorage: networkStorage,
       );
     } catch (error, stackTrace) {
-      detailResourceSwitchTrace(
-        'online-update.check.error',
-        fields: <String, Object?>{
-          'target': _detailResourceTraceTarget(target),
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
+      appLogError('detail-resource', 'online-update.check.error',
+          fields: <String, Object?>{
+            'target': _detailResourceTraceTarget(target),
+          },
+          error: error,
+          stackTrace: stackTrace);
       if (!mounted || !isCurrent()) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('检查更新失败：$error')),
@@ -974,13 +911,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     final feedback = _saveFeedback.start();
 
     try {
-      detailResourceSwitchTrace(
-        'online-update.save.begin',
-        fields: <String, Object?>{
-          'favoriteId': favoriteMatch.result.id,
-          'folderName': favoriteMatch.folderName,
-        },
-      );
       final outcome = await ref.read(cloudSaveDispatcherProvider).save(
             result: favoriteMatch.result,
             saveFolderName: favoriteMatch.folderName,
@@ -989,36 +919,25 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             onBackgroundRefreshFailure: feedback.showRefreshFailure,
           );
       if (!outcome.isSuccess) {
-        detailResourceSwitchTrace(
-          'online-update.save.error',
-          fields: <String, Object?>{
-            'favoriteId': favoriteMatch.result.id,
-            'errorType': outcome.failureKind?.name,
-          },
-          error: outcome.error,
-          stackTrace: outcome.stackTrace,
-        );
+        appLogError('detail-resource', 'online-update.save.error',
+            fields: <String, Object?>{
+              'favoriteId': favoriteMatch.result.id,
+              'errorType': outcome.failureKind?.name,
+            },
+            error: outcome.error,
+            stackTrace: outcome.stackTrace);
         feedback.fail(outcome.message);
         return;
       }
-      detailResourceSwitchTrace(
-        'online-update.save.done',
-        fields: <String, Object?>{
-          'favoriteId': favoriteMatch.result.id,
-          'folderName': favoriteMatch.folderName,
-        },
-      );
       feedback.complete(outcome.message);
     } catch (error, stackTrace) {
-      detailResourceSwitchTrace(
-        'online-update.save.error',
-        fields: <String, Object?>{
-          'favoriteId': favoriteMatch.result.id,
-          'errorType': 'unexpected',
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
+      appLogError('detail-resource', 'online-update.save.error',
+          fields: <String, Object?>{
+            'favoriteId': favoriteMatch.result.id,
+            'errorType': 'unexpected',
+          },
+          error: error,
+          stackTrace: stackTrace);
       feedback.fail('保存失败：$error');
     } finally {
       feedback.closeProgress();
@@ -1030,27 +949,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
   }
 
-  void _cancelActiveLibraryMatch({String reason = ''}) {
-    if (_activeLibraryMatchController != null) {
-      detailResourceSwitchTrace(
-        'resource.match.cancel.request',
-        fields: {
-          'reason': reason,
-          'target': _detailResourceTraceTarget(_manualOverrideTarget),
-        },
-      );
-    }
+  void _cancelActiveLibraryMatch() {
     _activeLibraryMatchController?.cancel();
     _activeLibraryMatchController = null;
   }
 
   void _cancelDetailTasks({
-    String reason = '',
     bool invalidateProviders = true,
     Iterable<MediaDetailTarget> additionalTargets = const [],
   }) {
-    _cancelActiveLibraryMatch(reason: reason);
-    _pageController.cancelDetailTasks();
+    _cancelActiveLibraryMatch();
+    _pageController.startNewSession();
     if (!invalidateProviders) {
       return;
     }
@@ -1126,15 +1035,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                 _seriesSourceReady = true;
               });
             }
-            detailResourceSwitchTrace(
-              'startup.error',
-              fields: <String, Object?>{
-                'sessionId': sessionId,
-                'target': _detailResourceTraceTarget(widget.target),
-              },
-              error: error,
-              stackTrace: stackTrace,
-            );
+            appLogError('detail-resource', 'startup.error',
+                fields: <String, Object?>{
+                  'sessionId': sessionId,
+                  'target': _detailResourceTraceTarget(widget.target),
+                },
+                error: error,
+                stackTrace: stackTrace);
           },
         ),
       );
@@ -1294,15 +1201,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
     _initialDetailCacheFuture = null;
     if (cachedState == null) {
-      detailResourceSwitchTrace(
-        'cache.restore.miss',
-        dedupeKey: 'cache.restore|${_detailTraceKey(widget.target)}',
-        fields: {
-          'seed': _detailResourceTraceTarget(widget.target),
-          'itemType': widget.target.itemType,
-          'title': widget.target.title,
-        },
-      );
       return DetailMetadataRefreshStatus.never;
     }
     final restorePlan = _detailCachedStateRestorer.buildPlan(
@@ -1313,22 +1211,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       choices: restorePlan.libraryMatchChoices,
       selectedIndex: restorePlan.selectedLibraryMatchIndex,
       isMatching: false,
-    );
-    detailResourceSwitchTrace(
-      'cache.restore.hit',
-      dedupeKey: 'cache.restore|${_detailTraceKey(widget.target)}',
-      fields: {
-        'seed': _detailResourceTraceTarget(widget.target),
-        'cachedTarget': _detailResourceTraceTarget(cachedState.target),
-        'choices': restorePlan.libraryMatchChoices.length,
-        'selectedIndex': restorePlan.selectedLibraryMatchIndex,
-        'manualOverride': _detailResourceTraceTarget(
-          restorePlan.manualOverrideTarget,
-        ),
-        'metadataStatus': cachedState.metadataRefreshStatus.name,
-        'choiceSample':
-            _detailResourceTraceChoiceSample(restorePlan.libraryMatchChoices),
-      },
     );
     final manualOverrideTarget = restorePlan.manualOverrideTarget;
     if (manualOverrideTarget == null) {
@@ -1345,32 +1227,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     if (currentTarget.isSeries) {
       return;
     }
-    detailResourceSwitchTrace(
-      'variant.restore.start',
-      dedupeKey: 'variant.restore|${_detailTraceKey(widget.target)}',
-      fields: {
-        'target': _detailResourceTraceTarget(currentTarget),
-        'baseChoices': _libraryMatchChoices.length,
-        'baseSample': _detailResourceTraceChoiceSample(_libraryMatchChoices),
-      },
-    );
     final expandedState = await _expandEpisodeLikeLibraryMatchChoices(
       baseChoices:
           _libraryMatchChoices.isEmpty ? [currentTarget] : _libraryMatchChoices,
       selectedTarget: currentTarget,
+      isActive: () => _isSessionActive(sessionId),
     );
     if (!_isSessionActive(sessionId) ||
         expandedState == null ||
         expandedState.choices.length <= 1) {
-      detailResourceSwitchTrace(
-        'variant.restore.skip',
-        dedupeKey: 'variant.restore|${_detailTraceKey(widget.target)}',
-        fields: {
-          'target': _detailResourceTraceTarget(currentTarget),
-          'expandedChoices': expandedState?.choices.length ?? 0,
-          'selectedIndex': expandedState?.selectedIndex ?? -1,
-        },
-      );
       return;
     }
 
@@ -1384,17 +1249,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       selectedIndex: selectedIndex,
       isMatching: false,
     );
+    if (!_isSessionActive(sessionId)) return;
     _pageController.setManualOverrideTarget(selectedTarget);
-    detailResourceSwitchTrace(
-      'variant.restore.done',
-      dedupeKey: 'variant.restore|${_detailTraceKey(widget.target)}',
-      fields: {
-        'selectedIndex': selectedIndex,
-        'selectedTarget': _detailResourceTraceTarget(selectedTarget),
-        'choices': expandedState.choices.length,
-        'choiceSample': _detailResourceTraceChoiceSample(expandedState.choices),
-      },
-    );
+    if (!_isSessionActive(sessionId)) return;
     await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
           seedTarget: widget.target,
           resolvedTarget: selectedTarget,
@@ -1407,7 +1264,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       _expandEpisodeLikeLibraryMatchChoices({
     required List<MediaDetailTarget> baseChoices,
     required MediaDetailTarget selectedTarget,
+    required bool Function() isActive,
   }) async {
+    if (!isActive()) return null;
     if (selectedTarget.isSeries) {
       return null;
     }
@@ -1426,18 +1285,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     final expandedChoices = <MediaDetailTarget>[];
     var expandedSelectedTarget = selectedTarget;
     final selectedTargetKey = _libraryMatchTargetKey(selectedTarget);
-    detailResourceSwitchTrace(
-      'variant.expand.start',
-      dedupeKey: 'variant.expand|${_detailTraceKey(widget.target)}',
-      fields: {
-        'selected': _detailResourceTraceTarget(selectedTarget),
-        'baseChoices': baseChoices.length,
-        'initialChoices': initialChoices.length,
-        'initialSample': _detailResourceTraceChoiceSample(initialChoices),
-      },
-    );
 
     for (final choice in initialChoices) {
+      if (!isActive()) return null;
       DetailExternalEpisodeVariantState? variantState;
       try {
         variantState = await variantService.loadChoices(
@@ -1450,32 +1300,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                 : MediaSourceKind.emby,
           )),
         );
-        detailResourceSwitchTrace(
-          'variant.expand.choice',
-          dedupeKey:
-              'variant.expand.choice|${_detailTraceKey(choice)}|${choice.itemId}',
-          fields: {
-            'choice': _detailResourceTraceTarget(choice),
-            'variantChoices': variantState?.choices.length ?? 0,
-            'selectedIndex': variantState?.selectedIndex ?? -1,
-            'variantSample': _detailResourceTraceChoiceSample(
-              variantState?.choices ?? const <MediaDetailTarget>[],
-            ),
-          },
-        );
       } catch (error, stackTrace) {
         variantState = null;
-        detailResourceSwitchTrace(
-          'variant.expand.error',
-          dedupeKey:
-              'variant.expand.choice|${_detailTraceKey(choice)}|${choice.itemId}',
-          fields: {
-            'choice': _detailResourceTraceTarget(choice),
-          },
-          error: error,
-          stackTrace: stackTrace,
-        );
+        appLogError('detail-resource', 'variant.expand.error',
+            fields: {
+              'choice': _detailResourceTraceTarget(choice),
+            },
+            error: error,
+            stackTrace: stackTrace);
       }
+      if (!isActive()) return null;
       final resolvedChoices =
           variantState == null || variantState.choices.length <= 1
               ? [choice]
@@ -1497,33 +1331,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
     final mergedChoices = _mergeExpandedLibraryChoices(expandedChoices);
     if (mergedChoices.length <= 1) {
-      detailResourceSwitchTrace(
-        'variant.expand.done',
-        dedupeKey: 'variant.expand|${_detailTraceKey(widget.target)}',
-        fields: {
-          'expandedChoices': expandedChoices.length,
-          'mergedChoices': mergedChoices.length,
-          'selected': _detailResourceTraceTarget(expandedSelectedTarget),
-          'mergedSample': _detailResourceTraceChoiceSample(mergedChoices),
-        },
-      );
       return null;
     }
 
     final resolvedSelectedIndex = _resolveExpandedLibraryMatchIndex(
       target: expandedSelectedTarget,
       choices: mergedChoices,
-    );
-    detailResourceSwitchTrace(
-      'variant.expand.done',
-      dedupeKey: 'variant.expand|${_detailTraceKey(widget.target)}',
-      fields: {
-        'expandedChoices': expandedChoices.length,
-        'mergedChoices': mergedChoices.length,
-        'selectedIndex': resolvedSelectedIndex,
-        'selected': _detailResourceTraceTarget(expandedSelectedTarget),
-        'mergedSample': _detailResourceTraceChoiceSample(mergedChoices),
-      },
     );
     return DetailExternalEpisodeVariantState(
       choices: mergedChoices,
@@ -1542,7 +1355,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     }
 
     final controller = DetailLibraryMatchTaskController();
-    _cancelActiveLibraryMatch(reason: 'match.restart');
+    _cancelActiveLibraryMatch();
     _activeLibraryMatchController = controller;
     _updateLibraryMatchView(
       choices: const [],
@@ -1551,13 +1364,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     );
 
     try {
-      detailResourceSwitchTrace(
-        'resource.match.begin',
-        fields: {
-          'target': _detailResourceTraceTarget(currentTarget),
-          'sessionId': activeSessionId,
-        },
-      );
       final settings = ref.read(appSettingsProvider);
       final query = currentTarget.searchQuery.trim().isEmpty
           ? currentTarget.title
@@ -1568,28 +1374,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         target: currentTarget,
         query: query,
       );
-      detailResourceSwitchTrace(
-        'resource.match.metadata.done',
-        fields: {
-          'target': _detailResourceTraceTarget(currentTarget),
-          'query': query,
-          'matched': metadataMatch != null,
-          'tmdbId': metadataMatch?.tmdbId ?? '',
-          'imdbId': metadataMatch?.imdbId ?? '',
-        },
-      );
       controller.throwIfCancelled();
       if (!_isLibraryMatchActive(activeSessionId, controller)) {
-        detailResourceSwitchTrace(
-          'resource.match.cancel.after-metadata',
-          fields: {
-            'target': _detailResourceTraceTarget(currentTarget),
-            'sessionId': activeSessionId,
-          },
-        );
         throw const DetailLibraryMatchCancelledException();
       }
-      final allowedSources = _resolveLibraryMatchSources(settings);
+      final allowedSources =
+          _detailLibraryMatchService.resolveLibraryMatchSources(settings);
       final preferredSources =
           DetailLibraryMatchCoordinator.resolvePreferredSources(
         pageSeedTarget: widget.target,
@@ -1601,20 +1391,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
               ) !=
               null &&
           preferredSources.isNotEmpty;
-      detailResourceSwitchTrace(
-        'resource.match.sources',
-        fields: {
-          'target': _detailResourceTraceTarget(currentTarget),
-          'allowedCount': allowedSources.length,
-          'allowedSources': allowedSources
-              .map((item) => '${item.kind.name}:${item.id}')
-              .join(' || '),
-          'preferredSources': preferredSources
-              .map((item) => '${item.kind.name}:${item.id}')
-              .join(' || '),
-          'skipPreferredSourceSearch': skipPreferredSourceSearch,
-        },
-      );
 
       final coordinator = DetailLibraryMatchCoordinator(
         mediaRepository: ref.read(mediaRepositoryProvider),
@@ -1633,7 +1409,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           if (!_isLibraryMatchActive(activeSessionId, controller)) {
             return;
           }
-          final partialMerged = _candidatesToMergedTargets(
+          final partialMerged =
+              _detailLibraryMatchService.candidatesToMergedTargets(
             currentTarget,
             partialCandidates,
             query,
@@ -1648,16 +1425,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           if (partialChoices.isEmpty) {
             return;
           }
-          detailResourceSwitchTrace(
-            'resource.match.partial',
-            dedupeKey: 'resource.match|${_detailTraceKey(widget.target)}',
-            fields: {
-              'target': _detailResourceTraceTarget(currentTarget),
-              'partialCandidates': partialCandidates.length,
-              'partialMerged': partialChoices.length,
-              'partialSample': _detailResourceTraceChoiceSample(partialChoices),
-            },
-          );
           _updateLibraryMatchView(
             choices: partialChoices.length > 1
                 ? partialChoices
@@ -1665,6 +1432,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             selectedIndex: preferredPartial.selectedIndex,
             isMatching: true,
           );
+          if (!_isLibraryMatchActive(activeSessionId, controller)) return;
           _pageController.setManualOverrideTarget(
             partialChoices[preferredPartial.selectedIndex],
           );
@@ -1673,20 +1441,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
 
       controller.throwIfCancelled();
       if (!_isLibraryMatchActive(activeSessionId, controller)) {
-        detailResourceSwitchTrace(
-          'resource.match.cancel.after-candidates',
-          fields: {
-            'target': _detailResourceTraceTarget(currentTarget),
-            'sessionId': activeSessionId,
-            'candidateCount': candidates.length,
-          },
-        );
         throw const DetailLibraryMatchCancelledException();
       }
 
       final merged = prioritizeDetailLibraryMatchChoices(
         pageSeedTarget: widget.target,
-        choices: _candidatesToMergedTargets(
+        choices: _detailLibraryMatchService.candidatesToMergedTargets(
           currentTarget,
           candidates,
           query,
@@ -1694,22 +1454,17 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         includePreferredEntryChoice: true,
         currentTarget: currentTarget,
       ).choices;
-      detailResourceSwitchTrace(
-        'resource.match.final',
-        dedupeKey: 'resource.match|${_detailTraceKey(widget.target)}',
-        fields: {
-          'target': _detailResourceTraceTarget(currentTarget),
-          'candidateCount': candidates.length,
-          'mergedChoices': merged.length,
-          'mergedSample': _detailResourceTraceChoiceSample(merged),
-        },
-      );
       final expandedVariantState = currentTarget.isSeries
           ? null
           : await _expandEpisodeLikeLibraryMatchChoices(
               baseChoices: merged,
               selectedTarget: merged.isEmpty ? currentTarget : merged.first,
+              isActive: () =>
+                  _isLibraryMatchActive(activeSessionId, controller),
             );
+      if (!_isLibraryMatchActive(activeSessionId, controller)) {
+        throw const DetailLibraryMatchCancelledException();
+      }
       final preferredEffective = prioritizeDetailLibraryMatchChoices(
         pageSeedTarget: widget.target,
         choices: expandedVariantState?.choices ?? merged,
@@ -1728,26 +1483,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         selectedIndex: effectiveSelectedIndex,
         isMatching: false,
       );
-      detailResourceSwitchTrace(
-        'resource.match.effective',
-        dedupeKey: 'resource.match|${_detailTraceKey(widget.target)}',
-        fields: {
-          'choices': effectiveChoices.length,
-          'selectedIndex': effectiveSelectedIndex,
-          'selected': effectiveChoices.isEmpty
-              ? ''
-              : _detailResourceTraceTarget(
-                  effectiveChoices[effectiveSelectedIndex],
-                ),
-          'choiceSample': _detailResourceTraceChoiceSample(effectiveChoices),
-        },
-      );
       if (effectiveChoices.isNotEmpty) {
+        if (!_isLibraryMatchActive(activeSessionId, controller)) return;
         _pageController.setManualOverrideTarget(
           effectiveChoices[effectiveSelectedIndex],
         );
       }
 
+      if (!_isLibraryMatchActive(activeSessionId, controller)) return;
       unawaited(
         ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
               seedTarget: currentTarget,
@@ -1783,7 +1526,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
           SnackBar(
             content: Text(
               matched.availabilityLabel.trim().isNotEmpty
-                  ? '已匹配到 ${_availabilityFeedbackLabel(matched.availabilityLabel)}'
+                  ? '已匹配到 ${_detailLibraryMatchService.availabilityFeedbackLabel(matched.availabilityLabel)}'
                   : '已匹配到 ${matched.sourceKind?.label ?? '资源'} · ${matched.sourceName}',
             ),
           ),
@@ -1797,25 +1540,16 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         ),
       );
     } on DetailLibraryMatchCancelledException {
-      detailResourceSwitchTrace(
-        'resource.match.cancelled',
-        fields: {
-          'target': _detailResourceTraceTarget(currentTarget),
-          'sessionId': activeSessionId,
-        },
-      );
       return;
     } catch (error, stackTrace) {
-      detailResourceSwitchTrace(
-        'resource.match.error',
-        fields: {
-          'target': _detailResourceTraceTarget(currentTarget),
-          'sessionId': activeSessionId,
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
-      if (_isSessionActive(activeSessionId) && showFeedback && mounted) {
+      appLogError('detail-resource', 'resource.match.error',
+          fields: {
+            'target': _detailResourceTraceTarget(currentTarget),
+            'sessionId': activeSessionId,
+          },
+          error: error,
+          stackTrace: stackTrace);
+      if (_isLibraryMatchActive(activeSessionId, controller) && showFeedback) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('匹配本地资源失败：$error')),
         );
@@ -1863,14 +1597,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     var changed = false;
     var refreshOutcome = DetailMetadataOutcome.skipped;
     try {
-      detailResourceSwitchTrace(
-        'metadata.refresh.begin',
-        fields: <String, Object?>{
-          'sessionId': activeSessionId,
-          'target': _detailResourceTraceTarget(currentTarget),
-          'showFeedback': showFeedback,
-        },
-      );
       final settings = ref.read(detailEnrichmentSettingsProvider);
       final doubanAccount = ref.read(appSettingsProvider).doubanAccount;
       final result = await resolveDetailMetadata(
@@ -1907,25 +1633,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                         ? DetailMetadataRefreshStatus.failed
                         : DetailMetadataRefreshStatus.succeeded,
           );
-      detailResourceSwitchTrace(
-        'metadata.refresh.done',
-        fields: <String, Object?>{
-          'sessionId': activeSessionId,
-          'target': _detailResourceTraceTarget(currentTarget),
-          'changed': changed,
-          'outcome': refreshOutcome.name,
-        },
-      );
     } catch (error, stackTrace) {
-      detailResourceSwitchTrace(
-        'metadata.refresh.error',
-        fields: <String, Object?>{
-          'sessionId': activeSessionId,
-          'target': _detailResourceTraceTarget(currentTarget),
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
+      appLogError('detail-resource', 'metadata.refresh.error',
+          fields: <String, Object?>{
+            'sessionId': activeSessionId,
+            'target': _detailResourceTraceTarget(currentTarget),
+          },
+          error: error,
+          stackTrace: stackTrace);
       if (_isSessionActive(activeSessionId)) {
         await ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
               seedTarget: widget.target,
@@ -2019,28 +1734,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     final resolvedTarget =
         _pageController.applySelectedLibraryMatchIndex(index);
     if (resolvedTarget == null) {
-      detailResourceSwitchTrace(
-        'resource.select.skip',
-        dedupeKey: 'resource.select|${_detailTraceKey(widget.target)}',
-        fields: {
-          'index': index,
-          'choices': _libraryMatchChoices.length,
-        },
-      );
       return;
     }
     final resolvedIndex = _selectedLibraryMatchIndex;
-    detailResourceSwitchTrace(
-      'resource.select.apply',
-      dedupeKey: 'resource.select|${_detailTraceKey(widget.target)}',
-      fields: {
-        'index': index,
-        'resolvedIndex': resolvedIndex,
-        'target': _detailResourceTraceTarget(resolvedTarget),
-        'choices': _libraryMatchChoices.length,
-        'choiceSample': _detailResourceTraceChoiceSample(_libraryMatchChoices),
-      },
-    );
     unawaited(
       ref.read(localStorageCacheRepositoryProvider).saveDetailTarget(
             seedTarget: widget.target,
@@ -2249,14 +1945,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
             onMatchLocalResource: libraryMatchView.isMatching
                 ? null
                 : () {
-                    detailResourceSwitchTrace(
-                      'resource.ui.match.tap',
-                      fields: {
-                        'target': _detailResourceTraceTarget(target),
-                        'isMatching': libraryMatchView.isMatching,
-                        'currentChoices': libraryMatchView.choices.length,
-                      },
-                    );
                     _matchLocalResource(target);
                   },
             onCheckOnlineResourceUpdate: canCheckFavoriteOnlineResourceUpdate
@@ -2274,12 +1962,6 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
               );
             },
             onOpenMetadataIndexManager: () {
-              detailResourceSwitchTrace(
-                'resource.ui.metadata-manager.tap',
-                fields: {
-                  'target': _detailResourceTraceTarget(target),
-                },
-              );
               _openMetadataIndexManager(target);
             },
           ),
@@ -2594,8 +2276,4 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       ),
     );
   }
-}
-
-String _availabilityFeedbackLabel(String label) {
-  return _detailLibraryMatchService.availabilityFeedbackLabel(label);
 }

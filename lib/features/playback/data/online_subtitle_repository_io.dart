@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +12,7 @@ import 'package:starflow/features/playback/data/online_subtitle_repository.dart'
 import 'package:starflow/features/playback/data/online_subtitle_validation_pipeline.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_operation.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -33,9 +35,11 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
   final AppSettings Function() _settingsProvider;
   final Future<Directory> Function() _temporaryDirectoryProvider;
 
-  OpenSubtitlesStructuredProvider _openSubtitlesProvider() {
+  OpenSubtitlesStructuredProvider _openSubtitlesProvider(
+      [SubtitleOperation? operation]) {
     final settings = _settingsProvider();
     return OpenSubtitlesStructuredProvider(_client,
+        operation: operation,
         config: OpenSubtitlesProviderConfig(
           enabled: settings.opensubtitlesEnabled,
           apiKey: _openSubtitlesApiKey,
@@ -54,30 +58,43 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     ],
     int maxResults = 0,
     int maxValidated = 0,
+    SubtitleOperation? operation,
   }) async {
+    operation?.throwIfCancelled();
     if (!request.hasStructuredIdentity) return const [];
     final settings = _settingsProvider();
+    final providerOperation = SubtitleOperation();
+    unawaited(operation?.whenCancelled.then((_) => providerOperation.cancel()));
+    final deadline =
+        Timer(const Duration(seconds: 30), providerOperation.cancel);
     final providers = <OnlineSubtitleStructuredProvider>[
       AssrtStructuredProvider(_client,
+          operation: providerOperation,
           config: AssrtProviderConfig(
               enabled: settings.assrtApiSearchEnabled,
               token: settings.assrtToken)),
-      _openSubtitlesProvider(),
+      _openSubtitlesProvider(providerOperation),
       SubdlStructuredProvider(_client,
+          operation: providerOperation,
           config: SubdlProviderConfig(
               enabled: settings.subdlEnabled, apiKey: settings.subdlApiKey)),
     ].where((provider) => sources.contains(provider.source));
     final errors = <String>[];
-    final batches = await Future.wait(providers.map((provider) async {
-      try {
-        return await provider
-            .search(request)
-            .timeout(const Duration(seconds: 30));
-      } catch (error) {
-        errors.add('${provider.providerLabel}: $error');
-        return <ProviderSubtitleHit>[];
-      }
-    }));
+    late final List<List<ProviderSubtitleHit>> batches;
+    try {
+      batches = await Future.wait(providers.map((provider) async {
+        try {
+          return await provider.search(request);
+        } catch (error) {
+          errors.add('${provider.providerLabel}: $error');
+          return <ProviderSubtitleHit>[];
+        }
+      }));
+    } finally {
+      deadline.cancel();
+      providerOperation.cancel();
+    }
+    operation?.throwIfCancelled();
     final hits = batches.expand((batch) => batch).toList();
     if (hits.isEmpty && errors.isNotEmpty) throw StateError(errors.join('；'));
     var limit = hits.length;
@@ -95,14 +112,16 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
   }
 
   @override
-  Future<SubtitleDownloadResult> download(SubtitleSearchResult result) async {
+  Future<SubtitleDownloadResult> download(SubtitleSearchResult result,
+      {SubtitleOperation? operation}) async {
+    operation?.throwIfCancelled();
     final url = result.source == OnlineSubtitleSource.opensubtitles &&
             result.providerFileId > 0
-        ? await _openSubtitlesProvider()
-            .resolveDownloadUrl(result.providerFileId)
-            .timeout(const Duration(seconds: 30))
+        ? await _resolveDownloadUrl(result.providerFileId, operation)
         : result.downloadUrl;
-    await _pruneExpiredCache();
+    operation?.throwIfCancelled();
+    await _pruneExpiredCache(operation: operation);
+    operation?.throwIfCancelled();
     final pipeline =
         SubtitleValidationPipeline(_client, cacheDirectoryProvider: _cacheRoot);
     final validated = await pipeline.validateHit(
@@ -119,17 +138,40 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
           episodeNumber: result.episodeNumber,
         ),
         preferredLanguages: _settingsProvider().subtitlePreferredLanguages,
+        operation: operation,
         referer: result.source == OnlineSubtitleSource.assrt
             ? 'https://assrt.net/'
             : '');
     if (!validated.canApply) throw StateError(validated.failureReason);
-    return validated.toDownloadResult();
+    if (operation?.isCancelled ?? false) {
+      await discardSubtitleDownload(validated.cachedPath);
+      operation!.throwIfCancelled();
+    }
+    return SubtitleDownloadResult(
+        cachedPath: validated.cachedPath,
+        displayName: validated.displayName,
+        subtitleFilePath: validated.subtitleFilePath,
+        discard: () => discardSubtitleDownload(validated.cachedPath));
   }
 
   Future<Directory> _cacheRoot() async => Directory(p.join(
       (await _temporaryDirectoryProvider()).path,
       'starflow',
       'online_subtitles'));
+
+  Future<String> _resolveDownloadUrl(
+      int fileId, SubtitleOperation? operation) async {
+    final authorization = SubtitleOperation();
+    unawaited(operation?.whenCancelled.then((_) => authorization.cancel()));
+    final deadline = Timer(const Duration(seconds: 30), authorization.cancel);
+    try {
+      return await _openSubtitlesProvider(authorization)
+          .resolveDownloadUrl(fileId);
+    } finally {
+      deadline.cancel();
+      authorization.cancel();
+    }
+  }
 
   Future<List<Directory>> _cacheRoots() async {
     final root = await _temporaryDirectoryProvider();
@@ -143,19 +185,23 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
 
   DateTime? _lastCachePrune;
 
-  Future<void> _pruneExpiredCache() async {
+  Future<void> _pruneExpiredCache({SubtitleOperation? operation}) async {
+    operation?.throwIfCancelled();
     final now = DateTime.now();
     if (_lastCachePrune != null &&
         now.difference(_lastCachePrune!) < const Duration(hours: 1)) {
       return;
     }
-    _lastCachePrune = now;
     final cutoff = DateTime.now().subtract(const Duration(days: 7));
     for (final root in await _cacheRoots()) {
+      operation?.throwIfCancelled();
       try {
         if (!await root.exists()) continue;
         await for (final entry in root.list(followLinks: false)) {
-          if ((await entry.stat()).modified.isBefore(cutoff)) {
+          operation?.throwIfCancelled();
+          final stat = await entry.stat();
+          operation?.throwIfCancelled();
+          if (stat.modified.isBefore(cutoff)) {
             await entry.delete(recursive: true);
           }
         }
@@ -163,6 +209,8 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
         // Retention is best effort while other engines inspect or clear cache.
       }
     }
+    operation?.throwIfCancelled();
+    _lastCachePrune = now;
   }
 
   @override

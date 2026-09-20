@@ -4,7 +4,6 @@ import 'package:starflow/core/storage/bounded_memory_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
-import 'package:starflow/core/utils/metadata_search_trace.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
@@ -28,8 +27,10 @@ class WmdbMetadataClient {
   final Map<String, MetadataMatchResult?> _resolvedMatches =
       BoundedMemoryMap(512);
   final Map<String, Future<MetadataMatchResult?>> _inflightMatches = {};
+  int _cacheGeneration = 0;
 
   void clearCache() {
+    _cacheGeneration++;
     _resolvedMatches.clear();
     _inflightMatches.clear();
   }
@@ -39,65 +40,33 @@ class WmdbMetadataClient {
   }) async {
     final normalizedDoubanId = doubanId.trim();
     if (normalizedDoubanId.isEmpty) {
-      metadataSearchTrace(
-        'wmdb.matchByDoubanId.skip-invalid',
-        fields: <String, Object?>{
-          'doubanId': doubanId,
-        },
-      );
       return null;
     }
 
     final cacheKey = 'id|$normalizedDoubanId';
     if (_resolvedMatches.containsKey(cacheKey)) {
       final cached = _resolvedMatches[cacheKey];
-      metadataSearchTrace(
-        'wmdb.matchByDoubanId.cache-hit',
-        fields: <String, Object?>{
-          'doubanId': normalizedDoubanId,
-          'matched': cached != null,
-          'title': cached?.title ?? '',
-          'tmdbId': cached?.tmdbId ?? '',
-        },
-      );
       return cached;
     }
     final inflight = _inflightMatches[cacheKey];
     if (inflight != null) {
-      metadataSearchTrace(
-        'wmdb.matchByDoubanId.inflight-hit',
-        fields: <String, Object?>{
-          'doubanId': normalizedDoubanId,
-        },
-      );
       return inflight;
     }
 
-    metadataSearchTrace(
-      'wmdb.matchByDoubanId.start',
-      fields: <String, Object?>{
-        'doubanId': normalizedDoubanId,
-      },
-    );
+    final generation = _cacheGeneration;
     final future = _matchByDoubanIdUncached(normalizedDoubanId);
     _inflightMatches[cacheKey] = future;
 
     try {
       final result = await future;
-      metadataSearchTrace(
-        'wmdb.matchByDoubanId.finish',
-        fields: <String, Object?>{
-          'doubanId': normalizedDoubanId,
-          'matched': result != null,
-          'title': result?.title ?? '',
-          'tmdbId': result?.tmdbId ?? '',
-          'imdbId': result?.imdbId ?? '',
-        },
-      );
-      _resolvedMatches[cacheKey] = result;
+      if (generation == _cacheGeneration && result != null) {
+        _resolvedMatches[cacheKey] = result;
+      }
       return result;
     } finally {
-      _inflightMatches.remove(cacheKey);
+      if (identical(_inflightMatches[cacheKey], future)) {
+        _inflightMatches.remove(cacheKey);
+      }
     }
   }
 
@@ -116,16 +85,6 @@ class WmdbMetadataClient {
         .map((item) => item.trim())
         .firstWhere((item) => item.isNotEmpty, orElse: () => '');
     if (normalizedQuery.isEmpty && actorHint.isEmpty) {
-      metadataSearchTrace(
-        'wmdb.matchTitle.skip-invalid',
-        fields: <String, Object?>{
-          'query': query,
-          'normalizedQuery': normalizedQuery,
-          'year': year,
-          'preferSeries': preferSeries,
-          'actorHint': actorHint,
-        },
-      );
       return null;
     }
 
@@ -138,46 +97,14 @@ class WmdbMetadataClient {
     ].join('|');
     if (_resolvedMatches.containsKey(cacheKey)) {
       final cached = _resolvedMatches[cacheKey];
-      metadataSearchTrace(
-        'wmdb.matchTitle.cache-hit',
-        fields: <String, Object?>{
-          'query': query,
-          'normalizedQuery': normalizedQuery,
-          'year': year,
-          'preferSeries': preferSeries,
-          'actorHint': actorHint,
-          'matched': cached != null,
-          'title': cached?.title ?? '',
-          'tmdbId': cached?.tmdbId ?? '',
-        },
-      );
       return cached;
     }
     final inflight = _inflightMatches[cacheKey];
     if (inflight != null) {
-      metadataSearchTrace(
-        'wmdb.matchTitle.inflight-hit',
-        fields: <String, Object?>{
-          'query': query,
-          'normalizedQuery': normalizedQuery,
-          'year': year,
-          'preferSeries': preferSeries,
-          'actorHint': actorHint,
-        },
-      );
       return inflight;
     }
 
-    metadataSearchTrace(
-      'wmdb.matchTitle.start',
-      fields: <String, Object?>{
-        'query': query,
-        'normalizedQuery': normalizedQuery,
-        'year': year,
-        'preferSeries': preferSeries,
-        'actorHint': actorHint,
-      },
-    );
+    final generation = _cacheGeneration;
     final future = _matchTitleUncached(
       query: cleanedQuery,
       actorHint: actorHint,
@@ -188,23 +115,14 @@ class WmdbMetadataClient {
 
     try {
       final result = await future;
-      metadataSearchTrace(
-        'wmdb.matchTitle.finish',
-        fields: <String, Object?>{
-          'query': query,
-          'year': year,
-          'preferSeries': preferSeries,
-          'actorHint': actorHint,
-          'matched': result != null,
-          'title': result?.title ?? '',
-          'tmdbId': result?.tmdbId ?? '',
-          'imdbId': result?.imdbId ?? '',
-        },
-      );
-      _resolvedMatches[cacheKey] = result;
+      if (generation == _cacheGeneration && result != null) {
+        _resolvedMatches[cacheKey] = result;
+      }
       return result;
     } finally {
-      _inflightMatches.remove(cacheKey);
+      if (identical(_inflightMatches[cacheKey], future)) {
+        _inflightMatches.remove(cacheKey);
+      }
     }
   }
 
@@ -288,6 +206,7 @@ class WmdbMetadataClient {
         result.doubanId.trim(),
         result.imdbId.trim(),
         result.tmdbId.trim(),
+        result.mediaType.name,
         result.title.trim().toLowerCase(),
       ].where((item) => item.isNotEmpty).join('|');
       if (key.isEmpty || !seen.add(key)) {
@@ -303,31 +222,15 @@ class WmdbMetadataClient {
 
   Future<MetadataMatchResult?> _matchByDoubanIdUncached(String doubanId) async {
     final uri = Uri.https('api.wmdb.tv', '/movie/api', {'id': doubanId});
-    _logRequest(
-      action: 'lookup',
-      uri: uri,
-      details: 'doubanId=$doubanId',
-    );
+
     final response = await _networkGuard.get(
       _client,
       uri,
       headers: const {'Accept': 'application/json'},
     );
     if (response.statusCode != 200) {
-      _logFailure(
-        action: 'lookup',
-        uri: uri,
-        response: response,
-        details: 'doubanId=$doubanId',
-      );
       throw WmdbMetadataException('WMDB 查询失败：HTTP ${response.statusCode}');
     }
-    _logSuccess(
-      action: 'lookup',
-      uri: uri,
-      response: response,
-      details: 'doubanId=$doubanId',
-    );
 
     final decoded = jsonDecode(
       utf8.decode(response.bodyBytes, allowMalformed: true),
@@ -354,34 +257,15 @@ class WmdbMetadataClient {
       if (year > 0) 'year': '$year',
     };
     final uri = Uri.https('api.wmdb.tv', '/api/v1/movie/search', parameters);
-    _logRequest(
-      action: 'search',
-      uri: uri,
-      details:
-          'query=${query.trim()} year=$year preferSeries=$preferSeries actor=$actorHint',
-    );
+
     final response = await _networkGuard.get(
       _client,
       uri,
       headers: const {'Accept': 'application/json'},
     );
     if (response.statusCode != 200) {
-      _logFailure(
-        action: 'search',
-        uri: uri,
-        response: response,
-        details:
-            'query=${query.trim()} year=$year preferSeries=$preferSeries actor=$actorHint',
-      );
       throw WmdbMetadataException('WMDB 搜索失败：HTTP ${response.statusCode}');
     }
-    _logSuccess(
-      action: 'search',
-      uri: uri,
-      response: response,
-      details:
-          'query=${query.trim()} year=$year preferSeries=$preferSeries actor=$actorHint',
-    );
 
     final decoded = jsonDecode(
       utf8.decode(response.bodyBytes, allowMalformed: true),
@@ -395,14 +279,6 @@ class WmdbMetadataClient {
         .map((item) => Map<String, dynamic>.from(item))
         .toList();
     if (entries.isEmpty) {
-      metadataSearchTrace(
-        'wmdb.matchTitle.candidates',
-        fields: <String, Object?>{
-          'query': query,
-          'count': 0,
-          'sample': '',
-        },
-      );
       return null;
     }
 
@@ -412,26 +288,10 @@ class WmdbMetadataClient {
       year: year,
       preferSeries: preferSeries,
     );
-    metadataSearchTrace(
-      'wmdb.matchTitle.candidates',
-      fields: <String, Object?>{
-        'query': query,
-        'count': entries.length,
-        'rankedCount': ranked.length,
-        'sample': _describeRankedWmdbCandidates(ranked),
-      },
-    );
     if (ranked.isEmpty) {
       return null;
     }
     final best = ranked.first.item;
-    metadataSearchTrace(
-      'wmdb.matchTitle.best',
-      fields: <String, Object?>{
-        'query': query,
-        'candidate': _describeWmdbCandidate(best, score: ranked.first.score),
-      },
-    );
     return _mapMatch(best, provider: MetadataMatchProvider.wmdb);
   }
 
@@ -677,87 +537,6 @@ class WmdbMetadataClient {
         .replaceAll(RegExp(r'\s+'), ' ')
         .replaceAll(RegExp(r'[^a-z0-9\u4e00-\u9fff]+'), '')
         .trim();
-  }
-
-  void _logRequest({
-    required String action,
-    required Uri uri,
-    required String details,
-  }) {
-    metadataSearchTrace(
-      'wmdb.$action.request',
-      fields: <String, Object?>{
-        'uri': uri,
-        'details': details,
-      },
-    );
-  }
-
-  void _logSuccess({
-    required String action,
-    required Uri uri,
-    required http.Response response,
-    required String details,
-  }) {
-    metadataSearchTrace(
-      'wmdb.$action.response',
-      fields: <String, Object?>{
-        'uri': uri,
-        'status': response.statusCode,
-        'bytes': response.bodyBytes.length,
-        'details': details,
-      },
-    );
-  }
-
-  void _logFailure({
-    required String action,
-    required Uri uri,
-    required http.Response response,
-    required String details,
-  }) {
-    metadataSearchTrace(
-      'wmdb.$action.response-failed',
-      fields: <String, Object?>{
-        'uri': uri,
-        'status': response.statusCode,
-        'bytes': response.bodyBytes.length,
-        'details': details,
-      },
-    );
-  }
-
-  String _describeRankedWmdbCandidates(
-    List<({Map<String, dynamic> item, double score})> ranked,
-  ) {
-    return ranked
-        .take(5)
-        .map((entry) => _describeWmdbCandidate(entry.item, score: entry.score))
-        .join(' || ');
-  }
-
-  String _describeWmdbCandidate(Map<String, dynamic> item, {double? score}) {
-    final data = _resolveLocalizedEntry(item);
-    final title = '${data['name'] ?? item['originalName'] ?? ''}'.trim();
-    final originalTitle = '${item['originalName'] ?? ''}'.trim();
-    final year = '${item['year'] ?? ''}'.trim();
-    final doubanId = '${item['doubanId'] ?? ''}'.trim();
-    final tmdbId = '${item['tmdbId'] ?? ''}'.trim();
-    final type = '${item['type'] ?? ''}'.trim();
-    final doubanVotes = '${item['doubanVotes'] ?? ''}'.trim();
-    final parts = <String>[
-      if (type.isNotEmpty) type,
-      if (title.isNotEmpty) title,
-      if (originalTitle.isNotEmpty &&
-          originalTitle.toLowerCase() != title.toLowerCase())
-        'orig=$originalTitle',
-      if (year.isNotEmpty) 'year=$year',
-      if (doubanId.isNotEmpty) 'doubanId=$doubanId',
-      if (tmdbId.isNotEmpty) 'tmdbId=$tmdbId',
-      if (doubanVotes.isNotEmpty) 'votes=$doubanVotes',
-      if (score != null) 'score=${score.toStringAsFixed(2)}',
-    ];
-    return parts.join(' ');
   }
 }
 

@@ -14,12 +14,57 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  for (final tv in [false, true]) {
+    testWidgets('custom menu order preserves branch routing (TV: $tv)',
+        (tester) async {
+      final router = _buildRouter();
+      addTearDown(router.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => tv),
+          appSettingsProvider.overrideWithValue(_settings.copyWith(
+            autoHideNavigationBarEnabled: false,
+            navigationDestinationIds: const ['settings', 'live-tv', 'home'],
+          )),
+        ],
+        child: MaterialApp.router(routerConfig: router),
+      ));
+      await tester.pumpAndSettle();
+      if (tv) {
+        _navigationNode(tester, 0).requestFocus();
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      } else {
+        expect(tester.getCenter(find.byIcon(Icons.tune_outlined)).dx,
+            lessThan(tester.getCenter(find.byIcon(Icons.live_tv_outlined)).dx));
+        expect(tester.getCenter(find.byIcon(Icons.live_tv_outlined)).dx,
+            lessThan(tester.getCenter(find.byIcon(Icons.space_dashboard_rounded)).dx));
+        await tester.tap(find.byIcon(Icons.tune_outlined));
+      }
+      await tester.pumpAndSettle();
+      expect(router.routeInformationProvider.value.uri.path, '/settings');
+      if (tv) {
+        _contentNode(tester, 'settings').requestFocus();
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+        await tester.pumpAndSettle();
+        expect(_navigationNode(tester, 0).hasPrimaryFocus, isTrue);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(router.routeInformationProvider.value.uri.path, '/live-tv');
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
   for (final autoHide in [true, false]) {
     for (final (index, path) in const [
       'home',
       'search',
       'favorites',
       'library',
+      'live-tv',
       'settings',
     ].indexed) {
       testWidgets(
@@ -62,9 +107,9 @@ void main() {
           expect(_navigationNode(tester, index).hasPrimaryFocus, isTrue);
           expect(content.hasFocus, isFalse);
 
-          final nextIndex = index == 4 ? index - 1 : index + 1;
+          final nextIndex = index == 5 ? index - 1 : index + 1;
           await tester.sendKeyEvent(
-            index == 4
+            index == 5
                 ? LogicalKeyboardKey.arrowUp
                 : LogicalKeyboardKey.arrowDown,
           );
@@ -163,7 +208,7 @@ void main() {
       await tester.pumpAndSettle();
 
       final homeNavigationNode = _navigationNode(tester, 0);
-      final searchNavigationNode = _navigationNode(tester, 1);
+      final liveNavigationNode = _navigationNode(tester, 1);
       final menuScope = tester.widget<TvMenuButtonScope>(
         find.byType(TvMenuButtonScope),
       );
@@ -173,7 +218,7 @@ void main() {
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
-      expect(searchNavigationNode.hasPrimaryFocus, isTrue);
+      expect(liveNavigationNode.hasPrimaryFocus, isTrue);
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
@@ -211,12 +256,12 @@ void main() {
 
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
       await tester.pumpAndSettle();
-      expect(searchNavigationNode.hasPrimaryFocus, isTrue);
+      expect(liveNavigationNode.hasPrimaryFocus, isTrue);
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
-      expect(_contentNode(tester, 'search').hasPrimaryFocus, isTrue);
+      expect(_contentNode(tester, 'live-tv').hasPrimaryFocus, isTrue);
 
       final container = ProviderScope.containerOf(
         tester.element(find.byType(AppNavigationShell)),
@@ -227,8 +272,8 @@ void main() {
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
-      expect(searchNavigationNode.hasPrimaryFocus, isTrue);
-      expect(_contentNode(tester, 'search').hasFocus, isFalse);
+      expect(liveNavigationNode.hasPrimaryFocus, isTrue);
+      expect(_contentNode(tester, 'live-tv').hasFocus, isFalse);
       expect(find.text('退出 Starflow？'), findsNothing);
       expect(limiter.isPausedForForeground, isFalse);
 
@@ -365,7 +410,7 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await tester.pumpAndSettle();
 
-    expect(_contentNode(tester, 'search').hasPrimaryFocus, isTrue);
+    expect(_contentNode(tester, 'live-tv').hasPrimaryFocus, isTrue);
     expect(
       tester
           .widgetList<ExcludeFocus>(find.byType(ExcludeFocus))
@@ -476,6 +521,7 @@ GoRouter _buildRouter({bool nestedPageFocusScope = false}) {
             'favorites',
             'library',
             'settings',
+            'live-tv',
           ])
             StatefulShellBranch(
               routes: [

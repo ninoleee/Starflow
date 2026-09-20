@@ -29,7 +29,10 @@
 - 播放记忆共享冷读，大 JSON/较多 series 编码走 compute；不裁剪用户历史/偏好。iOS 仅在 UserDefaults 原文不变时复用解析对象，外部写入仍失效。
 - TMDB/WMDB 已解析结果各最多 512 项 LRU；图片压缩字节仍 256 项/72 MiB，内存压力时只清该内存层。磁盘成功写后最多每小时维护一次，按修改时间淘汰超过 30 天或超过 512 MiB 的文件，最近五分钟文件受保护，故为软上限，不是访问 LRU。字幕过期扫描最多每小时一次。
 - Android 普通日志为单线程后台写、256 条有界队列、配置缓存 1s；满文件保留约半容量完整尾行，崩溃同步写与会话标记保留。Dart 普通日志 16ms 批量、待写最多 256 条/约 1M 字符，超量计数在后续日志报告；关键错误、flush、清理维持串行顺序。预览每文件最多 2 MiB 尾部，在 isolate 解析；导出按块收集，但接口仍返回完整 bytes，不是恒定内存流式导出。
-- 帧监测按约 600 帧或有新帧时满 30 秒汇总 build/raster p50/p95 与超 16.667/33.333ms 数量，250ms 严重长帧告警保留。不能把 Flutter 帧统计当视频首帧或解码掉帧。
+- 帧监测仅在记录 `info` 时按约 600 帧或有新帧时满 30 秒汇总 build/raster p50/p95 与超 16.667/33.333ms 数量；`warning` 独立控制 250ms 严重长帧检查。关闭日志时不遍历帧，关闭采样时清除旧窗口。不能把 Flutter 帧统计当视频首帧或解码掉帧。
+- MPV 释放前仅在记录 `info` 时并行读取解码器、音频输出、掉帧等 11 项纯诊断属性；缓存速度和既有 5 秒带宽采样仍用于功能性调参。释放顺序、恢复预算、进度保存和缓冲 UI 不变。
+- IMDb 数据集下载与后台解压/索引共享 Future，保留 TSV 字节及每行 4 字节偏移，按 ID 二分查询；下载上限 32 MiB、展开上限 128 MiB、400 万行、单行 256 字节，校验 gzip 校验和与长度。网络与解析失败不永久缓存，清空后的旧结果不回填，新查询不逐影片解压。查询及建议缓存各 512 项；NAS 配置开关默认关闭，详情设置切片不再订阅该无关字段。
+- Flutter assets 显式列出主 Logo 与启动 Logo，不打包两张设计源图或性能样本视频；源文件和图标生成链保留，bootstrap 目录继续支持显式嵌入设置。
 
 Starflow 不是单一播放器，而是一个面向个人影音库的统一入口，把这些能力放进同一个 App：
 
@@ -49,7 +52,7 @@ Starflow 不是单一播放器，而是一个面向个人影音库的统一入�
 - `details/domain/cached_artwork.dart` 把每类图片 URL 与 headers 作为同一个来源选择；多背景图列表不跨鉴权来源拼接。`cached_metadata.dart` 统一标题、评分、简介、演职员及外部 ID 装饰；播放身份和季集结构由各入口保留，首页 / 媒体库继续在内容不变时返回原对象。
 - `library/data/nfo_metadata.dart` 是 WebDAV / Quark 共用的纯解析模型、解析器和主次合并策略。WebDAV 通过回调解析相对图片地址；夸克不把相对地址当远程下载链接。列目录、读取文件、鉴权和本地 sidecar 优先级仍由各客户端负责。
 - `search/application/cloud_save_postprocessing.dart` 统一延迟下限、SmartStrm 部分失败与后台刷新失败边界；夸克仅重复项转存仍刷新原生夸克源，115 零新增保留原来的提前返回行为。
-- `PlaybackMemoryRepository` 串行执行完整读改写与清空，持久化成功后才更新内存快照；失效代次阻止迟到读取重新装入旧快照。这是单仓库实例内的队列，不是 Dart / 原生跨运行时事务，原生播放返回仍须失效并重读共享偏好。
+- `PlaybackMemoryRepository` 串行执行完整读改写与清空，持久化成功后才更新内存快照；失效代次阻止迟到读取重新装入旧快照。2026-09-20 起移动端通过 `NativePlaybackMemoryPreferences` 的 read / compare-and-set 桥接，与原生播放器共用原生串行写队列；冲突时重新读取并重做 mutation，不以旧全量快照覆盖新数据。Android 队列和 iOS 队列均跨 store 实例共享。原生播放返回仍须失效并重读缓存；此协议只保证本应用内参与该队列的写入顺序，不保证强杀瞬间磁盘持久化或第三方进程直接改偏好的一致性。
 - `config/playback_policy.json` 生成 Dart / Kotlin / Swift 常量；播放记忆共享 5 秒起点、12 秒续播剩余下限、8 秒完成剩余阈值、98.5% 完成比例和 20 条最近项目上限。原生时间戳统一比较实际时间、毫秒单调递增，同时间按 key 倒序；三端用 `test/fixtures/playback_memory_contract.json` 验证阈值，内核操作仍由平台实现。
 - `library_resource_deletion.dart` 只收敛确认弹窗、mounted 检查、反馈与日志；远端删除和索引清理由仓库承担。设置加载、导入、来源编辑 / 删除对两个网盘的 WebDAV 目录引用采用同一协调规则。
 
@@ -84,6 +87,7 @@ Starflow 不是单一播放器，而是一个面向个人影音库的统一入�
 - `SearchRequest` 捕获来源选择与查询，`SearchSession` 拥有请求代次、搜索/验链排队、去重及批量发布的不可变视图状态；`SearchShareValidator` 适配两种分享协议。输入、TV 焦点、收藏入口和提示仍在 presentation 层。
 - `CloudSaveDispatcher` 统一搜索、收藏与详情的保存分发、分享凭据准备及错误结果映射；原有 Quark / 115 工作流保留协议差异、零新增行为和 STRM 后处理，页面复用反馈 session。未知 115 失败显示保存未确认，客户端已有的批次未确认提示原样保留，不自动重试。
 - 公共存储仓库保留调用兼容性；`DetailCacheStore` 持有详情数据、串行写链和 revision 通知，`MediaServerCacheStore` 持有媒体服务器分片、manifest、读复用与写队列。公共模型由旧仓库入口导出；持久化 key 与数据格式不变，不因文件拆分触发缓存迁移或远端刷新。
+- 2026-09-20 缓存失败恢复补强：`MediaServerCacheStore` 在写分片前记录独立分片索引，清理时同时枚举严格分片 key 前缀，manifest 提交失败或损坏不会使分片失去清理入口；只清理媒体库缓存，不扫描或删除其他偏好。设置加载将 JSON 解析与凭据 IO 分离；读取或协调保存失败不再用默认配置覆盖有效设置，格式损坏的原文和独立凭据也保留供恢复。
 - `MpvPlaybackLifecycle` 持有实例订阅并组合 `MpvSubtitleSession`，detach 同步隔离旧所有者，清理 Future 随旧播放器传递；字幕 sid 注册迟到时仍由旧所有者移除。`PlaybackPlatformSessionOwner` 持有系统会话绑定、代次和发布快照。页面级自动恢复预算不移入单个实例，也不合并 Dart、Media3 与 AVPlayer 能力；现有 `part` 仍属于页面 library，不能称为全部运行逻辑已独立。
 - iOS `AppDelegate` 保留通道与宿主装配；`NativePlaybackModels / NativePlaybackMemoryStore / NativePlaybackViewController / SettingsDocumentExporter` 分别负责模型、存储、容器和文档导出。Swift 纯模型/存储测试不替代 AVPlayer 真机操作。
 
@@ -122,6 +126,7 @@ lib/
     discovery/
     home/
     library/
+    live_tv/
     metadata/
     playback/
     search/
@@ -139,15 +144,18 @@ lib/
 - `router/app_router.dart`：主导航和独立页面路由
 - `theme/app_theme.dart`：当前全局主题
 
-`AppRoutes.shellBranches` 固定保留五个一级路由：
+`AppRoutes.shellBranches` 保留六个一级路由，直播追加为索引 5，原有索引不变：
 
 - 首页
 - 搜索
 - 收藏（复用 `SearchPage(favoritesOnly: true)`）
 - 媒体库
 - 设置
+- 直播
 
-可见菜单由 `navigationDestinationIds` 决定；默认四项不含收藏，设置项始终保留。路由分支索引与可见菜单索引不可混用。
+可见菜单由 `navigationDestinationIds` 决定；新配置默认依次为首页、直播、搜索、媒体库、设置，不含收藏。旧配置保留已保存的菜单顺序，不强制插入直播，设置项始终保留。路由分支索引与可见菜单索引不可混用。
+
+2026-09-20 默认直播第二项调整：主机配置与导航回归 47 项通过，相关静态检查通过；包含 TV 从首页下移一次进入直播的焦点与自动隐藏检查，不代表真机验证。
 
 ### `core`
 
@@ -181,6 +189,8 @@ lib/
 - 详情 Hero 的“继续播放 / 从头播放”继续使用与普通操作按钮相同的 `secondary` 中性样式，不读取 `AppActionColors`；详情线路选择使用淡强调色底、边框与选中图标；当前播放剧集使用中性白色选中样式。详情上次播放剧集由 `findLastPlayedEpisodeIndex` 匹配，在卡片上半部图片区的 Stack 内居中显示中性历史图标和“Last Played”文字，配半透明黑底，下方简介统一最多三行；无匹配时不显示，不增加强调色边框，不改变卡片尺寸、滚动恢复或焦点行为。播放器显式绘制的已播放进度段同样读取 `AppActionColors`，缓冲段与未播放轨道保持中性
 - 首页在重新变为活动页以及 `hasPendingSections` 从 `true` 变为 `false` 时各安排一次下一帧检查；仅在主焦点为空、落在 `FocusScopeNode`、已卸载或不可请求时调用现有侧栏恢复入口，已有可操作焦点时不做任何处理
 - TV 菜单上下键按显示顺序在可见菜单项之间移动，首尾保持原位。搜索页异步结果只在主焦点为空、落在 `FocusScopeNode`、已卸载或不可请求时恢复到搜索输入框；收藏页优先恢复 `favorites:sync`，设置首页优先补到 `settings:header`。菜单或其他已挂载的可操作焦点不会被页面恢复逻辑抢占
+- 菜单显示顺序由 `AppSettings.navigationDestinationIds` 同时承载可见性与顺序；规范化保留首次出现顺序、过滤未知 ID，并在缺少设置入口时追加，不改变路由分支编号。`NavigationDestinationDialog` 维护本地排序/勾选草稿，保存时统一提交既有 SettingsController；普通端提供拖拽和移动按钮，TV 移动到边界后按钮保焦但禁止继续移动。`AppNavigationShell` 按已保存 ID 顺序映射固定分支，底栏和侧栏共用；旧配置无需 schema 迁移，不增加网络请求。
+- 菜单排序验证（2026-09-20）：主机菜单/配置/路由/设置导航联合回归 82 项通过，其中弹窗专项 5 项覆盖普通端/TV 保存、取消、设置入口不可隐藏、TV 边界保焦与 320px 窄屏实际拖拽；相关源文件与测试静态检查通过。此记录不是 Android TV 真机测量，遥控器实机体验仍待验证。
 - TV 主壳处理返回键时先以 `UnfocusDisposition.scope` 清理当前焦点及作用域历史，再聚焦当前页面对应的侧栏入口；仅当该入口已经持有主焦点时，再次返回才进入退出确认
 - `AppNavigationShell._focusCurrentDestination` 显示菜单后在帧末聚焦当前分支对应的入口，并通过 `ensureVisualUpdate` 主动安排更新帧。常驻菜单显隐状态不变时也不会让聚焦回调滞留到下一次按键；自动隐藏模式仍先解除 `ExcludeFocus` 再请求焦点。回归测试在按左后、主动补帧前检查帧已调度，覆盖五个一级分支及两种菜单模式。
 - `PageActivityMixin` 在应用非 resumed 时同步分发失活，避免后台停帧或快速失活再恢复漏掉取消处理；前台激活与路由可见性变化仍在帧末分发，并主动调度帧。重复状态不重复通知，隐藏页恢复前台不激活，已销毁页面不执行待处理回调。首页和设置页的缺焦恢复及首页 `_waitForNextFrame` 使用 `ensureVisualUpdate`，帧末嵌套回调与滚动边界无位移时也能继续；保留现有焦点保护、重试上限及取消版本检查。
@@ -199,11 +209,32 @@ lib/
 
 ### `features`
 
+直播新增 `features/live_tv/`，采用独立 `LiveSource / LiveChannel / LiveLine / LivePreference / LiveProgramme`，不扩展影视媒体源枚举，也不借用 `PlaybackTarget` 的电影语义。`LiveRepository` 持有 Sembast 数据库、串行 mutation、来源代次和合并刷新请求；下载/解析在成功后事务提交，旧响应不能恢复已删除来源。频道与 EPG 分别提交，频道成功而 EPG 失败是部分更新，不称为全部成功。
+
+`LivePlaybackController` 持有单个 `LiveEngine`、换台代次、180ms 连续换台合并、15s 开流等待、18s 无进展监测和最多三次自动恢复。恢复预算不因短暂就绪重置；手动换台/重试才重置。MPV 与 Android `LiveTvView` Exo 通过同一接口报告状态，Exo 原生视图只持有 Media3、TextureView 和音轨操作，不读取点播历史。播放器注册全局清理所有权并参与播放优先调度，后台停止，退出串行释放。当前 Exo 使用标准 Media3 renderers，并不继承点播容器的 FFmpeg/双字幕全部扩展。完整边界见 [直播电视](live-tv.md)。
+
+直播页面和持久化的具体所有权：
+
+- `liveSnapshotProvider` 订阅仓库变更，`liveGuideProvider / liveNowNextProvider` 读取本地节目单；频道页活动时每分钟刷新 now/next 查询，播放页每分钟更新当前节目显示，不发起分钟级网络轮询。`refreshDue` 只在页面激活时检查来源期限，离开/后台阻止开始下一来源，已开始的有界请求允许收尾。
+- `LiveTvPage` 拥有搜索、分组、收藏筛选和整理 UI；`LiveSourcesPage` 拥有来源编辑、文件选择、首次/手动刷新和删除确认。只有 `/live-tv` 是具名壳路由；订阅页用 `MaterialPageRoute`，播放页经 root navigator 打开 `LivePlayerPage(initialChannel, snapshot)`，没有契约草稿中的 `/live-tv/sources` 或 `/live-tv/player?channel=...` 路由。
+- TV 文件入口由 `LivePlaylistTransferDialog` 持有临时 `LivePlaylistTransferSession`，复用 `LanTransferQrAddressCard` 和 TV 对话框返回处理；返回/后台/销毁都会关闭会话，启动后迟到的 session 也会立即关闭。接收服务只校验并返回文件名与原始字节，不接触数据库或应用配置；`LiveSourcesPage` 收到后保留草稿，仍由保存动作交给 `LiveRepository`。非 TV 保留本地文件选择，Web 使用不启动 HTTP 服务的 stub。
+- `LivePlayerPage` 拥有画布/工具栏/频道/节目单的 Flutter 焦点、当前频道与内核切换、生命周期和播放优先状态。`LiveTvView` 的根视图与 TextureView 不接受焦点，Flutter 的 `AndroidView` 也被 `ExcludeFocus` 包装；原生不接管遥控器、EPG 或影视历史。音轨弹窗只向当前 engine 回写，频道及线路记忆在当前代次首次 progress/frame 时提交，而非 ready 时提交。
+- IO 库为应用支持目录 `starflow-db/live_tv.db`，Web 库为 `starflow-live-tv`。`sources / channels / preferences / epg / meta` 分离直播数据；直播内核、收藏和线路偏好不写入 `AppSettings`。只有菜单可见项仍属于配置，不代表直播数据库随配置 JSON、Web/TV 传输、WebDAV 手动备份或影视收藏自动同步。没有专属直播备份/恢复、缓存容量管理或自动过期清扫入口。
+- `live_logo_provider.dart` 拥有独立四路传输池、15s/2 MiB 单图边界和 provider 释放时取消；不接入影视海报磁盘缓存。订阅、EPG 和台标不携带媒体 headers，`LiveSource` 无自定义请求头字段；`LiveLine.headers` 仅来自播放列表的媒体选项。代理与正文边界以 [开发网络](development-network.md#直播订阅与媒体流2026-09-20) 为准。
+- 15s 开流计时触发失败，不通过 `Future.timeout` 释放旧 open 所有权，也不强制取消媒体请求；必须等待旧 open settle 后串行 stop/dispose，再开始后续 open。`LiveEngine` 无取消接口，底层永久挂起仍会阻塞清理和换台，这是当前限制。18s 只由 progress/frame 续期，ready/buffering 不续期；重连按 2/4/6s 退避。手动选线路也重置恢复预算，前台恢复不重置，切换内核建立新控制器。Exo 与 MPV 信号不完全等价，结构化 `live.playback` 只记录首次 progress/frame 的类型和耗时，不自动生成双内核可比的像素首帧报告。
+
+收尾源码补充：仓库增加 `channelOwners / epgLogos` 保存历史频道归属和来源台标缓存，删除来源同时清理可归属的旧偏好及上次播放标记；停用来源不开始刷新，刷新合并按来源及版本隔离。设置入口使用 `LiveTvPage(showBackButton: true)`，一级直播页不显示该返回按钮。播放页增加 session/attachment 代次、切换内核防重入和显式工具栏返回模式；这些后续实现不自动获得前置测试结果背书。
+
+数据收尾边界：单表 10000 频道、每频道 64 线路、全表 50000 线路；手动排序后的新频道追加。刷新按 generation 合并，删除/禁用/同 ID 重建使旧响应失效；EPG 失败保留节目及台标，偏好新增来源归属，来源日志 ID 哈希化。数据专项 38 项、播放生命周期 19 项/Exo 通道 6 项与导航 48 项均单列在主机记录，不相加为最终全套结果。
+
+[直播协作契约](live-tv-contract.md) 保留为实现前约定，实际类名、路由及已接入能力以当前代码和上述职责为准。2026-09-20 合并后指定 9 文件/132 项 Flutter 与 17 项直播 JVM 通过，定向分析无问题，详见 [主机记录](performance.md#2026-09-20-直播前置验证快照)；真实源/真机仍未测。
+
 按业务拆分：
 
 - `bootstrap`：启动预热
 - `home`：首页模块装配与 Hero
 - `library`：媒体源接入、`WebDAV` 索引、`Quark` 目录源、刷新、删除
+- `live_tv`：独立直播订阅、频道、EPG、整理偏好与 MPV/Android Exo 专属播放会话
 - `details`：详情页、详情缓存、手动索引入口、人物关联影片页
 - `metadata`：`WMDB / TMDB`
 - `search`：本地搜索、在线搜索、夸克保存、`SmartStrm`
@@ -479,7 +510,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 首页 `Hero / item` 的运行时局部 overlay 更新现在可由设置统一关闭；关闭后，首页会保持当前静态快照，只在应用启动、保存设置或显式刷新边界后重新合并缓存
 - 如果缓存里已经有刮削或手动关联后的标题，首页 `Hero`、卡片和后续详情入口都会优先展示这份标题，而不是继续显示原始文件名或 seed 标题
 - 最近播放模块直接读取本地播放记忆，并优先尝试从详情缓存补海报
-- 最近播放卡片会从 `PlaybackTarget.sourceName` 读取来源媒体库并以 19 号加粗、无边框、无背景的文字显示在海报右上角，保留原有间距，其他海报角标样式不变；来源名为空时退回来源类型标签，不使用详情缓存里的来源字段覆盖播放记录
+- 最近播放卡片会从 `PlaybackTarget.sourceName` 读取来源媒体库并以 19 号加粗、无边框、无背景的文字显示在海报右上角，使用双层黑色文字阴影提升亮色封面上的可读性，保留原有间距，其他海报角标样式不变；来源名为空时退回来源类型标签，不使用详情缓存里的来源字段覆盖播放记录
 - 最近播放卡片的主标题会优先显示电影名或剧集总名；对于单集，`SxxEyy`、进度等信息继续留在副标题，不再把具体集名作为首页主标题
 - Hero 当前主要外显配置是 Logo 形态标题、`normal / borderless` 展示方式和背景图
 - 首页滚动区外层 `LayoutBuilder` 按实际可用高度计算 Hero 高度：扣除 Hero 外边距后取 `62%`，常规下限 `220dp`，普通/无边框上限分别为 `440/500dp`；空间不足时以预留 `140dp` 给分页区、下一模块标题和卡片露出为优先。加载占位和真实内容共用计算值与 `20dp` 分页占位，单项也保留分页高度。简介最多两行，元信息限制一行；局部布局结合文字缩放在矮窗口下依次隐藏简介、元信息，优先保留片名。
@@ -513,6 +544,8 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 `LocalStorageCacheRepository` 保存 Emby 库快照时使用一个轻量 manifest、最多 `400` 条的来源 summary 以及来源 / 分区 shards，并从 fallback 中剔除已经写入分区的重复条目。来源根列表与只需要分区清单的调用共用 summary，首页或媒体库读取指定分区时只解码目标 shard；完整标题匹配仍可读取所有分区，但解码并发固定封顶为 `2`，相同 snapshot / shard 的并发读取直接复用进行中的 Future。大分片 JSON 在后台 isolate 编解码。旧 `v1` 单文件 payload 不再读取、迁移或清理，只有当前格式可作为有效缓存；缺少当前缓存时会由正常 Emby 刷新重新生成。分片加载超过 `500ms` 时会写入 INFO 级 `storage.emby-cache` 诊断日志。
 
 ### 飞牛影视
+
+2026-09-20 音轨补强：`NativePlaybackAudioTracks.serverStream` 反向映射保留不支持轨道的原始位置，语言别名归一化并结合声道，仅在完整列表数量一致时使用序号兜底；字幕回写也不再使用过滤后的序号。MPV / Exo 原画菜单额外列出服务端返回但实际流不可用的音轨，用户显式选择服务端转码档位后才重新申请会话，复用旧播放回退和迟到清理。Dart resolver 对显式且已消失的音轨 GUID 报错，避免静默回退。此改动不代表多声道转码、仅转音频、外挂位图字幕、FN ID / 双重验证或直播链路已经实现。
 
 - `MediaSourceKind.fntv` 使用独立类型、来源身份和会话；`MediaSourceKindX.isMediaServer` 仅用于 Emby / 飞牛共享的媒体服务器调用边界，不表示两者协议兼容。
 - `MediaServerClient` 定义分区、条目、子层级、播放解析和文件版本接口，family provider 按类型选取 `EmbyApiClient / FntvApiClient`；网络实现仍位于 library/data。飞牛客户端负责 v1 签名、鉴权、分页和统一模型映射，设置页负责会话测试及自动保存。
@@ -551,7 +584,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 每份 NAS / WebDAV / Quark 索引状态持久化媒体源资源身份；同一 `sourceId` 的 endpoint、根路径或 Quark 根目录变化时，启动与设置保存链会停止旧扫描并清除该来源的索引、WebDAV 目录快照、内存聚合结果和详情页本地资源关系，再由当前来源正常重建
 - 媒体源删除或配置导入后，索引 state、记录、WebDAV 子目录快照、Emby snapshot 或详情缓存中找不到对应设置来源的孤儿缓存都会按来源清理；在线海报、简介和评分仍保留，播放历史不作为来源缓存删除
 - 本地存储页清理“媒体库索引”走同一失效版本与取消链，同时清持久化和内存态，不再直接只删 Sembast 表
-- 旧的应用侧 trace helper 保持静音；正式诊断信息统一进入结构化日志系统
+- 旧静默 trace 调用、专用格式化函数和兼容 helper 已删除；异常记录直接进入结构化日志系统，原生退出捕获、预览、筛选、清理和导出保留
 
 `NasMediaIndexer` 负责的事情包括：
 
@@ -706,7 +739,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 
 - 顶部 Hero 优先使用背景图，不再重复放置海报；文字覆盖区域单独加阴影，未覆盖区域保持原图
 - 非 TV 使用标准详情 Hero；TV 固定使用精简详情 Hero
-- `TMDB` 已接入 `poster / backdrop / still / profile / logo` 等图片字段，并把 `TMDB x.x` 写入统一评分标签链路；当前不再主动去 `IMDb` 搜索信息，`IMDb` 相关标签只会在上游 `WMDB / TMDB` 已返回时参与展示和保存
+- `TMDB` 已接入 `poster / backdrop / still / profile / logo` 等图片字段，并把 `TMDB x.x` 写入统一评分标签链路；详情不主动请求 IMDb。NAS 索引仅在配置 `imdbRatingMatchEnabled=true` 时调用独立 IMDb 客户端，默认关闭；上游 `WMDB / TMDB` 与既有索引的 IMDb 标签继续展示和保存
 - `MediaItem.ratingCount` 与 `MediaDetailTarget.ratingCount` 共用豆瓣评分人数。详情 Hero 使用 `buildRatingCountLabel` 显示 `☆31.6万`；`douban_rating_stats_service` 获取 `rating.count` 后，`MediaRepository.updateRatingCount` 会把人数写回 Emby / 飞牛分片缓存或 NAS / WebDAV / Quark 索引。索引建条目、系列 / 季 / 特殊集分组和增量刷新均保留该字段，因此媒体库入口再次打开详情时可直接恢复人数。
 - 人数不再作为独立预取条件：resolver 在缺豆瓣评分、豆瓣 ID 新匹配或强制刷新时同步获取评分与人数。`DoubanEntry` 保留列表响应的 `rating.count`；首页（含轮播）和媒体库批量缓存合并、可见页变化检测、资源匹配、剧集变体及清理失效资源关联时均保留人数；仅人数变化也归入 `LocalStorageDetailCacheChangedField.ratings`，沿评分缓存订阅更新入口。已有评分但无人数的旧缓存不自动补人数，可手动更新影片信息。
 - 详情页评分标签会按来源归一去重；`豆瓣 / IMDb / TMDB` 各最多保留一条，避免 seed target、详情缓存和后续在线补全合并后出现重复评分标签；评分人数不占用标签条目
@@ -833,6 +866,10 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 
 ## 10. 播放链路
 
+2026-09-20 流畅度修复边界：iOS 与 Android 原生容器均接收完整延迟解析剧集队列，iOS 只在切集时经 `starflow/native_playback_resolver` 解析目标，30 秒截止及会话代次拒绝迟到提交。iOS 宿主更换请求身份前完成旧实例字幕/进度快照与清理，再异步读取新集记忆。`NativePlaybackMemoryStore` 在两端拥有串行写入队列，合并待写周期进度而保留强制最终快照；iOS 缓存最大时间戳及复用日期解析器，Android 高频跳过检查读取发布快照。写入完成通过 `nativePlaybackMemoryChanged` 使 Flutter 历史缓存失效，不能把主线程提交完成等同磁盘同步。
+
+MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播放器代次和手动选轨优先；`PlaybackSeekCoalescer` 合并 TV 长按输入，稳定的播放页 key 不因 ready 状态销毁视频子树。AVPlayer StartupGate 只允许一个 preroll，ready 时间轴区分点播/直播，不以 `.m3u8` 判断直播。iOS 呈现回调和 `playing` 不是实际像素首帧。处理状态与限制见 [播放器审查](player-smoothness-review-2026-09-20.md)。
+
 播放器页基于 `media_kit`，当前是“三种播放内核”分支：
 
 - 内置播放器负责应用内播放、字幕增强、续播和跳过逻辑
@@ -890,7 +927,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
   - `player_page_runtime_actions.part.dart`：续播、跳过、字幕、外挂字幕、在线字幕、飞牛画质与轨道切换
   - `player_page_controls.part.dart`：返回、进度、选择器、播放设置、视频 surface
   - `player_playback_options_dialog.dart`、`player_playback_overlays.dart`、`player_playback_dialogs.dart`、`player_tv_playback_widgets.dart`、`player_network_speed_label.dart`：纯展示层组件；旧自定义 `PlayerMpvControlsOverlay` 已删除，非 TV 统一使用 media_kit Adaptive 控制层
-- `lib/core/utils/playback_trace.dart`、`subtitle_search_trace.dart`、`metadata_search_trace.dart` 与 `detail_resource_switch_trace.dart` 仍保留调用点，但当前实现都已静音，不再产生运行时输出
+- 四类旧 trace helper 和 `DebugTraceOnce` 已删除，普通静默调用不再提前构造参数；错误调用直接使用 `appLogError`。MPV 不再为静默尺寸日志订阅 width/height；缓冲订阅继续用于性能会话、可靠性日志与 UI
 - 内置 `MPV` 现已把 `ISO` 打开路径统一纳入同一条执行链：本地路径 / `file://` / UNC 优先尝试 `dvd-device / bluray-device`，远程 `ISO` 则直接回退普通 `Media(...)` 打开，并在回退前清理残留的 `dvd-device / bluray-device / http-header-fields`
 - `TV` 分支当前仍保留自定义播放叠层：
   - 电视场景继续走“首层极简 + 二层高级”的 `NoVideoControls + 遥控器快捷键` 模式
@@ -976,7 +1013,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - `NativePlaybackRuntimeController` 管理运行循环、watchdog 调度、自动跳过和进度采样；`NativePlaybackDiagnostics` 管理会话性能、带宽与运行日志；`NativePlaybackSystemController` 管理系统会话与画中画。`NativePlaybackMemoryStore` 独立管理 SharedPreferences 快照读写、20 条历史裁剪和剧集字幕/跳过偏好，以显式 key 接收请求并保留强制 commit/普通 apply；`NativePlaybackTarget / NativePlaybackMarkers / NativePlaybackSource / NativePlaybackFormatting` 分别提供目标信息、章节标记、源地址处理和显示格式。
 - Android 原生播放器容器页当前使用原生 `Activity + Media3/ExoPlayer` 承载播放，在 UI 中命名为 `ExoPlayer（原生）`；它会跟随设置选择 `自动 / 硬解优先 / 软解优先` 和独立的音频输出模式
 - Android 原生播放器按实际 `Format.sampleMimeType` 决定音频输出策略，始终注册 FFmpeg 备选；TV 自动 E-AC-3/JOC、PCM 兼容及故障回退禁用对应压缩直通，FFmpeg 支持时将该音频路由到扩展 renderer。`NativePlaybackAudioSink` 包装 context-aware 默认 sink，保留设备能力监测和 PCM 能力查询。系统解码器的软/硬解优先使用稳定排序，不删除其他候选。
-- `NativePlaybackRecoveryController` 只对非 DRM 音频 renderer 的解码/AudioTrack 初始化或写入错误尝试一次 FFmpeg/PCM 重建；网络、视频、已使用 FFmpeg 或库不支持的音频不进入这条恢复。`NativePlaybackSession` 保存位置、暂停、倍速、音量和音轨 Format，在新轨道中按身份匹配并创建新的 override；新媒体清空回退预算，不复用旧 TrackGroup。`NativePlaybackAudioTracks` 同时负责飞牛首次 GUID 匹配，语言别名归一化，序号兜底保留不支持轨且要求两端轨道数量一致，已有用户 override 优先。
+- `NativePlaybackRecoveryController` 将非 DRM 音频恢复分为独立预算：解码初始化/解码失败最多一次 FFmpeg 回退，要求原 renderer 非 FFmpeg 且库支持该 MIME；AudioTrack 初始化/写入失败只对实际高精度或压缩直通输出尝试一次 PCM16，不改变解码器选择策略、不消耗解码预算。网络、视频和 DRM 不进入这两条恢复。`NativePlaybackSession` 保存位置、暂停、倍速、音量和音轨 Format，在新轨道中按身份匹配并创建新的 override；新媒体清空回退预算，不复用旧 TrackGroup。`NativePlaybackAudioTracks` 同时负责飞牛首次 GUID 匹配，语言别名归一化，序号兜底保留不支持轨且要求两端轨道数量一致，已有用户 override 优先。
 - Android 音频轨变化日志按内容去重，保留 MIME、声道、采样率、支持/选中状态；初始化区分 `ffmpegConfigured / ffmpegAvailable / audioFallbackMime`，真实 decoder 回调及 AudioTrack 初始化记录 decoder 名称、输出 encoding、采样率、声道掩码、offload/tunneling。MPV 在会话结束的有界属性查询中增加音频 codec、输出后端、输入格式、输出声道/采样率和 A/V sync，不新增高频轮询。
 - Android 原生播放器的字幕菜单不使用 Media3 泛化轨道名称，而由 `NativeSubtitleTrackLabelPolicy` 按内置 MPV 的“标题 · 语言 · 默认/强制”顺序生成；`und / zxx` 不显示为语言，外挂字幕优先显示文件名
 - Android 双字幕由 `NativeDualSubtitleController` 管理主/副文本 renderer，按选定轨道的 `NativeSubtitleFormatKey` 路由，不再把副轨写死为英文。样式从 Flutter 全局设置传入，播放内修改经窄保存回调持久化；普通模式只启用主字幕，PGS/VobSub/DVB 不进入双字幕候选
@@ -990,7 +1027,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - MPV 缓冲预算由 `resolveMpvBufferBudget` 统一计算，并通过 Android `starflow/platform -> getMemoryClassMb` 读取 TV 应用内存等级；低内存 TV 将夸克/激进前向缓冲封顶 `96 MB`、回看封顶 `16 MB`，中高内存和非 TV 继续使用原预算。`resolveMpvRemotePlaybackTuningProfile` 还会比较启动速度与片源码率，达到 `2.5x` 且非高风险容器时进入 `fast-start`，否则保留 standard/high-risk 档
 - MPV 打开重试先由 `classifyMpvOpenFailure` 分类，只有临时网络错误才在统一总超时内最多尝试 `3` 次（包含首次）；永久资源/权限/格式错误与未知错误不再无条件重复创建播放器。进程内 `PlaybackHostBandwidthCache` 按主机缓存实际播放速度 `10` 分钟，首次播放与切集都只读缓存，不额外发起 Range 预检或测速
 - 启动编排通过 `_startupGeneration` 在退出或替换会话后使旧异步任务失效，并在解析、打开和重试边界校验；打开失败只清理仍由当前打开链持有的播放器，已 detach 的实例交给退出/替换路径释放。单次打开从开流到首帧、稳定播放共用启动错误信号，不在中间重置；TCP `ffurl_read` 读取失败纳入有限临时网络重试。
-- MPV 的 `_initialize` 在地址解析和本地准备后直接进入 `_openEmbeddedPlayback / _openWithRetry`，移除 `_prepareStartupDiagnostics`、预检拦截、预检 Range 风险状态和预检测速统计。`resolveMpvRemotePlaybackTuningProfile` 的可选 `estimatedMegabitsPerSecond` 来自同主机缓存；缺失时按片源元数据选标准/高风险档，后续经本地 `cache-speed` 更新缓存。`PlaybackRemotePreflight` 仅继续供原生 ExoPlayer 的 SmartStrm 格式探测使用。`playback.startup / playback.mpv` 记录直接打开、启动异常与重试决定，不依赖静音的旧 trace helper
+- MPV 的 `_initialize` 在地址解析和本地准备后直接进入 `_openEmbeddedPlayback / _openWithRetry`，移除 `_prepareStartupDiagnostics`、预检拦截、预检 Range 风险状态和预检测速统计。`resolveMpvRemotePlaybackTuningProfile` 的可选 `estimatedMegabitsPerSecond` 来自同主机缓存；缺失时按片源元数据选标准/高风险档，后续经本地 `cache-speed` 更新缓存。`PlaybackRemotePreflight` 仅继续供原生 ExoPlayer 的 SmartStrm 格式探测使用。`playback.startup / playback.mpv` 记录直接打开、启动异常与重试决定；旧 trace helper 已删除
 - 当平滑后的同主机速度低于片源码率 `0.9x` 时，MPV 运行期 hard stall 与 Exo watchdog 保留当前连接继续缓冲并提示；MPV 已失败并释放的开流不受该历史速度门槛限制，仍按错误分类有限重试。
 - `MpvStartupScope` 统一启动等待的取消信号和截止时间，覆盖调参、开流、首帧、稳定播放、偏好应用及退避；首帧元数据订阅在取消/错误/超时后释放。取消等待不取消底层原生操作，释放仍串行。启动阶段的 error 事件只交给启动流程，ISO 换候选重置错误信号及 HTTP/缓冲证据。单次打开最多保留 12 条原生错误白名单摘要，失败写结构化本地日志；成功后原生 log 订阅随 `_OpenedPlayback` 移交给页面以继续识别运行期 HTTP 错误，与 error 订阅一并在失败/退出/替换时释放。`buildMpvRecoveryTarget` 保留当前集身份并启用续播，恢复成功需要实际进度前进。
 - `MpvStartupErrorGate` 处理 media_kit 从原生日志转发的启动错误：非 Web 远程临时错误每 `250ms` 查询本地 `idle-active`，连续两次为真或错误后连续 `15s` 无播放/缓冲进展时完成 `MpvOpenFailure` 信号。每次属性查询最多 `250ms`，连续六次不可用则失败；持续进展仍受共享启动截止时间限制。永久/未知及本地/Web 错误即时处理。成功、失败、退出和 ISO 换候选均清理 gate；日志保留白名单摘要、延后错误数和确认方式。
@@ -1001,24 +1038,34 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - Android 原生播放器同时记录视频轨 MIME、编码、尺寸、色彩信息与支持状态；检测到存在视频轨但当前设备全部不支持时，会以 `static=false` 重新请求 Emby 转码流并从原进度继续
 - Android 原生播放器额外包含与 Media3 同版本的 `media3-exoplayer-hls`；`/smartstrm_fid/` 只在目标为 MP4/未知格式时执行最多 `64` 字节、约 `1.5s` 的轻量预检，以 MP4 `ftyp` 或 HLS `#EXTM3U` 文件头优先选择 MediaSource。已知 MKV 等其他容器不再产生额外 Range 探测；其他含 `#/%23` 的 SmartStrm 地址仍保留探测。预检失败或文件头不明确时继续按原格式启动；标准 `/smartstrm/` 与 `/smartstrm_*/` 路径在首次解析错误 `3003` 后仍由 `NativePlaybackHlsFallbackPolicy` 保留进度并强制切换 HLS 一次
 - `NativePlaybackSource.buildRequestHeaders` 只负责构造原生播放请求头：保留目标已有 `User-Agent`，缺失时才补 `Starflow`；`NativePlaybackSession` 不再调用 `DefaultHttpDataSource.Factory.setUserAgent`，避免后写覆盖飞牛 115 直链要求的浏览器 UA。
-- Android 原生 progressive TS 使用 `NativePlaybackExtractorsFactory` 替换默认 `TsExtractor` 的 payload reader。Session 将当前目标 `audioCodec` 传入 factory；`NativeTsPayloadReaderFactory` 仅对 `0x80` 且编码精确匹配 `pcm_bluray`（忽略大小写及首尾空白）或 ES 注册描述符（tag `0x05`）标识 `HDMV` 的流启用 `PcmBluRayReader`。描述符按 TLV 边界解析，截断、过短注册描述符及非 HDMV/冲突注册信息均保留默认 reader，即使目标编码为 `pcm_bluray`。未使用 PMT program-level 描述符或读取媒体包猜测；无证据的 NAS/STRM `0x80` 仍走默认 `DC2/H.262`。reader 解析 HDMV 布局 1/3/9/11（单声道、双声道、5.1、7.1）的 48/96/192 kHz、16/20/24-bit 数据，移除填充并重排为 Media3 PCM16 顺序；高位深截取高 16 位，其他布局明确抛出不支持错误。默认 reader factory 额外启用 `FLAG_ALLOW_NON_IDR_KEYFRAMES`，由 Media3 识别 H.264 非 IDR I slice，避免开放 GOP 在 seek 后无关键帧可读；不启用其他 TS flags，不影响 HLS extractor 或内置 MPV。
+- Android 原生 progressive TS 使用 `NativePlaybackExtractorsFactory` 替换默认 `TsExtractor` 的 payload reader。Session 将当前目标 `audioCodec` 传入 factory；`NativeTsPayloadReaderFactory` 仅对 `0x80` 且编码精确匹配 `pcm_bluray`（忽略大小写及首尾空白）或 ES 注册描述符（tag `0x05`）标识 `HDMV` 的流启用 `PcmBluRayReader`。描述符按 TLV 边界解析，截断、过短注册描述符及非 HDMV/冲突注册信息均保留默认 reader，即使目标编码为 `pcm_bluray`。未使用 PMT program-level 描述符或读取媒体包猜测；无证据的 NAS/STRM `0x80` 仍走默认 `DC2/H.262`。reader 解析 HDMV 布局 1/3/9/11（单声道、双声道、5.1、7.1）的 48/96/192 kHz、16/20/24-bit 数据，保留位深输出 PCM16/PCM24，其他布局明确抛出不支持错误。默认 reader factory 额外启用 `FLAG_ALLOW_NON_IDR_KEYFRAMES`，由 Media3 识别 H.264 非 IDR I slice，避免开放 GOP 在 seek 后无关键帧可读；不启用其他 TS flags，不影响 HLS extractor 或内置 MPV。
 - `0x90` Blu-ray PGS 流由 `PgsReader` 按 segment header 跨 PES 聚合 `PCS / PDS / WDS / ODS / END`，完整显示集以 `application/pgs` / `S_HDMV/PGS` 提交给 `NativeSubtitleParserFactory` 的 `BoundedPgsParser`。显示时间锁定为 PCS 开始处的 PES PTS，即使 segment header 跨包也不被后续 PTS 覆盖；缺少 PCS 时 reader 保留首段时间，parser 不推测缺失的组合对象。新 PCS 会抛弃缺失 END 的旧显示集，单个显示集最多缓存 `4 MiB`，超限后忽略至 END 或新 PCS；seek 清空组装状态。PGS parser 按 ID 管理对象/调色板，支持多对象、裁剪、窗口和正常组合复用；epoch/acquisition 清缓存。对象编码缓存上限 `8 MiB`，sample/解压上限 `4 MiB`，组合像素上限 `3840 × 2160`。`BoundedVobsubParser` 基于 Media3 1.10.1，增加循环前进与分配边界；DVB 保留上游解码但预检资源并修正 offset。progressive extractor 按自身作用域记录 parser，seek/release 显式 reset，TS PGS/DVB 连续性中断按 format ID reset。MediaSource 字幕入口使用同一工厂，Blu-ray `0x90` 自定义识别不扩展到 HLS。详细限制见 [字幕链路](subtitles.md)。
 - `NativePlaybackExtractorsFactory.TS_TIMESTAMP_SEARCH_BYTES` 将 progressive TS 的 PCR 搜索窗口设为 `6000 * 188 = 1,128,000` 字节（默认 `600 * 188`）。高码率 / 可变码率 TS 的相邻 PCR 可相隔数百 KiB，旧窗口找不到 PCR 时，Media3 `TsBinarySearchSeeker` 会退出二分定位并从估算字节位置读取；首尾搜索不到 PCR 还会让 `TsDurationReader` 无法确定时长。扩大的有界窗口同时供这两个原有组件使用，不自建 seek 算法，不改变其他容器、HLS、MPV 或加载策略。回归测试直接调用 Media3 定位器和时长读取器，用稀疏 PCR 流验证旧窗口的错误落点及新窗口的收敛；这不代替 TV 解码和字幕屏幕位置验证。
 - `NativeSubtitleRenderer` 包装 Media3 `TextRenderer`，将其 cue 回调留在播放线程，再由 `NativeSubtitleOutput` 单槽队列交付 UI。PGS/VobSub/DVB 每轮最多追赶 32 次，`BitmapSubtitleSampleStream` 最多允许一条未来样本进入 resolver，保持外部原 stream 身份与 offset 语义；后续每帧仍调用 render 以推进显示/清屏。到达追赶上限时保留最后状态但暂不发 UI，下一轮继续。主、副 renderer 各自持有状态；reset/disable 清除旧更新，disable 通过公开 position reset 清理 resolver，release 关闭输出。Media3 继续负责 cue 替换和时间轴，不改 PGS PTS。`lagMs` 超过 1 秒时最多每 5 秒记录一次，其余维持 30 秒限频，它不是解码耗时；`subtitle.decode` 另记录 PGS 解码耗时/像素/编码缓存，`subtitle.decode.drop` 记录丢弃原因，`subtitle.catch-up` 记录追赶批次，均限频且不含字幕正文。
 - MPV 的 `MpvSubtitleRenderBinding` 独立管理字幕可见性，订阅 track、tracks 及原生 sid，解析 auto 的实际轨道并容忍迟到元数据；串行合并属性写入、检查关闭状态、失败写结构化日志。`subtitle_render_policy.dart` 统一渲染、双字幕、偏好指纹和飞牛外挂的 codec/image 判定。绑定不修改 sid，不抢用户选轨；关闭时解除观察及订阅。
 - 原生运行期日志另记录 `awaitingVideoFrameAfterSeek`：存在已选视频轨时在 seek 回调中置位，收到 `onRenderedFirstFrame` 后清除，创建新播放器时重置。与历史 `firstFrame` 分开，便于区分“本会话曾出画面”和“此次快进已恢复画面”；该标记只用于诊断，不把字幕输出或播放时钟推进视为视频出帧，也不新增自动恢复策略。
-- `PcmBluRayReader.createTracks` 提前注册音轨，格式在完整音频头可用时发布；非法布局、位深、采样率、payload 长度或 PES 边界截断的音频头明确失败，不静默等待 Format。完整采样帧使用固定 24 字节 scratch，输出复用 30,720 字节缓冲和 ParsableByteArray，最多 10 ms 或 PES 完成时提交。`sampleData` 遵循 `(data, length, SAMPLE_DATA_PART_MAIN)`，时间戳按累计采样帧数计算，缺 PTS 时延续时钟，变采样率先折算上一段时长；seek 清除时钟、包头和残片。未完成的采样帧不跨 PES 拼接。
+- `PcmBluRayReader.createTracks` 提前注册音轨，格式在完整音频头可用时发布；非法布局、位深、采样率、payload 长度或 PES 边界截断的音频头明确失败，不静默等待 Format。完整采样帧使用固定 24 字节 scratch，输出复用 46,080 字节缓冲和 ParsableByteArray，最多 10 ms 或 PES 完成时提交。16-bit 保留 PCM16，20/24-bit 的三字节存储完整反转为 PCM24，不在 reader 丢弃低位。位深变化也发布新 Format。`sampleData` 遵循 `(data, length, SAMPLE_DATA_PART_MAIN)`，时间戳按实际采样宽度和累计采样帧计算，缺 PTS 时延续时钟，变采样率先折算上一段时长；seek 清除时钟、包头和残片。未完成的采样帧不跨 PES 拼接。
+- `NativePlaybackAudioPolicy.useHighPrecisionPcm` 决定输出：非 PCM 兼容模式、speed/pitch 均为 1 且无会话回退时启用 Media3 float output。高位深由其 `ToFloatPcmAudioProcessor` 转换；兼容路径使用上游 `ToInt16PcmAudioProcessor` 和 Sonic，不自研重采样、降位深或 dither，也不宣称兼容转换无损。非正常 speed/pitch 同时禁用压缩直通，但不因此强制 FFmpeg。`Session.setPlaybackParameters` 在提交倍速前依据实际 sink 状态决定是否重建；普通 PCM16 原地更新，高位深/float、正在直通或恢复此前因倍速关闭的直通时才切路径；尚无 sink 证据时保守处理。`stagePlaybackParameters` 让飞牛重开在创建 sink 前拿到倍速。sink 配置回调补偿随后切入高位深音轨；参数监听和输出观测按播放器实例隔离，忽略旧实例/过时回调。必要的重建会重新开流并恢复位置、音轨、音量、暂停状态。
+- `NativeAudioOutputState` 每个播放器独立记录 sink 输入 Format、真实 decoder 和 AudioTrack encoding，释放时替换；Recovery 优先使用 AudioSink 异常自带格式，其次取当前 sink，不能把 AAC/DTS 等压缩 renderer 输入直接当成实际输出。高精度/直通输出失败单次回退 PCM16，不依赖 FFmpeg raw 支持；已经 PCM16 的输出失败不触发这条回退。新媒体重置，手动输出选择可清除当前格式强制项但不刷新自动重试预算。Diagnostics 分别记录输入 PCM encoding 和实际 AudioTrack encoding，并附 PCM16/PCM24/Float32 等可读标签；reader 另记录源 16/20/24-bit，避免把 PCM24 容器误写成 24 位有效输入。Android 混音器和 HDMI 最终格式不属于此日志的保证范围。
+- `NativeAudioPrecisionHistory` 由 Session 按当前媒体持有，记录已观察到的高精度输出因倍速关闭时的源音轨身份；返回正常 speed/pitch 且策略允许时补偿系统解码器 PCM16 无法自行说明历史的问题。恢复重建前清记录，普通重建保留，换媒体、手动输出模式、设备/解码回退清除；不根据 codec 推测源位深。`NativeAudioDecoderPrecisionPolicy` 将 FFmpeg 恢复候选限制在当前 AAR 支持的非 AC-3 MIME，不为固定 PCM16 的 AC-3 重建。状态观测区分源 Format、sink 配置尝试与活动 AudioTrack，配置不等于新输出已建立；复用时保留输出，释放回调清理对应实例。
+- `NativePlaybackAudioOutputProvider` 仅接管高精度 raw PCM 的自动缓冲区查询，把明确的 `AudioTrack.ERROR_BAD_VALUE` 转成 provider 配置异常，由真实 `DefaultAudioSink` 包装成携带输入 Format 的 `AudioSink.ConfigurationException`；其他 runtime 异常不按消息或调用栈猜测恢复。成功路径沿用 Media3 1.10.1 默认缓冲区计算，PCM16、压缩输出和显式缓冲区保留原路径，包装仍转发设备能力与声道能力。升级 Media3 或自定义缓冲区策略时须复核该适配。
+- `rendererFormat` 缺失时，输出恢复只接受已知音频 renderer 的 AudioSink 格式证据；系统解码器还必须有当前源轨证据并排除 DRM，不能用已去除加密元数据的 raw sink 代替源轨。FFmpeg renderer 本身拒绝 DRM，但显式 DRM 标记仍阻止恢复。状态通过不可变快照发布，旧 track/decoder 释放不能清除新实例；Media3 回调缺少实例 ID，相同配置或名称按 FIFO 配对，不能保证识别逆序释放。源轨没有 ID 时，精度历史只接受同一 Format 对象，重建后无法确认身份则保守不恢复。
 - `NativePlaybackSession` 保持其他容器的 extractor、HLS 工厂、load control 档位及启动预算不变；`1004` 本身不是 HLS 格式证据，不据此强制回退 HLS。
 - Android 原生启动通过 `buildDeferredNativeEpisodeQueue` 携带当前季的完整未解析队列并保留真实 `currentIndex`，只用已解析目标替换当前条目；原生选集、上一集、下一集和播放结束自动续播统一通过 `starflow/native_playback_resolver` 回调 Flutter，按选中的单集执行 `PlaybackTargetResolver` 和必要的 SmartStrm MP4/HLS 探测。异步解析期间旧播放器不释放，成功后才更新队列条目并切换，失败或会话变化则保留当前视频
 - Android TV 原生播放器内切换远程剧集时，`releasePlayer()` 先清理旧 Exo、Surface、Analytics/带宽监听、运行循环、看门狗和系统媒体会话；新集不继承旧 URL、MediaSource 或缓冲数据。低内存 TV 的内部切集档使用 `minBuffer=30s / start=6s / rebuffer=12s / target=48 MB`，首次外部启动继续使用原快启档。`native.queue.old-player-released` 与 `native.buffer-policy episodeSwitchWarmup=true` 用于验证两段边界
 - 内置 MPV 的 TV、Material 和 Material Desktop 控制层都直接消费 `PlaybackEpisodeQueue`，不使用 media_kit 内部单媒体 playlist 的上一项/下一项按钮；三端统一显示边界可用状态和右侧选集面板。手动选集、相邻集及自动续播最终收口到 `_switchPlaybackQueueIndex`：先取用命中的预解析地址，否则用 `PlaybackTargetResolver` 解析目标单集并校验可播地址，成功后才保存旧集进度、关闭旧播放器并初始化新集，解析失败时队列索引和当前播放器保持不变
 - MPV 的 TV 下键由独立 `_OpenTvEpisodePickerIntent` 处理：有可浏览队列时直接打开选集，没有队列时打开播放设置；选集不主动收起或显示控制栏，控制栏是否可见保持进入前的状态
+- Flutter `player_episode_picker_dialog.dart` 在非 TV 模式的底栏最左侧提供关闭图标，复用现有工具按钮的 44dp 点击区域及语义标签；关闭返回空选择，不提交剧集或候选队列，切季加载时仍可使用。TV 不增加按钮，保留返回键与既有焦点布局。
+- Flutter 选集初始定位、模式/分段切换、定位当前集与方向键移动共用整行对齐偏移：取最接近居中位置的 72dp 行边界。滚动内容底部仅在需要时补不足一行的余量，使末尾最大偏移也对齐行边界且最后一行完整可见；不改变条目高度，不干预手动滑动，也不使用首帧后的补滚动。Android 原生选集定位策略不受此变更影响。
 - `PlaybackEpisodeBrowser` 负责选集会话内的季列表、单季元数据及 in-flight 缓存，失败清除对应缓存后可重试；`PlaybackEpisodeQueueResolver.loadSeasons/loadSeason` 复用媒体服务子列表和 NAS 本地索引，不解析播放地址。浏览其他季的队列使用 `currentIndex=-1`，通过 `PlaybackEpisodeSelection` 将候选队列与选择索引交给播放层，MPV 在地址解析成功且原队列仍有效后才提交。Android 经 `browseNativePlaybackEpisodes` 回调同一服务，`NativePlaybackEpisodePicker` 只负责面板；`NativePlaybackEpisodeController.selectedSeasonQueue` 暂存跨季候选，失败清除，成功才提交为播放队列。
 - 两端选集面板采用列表/四列网格，TV 宽度为可用宽度的 `30%` 并夹紧在 `320–600dp`，窄屏继续占满可用宽度；每段最多挂载 30 个轻量条目，按真实集号显示分段边界，遥控器移动可跨段。当前播放依据资源 key 标识而不是焦点位置；本地历史仅作显示，不修改历史保留策略。Flutter 选集及季/范围弹窗使用 `AnimationStyle.noAnimation`；Android 对应窗口在显示前设置 `windowAnimations=0`，主面板的尺寸与位置也在显示前确定，避免默认窗口缩放和显示后扩张。Flutter 关闭后恢复原 FocusNode，Android 优先恢复仍挂载的入口 View。单季加载带请求代次校验和 30 秒超时，关闭面板、定位当前集或切换请求后忽略迟到结果；不加载剧照、不预解析整季。
-- MPV 的跳过与连续播放规则由 `playback_auto_skip_policy.dart` 提供，与 Kotlin `NativePlaybackStartPolicy` / `NativePlaybackSkipPolicy` 一一对应：`resolvePlaybackStartPosition` 在打开后、位置事件生效前决定起点（自动下一集忽略旧续播并应用片头，非自动入口按 allowResume 用续播点，无续播点才用片头，片头越界回到 0），随后置位片头标志，因此启动 seek 不会和续播互相覆盖；`resolvePlaybackEndBoundary` 给出结束边界，`shouldPrepareNextEpisode` 给出边界前 `30s` 的预解析窗口
-- MPV 起点在创建播放器之前算好，通过 media_kit `Media(start:)` 交给 mpv 的 `on_load` 钩子（`on_unload` 会自动复位），因此打开即定位，打开后不再有续播 seek，也不再需要第二轮 `_awaitStrictPlaybackReady` 确认；片头越界在时长事件里校验一次并回到 0，后端未应用起点时（相差超过 `10s`）才回落到一次 seek。开流后的异常由卡顿看门狗接管
+- MPV 的跳过与连续播放规则由 `playback_auto_skip_policy.dart` 提供，与 Kotlin `NativePlaybackStartPolicy` / `NativePlaybackSkipPolicy` 对应：`resolvePlaybackStartPosition` 在创建播放器之前决定开流起点（自动下一集忽略旧续播并应用片头，非自动入口按 allowResume 用续播点，无续播点才用片头），`resolvePlaybackEndBoundary` 给出结束边界，`shouldPrepareNextEpisode` 给出边界前 `30s` 的预解析窗口。
+- MPV 起点通过 media_kit `Media(start:)` 交给 mpv 的 `on_load` 钩子（`on_unload` 会自动复位）。`PlaybackIntroStartGuard` 在开流前订阅 duration，在首帧 / 稳定播放等待期间发现越界便同步将有效起点改为零并执行自动 seek；纠正期间不确认就绪，结束后重新建立位置基线、确认窗口与 watchdog，迟到 position 回退也重置基线。订阅在成功、失败和取消时释放；`_OpenedPlayback.effectiveStartPosition` 传递最终起点，ISO 后续尝试及 finalize 不恢复无效片头。有效起点仍仅在后端偏差超过 `10s` 时兜底 seek，不新增常规二次缓冲。
 - MPV 的剧集队列只在没有队列时解析：切集和故障恢复复用内存队列并替换当前条目；冷启动的内嵌路线在开流后台解析队列，`launchSystemPlayer / launchNativeContainer` 两条路线仍在 executor 前同步解析
-- MPV 到达结束边界时经 `_advanceAtPlaybackEndBoundary` 直接切下一集并把旧集按完成写盘，不再 seek 到 `duration-400ms` 等 `completed`；最后一集保存完成后暂停并提示。预解析只缓存地址和请求头（`_PreparedNextEpisode`，TTL `60s`、解析超时 `30s`、每个准备键一次），暂停、切集进行中或地址已知的条目都不发起；用预解析地址打开失败且 `classifyMpvOpenFailure` 判为永久错误时，用原目标重新解析一次
+- MPV 到达结束边界时经 `_advanceAtPlaybackEndBoundary` 直接切下一集，不再 seek 到文件尾。`PlaybackCompletionState` 独立记录因跳过而完成，仓库 `saveProgress(completedByAutoSkip:)` 将其与原完成策略取 OR，但保存真实 position / progress，不增加 JSON 字段、不在仓库继承旧完成状态；同媒体恢复保留，手动 seek 和新播放清除。最后一集先设置完成并暂停，再强制保存，暂停 / 退出采样继续传递标记。
+- `PlaybackEpisodeAdvanceGuard` 管请求所有权、自动失败去重及提交阶段；每次 await 后校验令牌、播放器、队列和上下文，自动请求另复查当前边界 / 播放意图。显式暂停、手动 seek、改规则和字幕搜索使尚未提交的自动请求失效，手动选集可取代它；自然 EOF 的 playing=false 不被误认成用户暂停。提交前无 await 地锁定请求并 detach 旧播放器，随后保存 / 释放；旧 finally 不清除新请求。
+- `PlaybackInteractionPlayer` 截获所有通过 Player API 的手动 seek / 播放意图，在后端位置事件之前设置保护，覆盖 Adaptive 进度条 / 滑动 / 双击 / 桌面键盘及 TV / 系统媒体命令；应用启动、片头纠正和恢复通过显式 automatic 方法绕过。自动 seek 不撤销已完成状态。
+- `PlaybackEpisodePreparation` 只缓存地址与请求头，绑定播放代次、当前队列 / 目标和设置快照；背景每键一次，TTL `60s`，后台 / 直接前台解析 `30s`，在途请求首次转前台只延长一次 `30s`，后续调用不续期。自动意图取消不清缓存；上下文变化 / detach / 销毁取消计时器并拒绝旧结果，显式手动重试可重新解析失败。切集和预解析共用键，已解析目标通过 `targetAlreadyResolved: true` 进入启动，飞牛不重复解析；预解析地址的可刷新永久错误仍仅用原目标刷新一次。
 - Flutter、Android MediaSession 和 iOS MPRemoteCommandCenter 通过 `hasEpisodeQueue / hasPrevious / hasNext` 共享系统媒体动作语义：存在多集队列时隐藏 10 秒快退/快进并发布上一集/下一集，普通影片则继续发布快退/快进与进度拖动；系统命令不再在剧集边界回退成 seek。MPV、Android 原生和 iOS 原生的切集成功路径均不显示额外提示，只保留解析中与失败反馈
 - Android 原生播放器复用每秒运行循环做续播采样，实际仍按约 `10s` 的位置差值节流落盘；内置 `MPV` 和 iOS 原生播放器使用同一量级，生命周期暂停、返回、切集和关闭路径会强制保存
 - `PlaybackMemoryRepository` 在进程内缓存解码后的快照：写入时同步更新缓存，避免播放中每 `10s` 的进度保存都触发一次 `reload()` + 整份 JSON 解码。原生播放器写同一物理键，因此应用回到前台时由 `AppRuntimeRecoveryBoundary` 调用 `invalidateSnapshotCache()` 使缓存失效
@@ -1031,7 +1078,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 选集初始定位在首次绘制前完成：Flutter 在 `LayoutBuilder` 中按当前分段、行高和实际视口高度设置 `ScrollController.initialScrollOffset`，由当前集 autofocus 接收焦点，不再首帧后 jump；Android 预先构建条目，在一次性 `OnPreDrawListener` 中请求当前集焦点并 `scrollTo`，抑制初始焦点回调的平滑滚动。打开后的遥控器浏览继续沿用原有滚动行为。
 - 播放器弹窗经 `showPlaybackMenuDialog` 统一挂载 `PlaybackMenuTheme`，背景唯一配置为 `playbackMenuBackground = #CC18181B`（80% 不透明），禁用 surface tint 和 elevation，避免叠加背景使透明度失真；选集及各级设置菜单不单独重复配置。退出确认通过通用 action dialog 的可选 `dialogWrapper` 接入主题，其他页面不受影响。Android 的 `NativePlaybackSettingsDialogTheme` 仅由 windowBackground 绘制 `native_settings_background = #CC18181B`，内容 colorBackground 透明，选集自绘底板复用同一颜色。前景控件及各入口原有遮罩保持不变。
 - 选集结构切换（季、布局、分段、定位）复用绘制前定位：Flutter 用布局代次更换滚动子树和初始 offset，旧控制器在卸载后释放，过时代次不请求焦点；同段方向移动直接更新焦点和滚动，不调用面板 setState。Android 仅保留一个待执行 pre-draw listener，同段焦点回调只发起一次居中，不再 post 重复滚动，关闭移除 listener。
-- 列表/网格偏好使用 `episode_picker_layout`（`list`/`grid`），Flutter 经 `SharedPreferencesStore.reloading` 在打开前读取；Android 使用 `FlutterSharedPreferences` 的 `flutter.episode_picker_layout`，两种播放器共享本地模式。仍以当前播放集初始化位置，不记忆临时浏览位置。每段保留 30 集，网格左右停止在本行边界，上下跨段使用段内列号，缺列夹紧到可用项；剧集首尾分别连接标题右侧的列表模式按钮和底部定位按钮，按钮反向可返回剧集。主面板移除关闭 X，保留返回关闭。
+- 列表/网格偏好使用 `episode_picker_layout`（`list`/`grid`），Flutter 经 `SharedPreferencesStore.reloading` 在打开前读取；Android 使用 `FlutterSharedPreferences` 的 `flutter.episode_picker_layout`，两种播放器共享本地模式。仍以当前播放集初始化位置，不记忆临时浏览位置。每段保留 30 集，网格左右停止在本行边界，上下跨段使用段内列号，缺列夹紧到可用项；本季第一集／网格首行上移优先连接可用选季入口，选季上移连接列表模式按钮，两个模式按钮下移先到选季，选季下移返回原剧集。选季不可用时跳过；剧集末尾仍连接底部定位按钮，反向返回原剧集。Flutter 的节点和 Android View 方向处理均由各自选集面板持有，不改变公共寻焦或跨段索引策略。TV 保留返回关闭，Flutter 非 TV 左下角提供关闭 X。
 - 切季保留旧队列、标题和条目，固定高度状态区显示加载/错误，加载中禁止确认旧集；成功提交新队列和季标题后再定位，失败保留旧内容并支持重试。Flutter 单独维护待加载季，空季按失败处理；定位当前集使在途结果失效。窄网格集号保持单行，Flutter 必要时缩小，Android 超长集号省略。
 - 选集样式统一为深灰面板、6dp 控件圆角、44dp 工具按钮及 22dp 图标。标题右侧排列列表/网格切换；36dp 副标题行合并季名与总集数，作为选择季入口。列表加载/错误原位替换副标题，网格另设 28dp 焦点信息行显示标题/状态或加载/错误。布局选中态用低亮灰底，焦点使用白色描边；Flutter 用独立 ValueNotifier 局部更新信息行，Android 只更新 TextView。TV 列表使用 16/13 字号，手机为 15/12；列表与网格统一 72dp 行高，条目垂直内边距 4dp；Flutter 行距 1.2，Android 标题/状态关闭额外字体 padding，以容纳双行中文标题和状态。滚动定位与渲染共用行高。播放标记和进度线统一青绿色，网格采用角标而非格内小字，补充语义标签；原生使用本地 Material 风格 vector 图标替代平台旧图标，分段箭头不再使用媒体上一集/下一集图标。
 - Exo 手机 / TV 布局的 `exo_play_pause` 直接放在 `exo_bottom_bar` 左侧、播放时间前面，时间行预留按钮宽度及间距，使用 48dp 按钮及无描边的圆形半透明背景，并随底栏收起。TV 在 XML 和运行时均禁用该按钮焦点，保留状态显示及点击；`PRIMARY` 改为 `exo_progress`，不可聚焦时回退播放器容器。手机中央控制组仅保留快退/快进，播放/暂停仍加入底栏横向焦点链并保留焦点高亮。

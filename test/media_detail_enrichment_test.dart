@@ -729,7 +729,6 @@ void main() {
           wmdbMetadataMatchEnabled: false,
           tmdbMetadataMatchEnabled: false,
           tmdbReadAccessToken: '',
-          imdbRatingMatchEnabled: false,
         ),
       );
       final container = ProviderContainer(
@@ -828,7 +827,6 @@ void main() {
         wmdbMetadataMatchEnabled: false,
         tmdbMetadataMatchEnabled: false,
         tmdbReadAccessToken: '',
-        imdbRatingMatchEnabled: false,
       );
 
       final resolved = await container.read(provider.future);

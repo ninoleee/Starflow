@@ -40,41 +40,29 @@ class DetailPageController {
     DetailLibraryMatchViewState libraryMatchView =
         const DetailLibraryMatchViewState(),
   })  : _detailSessionId = initialSessionId,
-        _manualOverrideTarget = initialManualOverrideTarget,
-        _libraryMatchView = libraryMatchView {
-    _manualOverrideTargetNotifier = ValueNotifier<MediaDetailTarget?>(
-      _manualOverrideTarget,
-    );
-    _libraryMatchViewNotifier =
-        ValueNotifier<DetailLibraryMatchViewState>(_libraryMatchView);
-  }
+        _manualOverrideTargetNotifier =
+            ValueNotifier(initialManualOverrideTarget),
+        _libraryMatchViewNotifier = ValueNotifier(libraryMatchView);
 
   int _detailSessionId;
-  MediaDetailTarget? _manualOverrideTarget;
-  DetailLibraryMatchViewState _libraryMatchView;
-  late final ValueNotifier<MediaDetailTarget?> _manualOverrideTargetNotifier;
-  late final ValueNotifier<DetailLibraryMatchViewState>
-      _libraryMatchViewNotifier;
+  final ValueNotifier<MediaDetailTarget?> _manualOverrideTargetNotifier;
+  final ValueNotifier<DetailLibraryMatchViewState> _libraryMatchViewNotifier;
 
   int get detailSessionId => _detailSessionId;
-  MediaDetailTarget? get manualOverrideTarget => _manualOverrideTarget;
-  DetailLibraryMatchViewState get libraryMatchView => _libraryMatchView;
+  MediaDetailTarget? get manualOverrideTarget =>
+      _manualOverrideTargetNotifier.value;
+  DetailLibraryMatchViewState get libraryMatchView =>
+      _libraryMatchViewNotifier.value;
   ValueListenable<MediaDetailTarget?> get manualOverrideTargetListenable =>
       _manualOverrideTargetNotifier;
   ValueListenable<DetailLibraryMatchViewState> get libraryMatchViewListenable =>
       _libraryMatchViewNotifier;
 
-  List<MediaDetailTarget> get libraryMatchChoices => _libraryMatchView.choices;
-  int get selectedLibraryMatchIndex => _libraryMatchView.selectedIndex;
-  bool get isMatchingLocalResource => _libraryMatchView.isMatching;
-  int get currentLibraryMatchIndex => _libraryMatchView.effectiveSelectedIndex;
+  List<MediaDetailTarget> get libraryMatchChoices => libraryMatchView.choices;
+  int get selectedLibraryMatchIndex => libraryMatchView.selectedIndex;
+  bool get isMatchingLocalResource => libraryMatchView.isMatching;
 
   int startNewSession() {
-    _detailSessionId += 1;
-    return _detailSessionId;
-  }
-
-  int cancelDetailTasks() {
     _detailSessionId += 1;
     return _detailSessionId;
   }
@@ -88,24 +76,16 @@ class DetailPageController {
   }
 
   void setManualOverrideTarget(MediaDetailTarget? target) {
-    _manualOverrideTarget = target;
     _manualOverrideTargetNotifier.value = target;
   }
 
   void resetForTargetChange() {
-    _manualOverrideTarget = null;
-    _manualOverrideTargetNotifier.value = null;
-    _libraryMatchView = const DetailLibraryMatchViewState(
-      choices: <MediaDetailTarget>[],
-      selectedIndex: 0,
-      isMatching: false,
-    );
-    _libraryMatchViewNotifier.value = _libraryMatchView;
+    setManualOverrideTarget(null);
+    _libraryMatchViewNotifier.value = const DetailLibraryMatchViewState();
   }
 
   void resetForPageInactive() {
-    _libraryMatchView = _libraryMatchView.copyWith(isMatching: false);
-    _libraryMatchViewNotifier.value = _libraryMatchView;
+    updateLibraryMatchView(isMatching: false);
   }
 
   void updateLibraryMatchView({
@@ -113,25 +93,21 @@ class DetailPageController {
     int? selectedIndex,
     bool? isMatching,
   }) {
-    _libraryMatchView = _libraryMatchView.copyWith(
+    _libraryMatchViewNotifier.value = libraryMatchView.copyWith(
       choices: choices,
       selectedIndex: selectedIndex,
       isMatching: isMatching,
     );
-    _libraryMatchViewNotifier.value = _libraryMatchView;
   }
 
   MediaDetailTarget? applySelectedLibraryMatchIndex(int index) {
-    if (_libraryMatchView.choices.isEmpty) {
+    if (libraryMatchChoices.isEmpty) {
       return null;
     }
-    final resolvedIndex = index.clamp(0, _libraryMatchView.choices.length - 1);
-    final resolvedTarget = _libraryMatchView.choices[resolvedIndex];
-    _libraryMatchView =
-        _libraryMatchView.copyWith(selectedIndex: resolvedIndex);
-    _libraryMatchViewNotifier.value = _libraryMatchView;
-    _manualOverrideTarget = resolvedTarget;
-    _manualOverrideTargetNotifier.value = resolvedTarget;
+    final resolvedIndex = index.clamp(0, libraryMatchChoices.length - 1);
+    final resolvedTarget = libraryMatchChoices[resolvedIndex];
+    updateLibraryMatchView(selectedIndex: resolvedIndex);
+    setManualOverrideTarget(resolvedTarget);
     return resolvedTarget;
   }
 

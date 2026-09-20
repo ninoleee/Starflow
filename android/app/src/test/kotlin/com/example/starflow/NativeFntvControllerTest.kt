@@ -75,6 +75,56 @@ class NativeFntvControllerTest {
     }
 
     @Test
+    fun unsupportedAudioDoesNotShiftReportedGuidOrQualitySelection() {
+        json = """{"sourceKind":"fntv","preferredAudioStreamId":"a","audioStreams":[{"id":"a","index":0},{"id":"b","index":1}],"playbackQualities":[{"index":-1,"serverTranscode":true}]}"""
+        val group = TrackGroup(
+            Format.Builder().setId("a").setSampleMimeType(MimeTypes.AUDIO_AC3).build(),
+            Format.Builder().setId("b").setSampleMimeType(MimeTypes.AUDIO_AAC).build(),
+        )
+        `when`(host.session.player!!.currentTracks).thenReturn(Tracks(listOf(Tracks.Group(group, false,
+            intArrayOf(C.FORMAT_UNSUPPORTED_TYPE, C.FORMAT_HANDLED), booleanArrayOf(false, true)))))
+        assertEquals(listOf("a"), controller.unavailableAudioStreams().map { it.optString("id") })
+        controller.switchQuality(-1)
+        assertEquals("b", JSONObject(requestJson).getString("preferredAudioStreamId"))
+    }
+
+    @Test
+    fun serverAudioFallbackRequiresValidStreamAndTranscodeProfile() {
+        json = """{"sourceKind":"fntv","audioStreams":[{"id":"a"},{"id":"b"}],"playbackQualities":[{"index":0},{"index":-1,"serverTranscode":true}]}"""
+        controller.switchServerAudio("missing", -1)
+        controller.switchServerAudio("b", 0)
+        assertNull(pending)
+        controller.switchServerAudio("b", -1)
+        val request = JSONObject(requestJson)
+        assertEquals("b", request.getString("preferredAudioStreamId"))
+        assertEquals(-1, request.getInt("preferredPlaybackQualityIndex"))
+        assertTrue(request.getBoolean("fntvTrackSelectionExplicit"))
+    }
+
+    @Test
+    fun missingAudioIdentityDoesNotGuessFirstServerStream() {
+        json = """{"sourceKind":"fntv","preferredAudioStreamId":"b","audioStreams":[{"id":"a","index":0},{"id":"b","index":1}],"playbackQualities":[{"index":-1,"serverTranscode":true}]}"""
+        val group = TrackGroup(Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AAC).build())
+        `when`(host.session.player!!.currentTracks).thenReturn(Tracks(listOf(Tracks.Group(group, false,
+            intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)))))
+        controller.switchQuality(-1)
+        assertEquals("b", JSONObject(requestJson).getString("preferredAudioStreamId"))
+    }
+
+    @Test
+    fun subtitleSnapshotKeepsUnsupportedTrackPositions() {
+        json = """{"sourceKind":"fntv","subtitleStreams":[{"id":"s1","index":0},{"id":"s2","index":1}],"playbackQualities":[{"index":-1,"serverTranscode":true}]}"""
+        val group = TrackGroup(
+            Format.Builder().setId("s1").setSampleMimeType(MimeTypes.APPLICATION_PGS).build(),
+            Format.Builder().setId("s2").setSampleMimeType(MimeTypes.TEXT_VTT).build(),
+        )
+        `when`(host.session.player!!.currentTracks).thenReturn(Tracks(listOf(Tracks.Group(group, false,
+            intArrayOf(C.FORMAT_UNSUPPORTED_TYPE, C.FORMAT_HANDLED), booleanArrayOf(false, true)))))
+        controller.switchQuality(-1)
+        assertEquals("s2", JSONObject(requestJson).getString("preferredSubtitleStreamId"))
+    }
+
+    @Test
     fun qualityEntryUsesSelectedServerIndexAndStaysAbsentForOtherSources() {
         json = """{"sourceKind":"fntv","preferredPlaybackQualityIndex":4,"playbackQualities":[{"index":2,"resolution":"1080P"},{"index":4,"resolution":"4K"}]}"""
         assertEquals("画质 · 4K", controller.qualitySettingsLabel())
@@ -122,7 +172,7 @@ class NativeFntvControllerTest {
         pending!!(mapOf("ok" to true, "playbackTargetJson" to """{"streamUrl":"https://example.com/video"}"""))
         verify(host.session).pendingResumePositionOverrideMs = 42_000L
         verify(host.session).nextInitializePlayWhenReady = false
-        verify(host.session.player!!).playbackParameters = PlaybackParameters(1.5f)
+        verify(host.session).stagePlaybackParameters(PlaybackParameters(1.5f))
         verify(host.session).initializePlayer()
         assertTrue(controller.recoverQualityFailure())
         verify(host.session, times(2)).initializePlayer()
@@ -207,12 +257,67 @@ class NativeFntvControllerTest {
     }
 
     @Test
+    fun lateServerResolutionCannotReplaceNewerLocalSubtitleIntent() {
+        controller.switchQuality(1)
+        `when`(host.subtitles.subtitleSelectionRevision).thenReturn(1L)
+        pending!!(mapOf("ok" to true, "playbackTargetJson" to
+            """{"sourceKind":"fntv","fntvSessionLink":"late","streamUrl":"https://nas/hls.m3u8"}"""))
+        verify(host.session, never()).releasePlayer()
+        assertEquals(listOf("releaseNativeFntvPlayback"), calls)
+        assertFalse(controller.isSwitching)
+    }
+
+    @Test
     fun lateSubtitleResponseIsIgnoredAfterTargetChanges() {
         controller.loadSubtitle(JSONObject("""{"id":"sub"}"""))
         json = """{"sourceKind":"fntv","itemId":"next"}"""
         pending!!(mapOf("ok" to true, "path" to "/tmp/sub.srt", "displayName" to "sub"))
-        verify(host.externalSubtitles, never()).loadCachedSubtitleFile(anyString(), anyString(), isNull())
+        verify(host.externalSubtitles, never()).loadCachedSubtitleFile(anyString(), anyString(), isNull(), isNull())
+        verify(host.externalSubtitles).discardFntvDownload("/tmp/sub.srt")
         assertFalse(controller.isSwitching)
+    }
+
+    @Test
+    fun newerSubtitleIntentRejectsLateDownloadWithoutBlockingOtherSelections() {
+        val trackHost = mock(NativePlaybackTrackController.Host::class.java, RETURNS_DEEP_STUBS)
+        val subtitles = NativePlaybackTrackController(trackHost)
+        `when`(host.subtitles).thenReturn(subtitles)
+        `when`(trackHost.fntv).thenReturn(controller)
+        controller.loadSubtitle(JSONObject("""{"id":"sub"}"""))
+        val reply = pending!!
+        assertFalse(controller.isSwitching)
+        subtitles.beginSubtitleSelection()
+        subtitles.subtitleSessionPreference = NativeSubtitleSessionPreference(NativeSubtitleSessionMode.OFF)
+        reply(mapOf("ok" to true, "path" to "/tmp/sub.srt"))
+        verify(host.externalSubtitles, never()).loadCachedSubtitleFile(anyString(), anyString(), any(), any())
+        verify(host.externalSubtitles).discardFntvDownload("/tmp/sub.srt")
+        assertEquals(NativeSubtitleSessionMode.OFF, subtitles.subtitleSessionPreference?.mode)
+        verify(host.runtime, never()).persistPlaybackProgress(anyBoolean())
+    }
+
+    @Test
+    fun newerDownloadWinsAndUsesItsOriginalRevisionThroughMount() {
+        val trackHost = mock(NativePlaybackTrackController.Host::class.java, RETURNS_DEEP_STUBS)
+        val subtitles = NativePlaybackTrackController(trackHost)
+        `when`(host.subtitles).thenReturn(subtitles)
+        `when`(trackHost.fntv).thenReturn(controller)
+        controller.loadSubtitle(JSONObject("""{"id":"old"}"""))
+        val oldReply = pending!!
+        controller.loadSubtitle(JSONObject("""{"id":"new"}"""))
+        val newReply = pending!!
+        newReply(mapOf("ok" to true, "path" to "/tmp/new.srt", "displayName" to "new"))
+        oldReply(mapOf("ok" to true, "path" to "/tmp/old.srt"))
+        verify(host.externalSubtitles).loadCachedSubtitleFile(eq("/tmp/new.srt"), eq("new"), any(), eq(2L))
+        verify(host.externalSubtitles).discardFntvDownload("/tmp/old.srt")
+        assertEquals(2L, subtitles.subtitleSelectionRevision)
+    }
+
+    @Test
+    fun explicitOffPreventsReadyFromRestartingAutomaticServerSubtitleDownload() {
+        json = """{"sourceKind":"fntv","fntvSessionLink":"active","preferredSubtitleStreamId":"sub","subtitleStreams":[{"id":"sub","isExternal":true}]}"""
+        controller.cancelSubtitleLoad()
+        controller.onReady()
+        assertTrue(calls.isEmpty())
     }
 
     @Test

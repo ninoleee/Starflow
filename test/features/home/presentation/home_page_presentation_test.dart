@@ -408,7 +408,7 @@ void main() {
     expect(find.byIcon(Icons.movie_creation_outlined), findsNothing);
   });
 
-  testWidgets('recent playback card shows source media library without decoration',
+  testWidgets('recent playback card shows source media library with text shadows',
       (tester) async {
     const section = HomeSectionViewModel(
       id: 'layout-test',
@@ -447,6 +447,10 @@ void main() {
     expect(poster.imageTopRightBadgeShowDecoration, isFalse);
     final sourceLabel = find.text('家庭影音库');
     expect(sourceLabel, findsOneWidget);
+    expect(tester.widget<Text>(sourceLabel).style?.shadows, const [
+      Shadow(color: Colors.black, blurRadius: 2),
+      Shadow(color: Colors.black87, offset: Offset(0, 1), blurRadius: 4),
+    ]);
     final sourceOverlay = find
         .ancestor(of: sourceLabel, matching: find.byType(Positioned))
         .first;

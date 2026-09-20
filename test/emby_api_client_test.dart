@@ -726,7 +726,8 @@ void main() {
       expect(resolvedUri.queryParameters['MediaSourceId'], 'media-source-2');
       expect(resolvedUri.queryParameters['api_key'], 'token-789');
       expect(target.headers['X-Test-Header'], 'value-1');
-      expect(target.headers['X-Emby-Token'], 'token-789');
+      expect(target.headers['X-Emby-Token'], isNull);
+      expect(target.headers['X-Emby-Authorization'], isNull);
       expect(target.container, 'mkv');
       expect(target.videoCodec, 'hevc');
       expect(target.audioCodec, 'truehd');

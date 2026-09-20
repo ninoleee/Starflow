@@ -5,6 +5,8 @@ import 'dart:math';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
+import 'package:starflow/core/network/bounded_http_request.dart';
+import 'package:starflow/core/network/http_origin_policy.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -133,7 +135,15 @@ class EmbyApiClient implements MediaServerClient {
     required PlaybackTarget target,
   }) async {
     if (target.streamUrl.trim().isNotEmpty) {
-      return target;
+      final baseUri = Uri.parse(source.endpoint.trim());
+      final uri = _resolveRelativeStreamUri(
+        baseUri: baseUri,
+        rawUrl: target.streamUrl,
+        accessToken: source.accessToken,
+      );
+      return target.copyWith(
+          streamUrl: uri.toString(),
+          headers: _streamHeaders(target.headers, source.accessToken));
     }
     if (target.itemId.trim().isEmpty) {
       throw const EmbyApiException('没有可解析的 Emby 播放目标');
@@ -329,17 +339,20 @@ class EmbyApiClient implements MediaServerClient {
               (audioStream?['BitRate'] as num?))
           ?.toInt(),
       fileSizeBytes: (mediaSource['Size'] as num?)?.toInt(),
-      headers: {
-        ...requiredHeaders
-            .map((key, value) => MapEntry(key.toString(), value.toString())),
-        'X-Emby-Token': source.accessToken,
-        'X-Emby-Authorization': _authorizationHeader(
-          token: source.accessToken,
-          deviceId: source.deviceId,
-        ),
-      },
+      headers: _streamHeaders(requiredHeaders, source.accessToken),
     );
   }
+
+  // Native engines may forward custom headers across redirects. Keep stream
+  // credentials separate from the reusable Emby session (including old cache).
+  Map<String, String> _streamHeaders(
+          Map<String, dynamic> headers, String token) =>
+      {
+        for (final entry in headers.entries)
+          if (!entry.key.toLowerCase().startsWith('x-emby-') &&
+              (token.isEmpty || !entry.value.toString().contains(token)))
+            entry.key: entry.value.toString(),
+      };
 
   String _playbackVariantKey(PlaybackTarget target) {
     return [
@@ -759,8 +772,11 @@ class EmbyApiClient implements MediaServerClient {
       );
 
       try {
-        final request = http.Request(method, uri)
-          ..headers.addAll({
+        final response = await sendBoundedRequest(
+          _client,
+          method,
+          uri,
+          headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
             'X-Emby-Authorization': _authorizationHeader(
@@ -768,13 +784,12 @@ class EmbyApiClient implements MediaServerClient {
               deviceId: deviceId,
             ),
             if (token.trim().isNotEmpty) 'X-Emby-Token': token.trim(),
-          });
-        if (body != null) {
-          request.body = jsonEncode(body);
-        }
-
-        final streamedResponse = await _client.send(request);
-        final response = await http.Response.fromStream(streamedResponse);
+          },
+          body: body == null ? null : jsonEncode(body),
+          timeout: const Duration(seconds: 20),
+          maxBytes: 32 * 1024 * 1024,
+          allowUri: (next) => isSameHttpOrigin(baseUri, next),
+        );
 
         if (response.statusCode >= 200 && response.statusCode < 300) {
           final decoded = jsonDecode(response.body) as Map;
@@ -1032,15 +1047,11 @@ class EmbyApiClient implements MediaServerClient {
         (mediaSource['DirectStreamUrl'] as String? ?? '').trim();
     final transcodingUrl =
         (mediaSource['TranscodingUrl'] as String? ?? '').trim();
-    final addApiKey =
-        mediaSource['AddApiKeyToDirectStreamUrl'] as bool? ?? false;
-
     if (directStreamUrl.isNotEmpty) {
       return _resolveRelativeStreamUri(
         baseUri: baseUri,
         rawUrl: directStreamUrl,
         accessToken: accessToken,
-        addApiKey: addApiKey,
       );
     }
 
@@ -1049,7 +1060,6 @@ class EmbyApiClient implements MediaServerClient {
         baseUri: baseUri,
         rawUrl: transcodingUrl,
         accessToken: accessToken,
-        addApiKey: addApiKey,
       );
     }
 
@@ -1067,15 +1077,14 @@ class EmbyApiClient implements MediaServerClient {
     required Uri baseUri,
     required String rawUrl,
     required String accessToken,
-    required bool addApiKey,
   }) {
     final parsed = Uri.parse(rawUrl);
     final normalizedBasePath = _trimTrailingSlash(baseUri.path);
     final hasEmbeddedBasePath = normalizedBasePath.isNotEmpty &&
         (parsed.path == normalizedBasePath ||
             parsed.path.startsWith('$normalizedBasePath/'));
-    final resolved = parsed.hasScheme
-        ? parsed
+    final resolved = parsed.hasScheme || parsed.hasAuthority
+        ? baseUri.resolveUri(parsed)
         : baseUri.replace(
             path: hasEmbeddedBasePath
                 ? parsed.path
@@ -1083,9 +1092,18 @@ class EmbyApiClient implements MediaServerClient {
             queryParameters: parsed.hasQuery ? parsed.queryParameters : null,
           );
 
-    if (!addApiKey || accessToken.trim().isEmpty) {
+    if (!isHttpUri(resolved)) {
+      throw const EmbyApiException('Emby 返回了不安全的播放地址');
+    }
+    if (!isSameHttpOrigin(baseUri, resolved)) {
+      // Do not let a server echo this session token into an external URL.
+      if (accessToken.isNotEmpty &&
+          Uri.decodeFull(resolved.toString()).contains(accessToken)) {
+        throw const EmbyApiException('Emby 外部播放地址包含会话凭据');
+      }
       return resolved;
     }
+    if (accessToken.trim().isEmpty) return resolved;
     if (resolved.queryParameters.containsKey('api_key')) {
       return resolved;
     }

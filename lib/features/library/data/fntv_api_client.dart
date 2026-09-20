@@ -410,6 +410,11 @@ class FntvApiClient implements MediaServerClient, MediaServerSessionClient {
     final audioId = target.fntvTrackSelectionExplicit
         ? target.preferredAudioStreamId
         : _text(info['audio_guid']);
+    if (target.fntvTrackSelectionExplicit &&
+        audioId.isNotEmpty &&
+        !audioStreams.any((stream) => stream.id == audioId)) {
+      throw const FntvApiException('飞牛当前未提供所选音轨，请重新选择');
+    }
     final selectedAudio =
         audioStreams.where((s) => s.id == audioId).firstOrNull ??
             audioStreams.where((s) => s.isDefault).firstOrNull ??

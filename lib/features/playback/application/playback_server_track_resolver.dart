@@ -12,6 +12,27 @@ PlaybackAudioStream? preferredPlaybackAudioStream(
   );
 }
 
+List<PlaybackAudioStream> unavailablePlaybackAudioStreams({
+  required PlaybackTarget target,
+  required List<AudioTrack> tracks,
+}) =>
+    target.audioStreams
+        .where((stream) =>
+            resolvePlaybackAudioTrack(
+                target: target, tracks: tracks, preferred: stream) ==
+            null)
+        .toList(growable: false);
+
+String playbackServerAudioLabel(PlaybackAudioStream stream) {
+  final label = [
+    stream.title,
+    stream.language,
+    stream.codec,
+    if (stream.channels > 0) '${stream.channels} 声道'
+  ].where((value) => value.trim().isNotEmpty).join(' · ');
+  return label.isEmpty ? '音轨 ${stream.index + 1}' : label;
+}
+
 PlaybackSubtitleStream? preferredPlaybackSubtitleStream(
   PlaybackTarget target,
 ) {
@@ -129,7 +150,9 @@ SubtitleTrack? resolveEmbeddedPlaybackSubtitleTrack({
   }
   final ordinal =
       streams.indexWhere((stream) => stream.id == preferredStream.id);
-  if (ordinal >= 0 && ordinal < embedded.length) {
+  if (streams.length == embedded.length &&
+      ordinal >= 0 &&
+      ordinal < embedded.length) {
     return embedded[ordinal];
   }
   return null;
@@ -152,12 +175,13 @@ PlaybackSubtitleStream? matchPlaybackSubtitleStreamForTrack({
           item.data == false)
       .toList(growable: false);
   final ordinal = embedded.indexOf(track);
-  for (final stream in streams) {
-    if (_matchesSubtitle(track, stream)) {
-      return stream;
-    }
-  }
-  return ordinal >= 0 && ordinal < streams.length ? streams[ordinal] : null;
+  final matches = streams.where((stream) => _matchesSubtitle(track, stream));
+  if (matches.length == 1) return matches.single;
+  return streams.length == embedded.length &&
+          ordinal >= 0 &&
+          ordinal < streams.length
+      ? streams[ordinal]
+      : null;
 }
 
 T? _preferredStream<T>(

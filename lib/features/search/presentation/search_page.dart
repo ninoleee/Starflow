@@ -757,7 +757,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
                               ),
                               const SizedBox(height: 10),
                               SizedBox(
-                                height: 64,
+                                height:
+                                    StarflowChipButton.minimumHeight(context) +
+                                        12,
                                 child: LayoutBuilder(
                                   builder: (context, constraints) {
                                     return ScrollConfiguration(
@@ -840,8 +842,12 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                       ],
                                     )
                                   : SizedBox(
-                                      height: 52,
+                                      height: StarflowChipButton.minimumHeight(
+                                              context) +
+                                          12,
                                       child: ListView.separated(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 6),
                                         scrollDirection: Axis.horizontal,
                                         itemCount: targets.length,
                                         separatorBuilder: (context, index) =>

@@ -19,6 +19,147 @@ import org.mockito.Mockito.*
 
 class NativePlaybackSessionTest {
     @get:org.junit.Rule internal val android = AudioAndroidStubs()
+
+    @Test
+    fun systemDecoderSpeedRoundTripRestoresTemporaryPrecisionLoss() {
+        val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+        val session = spy(NativePlaybackSession(host))
+        doNothing().`when`(session).rebuildPlayer()
+        val current = mock(ExoPlayer::class.java)
+        val source = Format.Builder().setId("flac-1").setSampleMimeType(MimeTypes.AUDIO_FLAC)
+            .setSampleRate(96_000).setChannelCount(2).build()
+        `when`(current.audioFormat).thenReturn(source)
+        `when`(current.currentTracks).thenReturn(Tracks.EMPTY)
+        `when`(current.playbackParameters).thenReturn(PlaybackParameters.DEFAULT)
+        session.player = current
+        val precisionFlag = NativePlaybackSession::class.java.getDeclaredField("highPrecisionPcmEnabled")
+        precisionFlag.isAccessible = true
+        precisionFlag.setBoolean(session, true)
+        session.audioOutputState.sourceInput = source
+        session.audioOutputState.sinkInput = source.buildUpon().setSampleMimeType(MimeTypes.AUDIO_RAW)
+            .setPcmEncoding(C.ENCODING_PCM_FLOAT).build()
+        session.audioOutputState.decoderName = "c2.android.flac.decoder"
+        session.setPlaybackParameters(PlaybackParameters(1.5f))
+        verify(session).rebuildPlayer()
+        precisionFlag.setBoolean(session, false)
+        session.audioOutputState.sinkInput = session.audioOutputState.sinkInput!!.buildUpon()
+            .setPcmEncoding(C.ENCODING_PCM_16BIT).build()
+        session.audioOutputState.outputEncoding = C.ENCODING_PCM_16BIT
+        `when`(current.playbackParameters).thenReturn(PlaybackParameters(1.5f))
+        session.setPlaybackParameters(PlaybackParameters.DEFAULT)
+        verify(session, times(2)).rebuildPlayer()
+        session.setPlaybackParameters(PlaybackParameters.DEFAULT)
+        verify(session, times(2)).rebuildPlayer()
+    }
+
+    @Test
+    fun temporaryPrecisionHistoryDoesNotForceDifferentTrackOrDeviceFallback() {
+        for (fallback in listOf(false, true)) {
+            val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+            val session = spy(NativePlaybackSession(host))
+            doNothing().`when`(session).rebuildPlayer()
+            val current = mock(ExoPlayer::class.java)
+            val source = Format.Builder().setId("first").setSampleMimeType(MimeTypes.AUDIO_FLAC).build()
+            `when`(current.audioFormat).thenReturn(source)
+            `when`(current.currentTracks).thenReturn(Tracks.EMPTY)
+            `when`(current.playbackParameters).thenReturn(PlaybackParameters.DEFAULT)
+            session.player = current
+            val flag = NativePlaybackSession::class.java.getDeclaredField("highPrecisionPcmEnabled")
+            flag.isAccessible = true
+            flag.setBoolean(session, true)
+            session.audioOutputState.sinkInput = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_RAW)
+                .setPcmEncoding(C.ENCODING_PCM_FLOAT).build()
+            session.setPlaybackParameters(PlaybackParameters(1.5f))
+            flag.setBoolean(session, false)
+            session.audioOutputState.sinkInput = session.audioOutputState.sinkInput!!.buildUpon()
+                .setPcmEncoding(C.ENCODING_PCM_16BIT).build()
+            if (fallback) session.pcm16Fallback = true else {
+                `when`(current.audioFormat).thenReturn(source.buildUpon().setId("second").build())
+            }
+            session.setPlaybackParameters(PlaybackParameters.DEFAULT)
+            verify(session, times(1)).rebuildPlayer()
+            verify(current).playbackParameters = PlaybackParameters.DEFAULT
+        }
+    }
+    @Test
+    fun ordinaryAudioChangesSpeedWithoutReopeningAndSwitchingToHighResolutionReconciles() {
+        val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+        val session = spy(NativePlaybackSession(host))
+        doNothing().`when`(session).rebuildPlayer()
+        val current = mock(ExoPlayer::class.java)
+        session.player = current
+        session.audioOutputState.sinkInput = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_RAW)
+            .setPcmEncoding(C.ENCODING_PCM_16BIT).build()
+        session.setPlaybackParameters(PlaybackParameters.DEFAULT)
+        session.setPlaybackParameters(PlaybackParameters(1.5f))
+        verify(current).playbackParameters = PlaybackParameters.DEFAULT
+        verify(current).playbackParameters = PlaybackParameters(1.5f)
+        verify(session, never()).rebuildPlayer()
+        session.audioOutputState.sinkInput = session.audioOutputState.sinkInput!!.buildUpon()
+            .setPcmEncoding(C.ENCODING_PCM_24BIT).build()
+        `when`(current.playbackParameters).thenReturn(PlaybackParameters.DEFAULT)
+        `when`(current.currentTracks).thenReturn(Tracks.EMPTY)
+        session.reconcileAudioPrecision(current, PlaybackParameters.DEFAULT)
+        verify(session).rebuildPlayer()
+    }
+
+    @Test
+    fun passthroughSpeedChangeAndReturnToNormalRestoreOutputPolicy() {
+        val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+        val session = spy(NativePlaybackSession(host))
+        doNothing().`when`(session).rebuildPlayer()
+        val current = mock(ExoPlayer::class.java)
+        session.player = current
+        `when`(current.currentTracks).thenReturn(Tracks.EMPTY)
+        `when`(current.playbackParameters).thenReturn(PlaybackParameters.DEFAULT)
+        session.audioOutputState.sinkInput = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_DTS).build()
+        session.setPlaybackParameters(PlaybackParameters(1.5f))
+        verify(session).rebuildPlayer()
+        session.audioOutputState.sinkInput = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_RAW)
+            .setPcmEncoding(C.ENCODING_PCM_16BIT).build()
+        `when`(current.playbackParameters).thenReturn(PlaybackParameters(1.5f))
+        session.setPlaybackParameters(PlaybackParameters.DEFAULT)
+        verify(session, times(2)).rebuildPlayer()
+    }
+
+    @Test
+    fun speedPrecisionTransitionStagesParametersAndKeepsPauseAndVolume() {
+        val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+        `when`(host.target.playbackItemKey).thenReturn("episode")
+        val session = spy(NativePlaybackSession(host))
+        doNothing().`when`(session).rebuildPlayer()
+        val current = mock(ExoPlayer::class.java)
+        `when`(current.currentTracks).thenReturn(Tracks.EMPTY)
+        `when`(current.playbackParameters).thenReturn(PlaybackParameters(1.5f))
+        `when`(current.currentPosition).thenReturn(12_000L)
+        `when`(current.volume).thenReturn(0.4f)
+        session.player = current
+        // Initial test session is the PCM16 branch, returning to 1x rebuilds it.
+        session.setPlaybackParameters(PlaybackParameters.DEFAULT)
+        verify(session).rebuildPlayer()
+        verify(current, never()).setPlaybackParameters(PlaybackParameters.DEFAULT)
+        org.junit.Assert.assertEquals(12_000L, session.pendingResumePositionOverrideMs)
+        org.junit.Assert.assertEquals(false, session.nextInitializePlayWhenReady)
+        val fresh = mock(ExoPlayer::class.java)
+        session.restoreAudioPlaybackParameters(fresh)
+        verify(fresh).playbackParameters = PlaybackParameters.DEFAULT
+        verify(fresh).volume = 0.4f
+    }
+
+    @Test
+    fun compatibleSpeedChangesDoNotRebuildAndStaleCallbacksAreIgnored() {
+        val session = spy(NativePlaybackSession(mock(NativePlaybackSession.Host::class.java)))
+        val current = mock(ExoPlayer::class.java)
+        session.player = current
+        session.audioOutputMode = NativeAudioOutputMode.PCM_COMPATIBILITY
+        session.setPlaybackParameters(PlaybackParameters(1.5f))
+        verify(current).playbackParameters = PlaybackParameters(1.5f)
+        session.reconcileAudioPrecision(mock(ExoPlayer::class.java), PlaybackParameters.DEFAULT)
+        `when`(current.playbackParameters).thenReturn(PlaybackParameters(2f))
+        session.reconcileAudioPrecision(current, PlaybackParameters.DEFAULT)
+        verify(session, never()).rebuildPlayer()
+    }
+
     @Test
     fun audioOutputRestartRestoresTrackSpeedVolumePositionAndPause() {
         val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
@@ -58,6 +199,62 @@ class NativePlaybackSessionTest {
     }
 
     @Test
+    fun rapidSpeedRebuildsRetainPendingAudioUntilTracksArrive() {
+        val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+        `when`(host.target.playbackItemKey).thenReturn("episode")
+        val session = spy(NativePlaybackSession(host))
+        doNothing().`when`(session).rebuildPlayer()
+        val selected = Format.Builder().setId("manual").setLanguage("ja")
+            .setSampleMimeType(MimeTypes.AUDIO_DTS).build()
+        val old = mock(ExoPlayer::class.java)
+        `when`(old.currentTracks).thenReturn(Tracks(listOf(Tracks.Group(TrackGroup(selected), false,
+            intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)))))
+        `when`(old.playbackParameters).thenReturn(PlaybackParameters.DEFAULT)
+        session.player = old
+        session.audioOutputState.sinkInput = selected
+        session.setPlaybackParameters(PlaybackParameters(1.5f))
+        val preparing = mock(ExoPlayer::class.java)
+        `when`(preparing.currentTracks).thenReturn(Tracks.EMPTY)
+        `when`(preparing.playbackParameters).thenReturn(PlaybackParameters(1.5f))
+        session.player = preparing
+        assertTrue(session.restoreAudioTrack(Tracks.EMPTY))
+        session.setPlaybackParameters(PlaybackParameters.DEFAULT)
+        verify(session, times(2)).rebuildPlayer()
+        val fresh = mock(ExoPlayer::class.java)
+        `when`(fresh.trackSelectionParameters).thenReturn(TrackSelectionParameters.Builder().build())
+        session.player = fresh
+        val group = TrackGroup("fresh", selected)
+        assertTrue(session.restoreAudioTrack(Tracks(listOf(Tracks.Group(group, false,
+            intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(false))))))
+        val captor = org.mockito.ArgumentCaptor.forClass(TrackSelectionParameters::class.java)
+        verify(fresh).trackSelectionParameters = captor.capture()
+        assertSame(group, captor.value.overrides.values.single().mediaTrackGroup)
+    }
+
+    @Test
+    fun pendingAudioDoesNotCrossMediaEvenWhenNewMediaStagesSpeedFirst() {
+        for (stageSpeed in listOf(false, true)) {
+            val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+            `when`(host.target.playbackItemKey).thenReturn("one")
+            val session = NativePlaybackSession(host)
+            val old = mock(ExoPlayer::class.java)
+            val format = Format.Builder().setId("same-id").setSampleMimeType(MimeTypes.AUDIO_AAC).build()
+            val tracks = Tracks(listOf(Tracks.Group(TrackGroup(format), false,
+                intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true))))
+            `when`(old.currentTracks).thenReturn(tracks)
+            `when`(old.playbackParameters).thenReturn(PlaybackParameters.DEFAULT)
+            session.player = old
+            session.preserveAudioSession()
+            `when`(host.target.playbackItemKey).thenReturn("two")
+            if (stageSpeed) session.stagePlaybackParameters(PlaybackParameters(1.5f))
+            assertFalse(session.restoreAudioTrack(tracks))
+            `when`(old.currentTracks).thenReturn(Tracks.EMPTY)
+            session.preserveAudioSession()
+            assertFalse(session.restoreAudioTrack(tracks))
+        }
+    }
+
+    @Test
     fun usesCompatibleTsExtractorFactory() {
         val session = NativePlaybackSession(mock(NativePlaybackSession.Host::class.java))
         assertTrue(session.buildExtractorsFactory() is NativePlaybackExtractorsFactory)
@@ -82,6 +279,8 @@ class NativePlaybackSessionTest {
         val meter = mock(DefaultBandwidthMeter::class.java)
         session.player = player
         session.playbackBandwidthMeter = meter
+        val oldOutputState = session.audioOutputState
+        oldOutputState.outputEncoding = C.ENCODING_PCM_FLOAT
         val playerListener = host.playerListener
         val analyticsListener = host.diagnostics.playbackPerformanceAnalyticsListener
         val bandwidthListener = host.diagnostics.bandwidthEventListener
@@ -102,6 +301,10 @@ class NativePlaybackSessionTest {
         order.verify(meter).removeEventListener(bandwidthListener)
         assertNull(session.player)
         assertNull(session.playbackBandwidthMeter)
+        org.junit.Assert.assertNotSame(oldOutputState, session.audioOutputState)
+        oldOutputState.sinkInput = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_DTS).build()
+        assertNull(session.audioOutputState.outputEncoding)
+        assertFalse(session.audioOutputState.isPassthrough())
         session.releasePlayer()
         verify(player, times(1)).release()
         verify(meter, times(1)).removeEventListener(bandwidthListener)

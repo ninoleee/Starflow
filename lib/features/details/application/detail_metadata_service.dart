@@ -1,5 +1,4 @@
 import 'package:starflow/core/logging/app_logger.dart';
-import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
@@ -141,11 +140,6 @@ Future<DetailMetadataResult> resolveDetailMetadata({
   if (metadataNeeds.needsWmdb) {
     attempts += 1;
     try {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'wmdb',
-        'request query=$initialQuery doubanId=${nextTarget.doubanId}',
-      );
       final wmdbMatch = nextTarget.doubanId.trim().isNotEmpty
           ? await wmdbMetadataClient.matchByDoubanId(
               doubanId: nextTarget.doubanId,
@@ -158,30 +152,19 @@ Future<DetailMetadataResult> resolveDetailMetadata({
             );
       if (wmdbMatch != null) {
         matches += 1;
-        DebugTraceOnce.logMetadata(
-          traceKey,
-          'wmdb',
-          'matched title=${wmdbMatch.title} imdbId=${wmdbMatch.imdbId} '
-              'ratings=${wmdbMatch.ratingLabels.join(' | ')}',
-        );
         nextTarget =
             const DetailLibraryMatchService().applyMetadataMatchToDetailTarget(
           nextTarget,
           wmdbMatch,
           replaceExisting: forceReplace,
         );
-      } else {
-        DebugTraceOnce.logMetadata(traceKey, 'wmdb', 'no match');
       }
     } catch (error, stackTrace) {
       failures += 1;
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'wmdb',
-        'failed',
-        error: error,
-        stackTrace: stackTrace,
-      );
+      appLogError('metadata', 'detail.wmdb',
+          fields: {'key': traceKey, 'message': 'failed'},
+          error: error,
+          stackTrace: stackTrace);
     }
     metadataNeeds = _resolveDetailAutomaticMetadataNeeds(
       target: nextTarget,
@@ -194,12 +177,6 @@ Future<DetailMetadataResult> resolveDetailMetadata({
     attempts += 1;
     try {
       final currentQuery = _detailMetadataQuery(nextTarget);
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'tmdb',
-        'request query=$currentQuery year=${nextTarget.year} '
-            'preferSeries=${_prefersSeriesMetadata(nextTarget)}',
-      );
       final tmdbMatch = await tmdbMetadataClient.matchTitle(
         query: currentQuery,
         readAccessToken: settings.tmdbReadAccessToken.trim(),
@@ -208,11 +185,6 @@ Future<DetailMetadataResult> resolveDetailMetadata({
       );
       if (tmdbMatch != null) {
         matches += 1;
-        DebugTraceOnce.logMetadata(
-          traceKey,
-          'tmdb',
-          'matched title=${tmdbMatch.title} imdbId=${tmdbMatch.imdbId}',
-        );
         final resolvedBackdropUrl = await _resolveTmdbBackdropForTarget(
           settings: settings,
           tmdbMetadataClient: tmdbMetadataClient,
@@ -224,6 +196,9 @@ Future<DetailMetadataResult> resolveDetailMetadata({
           nextTarget,
           MetadataMatchResult(
             provider: MetadataMatchProvider.tmdb,
+            mediaType: tmdbMatch.isSeries
+                ? MetadataMediaType.series
+                : MetadataMediaType.movie,
             title: tmdbMatch.title,
             originalTitle: tmdbMatch.originalTitle,
             posterUrl: tmdbMatch.posterUrl,
@@ -276,18 +251,13 @@ Future<DetailMetadataResult> resolveDetailMetadata({
           ),
           replaceExisting: forceReplace,
         );
-      } else {
-        DebugTraceOnce.logMetadata(traceKey, 'tmdb', 'no match');
       }
     } catch (error, stackTrace) {
       failures += 1;
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'tmdb',
-        'failed',
-        error: error,
-        stackTrace: stackTrace,
-      );
+      appLogError('metadata', 'detail.tmdb',
+          fields: {'key': traceKey, 'message': 'failed'},
+          error: error,
+          stackTrace: stackTrace);
     }
   }
   if (nextTarget.doubanId.trim().isNotEmpty &&

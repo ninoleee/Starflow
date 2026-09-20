@@ -2,6 +2,7 @@ import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/tmdb_media_identity.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
@@ -291,6 +292,20 @@ class DetailLibraryMatchService {
         '';
   }
 
+  TmdbMediaIdentity? resolveManualMatchTmdbIdentity(
+    MediaDetailTarget target,
+    MetadataMatchResult? metadataMatch,
+  ) {
+    if (target.tmdbId.trim().isNotEmpty) {
+      return TmdbMediaIdentity.fromRaw(target.tmdbId, target.itemType);
+    }
+    if (metadataMatch == null) return null;
+    return TmdbMediaIdentity.fromRaw(
+      metadataMatch.tmdbId,
+      metadataMatch.mediaType.toItemType,
+    );
+  }
+
   String resolveManualMatchWikidataId(MediaDetailTarget target) {
     final current = target.wikidataId.trim();
     if (current.isNotEmpty) {
@@ -307,6 +322,7 @@ class DetailLibraryMatchService {
     required String doubanId,
     required String imdbId,
     required String tmdbId,
+    TmdbMediaType? tmdbMediaType,
     required String tvdbId,
     required String wikidataId,
   }) {
@@ -325,7 +341,10 @@ class DetailLibraryMatchService {
         item.imdbId.trim().toLowerCase() == normalizedImdbId) {
       reasons.add('IMDb ID');
     }
-    if (normalizedTmdbId.isNotEmpty && item.tmdbId.trim() == normalizedTmdbId) {
+    if (normalizedTmdbId.isNotEmpty &&
+        tmdbMediaType != null &&
+        TmdbMediaIdentity.fromRaw(item.tmdbId, item.itemType) ==
+            TmdbMediaIdentity(mediaType: tmdbMediaType, id: normalizedTmdbId)) {
       reasons.add('TMDB ID');
     }
     if (normalizedTvdbId.isNotEmpty && item.tvdbId.trim() == normalizedTvdbId) {
@@ -442,6 +461,12 @@ class DetailLibraryMatchService {
     required List<MediaItem> items,
     MetadataMatchResult? metadataMatch,
   }) {
+    final targetType = TmdbMediaType.fromItemType(target.itemType) ??
+        TmdbMediaType.fromItemType(metadataMatch?.mediaType.toItemType ?? '');
+    items = items.where((item) {
+      final itemType = TmdbMediaType.fromItemType(item.itemType);
+      return targetType == null || itemType == null || targetType == itemType;
+    }).toList(growable: false);
     if (items.isEmpty) {
       return const <MediaItem>[];
     }
@@ -495,6 +520,7 @@ class DetailLibraryMatchService {
     final doubanId = resolveManualMatchDoubanId(target, metadataMatch);
     final imdbId = resolveManualMatchImdbId(target, metadataMatch);
     final tmdbId = resolveManualMatchTmdbId(target, metadataMatch);
+    final tmdbIdentity = resolveManualMatchTmdbIdentity(target, metadataMatch);
     final tvdbId = resolveManualMatchTvdbId(target);
     final wikidataId = resolveManualMatchWikidataId(target);
     final exactMatchedItems = listMediaItemsMatchingExternalIds(
@@ -502,6 +528,7 @@ class DetailLibraryMatchService {
       doubanId: doubanId,
       imdbId: imdbId,
       tmdbId: tmdbId,
+      tmdbMediaType: tmdbIdentity?.mediaType,
       tvdbId: tvdbId,
       wikidataId: wikidataId,
     );
@@ -515,6 +542,7 @@ class DetailLibraryMatchService {
                 doubanId: doubanId,
                 imdbId: imdbId,
                 tmdbId: tmdbId,
+                tmdbMediaType: tmdbIdentity?.mediaType,
                 tvdbId: tvdbId,
                 wikidataId: wikidataId,
               ),

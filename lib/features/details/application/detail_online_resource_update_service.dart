@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
+import 'package:starflow/features/library/domain/tmdb_media_identity.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
@@ -111,6 +112,14 @@ class DetailOnlineResourceUpdateService {
 
     final matches = <DetailFavoriteSearchResourceMatch>[];
     for (final favorite in favorites) {
+      final targetType = TmdbMediaType.fromItemType(target.itemType);
+      final favoriteType =
+          TmdbMediaType.fromItemType(favorite.metadataMediaType);
+      if (targetType != null &&
+          favoriteType != null &&
+          targetType != favoriteType) {
+        continue;
+      }
       if (favorite.detailTarget != null) {
         continue;
       }
@@ -210,6 +219,7 @@ class DetailOnlineResourceUpdateService {
       doubanId: target.doubanId,
       imdbId: target.imdbId,
       tmdbId: target.tmdbId,
+      itemType: target.itemType,
       tvdbId: target.tvdbId,
       wikidataId: target.wikidataId,
     );
@@ -309,6 +319,7 @@ class DetailOnlineResourceUpdateService {
       doubanId: favorite.doubanId,
       imdbId: favorite.imdbId,
       tmdbId: favorite.tmdbId,
+      itemType: favorite.metadataMediaType,
       tvdbId: favorite.tvdbId,
       wikidataId: favorite.wikidataId,
     );
@@ -406,6 +417,7 @@ Map<String, String> _normalizedExternalIds({
   String doubanId = '',
   String imdbId = '',
   String tmdbId = '',
+  String itemType = '',
   String tvdbId = '',
   String wikidataId = '',
 }) {
@@ -421,7 +433,7 @@ Map<String, String> _normalizedExternalIds({
 
   add('douban', doubanId);
   add('imdb', imdbId.toLowerCase());
-  add('tmdb', tmdbId);
+  add('tmdb', TmdbMediaIdentity.fromRaw(tmdbId, itemType)?.key ?? '');
   add('tvdb', tvdbId);
   add('wikidata', wikidataId.toUpperCase());
   return values;

@@ -16,44 +16,47 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     bool automaticRecovery = false,
     bool targetAlreadyResolved = false,
     Duration? startPositionOverride,
+    int? recoveryIntent,
   }) async {
-    if (!automaticRecovery) _automaticRecoveryBudget.reset();
+    if (!automaticRecovery) {
+      _automaticRecoveryBudget.reset();
+      _recoveryStartupIntent = null;
+      _recoveryIntent.playback(true);
+    }
     final generation = ++_startupGeneration;
     _startupScope.cancel();
     final scope = _startupScope = MpvStartupScope();
+    _recoveryStartupIntent = recoveryIntent;
+    bool startupIsCurrent() =>
+        _isCurrentStartup(generation) &&
+        (recoveryIntent == null || _recoveryIntent.allows(recoveryIntent));
     _playbackStartupStartedAt = DateTime.now();
     _playbackTargetResolutionMs = 0;
     _playbackStartPositionApplied = false;
     _pendingIntroStartValidation = Duration.zero;
     _resetPreparedNextEpisode();
     final startupTarget = initialTarget ?? widget.target;
+    _completionState.startMedia(
+      buildPlaybackItemKey(startupTarget),
+      isRecovery: automaticRecovery || startPositionOverride != null,
+    );
     await ActivePlaybackCleanupCoordinator.cleanupAll(
       reason: 'player-page-initialize',
       exceptToken: _activePlaybackCleanupToken,
     );
     await _waitForPendingPlayerShutdowns(reason: 'player-page-initialize');
-    if (!_isCurrentStartup(generation)) {
+    if (!startupIsCurrent()) {
+      await _finishCancelledRecovery(generation, recoveryIntent);
       return;
     }
-    _traceWindowsMpv(
-      'windows-mpv.initialize.begin',
-      fields: {
-        'canPlay': startupTarget.canPlay,
-        'needsResolution': startupTarget.needsResolution,
-        'decodeMode': _playbackDecodeMode.name,
-        'qualityPresetRequested': _playbackMpvQualityPreset.name,
-        'leanUi': _leanPlaybackUiEnabled,
-        'aggressiveTuning': _aggressivePlaybackTuningEnabled,
-      },
-    );
     if (!startupTarget.canPlay) {
-      _traceWindowsMpv('windows-mpv.initialize.no-playable-source');
       setState(() {
         _error = '没有可播放的流地址';
       });
       return;
     }
 
+    PlaybackTarget? retainedRecoveryTarget;
     try {
       final coordinator = PlaybackStartupCoordinator(
         read: _providerContainer.read,
@@ -71,42 +74,21 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         // Ownership precedes the cancellation check, including late results.
         if (outcome.routeAction == PlaybackStartupRouteAction.openEmbeddedMpv) {
           await _fntvSessions.retain(outcome.resolvedTarget);
-          if (!_isCurrentStartup(generation)) {
+          if (recoveryIntent != null) {
+            retainedRecoveryTarget = outcome.resolvedTarget;
+          }
+          if (!startupIsCurrent()) {
             await _fntvSessions.release(outcome.resolvedTarget);
           }
         }
         return outcome;
       }));
-      if (!_isCurrentStartup(generation)) {
+      if (!startupIsCurrent()) {
         return;
       }
       _playbackTargetResolutionMs =
           DateTime.now().difference(_playbackStartupStartedAt!).inMilliseconds;
       final resolvedTarget = outcome.resolvedTarget;
-      _traceQuarkPlaybackStartup(
-        'quark.startup.outcome',
-        target: resolvedTarget,
-        fields: {
-          'routeAction': outcome.routeAction.name,
-          'engine': outcome.settings.playbackEngine.name,
-          'headers': resolvedTarget.headers.length,
-          'streamUrl': resolvedTarget.streamUrl,
-        },
-      );
-      _traceWindowsMpv(
-        'windows-mpv.initialize.target-resolved',
-        fields: {
-          'urlScheme':
-              Uri.tryParse(resolvedTarget.streamUrl.trim())?.scheme ?? '',
-          'sourceName': resolvedTarget.sourceName,
-          'resolution': resolvedTarget.resolutionLabel,
-          'format': resolvedTarget.formatLabel,
-          'videoCodec': resolvedTarget.videoCodec,
-          'audioCodec': resolvedTarget.audioCodec,
-          'bitrate': resolvedTarget.bitrate ?? 0,
-          'headers': resolvedTarget.headers.length,
-        },
-      );
       final startupPreparation = outcome.startupPreparation;
       final resumeEntry = startupPreparation.resumeEntry;
       final skipPreference = startupPreparation.skipPreference;
@@ -126,7 +108,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
                   currentTarget: resolvedTarget,
                 )
               : null);
-      if (!_isCurrentStartup(generation)) {
+      if (!startupIsCurrent()) {
         return;
       }
       if (mounted) {
@@ -144,15 +126,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         outcome.routeAction,
         resolvedTarget,
       );
-      _traceQuarkPlaybackStartup(
-        'quark.startup.executor-result',
-        target: resolvedTarget,
-        fields: {
-          'routeAction': outcome.routeAction.name,
-          'shouldOpenEmbedded': shouldOpen,
-        },
-      );
-      if (!shouldOpen || !_isCurrentStartup(generation)) {
+      if (!shouldOpen || !startupIsCurrent()) {
         return;
       }
       if (episodeQueue == null) {
@@ -172,7 +146,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
           : PlaybackStartPosition(
               position: startPositionOverride, isResume: true);
       await _resolveAndroidMemoryClassIfNeeded();
-      if (!_isCurrentStartup(generation)) {
+      if (!startupIsCurrent()) {
         return;
       }
       _beginMpvPerformanceSession(resolvedTarget);
@@ -207,7 +181,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         startPosition: startPosition,
       );
 
-      if (!_isCurrentStartup(generation)) {
+      if (!startupIsCurrent()) {
         await playback.cancelSubscriptions();
         return;
       }
@@ -216,17 +190,13 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       lifecycle.retain(playback.errorSubscription);
       lifecycle.retain(playback.logSubscription);
       await _bindMpvSubtitleRendering(playback.player);
-      if (!_isCurrentStartup(generation)) return;
+      if (!startupIsCurrent()) return;
       lifecycle.subtitles.listen(playback.player.stream.track);
       lifecycle.subtitles.listen(playback.player.stream.tracks);
       _syncMpvSubtitleRendering(playback.player);
       lifecycle.listen(playback.player.stream.playing, (
         playing,
       ) {
-        _traceWindowsMpv(
-          'windows-mpv.player.playing',
-          fields: {'playing': playing},
-        );
         if (_isTelevisionPlaybackDevice && _shouldUpdatePlaybackVisualState) {
           _updateTvPlaybackState(playing: playing);
         }
@@ -277,7 +247,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         unawaited(_persistPlaybackProgress());
         unawaited(_syncPlaybackSystemSession());
       });
-      _bindWindowsMpvTraceStreams(playback.player);
+      _bindMpvBufferingStreams(playback.player);
       _attachOpeningEmbeddedPlayback(
         playback.player,
         playback.videoController,
@@ -291,14 +261,19 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         );
       }
       await _syncSubtitleDelayState(playback.player);
+      if (!startupIsCurrent()) return;
       // The player already opened at the start position, so there is nothing
       // to seek and nothing to re-confirm here; the stall watchdog started
       // below owns everything after the open.
-      _finalizePlaybackStartPosition(playback.player, startPosition);
+      _finalizePlaybackStartPosition(
+        playback.player,
+        playback.effectiveStartPosition,
+      );
       if (!_isCurrentStartup(generation) || _player != playback.player) {
         return;
       }
       setState(() {
+        _recoveryStartupIntent = null;
         _isReady = true;
         _lastRuntimeMpvErrorAt = null;
         _runtimeMpvErrorBurstCount = 0;
@@ -306,16 +281,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
         _runtimeMpvErrorRecoveryInProgress = false;
       });
       _startMpvStallWatchdog(playback.player, resolvedTarget);
+      unawaited(_prepareOptionalStartupTracks(playback.player, resolvedTarget));
       _startMpvPerformanceSampling(playback.player, resolvedTarget);
-      _traceWindowsMpv(
-        'windows-mpv.initialize.ready',
-        fields: {
-          'durationMs': playback.player.state.duration.inMilliseconds,
-          'width': playback.player.state.width ?? 0,
-          'height': playback.player.state.height ?? 0,
-          'buffering': playback.player.state.buffering,
-        },
-      );
       unawaited(_syncBackgroundPlayback(enabled: true));
       unawaited(_bindPlaybackSystemSession());
       if (!_playbackPageInForeground) {
@@ -323,6 +290,9 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       }
       unawaited(_syncPlaybackSystemSession(force: true));
     } catch (error, stackTrace) {
+      if (_isCurrentStartup(generation) && !startupIsCurrent()) {
+        return;
+      }
       if (!_isCurrentStartup(generation)) {
         return;
       }
@@ -362,6 +332,13 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       });
       unawaited(_syncBackgroundPlayback(enabled: false));
       unawaited(_teardownPlaybackSystemSession());
+    } finally {
+      final cancelled = !startupIsCurrent();
+      await _finishCancelledRecovery(generation, recoveryIntent);
+      if (cancelled && retainedRecoveryTarget != null) {
+        await _fntvSessions.release(retainedRecoveryTarget!);
+      }
+      if (_isCurrentStartup(generation)) _recoveryStartupIntent = null;
     }
   }
 

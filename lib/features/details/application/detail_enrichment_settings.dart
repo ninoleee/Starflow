@@ -9,7 +9,6 @@ class DetailEnrichmentSettings {
     required this.wmdbMetadataMatchEnabled,
     required this.tmdbMetadataMatchEnabled,
     required this.tmdbReadAccessToken,
-    required this.imdbRatingMatchEnabled,
   });
 
   final List<MediaSourceConfig> mediaSources;
@@ -17,7 +16,6 @@ class DetailEnrichmentSettings {
   final bool wmdbMetadataMatchEnabled;
   final bool tmdbMetadataMatchEnabled;
   final String tmdbReadAccessToken;
-  final bool imdbRatingMatchEnabled;
 }
 
 final detailEnrichmentSettingsProvider =
@@ -42,9 +40,6 @@ final detailEnrichmentSettingsProvider =
     ),
     tmdbReadAccessToken: ref.watch(
       appSettingsProvider.select((settings) => settings.tmdbReadAccessToken),
-    ),
-    imdbRatingMatchEnabled: ref.watch(
-      appSettingsProvider.select((settings) => settings.imdbRatingMatchEnabled),
     ),
   );
 });

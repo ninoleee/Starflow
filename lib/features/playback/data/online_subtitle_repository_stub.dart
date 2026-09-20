@@ -3,6 +3,7 @@ import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_operation.dart';
 
 OnlineSubtitleRepository createOnlineSubtitleRepository(Ref ref) {
   return const UnsupportedOnlineSubtitleRepository();
@@ -21,12 +22,14 @@ class UnsupportedOnlineSubtitleRepository implements OnlineSubtitleRepository {
     ],
     int maxResults = 0,
     int maxValidated = 0,
+    SubtitleOperation? operation,
   }) {
     throw UnsupportedError('当前平台暂不支持结构化在线字幕搜索。');
   }
 
   @override
-  Future<SubtitleDownloadResult> download(SubtitleSearchResult result) {
+  Future<SubtitleDownloadResult> download(SubtitleSearchResult result,
+      {SubtitleOperation? operation}) {
     throw UnsupportedError('当前平台暂不支持应用内在线字幕下载。');
   }
 

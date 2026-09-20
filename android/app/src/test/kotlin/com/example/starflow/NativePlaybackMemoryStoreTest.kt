@@ -3,8 +3,78 @@ package com.example.starflow
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import android.content.SharedPreferences
+import org.mockito.Mockito.*
+import org.mockito.ArgumentMatchers.anyString
 
 class NativePlaybackMemoryStoreTest {
+    @Test
+    fun sharedCompareAndSetRejectsStaleSnapshotAndClearSurvivesNativeReload() {
+        val preferences = mock(SharedPreferences::class.java)
+        val editor = mock(SharedPreferences.Editor::class.java)
+        var raw: String? = "{}"
+        var staged: String? = null
+        `when`(preferences.getString(PLAYBACK_MEMORY_STORAGE_KEY, null)).thenAnswer { raw }
+        `when`(preferences.edit()).thenReturn(editor)
+        `when`(editor.putString(anyString(), anyString())).thenAnswer {
+            staged = it.getArgument(1); editor
+        }
+        `when`(editor.remove(anyString())).thenAnswer { staged = null; editor }
+        `when`(editor.commit()).thenAnswer { raw = staged; true }
+        val store = NativePlaybackMemoryStore(preferences)
+        val stale = raw
+        store.savePlaybackEntry("{}", "item", "", 20000, 100000, true)
+        val conflict = CountDownLatch(1)
+        var accepted: Boolean? = null
+        NativePlaybackMemoryStore.compareAndSetShared(preferences, stale, null) { result, error ->
+            assertNull(error); accepted = result; conflict.countDown()
+        }
+        assertTrue(conflict.await(10, TimeUnit.SECONDS))
+        assertEquals(false, accepted)
+        val cleared = CountDownLatch(1)
+        NativePlaybackMemoryStore.compareAndSetShared(preferences, raw, null) { result, error ->
+            assertNull(error); accepted = result; cleared.countDown()
+        }
+        assertTrue(cleared.await(10, TimeUnit.SECONDS))
+        assertEquals(true, accepted)
+        assertEquals(0L, store.loadResumePositionMs("item"))
+    }
+
+    @Test
+    fun backgroundProgressCoalescesWithoutBlockingCallerAndFinalOrdersNextTick() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val recorded = mutableListOf<Long>()
+        var snapshot: String? = null
+        val caller = Thread.currentThread()
+        val asyncStore = NativePlaybackMemoryStore(
+            readSnapshot = { snapshot },
+            writeSnapshot = { value, _ ->
+                assertNotEquals(caller, Thread.currentThread())
+                if (recorded.isEmpty()) {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+                snapshot = value
+                recorded += JSONObject(value).getJSONObject("items").getJSONObject("item").getLong("positionMs")
+                true
+            },
+        )
+        fun enqueue(position: Long, final: Boolean = false) = asyncStore.enqueuePlaybackEntry(
+            "{}", "item", "series", position, 100_000L, final)
+        enqueue(10_000L)
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        try {
+            repeat(20) { enqueue(20_000L + it) }
+            enqueue(40_000L, true)
+            enqueue(50_000L)
+        } finally { release.countDown() }
+        asyncStore.awaitPendingWrites()
+        assertEquals(listOf(10_000L, 40_000L, 50_000L), recorded)
+        assertEquals(50_000L, asyncStore.loadResumePositionMs("item"))
+    }
     private var raw: String? = null
     private var tick = 0
     private var decodes = 0

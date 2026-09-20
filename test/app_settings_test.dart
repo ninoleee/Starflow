@@ -951,4 +951,47 @@ void main() {
       ],
     );
   });
+
+  test('live menu defaults do not rewrite an existing menu selection', () {
+    const defaultOrder = ['home', 'live-tv', 'search', 'library', 'settings'];
+    expect(kDefaultNavigationDestinationIds, defaultOrder);
+    expect(AppSettings.fromJson(const {}).navigationDestinationIds, defaultOrder);
+    const legacyIds = [
+      kNavigationDestinationHome,
+      kNavigationDestinationSearch,
+      kNavigationDestinationLibrary,
+      kNavigationDestinationSettings
+    ];
+    const settings = AppSettings(
+        mediaSources: [],
+        searchProviders: [],
+        doubanAccount: DoubanAccountConfig(enabled: false),
+        homeModules: [],
+        navigationDestinationIds: legacyIds);
+    expect(AppSettings.fromJson(settings.toJson()).navigationDestinationIds,
+        legacyIds);
+    expect(kDefaultNavigationDestinationIds,
+        contains(kNavigationDestinationLiveTv));
+    final enabled = settings.copyWith(
+        navigationDestinationIds: normalizeNavigationDestinationIds(
+            [...legacyIds, kNavigationDestinationLiveTv]));
+    final restored = AppSettings.fromJson(enabled.toJson());
+    expect(restored.navigationDestinationIds,
+        contains(kNavigationDestinationLiveTv));
+    expect(restored.navigationDestinationIds,
+        contains(kNavigationDestinationSettings));
+  });
+
+  test('navigation normalization preserves order and removes invalid IDs', () {
+    expect(
+      normalizeNavigationDestinationIds(
+        [' settings ', 'live-tv', 'unknown', 'home', 'live-tv', 'search'],
+      ),
+      ['settings', 'live-tv', 'home', 'search'],
+    );
+    expect(normalizeNavigationDestinationIds(['unknown']), ['home', 'settings']);
+    expect(normalizeNavigationDestinationIds(['settings']), ['settings']);
+    expect(normalizeNavigationDestinationIds(['library', 'home']),
+        ['library', 'home', 'settings']);
+  });
 }

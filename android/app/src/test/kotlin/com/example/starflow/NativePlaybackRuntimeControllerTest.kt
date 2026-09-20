@@ -22,7 +22,7 @@ class NativePlaybackRuntimeControllerTest {
         `when`(host.target.seriesKey).thenReturn("series")
         `when`(host.target.playbackItemKey).thenReturn("episode")
         `when`(host.target.playbackTargetJson).thenReturn("{}")
-        `when`(host.memory.loadSeriesSkipPreference("series"))
+        `when`(host.memory.peekSeriesSkipPreference("series"))
             .thenReturn(
                 JSONObject("""{"enabled":true,"introDurationMs":10000,"outroDurationMs":40000}""")
             )
@@ -59,7 +59,7 @@ class NativePlaybackRuntimeControllerTest {
         verify(host.session.player!!, never()).seekTo(anyLong())
         verify(host.session, never()).setPlayWhenReady(false)
         verify(host.memory, never())
-            .savePlaybackEntry(
+            .enqueuePlaybackEntry(
                 anyString(),
                 anyString(),
                 anyString(),
@@ -77,7 +77,7 @@ class NativePlaybackRuntimeControllerTest {
         verify(host.session.player!!, never()).seekTo(anyLong())
         runtime.persistPlaybackProgress(force = true)
         verify(host.memory, times(2))
-            .savePlaybackEntry("{}", "episode", "series", 60_000L, 100_000L, true, true)
+            .enqueuePlaybackEntry("{}", "episode", "series", 60_000L, 100_000L, true, true)
         runtime.maybeApplyAutoSkip()
         verify(host.session, times(1)).setPlayWhenReady(false)
     }
@@ -91,7 +91,7 @@ class NativePlaybackRuntimeControllerTest {
         runtime.persistPlaybackProgress(force = true)
         verify(host.session.player!!, never()).seekTo(anyLong())
         verify(host.memory)
-            .savePlaybackEntry("{}", "episode", "series", 5_000L, 100_000L, true, false)
+            .enqueuePlaybackEntry("{}", "episode", "series", 5_000L, 100_000L, true, false)
     }
 
     @Test
@@ -107,7 +107,7 @@ class NativePlaybackRuntimeControllerTest {
     @Test
     fun invalidIntroDoesNotSkipEntireEpisode() {
         position = 0L
-        `when`(host.memory.loadSeriesSkipPreference("series"))
+        `when`(host.memory.peekSeriesSkipPreference("series"))
             .thenReturn(JSONObject("""{"enabled":true,"introDurationMs":100000}"""))
         runtime.introSkipApplied = false
         runtime.maybeApplyAutoSkip()

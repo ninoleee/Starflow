@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/playback/application/playback_completion_state.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
@@ -15,6 +16,190 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+  });
+
+  group('explicit auto-skip completion', () {
+    const target = PlaybackTarget(
+      title: 'Episode 1',
+      sourceId: 'emby-main',
+      streamUrl: 'https://emby.example/episode-1.mkv',
+      sourceName: 'Emby',
+      sourceKind: MediaSourceKind.emby,
+      itemId: 'episode-1',
+      itemType: 'episode',
+      seriesId: 'series-1',
+      seriesTitle: 'Series',
+      seasonNumber: 1,
+      episodeNumber: 1,
+    );
+
+    test('repeated 60 percent saves preserve position and the JSON schema',
+        () async {
+      final prefs = await SharedPreferences.getInstance();
+      final repository = PlaybackMemoryRepository(sharedPreferences: prefs);
+      final itemKey = buildPlaybackItemKey(target);
+      final seriesKey = buildSeriesKeyForTarget(target);
+      final state = PlaybackCompletionState()
+        ..startMedia(itemKey)
+        ..markCompletedByAutoSkip();
+
+      for (var index = 0; index < 3; index++) {
+        state.startMedia(itemKey, isRecovery: true);
+        await repository.saveProgress(
+          target: target,
+          position: const Duration(minutes: 6),
+          duration: const Duration(minutes: 10),
+          completedByAutoSkip: state.completedByAutoSkip,
+        );
+        final restored = PlaybackMemoryRepository(sharedPreferences: prefs);
+        final entry = (await restored.loadEntryForTarget(target))!;
+        expect(entry.completed, isTrue);
+        expect(entry.canResume, isFalse);
+        expect(entry.position, const Duration(minutes: 6));
+        expect(entry.duration, const Duration(minutes: 10));
+        expect(entry.progress, 0.6);
+        final seriesEntry = (await restored.loadSnapshot()).series[seriesKey]!;
+        expect(seriesEntry.completed, isTrue);
+        expect(seriesEntry.position, entry.position);
+        expect(seriesEntry.progress, entry.progress);
+      }
+
+      final json = jsonDecode(prefs.getString('starflow.playback.memory.v1')!)
+          as Map<String, dynamic>;
+      expect(
+        json.keys,
+        unorderedEquals([
+          'items',
+          'series',
+          'skipPreferences',
+          'subtitlePreferences',
+        ]),
+      );
+      final entryJson = (json['items'] as Map)[itemKey] as Map;
+      expect(
+        entryJson.keys,
+        unorderedEquals([
+          'key',
+          'target',
+          'updatedAt',
+          'seriesKey',
+          'seriesTitle',
+          'positionMs',
+          'durationMs',
+          'progress',
+          'completed',
+        ]),
+      );
+      expect(entryJson['completed'], isTrue);
+      expect(entryJson['positionMs'], 360000);
+      expect(entryJson['durationMs'], 600000);
+      expect(entryJson['progress'], 0.6);
+      expect((json['series'] as Map)[seriesKey], entryJson);
+    });
+
+    test('manual seek clears explicit completion in item and series', () async {
+      final repository = PlaybackMemoryRepository(
+        sharedPreferences: await SharedPreferences.getInstance(),
+      );
+      final state = PlaybackCompletionState()
+        ..startMedia(buildPlaybackItemKey(target))
+        ..markCompletedByAutoSkip();
+      await repository.saveProgress(
+        target: target,
+        position: const Duration(minutes: 6),
+        duration: const Duration(minutes: 10),
+        completedByAutoSkip: state.completedByAutoSkip,
+      );
+      state.clearForManualSeek();
+      await repository.saveProgress(
+        target: target,
+        position: const Duration(minutes: 3),
+        duration: const Duration(minutes: 10),
+        completedByAutoSkip: state.completedByAutoSkip,
+      );
+      repository.invalidateSnapshotCache();
+      final entry = (await repository.loadEntryForTarget(target))!;
+      expect(entry.completed, isFalse);
+      expect(entry.canResume, isTrue);
+      expect(entry.position, const Duration(minutes: 3));
+      expect(entry.progress, 0.3);
+      final seriesEntry = (await repository.loadSnapshot())
+          .series[buildSeriesKeyForTarget(target)]!;
+      expect(seriesEntry.completed, isFalse);
+    });
+
+    test('omitting the flag never inherits stored completion', () async {
+      final repository = PlaybackMemoryRepository(
+        sharedPreferences: await SharedPreferences.getInstance(),
+      );
+      await repository.saveProgress(
+        target: target,
+        position: const Duration(minutes: 6),
+        duration: const Duration(minutes: 10),
+        completedByAutoSkip: true,
+      );
+      await repository.saveProgress(
+        target: target,
+        position: const Duration(minutes: 6),
+        duration: const Duration(minutes: 10),
+      );
+      final entry = (await repository.loadEntryForTarget(target))!;
+      expect(entry.completed, isFalse);
+      expect(entry.canResume, isTrue);
+    });
+
+    test('new episode is independent of the previous completed episode',
+        () async {
+      final repository = PlaybackMemoryRepository(
+        sharedPreferences: await SharedPreferences.getInstance(),
+      );
+      final next = target.copyWith(itemId: 'episode-2', episodeNumber: 2);
+      final state = PlaybackCompletionState()
+        ..startMedia(buildPlaybackItemKey(target))
+        ..markCompletedByAutoSkip();
+      await repository.saveProgress(
+        target: target,
+        position: const Duration(minutes: 6),
+        duration: const Duration(minutes: 10),
+        completedByAutoSkip: state.completedByAutoSkip,
+      );
+      state.startMedia(buildPlaybackItemKey(next));
+      await repository.saveProgress(
+        target: next,
+        position: const Duration(minutes: 6),
+        duration: const Duration(minutes: 10),
+        completedByAutoSkip: state.completedByAutoSkip,
+      );
+      expect((await repository.loadEntryForTarget(target))!.completed, isTrue);
+      expect((await repository.loadEntryForTarget(next))!.completed, isFalse);
+      final seriesEntry = (await repository.loadSnapshot())
+          .series[buildSeriesKeyForTarget(target)]!;
+      expect(seriesEntry.target.itemId, 'episode-2');
+      expect(seriesEntry.completed, isFalse);
+    });
+
+    test('normal completion still uses percentage or remaining time', () async {
+      final repository = PlaybackMemoryRepository(
+        sharedPreferences: await SharedPreferences.getInstance(),
+      );
+      for (final sample in [
+        (position: 5910, duration: 6000, completed: true),
+        (position: 92, duration: 100, completed: true),
+        (position: 91, duration: 100, completed: false),
+        (position: 60, duration: 100, completed: false),
+        (position: 60, duration: 0, completed: false),
+      ]) {
+        await repository.saveProgress(
+          target: target,
+          position: Duration(seconds: sample.position),
+          duration: Duration(seconds: sample.duration),
+        );
+        final entry = (await repository.loadEntryForTarget(target))!;
+        expect(entry.completed, sample.completed);
+        expect(entry.position, Duration(seconds: sample.position));
+        expect(entry.duration, Duration(seconds: sample.duration));
+      }
+    });
   });
 
   test('persists movie progress for resume', () async {

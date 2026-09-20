@@ -85,6 +85,14 @@ internal class NativePlaybackEpisodePicker(
         seasonButton.setPadding(0, 0, dp(8), 0)
         seasonButton.maxLines = 1; seasonButton.ellipsize = TextUtils.TruncateAt.END
         seasonButton.setOnClickListener { chooseSeason() }
+        seasonButton.setOnKeyListener { _, key, event ->
+            if (event.action != KeyEvent.ACTION_DOWN || loading) false
+            else when (key) {
+                KeyEvent.KEYCODE_DPAD_UP -> { listButton.requestFocus(); true }
+                KeyEvent.KEYCODE_DPAD_DOWN -> { focus(focusedIndex); true }
+                else -> false
+            }
+        }
         seasonRow.addView(seasonButton, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root.addView(seasonRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)))
         styleButton(status); status.textSize = if (television) 13f else 12f; status.visibility = View.INVISIBLE
@@ -176,13 +184,20 @@ internal class NativePlaybackEpisodePicker(
         setPadding(dp(11), dp(11), dp(11), dp(11)); scaleType = ImageView.ScaleType.FIT_CENTER
         setOnClickListener { action() }
         setOnKeyListener { _, key, event ->
-            if (event.action == KeyEvent.ACTION_DOWN && !loading &&
-                ((this === listButton && key == KeyEvent.KEYCODE_DPAD_DOWN) ||
-                 (this === locateButton && key == KeyEvent.KEYCODE_DPAD_UP))) {
-                focus(focusedIndex); true
-            } else false
+            if (event.action != KeyEvent.ACTION_DOWN || loading) false
+            else when {
+                (this === listButton || this === gridButton) && key == KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    if (!focusSeason()) focus(focusedIndex)
+                    true
+                }
+                this === locateButton && key == KeyEvent.KEYCODE_DPAD_UP -> {
+                    focus(focusedIndex); true
+                }
+                else -> false
+            }
         }
     }
+    private fun focusSeason(): Boolean = seasonButton.isEnabled && seasonButton.isShown && seasonButton.requestFocus()
     private fun number(index: Int): Int = JSONObject(queue.entries[index].playbackTargetJson).optInt("episodeNumber", index + 1)
     private fun currentSeasonNumber() = JSONObject(queue.entries.first().playbackTargetJson).optInt("seasonNumber", 0)
 
@@ -318,7 +333,7 @@ internal class NativePlaybackEpisodePicker(
             else {
                 val next = episodePickerNeighbor(index, queue.entries.size, grid, delta)
                 when {
-                    next < 0 -> listButton.requestFocus()
+                    next < 0 -> { if (!focusSeason()) listButton.requestFocus() }
                     next >= queue.entries.size -> locateButton?.requestFocus()
                     else -> move(next)
                 }

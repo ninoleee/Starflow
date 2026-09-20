@@ -34,6 +34,19 @@ internal class NativePlaybackTrackController(private val host: Host) {
 
     var subtitleSessionPreference: NativeSubtitleSessionPreference? = null
 
+    var subtitleSelectionRevision = 0L
+        private set
+
+    fun beginSubtitleSelection(keepExternalSource: Boolean = false): Long {
+        subtitleSelectionRevision++
+        pendingExternalSubtitleSelection = false
+        automaticSubtitleSelectionApplied = true
+        host.fntv.cancelSubtitleLoad()
+        host.externalSubtitles.invalidatePendingSelection()
+        if (!keepExternalSource) host.externalSubtitles.externalSubtitleSource = null
+        return subtitleSelectionRevision
+    }
+
     val dualSubtitleController = NativeDualSubtitleController()
 
     fun subtitlePreferenceIsOff(): Boolean =
@@ -209,7 +222,8 @@ internal class NativePlaybackTrackController(private val host: Host) {
         val serverSubtitles = if (trackType == C.TRACK_TYPE_TEXT) {
             host.fntv.externalSubtitles()
         } else emptyList()
-        if (choices.isEmpty() && serverSubtitles.isEmpty()) {
+        val serverAudio = if (trackType == C.TRACK_TYPE_AUDIO) host.fntv.unavailableAudioStreams() else emptyList()
+        if (choices.isEmpty() && serverSubtitles.isEmpty() && serverAudio.isEmpty()) {
             host.showToast(emptyMessage)
             host.controllerView.restoreControllerFocusIfNeeded(focusTarget)
             return
@@ -245,6 +259,11 @@ internal class NativePlaybackTrackController(private val host: Host) {
                             it.optString("language").ifBlank { "外挂字幕" }
                         }
                     })
+                    addAll(serverAudio.map {
+                        val label = listOf(it.optString("title"), it.optString("language"), it.optString("codec"))
+                            .filter(String::isNotBlank).joinToString(" · ").ifBlank { "音轨 ${it.optInt("index") + 1}" }
+                        "$label · 需服务端转码"
+                    })
                 }
                 .toTypedArray()
         val selectedChoiceIndex = choices.indexOfFirst(NativeTrackChoice::selected)
@@ -261,16 +280,21 @@ internal class NativePlaybackTrackController(private val host: Host) {
             AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
                 .setTitle(title)
                 .setSingleChoiceItems(labels, checkedIndex) { pickerDialog, which ->
+                    if (host.session.player !== currentPlayer) {
+                        pickerDialog.dismiss()
+                        return@setSingleChoiceItems
+                    }
                     if (which >= choiceOffset + choices.size) {
                         pickerDialog.dismiss()
-                        host.fntv.loadSubtitle(serverSubtitles[which - choiceOffset - choices.size])
+                        val index = which - choiceOffset - choices.size
+                        if (trackType == C.TRACK_TYPE_AUDIO) host.fntv.requestServerAudio(serverAudio[index])
+                        else host.fntv.loadSubtitle(serverSubtitles[index])
                         return@setSingleChoiceItems
                     }
                     if (trackType == C.TRACK_TYPE_TEXT) {
-                        pendingExternalSubtitleSelection = false
                         val keepsExternal = which >= choiceOffset &&
                             which < choiceOffset + choices.size && choices[which - choiceOffset].isExternal
-                        if (!keepsExternal) host.externalSubtitles.externalSubtitleSource = null
+                        beginSubtitleSelection(keepExternalSource = keepsExternal)
                     }
                     val parameters =
                         currentPlayer.trackSelectionParameters
@@ -297,13 +321,21 @@ internal class NativePlaybackTrackController(private val host: Host) {
                         dualSubtitleController.disable()
                         host.subtitleStyle.applySubtitleStyle()
                         automaticSubtitleSelectionApplied = false
+                        val revision = subtitleSelectionRevision
                         host.playerView.post {
-                            applyAutomaticSubtitleSelection(currentPlayer.currentTracks)
+                            if (revision == subtitleSelectionRevision && host.session.player === currentPlayer) {
+                                applyAutomaticSubtitleSelection(currentPlayer.currentTracks)
+                            }
                         }
                         return@setSingleChoiceItems
                     } else if (showDualSubtitleOption && which == 2) {
                         pickerDialog.dismiss()
-                        host.playerView.post { openDualSubtitlePrimaryPicker(choices) }
+                        val revision = subtitleSelectionRevision
+                        host.playerView.post {
+                            if (revision == subtitleSelectionRevision && host.session.player === currentPlayer) {
+                                openDualSubtitlePrimaryPicker(choices)
+                            }
+                        }
                         return@setSingleChoiceItems
                     } else {
                         val choice = choices[which - choiceOffset]
@@ -339,6 +371,8 @@ internal class NativePlaybackTrackController(private val host: Host) {
     }
 
     private fun openDualSubtitlePrimaryPicker(choices: List<NativeTrackChoice>) {
+        val player = host.session.player ?: return
+        val revision = subtitleSelectionRevision
         val textChoices =
             choices.filter(NativeTrackChoice::canUseInDualSubtitleMode).sortedByDescending { choice
                 ->
@@ -358,10 +392,12 @@ internal class NativePlaybackTrackController(private val host: Host) {
                     val primaryChoice = textChoices[which]
                     pickerDialog.dismiss()
                     host.playerView.post {
-                        openDualSubtitleSecondaryPicker(
-                            choices = textChoices,
-                            primaryChoice = primaryChoice,
-                        )
+                        if (revision == subtitleSelectionRevision && host.session.player === player) {
+                            openDualSubtitleSecondaryPicker(
+                                choices = textChoices,
+                                primaryChoice = primaryChoice,
+                            )
+                        }
                     }
                 }
                 .setNegativeButton("取消", null)
@@ -373,6 +409,8 @@ internal class NativePlaybackTrackController(private val host: Host) {
         choices: List<NativeTrackChoice>,
         primaryChoice: NativeTrackChoice,
     ) {
+        val player = host.session.player ?: return
+        val revision = subtitleSelectionRevision
         val primaryKey = primaryChoice.formatKey ?: return
         val secondaryChoices =
             choices
@@ -402,7 +440,9 @@ internal class NativePlaybackTrackController(private val host: Host) {
                     which ->
                     val secondaryChoice = secondaryChoices[which]
                     pickerDialog.dismiss()
-                    enableDualSubtitleMode(primaryChoice, secondaryChoice)
+                    if (revision == subtitleSelectionRevision && host.session.player === player) {
+                        enableDualSubtitleMode(primaryChoice, secondaryChoice)
+                    }
                 }
                 .setNegativeButton("取消", null)
                 .create()
@@ -417,6 +457,7 @@ internal class NativePlaybackTrackController(private val host: Host) {
         if (primaryChoice.formatKey == null || secondaryChoice.formatKey == null) {
             return
         }
+        beginSubtitleSelection()
         enableDualSubtitleRouting(primaryChoice, secondaryChoice)
         currentPlayer.trackSelectionParameters =
             currentPlayer.trackSelectionParameters

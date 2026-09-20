@@ -15,6 +15,27 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('navigation order persists through save, export and restart', () async {
+    final repository = _OutOfOrderSettingsRepository(SeedData.defaultSettings);
+    final container = ProviderContainer(overrides: [
+      appSettingsRepositoryProvider.overrideWithValue(repository),
+    ]);
+    await container.read(settingsControllerProvider.future);
+    const order = ['settings', 'live-tv', 'library', 'home'];
+    await container
+        .read(settingsControllerProvider.notifier)
+        .setNavigationDestinationIds(order);
+    expect(container.read(appSettingsProvider).navigationDestinationIds, order);
+    expect(AppSettings.fromCurrentJson(repository.settings.toJson())
+        .navigationDestinationIds, order);
+    container.dispose();
+    final restarted = ProviderContainer(overrides: [
+      appSettingsRepositoryProvider.overrideWithValue(repository),
+    ]);
+    addTearDown(restarted.dispose);
+    expect((await restarted.read(settingsControllerProvider.future))
+        .navigationDestinationIds, order);
+  });
   test('hero auto play persists independently of simplified visuals', () async {
     final repository = _OutOfOrderSettingsRepository(SeedData.defaultSettings);
     final container = ProviderContainer(overrides: [

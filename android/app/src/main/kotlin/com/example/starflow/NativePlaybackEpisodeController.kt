@@ -131,7 +131,7 @@ internal class NativePlaybackEpisodeController(
         val queue = episodeQueue ?: return
         if (!queue.hasNext()) return
         val durationMs = player.duration.takeIf { it > 0L } ?: return
-        val preference = host.memory.loadSeriesSkipPreference(host.target.seriesKey)
+        val preference = host.memory.peekSeriesSkipPreference(host.target.seriesKey)
         val boundaryMs =
             NativePlaybackSkipPolicy.endBoundaryMs(
                 durationMs,
@@ -150,7 +150,7 @@ internal class NativePlaybackEpisodeController(
     fun onUserSeek() {
         if (transition.isSwitching) return
         val player = host.session.player ?: return
-        val preference = host.memory.loadSeriesSkipPreference(host.target.seriesKey)
+        val preference = host.memory.peekSeriesSkipPreference(host.target.seriesKey)
         val boundaryMs =
             NativePlaybackSkipPolicy.endBoundaryMs(
                 player.duration,

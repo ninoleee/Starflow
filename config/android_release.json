@@ -1,0 +1,7 @@
+{
+  "flutterVersion": "3.38.10",
+  "engineRevision": "cafcda5721a78a7884db92f13c5e89f7643d52dd",
+  "minSdk": 23,
+  "abis": ["armeabi-v7a", "arm64-v8a"],
+  "certificateSha256": "c4d0d934b121afc77f4ff0963df453b5e63ad77298604138a355d60738e73a12"
+}

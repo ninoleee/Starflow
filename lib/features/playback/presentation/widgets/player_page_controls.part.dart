@@ -72,14 +72,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
     if (_isEmbeddedMpvFullscreen == isFullscreen) {
       return;
     }
-    _traceWindowsMpv(
-      'windows-mpv.overlay.fullscreen-state-request',
-      fields: {
-        'reason': reason,
-        'fullscreenBefore': _isEmbeddedMpvFullscreen,
-        'fullscreenAfter': isFullscreen,
-      },
-    );
     if (_useWindowManagedEmbeddedMpvFullscreen) {
       if (isFullscreen) {
         await defaultEnterNativeFullscreen();
@@ -91,14 +83,11 @@ extension _PlayerPageStateControls on _PlayerPageState {
   }
 
   Future<void> _togglePlayback() async {
+    _recoveryIntent.playback(!(_player?.state.playing ?? false));
     final player = _player;
     if (!_isReady || player == null) {
       return;
     }
-    _traceWindowsMpv(
-      'windows-mpv.command.toggle-playback',
-      fields: {'playingBefore': player.state.playing},
-    );
     await player.playOrPause();
     if (_isTelevisionPlaybackDevice) {
       _showTvPlaybackChrome(autoHide: player.state.playing);
@@ -106,17 +95,11 @@ extension _PlayerPageStateControls on _PlayerPageState {
   }
 
   Future<void> _setPlayWhenReady(bool playing) async {
+    _recoveryIntent.playback(playing);
     final player = _player;
     if (!_isReady || player == null) {
       return;
     }
-    _traceWindowsMpv(
-      'windows-mpv.command.set-play-when-ready',
-      fields: {
-        'requestedPlaying': playing,
-        'playingBefore': player.state.playing,
-      },
-    );
     if (playing) {
       await player.play();
     } else {
@@ -135,17 +118,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
     }
     final current = player.state.position;
     final target = current + delta;
-    _traceWindowsMpv(
-      'windows-mpv.command.seek-relative',
-      fields: {
-        'fromMs': current.inMilliseconds,
-        'deltaMs': delta.inMilliseconds,
-        'toMs': target.inMilliseconds < 0 ? 0 : target.inMilliseconds,
-      },
-    );
     final seekTarget = target < Duration.zero ? Duration.zero : target;
     await player.seek(seekTarget);
-    _syncSkipFlagsAfterUserSeek(seekTarget);
     if (_isTelevisionPlaybackDevice) {
       _showTvPlaybackChrome();
     }
@@ -156,16 +130,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
     if (!_isReady || player == null) {
       return;
     }
-    _traceWindowsMpv(
-      'windows-mpv.command.seek-to',
-      fields: {
-        'fromMs': player.state.position.inMilliseconds,
-        'toMs': position.inMilliseconds < 0 ? 0 : position.inMilliseconds,
-      },
-    );
     final seekTarget = position < Duration.zero ? Duration.zero : position;
     await player.seek(seekTarget);
-    _syncSkipFlagsAfterUserSeek(seekTarget);
     if (_isTelevisionPlaybackDevice) {
       _showTvPlaybackChrome();
     }
@@ -971,40 +937,14 @@ extension _PlayerPageStateControls on _PlayerPageState {
     });
   }
 
-  void _bindWindowsMpvTraceStreams(Player player) {
-    if (_shouldTraceWindowsMpv) {
-      _lastTracedVideoWidth = null;
-      _lastTracedVideoHeight = null;
-      _lastTracedBufferingState = null;
-      _lastTracedBufferingBucket = null;
-      _traceWindowsMpvVideoDimensions(
-        width: player.state.width,
-        height: player.state.height,
-      );
-      _traceWindowsMpvBufferingState(
-        player.state.buffering,
-        percentage: player.state.bufferingPercentage,
-      );
-      _mpvLifecycle.listen(player.stream.width, (width) {
-        _traceWindowsMpvVideoDimensions(
-          width: width,
-          height: player.state.height,
-        );
-      });
-      _mpvLifecycle.listen(player.stream.height, (height) {
-        _traceWindowsMpvVideoDimensions(
-          width: player.state.width,
-          height: height,
-        );
-      });
-    }
+  void _bindMpvBufferingStreams(Player player) {
+    _lastTracedBufferingState = null;
+    _lastTracedBufferingBucket = null;
+    _recordMpvBufferingState(player.state.buffering);
     _mpvPerformanceTracker?.onBufferingChanged(player.state.buffering);
     _mpvLifecycle.listen(player.stream.buffering, (buffering) {
       _mpvPerformanceTracker?.onBufferingChanged(buffering);
-      _traceWindowsMpvBufferingState(
-        buffering,
-        percentage: player.state.bufferingPercentage,
-      );
+      _recordMpvBufferingState(buffering);
     });
     _mpvLifecycle.listen(player.stream.bufferingPercentage, (percentage) {
       final bucket = _bufferingTraceBucket(percentage);
@@ -1012,48 +952,21 @@ extension _PlayerPageStateControls on _PlayerPageState {
         return;
       }
       _lastTracedBufferingBucket = bucket;
-      _traceWindowsMpv(
-        'windows-mpv.player.buffering-progress',
-        fields: {
-          'buffering': player.state.buffering,
-          'percent': bucket,
-        },
-      );
       if (_shouldUpdatePlaybackVisualState) {
         _updateTvPlaybackState(bufferingPercentage: percentage);
       }
     });
   }
 
-  void _traceWindowsMpvVideoDimensions({
-    required int? width,
-    required int? height,
-  }) {
-    if (!_shouldTraceWindowsMpv) {
-      return;
-    }
-    if (_lastTracedVideoWidth == width && _lastTracedVideoHeight == height) {
-      return;
-    }
-    _lastTracedVideoWidth = width;
-    _lastTracedVideoHeight = height;
-    _traceWindowsMpv(
-      'windows-mpv.player.video-dimensions',
-      fields: {
-        'width': width ?? 0,
-        'height': height ?? 0,
-      },
-    );
-  }
-
-  void _traceWindowsMpvBufferingState(
-    bool buffering, {
-    required double percentage,
-  }) {
+  void _recordMpvBufferingState(bool buffering) {
     if (_lastTracedBufferingState == buffering) {
       return;
     }
     _lastTracedBufferingState = buffering;
+    if (!buffering) {
+      _lastTracedBufferingBucket = null;
+    }
+    if (!appLogger.isRecording(AppLogLevel.info)) return;
     final player = _player;
     appLogInfo('playback.reliability', 'Playback state', fields: {
       'engine': 'mpv',
@@ -1067,16 +980,6 @@ extension _PlayerPageStateControls on _PlayerPageState {
       ).name,
       'positionMs': player?.state.position.inMilliseconds ?? 0,
     });
-    if (!buffering) {
-      _lastTracedBufferingBucket = null;
-    }
-    _traceWindowsMpv(
-      'windows-mpv.player.buffering-state',
-      fields: {
-        'buffering': buffering,
-        'percent': percentage.toStringAsFixed(1),
-      },
-    );
   }
 
   int? _bufferingTraceBucket(double percentage) {
@@ -1250,6 +1153,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     List<SubtitleTrack> tracks,
     SubtitleTrack current,
   ) async {
+    _manualTrackRevision++;
     final target = _resolvedTarget ?? widget.target;
     if (target.isFntvTranscoding) {
       final selected = await showPlaybackMenuDialog<String>(
@@ -1525,11 +1429,61 @@ extension _PlayerPageStateControls on _PlayerPageState {
     });
   }
 
+  Future<void> _selectFntvServerAudio(
+    Player player,
+    PlaybackTarget target,
+    PlaybackAudioStream stream,
+  ) async {
+    _manualTrackRevision++;
+    if (!mounted ||
+        !identical(_player, player) ||
+        !identical(_resolvedTarget ?? widget.target, target)) {
+      return;
+    }
+    final profiles = fntvQualityPresets(
+      target.playbackQualities
+          .where((quality) => quality.serverTranscode)
+          .toList(),
+      target.preferredPlaybackQualityIndex,
+    );
+    if (profiles.isEmpty) {
+      _showMessage('当前播放流无法使用此音轨，飞牛未提供可用转码档位');
+      return;
+    }
+    final quality = await showPlaybackMenuDialog<FntvPlaybackQuality>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('使用服务端音轨 · 选择转码画质'),
+        children: [
+          for (final profile in profiles)
+            TvDialogOption(
+              isTelevision: _isTelevisionPlaybackDevice,
+              onPressed: () => Navigator.of(dialogContext).pop(profile),
+              child: Text(fntvQualityTitle(profile)),
+            ),
+        ],
+      ),
+    );
+    if (quality == null ||
+        !mounted ||
+        !identical(_player, player) ||
+        !identical(_resolvedTarget ?? widget.target, target)) {
+      return;
+    }
+    await _switchFntvPlayback(
+        player,
+        target.copyWith(
+          preferredAudioStreamId: stream.id,
+          preferredPlaybackQualityIndex: quality.index,
+        ));
+  }
+
   Future<void> _selectAudioTrack(
     Player player,
     List<AudioTrack> tracks,
     AudioTrack current,
   ) async {
+    _manualTrackRevision++;
     final target = _resolvedTarget ?? widget.target;
     if (target.isFntvTranscoding) {
       final selected = await showPlaybackMenuDialog<PlaybackAudioStream>(
@@ -1540,18 +1494,23 @@ extension _PlayerPageStateControls on _PlayerPageState {
                   TvDialogOption(
                     isTelevision: _isTelevisionPlaybackDevice,
                     onPressed: () => Navigator.pop(context, stream),
-                    child: Text([stream.title, stream.language, stream.codec]
-                        .where((s) => s.isNotEmpty)
-                        .join(' · ')),
+                    child: Text(playbackServerAudioLabel(stream)),
                   ),
               ]));
-      if (selected != null && mounted) {
+      if (selected != null &&
+          mounted &&
+          identical(_player, player) &&
+          identical(_resolvedTarget ?? widget.target, target) &&
+          selected.id != target.preferredAudioStreamId) {
         await _switchFntvPlayback(
             player, target.copyWith(preferredAudioStreamId: selected.id));
       }
       return;
     }
-    final selection = await showPlaybackMenuDialog<AudioTrack>(
+    final unavailable = target.sourceKind == MediaSourceKind.fntv
+        ? unavailablePlaybackAudioStreams(target: target, tracks: tracks)
+        : const <PlaybackAudioStream>[];
+    final selection = await showPlaybackMenuDialog<Object>(
       context: context,
       builder: (dialogContext) {
         return SimpleDialog(
@@ -1568,11 +1527,26 @@ extension _PlayerPageStateControls on _PlayerPageState {
                       : _formatServerAudioTrackLabel(target, tracks, track),
                 ),
               ),
+            for (final stream in unavailable)
+              TvDialogOption(
+                isTelevision: _isTelevisionPlaybackDevice,
+                onPressed: () => Navigator.of(dialogContext).pop(stream),
+                child: Text('${playbackServerAudioLabel(stream)} · 需服务端转码'),
+              ),
           ],
         );
       },
     );
-    if (selection == null) {
+    if (selection is PlaybackAudioStream) {
+      if (mounted) await _selectFntvServerAudio(player, target, selection);
+      return;
+    }
+    if (selection is! AudioTrack) {
+      return;
+    }
+    if (!mounted ||
+        !identical(_player, player) ||
+        !identical(_resolvedTarget ?? widget.target, target)) {
       return;
     }
 

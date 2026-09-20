@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
+import 'package:starflow/features/library/domain/tmdb_media_identity.dart';
 
 void main() {
   group('matchMediaItemByExternalIds', () {
@@ -46,12 +47,15 @@ void main() {
           sourceKind: MediaSourceKind.emby,
           streamUrl: '',
           tmdbId: '19995',
+          itemType: 'movie',
           addedAt: DateTime.utc(2026, 4, 4),
         ),
       ];
 
       expect(
-        matchMediaItemByExternalIds(library, tmdbId: '19995')?.id,
+        matchMediaItemByExternalIds(library,
+                tmdbId: '19995', tmdbMediaType: TmdbMediaType.movie)
+            ?.id,
         'movie-1',
       );
     });

@@ -36,7 +36,7 @@ class LocalStorageCacheRepository {
         notifyDetailCacheChanged,
     this.detailCacheChangeNotificationDelay = Duration.zero,
   }) : assert(preferences == null || sharedPreferences == null) {
-    final store = preferences ??
+    final PreferencesStore store = preferences ??
         (sharedPreferences == null
             ? AppPreferencesStore()
             : SharedPreferencesStore(sharedPreferences));

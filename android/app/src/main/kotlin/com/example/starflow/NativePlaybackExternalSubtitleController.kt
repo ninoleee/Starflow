@@ -23,6 +23,27 @@ internal class NativePlaybackExternalSubtitleController(
     private var applyPending: Runnable? = null
     private var mountedUri: Uri? = null
 
+    fun invalidatePendingSelection() {
+        generation++
+        applyPending?.let(handler::removeCallbacks)
+        applyPending = null
+    }
+
+    fun discardFntvDownload(path: String) {
+        if (worker.isShutdown) return // The Dart session owner cleans its downloads on close.
+        worker.execute {
+            runCatching {
+                val file = File(path).canonicalFile
+                val directory = file.parentFile ?: return@runCatching
+                if (directory.parentFile == host.activity.cacheDir.canonicalFile &&
+                    directory.name.startsWith("starflow-fntv-") &&
+                    file.name in listOf("subtitle.srt", "subtitle.vtt", "subtitle.ass")) {
+                    file.delete()
+                }
+            }
+        }
+    }
+
     fun close() {
         if (closed) return
         closed = true
@@ -48,9 +69,7 @@ internal class NativePlaybackExternalSubtitleController(
 
     var externalSubtitleSource: ExternalSubtitleSource? = null
         set(value) {
-            generation++
-            applyPending?.let(handler::removeCallbacks)
-            applyPending = null
+            invalidatePendingSelection()
             field = value
         }
 
@@ -98,6 +117,7 @@ internal class NativePlaybackExternalSubtitleController(
                 NativePlaybackFormatting.formatSubtitleDelayLabel(value.toLong())
             },
         ) { value ->
+            host.subtitles.beginSubtitleSelection(keepExternalSource = true)
             subtitleDelayMs = value.toLong()
             generation++
             applyPending?.let(handler::removeCallbacks)
@@ -197,6 +217,7 @@ internal class NativePlaybackExternalSubtitleController(
         }
 
         val previous = externalSubtitleSource
+        host.subtitles.beginSubtitleSelection(keepExternalSource = true)
         externalSubtitleSource =
             ExternalSubtitleSource(
                 originalUri = uri,
@@ -222,8 +243,11 @@ internal class NativePlaybackExternalSubtitleController(
     }
 
     fun loadCachedSubtitleFile(filePath: String, displayName: String,
-        onApplied: (() -> Unit)? = null): Boolean {
+        onApplied: (() -> Unit)? = null, selectionRevision: Long? = null): Boolean {
+        if (closed || (selectionRevision != null &&
+                selectionRevision != host.subtitles.subtitleSelectionRevision)) return false
         val previous = externalSubtitleSource
+        if (selectionRevision == null) host.subtitles.beginSubtitleSelection(keepExternalSource = true)
         if (!prepareCachedSubtitleFile(filePath, displayName)) {
             host.showToast("缓存字幕文件不存在")
             return false
@@ -263,12 +287,14 @@ internal class NativePlaybackExternalSubtitleController(
         val source = externalSubtitleSource ?: return false
         val sourceMediaItem = host.session.baseMediaItem ?: currentPlayer.currentMediaItem ?: return false
         val token = ++generation
+        val selectionRevision = host.subtitles.subtitleSelectionRevision
         val targetJson = host.target.playbackTargetJson
         val delay = subtitleDelayMs
         worker.execute {
             val result = runCatching { host.subtitleFiles.buildSubtitleConfiguration(source, delay) }
             handler.post {
-                if (closed || token != generation || host.session.player !== currentPlayer ||
+                if (closed || token != generation || selectionRevision != host.subtitles.subtitleSelectionRevision ||
+                    host.session.player !== currentPlayer ||
                     host.target.playbackTargetJson != targetJson || host.activity.isFinishing ||
                     host.activity.isDestroyed) {
                     result.getOrNull()?.let { configuration ->

@@ -6,6 +6,7 @@ class FntvSessionOwner {
 
   final Future<void> Function(PlaybackTarget) releaseSession;
   final Map<String, PlaybackTarget> _sessions = {};
+  final Set<String> _released = {};
   bool _closed = false;
 
   String _key(PlaybackTarget target) =>
@@ -13,6 +14,7 @@ class FntvSessionOwner {
 
   Future<void> retain(PlaybackTarget target) async {
     if (!target.isFntvTranscoding) return;
+    if (_released.contains(_key(target))) return;
     if (_closed) {
       await _release(target);
     } else {
@@ -26,6 +28,7 @@ class FntvSessionOwner {
   }
 
   Future<void> _release(PlaybackTarget target) async {
+    if (!_released.add(_key(target))) return;
     try {
       await releaseSession(target);
     } catch (_) {

@@ -1134,17 +1134,20 @@ const kNavigationDestinationSearch = 'search';
 const kNavigationDestinationFavorites = 'favorites';
 const kNavigationDestinationLibrary = 'library';
 const kNavigationDestinationSettings = 'settings';
+const kNavigationDestinationLiveTv = 'live-tv';
 
 const kAllNavigationDestinationIds = <String>[
   kNavigationDestinationHome,
   kNavigationDestinationSearch,
   kNavigationDestinationFavorites,
   kNavigationDestinationLibrary,
+  kNavigationDestinationLiveTv,
   kNavigationDestinationSettings,
 ];
 
 const kDefaultNavigationDestinationIds = <String>[
   kNavigationDestinationHome,
+  kNavigationDestinationLiveTv,
   kNavigationDestinationSearch,
   kNavigationDestinationLibrary,
   kNavigationDestinationSettings,
@@ -1161,10 +1164,7 @@ List<String> normalizeNavigationDestinationIds(Iterable<String> values) {
     selected.add(kNavigationDestinationHome);
   }
   selected.add(kNavigationDestinationSettings);
-  return [
-    for (final id in kAllNavigationDestinationIds)
-      if (selected.contains(id)) id,
-  ];
+  return selected.toList();
 }
 
 class AppSettings {

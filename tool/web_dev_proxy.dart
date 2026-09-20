@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:http/http.dart' as http;
+import 'package:starflow/core/network/http_origin_policy.dart';
+
 Future<void> main(List<String> args) async {
   final host = InternetAddress.loopbackIPv4;
   final port = _resolvePort(args, fallback: 8787);
@@ -12,7 +15,7 @@ Future<void> main(List<String> args) async {
   );
 
   await for (final request in server) {
-    unawaited(_handleRequest(request));
+    unawaited(handleWebDevProxyRequest(request));
   }
 }
 
@@ -26,7 +29,7 @@ int _resolvePort(List<String> args, {required int fallback}) {
   return int.tryParse(fromEnv ?? '') ?? fallback;
 }
 
-Future<void> _handleRequest(HttpRequest request) async {
+Future<void> handleWebDevProxyRequest(HttpRequest request) async {
   try {
     _addCorsHeaders(request.response);
 
@@ -43,7 +46,8 @@ Future<void> _handleRequest(HttpRequest request) async {
       return;
     }
 
-    if (request.uri.path != '/proxy') {
+    final manualRedirects = request.uri.path == '/proxy-v1';
+    if (request.uri.path != '/proxy' && !manualRedirects) {
       request.response.statusCode = HttpStatus.notFound;
       request.response.write('Not Found');
       await request.response.close();
@@ -59,7 +63,7 @@ Future<void> _handleRequest(HttpRequest request) async {
     }
 
     final targetUri = Uri.tryParse(targetRaw);
-    if (targetUri == null || !targetUri.hasScheme) {
+    if (targetUri == null || !isHttpUri(targetUri)) {
       request.response.statusCode = HttpStatus.badRequest;
       request.response.write('Invalid target url');
       await request.response.close();
@@ -75,38 +79,63 @@ Future<void> _handleRequest(HttpRequest request) async {
         outbound,
         headerOverrides: headerOverrides,
       );
+      final credentialProbe = http.Request(request.method, targetUri);
+      outbound.headers.forEach((name, values) {
+        credentialProbe.headers[name] = values.join(',');
+      });
+      outbound.followRedirects =
+          !manualRedirects && !hasOriginCredentials(credentialProbe);
       await request.cast<List<int>>().pipe(outbound);
 
       final inbound = await outbound.close();
-      request.response.statusCode = inbound.statusCode;
+      // Browsers must never see an actual 3xx for the manual contract. They
+      // would follow it outside this proxy before Dart can validate the origin.
+      request.response.statusCode = manualRedirects ? 200 : inbound.statusCode;
+      if (!manualRedirects && inbound.isRedirect && !outbound.followRedirects) {
+        request.response.statusCode = HttpStatus.badGateway;
+        request.response.write('Authenticated redirects require /proxy-v1');
+        await request.response.close();
+        return;
+      }
 
       inbound.headers.forEach((name, values) {
-        if (_isHopByHopHeader(name)) {
+        if (_isHopByHopHeader(name) ||
+            name.startsWith('x-starflow-') ||
+            (manualRedirects && name == 'location')) {
           return;
         }
         for (final value in values) {
           request.response.headers.add(name, value);
         }
       });
+      if (manualRedirects) {
+        request.response.headers.set('x-starflow-proxy-status', '${inbound.statusCode}');
+        final location = inbound.headers.value('location');
+        if (location != null) {
+          request.response.headers.set('x-starflow-proxy-location', location);
+        }
+      }
       _addCorsHeaders(request.response);
 
       await inbound.pipe(request.response);
     } finally {
       client.close(force: true);
     }
-  } catch (error, stackTrace) {
-    stderr
-      ..writeln('Proxy request failed: $error')
-      ..writeln(stackTrace);
+  } catch (_) {
+    stderr.writeln('Proxy request failed');
     try {
       _addCorsHeaders(request.response);
       request.response.statusCode = HttpStatus.badGateway;
       request.response.headers.contentType = ContentType.json;
-      request.response.write(jsonEncode({'error': '$error'}));
+      request.response.write(jsonEncode({'error': 'Proxy request failed'}));
     } catch (_) {
       // Ignore if the response has already started streaming.
     }
-    await request.response.close();
+    try {
+      await request.response.close();
+    } catch (_) {
+      // The browser may have aborted the request.
+    }
   }
 }
 
@@ -141,9 +170,7 @@ void _copyRequestHeaders(
         lowerName == 'cookie' ||
         lowerName == 'referer' ||
         lowerName == 'origin' ||
-        lowerName == 'x-starflow-cookie' ||
-        lowerName == 'x-starflow-referer' ||
-        lowerName == 'x-starflow-target-origin') {
+        lowerName.startsWith('x-starflow-')) {
       return;
     }
     for (final value in values) {
@@ -168,7 +195,7 @@ void _copyRequestHeaders(
 
   for (final entry in headerOverrides.entries) {
     final lowerName = entry.key.toLowerCase();
-    if (_isHopByHopHeader(lowerName) || lowerName == 'content-length') {
+    if (_isHopByHopHeader(lowerName) || lowerName.startsWith('x-starflow-')) {
       continue;
     }
     target.headers.set(entry.key, entry.value);
@@ -199,12 +226,13 @@ void _addCorsHeaders(HttpResponse response) {
     ..set(
       'Access-Control-Allow-Headers',
       'Origin, X-Requested-With, Content-Type, Accept, Authorization, Depth, '
+          'Cache-Control, If-Match, If-None-Match, Authx, Trim-MC-token, Range, '
           'x-emby-token, x-emby-authorization, x-starflow-cookie, '
           'x-starflow-referer, x-starflow-target-origin',
     )
     ..set(
       'Access-Control-Allow-Methods',
-      'GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, PROPFIND',
+      'GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, PROPFIND, MKCOL',
     )
     ..set('Access-Control-Expose-Headers', '*');
 }

@@ -58,3 +58,11 @@ flutter test --no-pub --reporter expanded \
 - iOS：新增 `scripts/test_native_playback_storage.swift` 模型/存储 runner 通过，既有记忆契约 10 项与字幕契约 16 项通过；Runner Swift 语法、类型及模块编译检查通过，RunnerTests 仅完成类型检查。无签名、arm64、iOS 13.0 目标的 `xcodebuild` Debug 构建成功，不是签名安装包或发布预设。
 
 并行工作区仍有性能、日志等其他任务的修改，以上不是全仓 Flutter 测试或 Android/iOS 完整发布构建结果，也没有新增设备性能测量。`NativePlaybackStartupGate.swift` 的既有主线程隔离警告及图标资源警告仍存在；未执行 XCTest、TV 遥控器、AVPlayer 真机后台切换或真实账号转存验收。
+
+## 后续精简复核
+
+2026-09-20，复核 `768a6b0..74dffd4`：详情、搜索、存储、播放及 `ios/Runner` 的生产代码合计新增 5606 行、删除 5589 行，净增 17 行；同提交 `test`、`scripts` 与 `tool` 下测试与脚本净增 1905 行。提交包含并行性能工作，不能全部归因于组件重构，也不能以主文件缩短证明整体简化。
+
+本次后续精简只修改三个生产文件：详情控制器改由 notifier 单独持有状态，合并重复会话递增逻辑，移除未使用 getter；详情页删除四个纯转发函数，用 `listEquals/mapEquals` 替代手写比较；详情缓存删除未调用的状态读取包装。相对复核时 HEAD，生产代码新增 44 行、删除 118 行，净减少 74 行；新增控制器回归测试 71 行，无新增业务文件，无用户可见行为或性能改善声明。
+
+本次重新执行九文件定向测试共 106 项通过：`detail_page_controller_test`、`detail_library_match_service_test`、`detail_library_match_coordinator_test`、`media_detail_match_cancellation_test`、`media_detail_match_restore_test`、`media_detail_enrichment_test`、`detail_online_resource_update_test`、`local_storage_cache_repository_test`、`cache_store_delegation_test`。`dart analyze lib test` 无问题。这是主机回归结果，不是全仓测试、发布构建或真机性能测量；此前记录不作为本次验证替代。

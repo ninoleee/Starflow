@@ -6,6 +6,8 @@ import android.os.SystemClock
 import android.view.View
 import android.widget.TextView
 import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.common.Player
 import androidx.media3.common.Tracks
 import androidx.media3.common.text.CueGroup
@@ -97,8 +99,19 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
 
             override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, config: AudioSink.AudioTrackConfig) {
                 NativeAppLogger.info("playback.audio", "Audio output initialized encoding=${config.encoding} " +
+                    "format=${NativePlaybackAudioPolicy.encodingLabel(config.encoding)} " +
                     "sampleRate=${config.sampleRate} channelMask=${config.channelConfig} " +
                     "offload=${config.offload} tunneling=${config.tunneling} bufferBytes=${config.bufferSize}")
+            }
+
+            override fun onAudioInputFormatChanged(
+                eventTime: AnalyticsListener.EventTime,
+                format: Format,
+                decoderReuseEvaluation: DecoderReuseEvaluation?,
+            ) {
+                NativeAppLogger.info("playback.audio", "Audio input mime=${format.sampleMimeType} " +
+                    "pcmEncoding=${format.pcmEncoding} format=${NativePlaybackAudioPolicy.encodingLabel(format.pcmEncoding)} " +
+                    "sampleRate=${format.sampleRate} channels=${format.channelCount}")
             }
 
             override fun onAudioCodecError(eventTime: AnalyticsListener.EventTime, error: Exception) {

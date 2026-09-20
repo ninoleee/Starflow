@@ -4,12 +4,40 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/core/logging/app_log_api.dart';
 
 void main() {
+  test('all formatter paths redact URL userInfo before truncation', () {
+    const urls = 'https://alice:p%40ss%3Aword@nas.test/a '
+        "nested(http://bob:sec'ond@[::1]:8080/b) //carol:third@nas.test/c";
+    final line = AppLogFormatter.format(
+      level: AppLogLevel.error,
+      category: urls,
+      message: urls,
+      fields: {
+        'nested': [
+          {'url': urls}
+        ]
+      },
+      error: StateError(urls),
+      stackTrace: StackTrace.fromString(urls),
+    );
+    for (final secret in [
+      'alice',
+      'p%40ss',
+      'bob',
+      "sec'ond",
+      'carol',
+      'third'
+    ]) {
+      expect(line, isNot(contains(secret)));
+    }
+    expect(line, contains('nas.test/a'));
+    expect(line, contains('[::1]:8080/b'));
+    expect(line, contains(AppLogFormatter.redactedValue));
+  });
   test('formatter emits JSON lines and redacts common secrets', () {
     final line = AppLogFormatter.format(
       level: AppLogLevel.error,
       category: 'network',
-      message:
-          'request failed authorization=Bearer secret-value&token=abc123',
+      message: 'request failed authorization=Bearer secret-value&token=abc123',
       fields: const <String, Object?>{
         'cookie': 'session=secret',
         'url': 'https://example.test/video?access_token=url-secret&id=1',

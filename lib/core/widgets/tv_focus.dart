@@ -752,6 +752,8 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
   }
 
   Map<Type, Action<Intent>> _buildTelevisionActions(BuildContext context) {
+    final contextAction = widget.onContextAction ??
+        TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed;
     return <Type, Action<Intent>>{
       ActivateIntent: CallbackAction<ActivateIntent>(
         onInvoke: (_) {
@@ -759,17 +761,13 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
           return null;
         },
       ),
-      TvContextMenuIntent: CallbackAction<TvContextMenuIntent>(
-        onInvoke: (_) {
-          final contextAction = widget.onContextAction;
-          if (contextAction != null) {
+      if (contextAction != null)
+        TvContextMenuIntent: CallbackAction<TvContextMenuIntent>(
+          onInvoke: (_) {
             contextAction();
-          } else {
-            TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed();
-          }
-          return null;
-        },
-      ),
+            return null;
+          },
+        ),
     };
   }
 
@@ -827,6 +825,8 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
       isTelevision: isTelevision,
     );
     final enabled = widget.onPressed != null;
+    final contextAction = widget.onContextAction ??
+        TvMenuButtonScope.maybeOf(context)?.onMenuButtonPressed;
 
     if (!isTelevision) {
       return InkWell(
@@ -854,10 +854,31 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
             widget.onFocused?.call();
           }
         },
-        shortcuts: _tvActionShortcuts,
+        shortcuts: contextAction != null
+            ? _tvActionShortcuts
+            : tvPressOnlyShortcuts(const {
+                SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.numpadEnter):
+                    ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+                SingleActivator(LogicalKeyboardKey.gameButtonA):
+                    ActivateIntent(),
+              }),
         actions: _buildTelevisionActions(context),
         child: _buildFocusVisualFrame(
-          child: widget.child,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: enabled
+                ? () {
+                    _effectiveFocusNode.requestFocus();
+                    widget.onPressed?.call();
+                  }
+                : null,
+            onSecondaryTap: enabled ? contextAction : null,
+            onLongPress: enabled ? contextAction : null,
+            child: widget.child,
+          ),
           lightweightTvFocusEnabled: lightweightTvFocusEnabled,
         ),
       ),
@@ -1155,6 +1176,21 @@ class StarflowChipButton extends StatefulWidget {
   final VoidCallback? onMoveUp;
   final VoidCallback? onMoveDown;
 
+  /// Includes the thickest focus border; independent of selected/focus state.
+  static double minimumHeight(BuildContext context) {
+    final style =
+        Theme.of(context).textTheme.labelLarge ?? const TextStyle(fontSize: 14);
+    final painter = TextPainter(
+      text: TextSpan(text: 'Mg', style: style.copyWith(height: 1.2)),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final height = (painter.height < 20 ? 20.0 : painter.height) + 26 + 6;
+    painter.dispose();
+    return height < 50 ? 50 : height;
+  }
+
   @override
   State<StarflowChipButton> createState() => _StarflowChipButtonState();
 }
@@ -1257,14 +1293,15 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 140),
           curve: Curves.easeOutCubic,
-          constraints: const BoxConstraints(minHeight: 50),
+          constraints: BoxConstraints(
+              minHeight: StarflowChipButton.minimumHeight(context)),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
           decoration: BoxDecoration(
             color: backgroundColor,
             borderRadius: radius,
             border: Border.all(
               color: borderColor,
-              width: _focused ? 3 : 1.5,
+              width: 3,
             ),
             boxShadow: _focused
                 ? [

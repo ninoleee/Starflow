@@ -72,6 +72,14 @@ import UIKit
     attachSystemVolumeViewIfNeeded()
     channel.setMethodCallHandler { [weak self] call, result in
       switch call.method {
+      case "readPlaybackMemory":
+        NativePlaybackMemoryStore.readShared { result($0) }
+      case "compareAndSetPlaybackMemory":
+        let arguments = call.arguments as? [String: Any]
+        NativePlaybackMemoryStore.compareAndSetShared(
+          expected: arguments?["expected"] as? String,
+          value: arguments?["value"] as? String
+        ) { result($0) }
       case "getSystemBrightnessLevel":
         result(UIScreen.main.brightness)
       case "setSystemBrightnessLevel":
@@ -130,6 +138,7 @@ import UIKit
           playbackItemKey: playbackItemKey,
           seriesKey: seriesKey,
           episodeQueueJson: episodeQueueJson,
+          resolverSessionId: arguments?["resolverSessionId"] as? String ?? "",
           backgroundPlaybackEnabled: backgroundPlaybackEnabled,
           subtitlePreference: subtitlePreference,
           defaultSubtitle: defaultSubtitle,
@@ -323,6 +332,7 @@ import UIKit
     playbackItemKey: String,
     seriesKey: String,
     episodeQueueJson: String,
+    resolverSessionId: String,
     backgroundPlaybackEnabled: Bool,
     subtitlePreference: String,
     defaultSubtitle: String,
@@ -359,7 +369,11 @@ import UIKit
         backgroundPlaybackEnabled: backgroundPlaybackEnabled,
         subtitlePreference: subtitlePreference,
         defaultSubtitle: defaultSubtitle,
-        playbackStore: self.nativePlaybackStore
+        playbackStore: self.nativePlaybackStore,
+        resolverSessionId: resolverSessionId,
+        resolverChannel: self.resolveFlutterViewController().map {
+          FlutterMethodChannel(name: "starflow/native_playback_resolver", binaryMessenger: $0.binaryMessenger)
+        }
       )
       controller.modalPresentationStyle = .fullScreen
       presenter.present(controller, animated: true) {

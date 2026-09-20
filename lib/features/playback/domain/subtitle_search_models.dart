@@ -264,11 +264,15 @@ class SubtitleDownloadResult {
     required this.cachedPath,
     required this.displayName,
     this.subtitleFilePath,
+    this.discard,
   });
 
   final String cachedPath;
   final String displayName;
   final String? subtitleFilePath;
+
+  /// Releases this download only when no consumer accepted it.
+  final Future<void> Function()? discard;
 }
 
 class SubtitleSearchSelection {
@@ -474,6 +478,53 @@ String _stripSubtitleSearchFormatSuffix(String fileName) {
       )
       .trim();
   return stripped.isNotEmpty ? stripped : fileName.trim();
+}
+
+/// Unknown labels remain eligible; explicit conflicting labels do not.
+bool isExplicitSubtitleEpisodeMismatch(
+  String fileName, {
+  int? seasonNumber,
+  int? episodeNumber,
+}) {
+  final components = fileName.replaceAll('\\', '/').split('/');
+  if (components.length > 1) {
+    return components.any((component) => isExplicitSubtitleEpisodeMismatch(
+          component,
+          seasonNumber: seasonNumber,
+          episodeNumber: episodeNumber,
+        ));
+  }
+  final name = fileName.replaceAll('_', ' ');
+  final pairPattern = RegExp(
+    r'\bs(\d{1,2})[ .-]*e(\d{1,3})\b|\b(\d{1,2})x(\d{1,3})\b|第\s*(\d+)\s*季\s*第\s*(\d+)\s*[集话期]',
+    caseSensitive: false,
+  );
+  final pairs = pairPattern.allMatches(name).toList();
+  if (pairs.isNotEmpty) {
+    final matchesTarget = pairs.any((match) {
+      final season = int.parse(match[1] ?? match[3] ?? match[5]!);
+      final episode = int.parse(match[2] ?? match[4] ?? match[6]!);
+      return (seasonNumber == null || season == seasonNumber) &&
+          (episodeNumber == null || episode == episodeNumber);
+    });
+    if (!matchesTarget) return true;
+  }
+  final remaining = name.replaceAll(pairPattern, ' ');
+  bool conflicts(RegExp pattern, int? target) {
+    if (target == null) return false;
+    final values = pattern
+        .allMatches(remaining)
+        .map((match) => int.parse(match[1] ?? match[2]!))
+        .toList();
+    return values.isNotEmpty && !values.contains(target);
+  }
+
+  return conflicts(
+          RegExp(r'\bs(\d{1,2})\b|第\s*(\d+)\s*季', caseSensitive: false),
+          seasonNumber) ||
+      conflicts(
+          RegExp(r'\be(\d{1,3})\b|第\s*(\d+)\s*[集话期]', caseSensitive: false),
+          episodeNumber);
 }
 
 int scoreSubtitleEpisodeMatch(

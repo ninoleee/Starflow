@@ -75,8 +75,8 @@ struct NativePlaybackErrorLogSummary: CustomStringConvertible {
 
 struct NativePlaybackMetricsSnapshot: CustomStringConvertible {
   let startupStartedAtIso8601: String
-  let firstFrameAtIso8601: String
-  let startupLatencyMs: Int?
+  let playingAtIso8601: String
+  let playingLatencyMs: Int?
   let stallCount: Int
   let lastStallAtIso8601: String
   let timeControlStatus: String
@@ -88,19 +88,19 @@ struct NativePlaybackMetricsSnapshot: CustomStringConvertible {
   let lastErrorLog: NativePlaybackErrorLogSummary?
 
   var description: String {
-    let startupValue = startupLatencyMs.map(String.init) ?? "-"
-    let firstFrameValue = firstFrameAtIso8601.isEmpty ? "-" : firstFrameAtIso8601
+    let startupValue = playingLatencyMs.map(String.init) ?? "-"
+    let playingValue = playingAtIso8601.isEmpty ? "-" : playingAtIso8601
     let stallTimeValue = lastStallAtIso8601.isEmpty ? "-" : lastStallAtIso8601
     let accessValue = lastAccessLog?.description ?? "access(-)"
     let errorValue = lastErrorLog?.description ?? "error(-)"
     return
-      "metrics(startupMs=\(startupValue), firstFrameAt=\(firstFrameValue), stalls=\(stallCount), lastStallAt=\(stallTimeValue), timeControl=\(timeControlStatus), waitReason=\(waitingReason), likely=\(isPlaybackLikelyToKeepUp), empty=\(isPlaybackBufferEmpty), full=\(isPlaybackBufferFull), \(accessValue), \(errorValue))"
+      "metrics(playingMs=\(startupValue), playingAt=\(playingValue), stalls=\(stallCount), lastStallAt=\(stallTimeValue), timeControl=\(timeControlStatus), waitReason=\(waitingReason), likely=\(isPlaybackLikelyToKeepUp), empty=\(isPlaybackBufferEmpty), full=\(isPlaybackBufferFull), \(accessValue), \(errorValue))"
   }
 
   var dictionary: [String: Any] {
     var value: [String: Any] = [
       "startupStartedAtIso8601": startupStartedAtIso8601,
-      "firstFrameAtIso8601": firstFrameAtIso8601,
+      "playingAtIso8601": playingAtIso8601,
       "stallCount": stallCount,
       "lastStallAtIso8601": lastStallAtIso8601,
       "timeControlStatus": timeControlStatus,
@@ -109,8 +109,8 @@ struct NativePlaybackMetricsSnapshot: CustomStringConvertible {
       "isPlaybackBufferEmpty": isPlaybackBufferEmpty,
       "isPlaybackBufferFull": isPlaybackBufferFull,
     ]
-    if let startupLatencyMs {
-      value["startupLatencyMs"] = startupLatencyMs
+    if let playingLatencyMs {
+      value["playingLatencyMs"] = playingLatencyMs
     }
     if let lastAccessLog {
       value["lastAccessLog"] = lastAccessLog.dictionary
@@ -133,7 +133,7 @@ final class NativePlaybackMetricsTracker {
   private var itemObservers: [NSObjectProtocol] = []
 
   private var startupBeganAt: Date?
-  private var firstFrameAt: Date?
+  private var playingAt: Date?
   private var stallCount: Int = 0
   private var lastStallAt: Date?
   private var lastAccessLogSummary: NativePlaybackAccessLogSummary?
@@ -159,7 +159,7 @@ final class NativePlaybackMetricsTracker {
 
   func reset() {
     startupBeganAt = nil
-    firstFrameAt = nil
+    playingAt = nil
     stallCount = 0
     lastStallAt = nil
     lastAccessLogSummary = nil
@@ -173,7 +173,7 @@ final class NativePlaybackMetricsTracker {
 
   func beginStartup(at date: Date = Date()) {
     startupBeganAt = date
-    firstFrameAt = nil
+    playingAt = nil
   }
 
   func attach(player: AVPlayer, item: AVPlayerItem) {
@@ -248,11 +248,11 @@ final class NativePlaybackMetricsTracker {
     }
   }
 
-  func markFirstFrameIfNeeded(at date: Date = Date()) {
-    guard firstFrameAt == nil else {
+  func markPlayingIfNeeded(at date: Date = Date()) {
+    guard playingAt == nil else {
       return
     }
-    firstFrameAt = date
+    playingAt = date
   }
 
   func refreshAccessErrorLog(item: AVPlayerItem? = nil) {
@@ -269,8 +269,8 @@ final class NativePlaybackMetricsTracker {
     }
     return NativePlaybackMetricsSnapshot(
       startupStartedAtIso8601: Self.isoString(startupBeganAt, formatter: isoFormatter),
-      firstFrameAtIso8601: Self.isoString(firstFrameAt, formatter: isoFormatter),
-      startupLatencyMs: calculateStartupLatencyMs(),
+      playingAtIso8601: Self.isoString(playingAt, formatter: isoFormatter),
+      playingLatencyMs: calculatePlayingLatencyMs(),
       stallCount: stallCount,
       lastStallAtIso8601: Self.isoString(lastStallAt, formatter: isoFormatter),
       timeControlStatus: timeControlStatusLabel,
@@ -300,7 +300,7 @@ final class NativePlaybackMetricsTracker {
     waitingReasonLabel = Self.describeWaitingReason(player.reasonForWaitingToPlay)
 
     if player.timeControlStatus == .playing {
-      markFirstFrameIfNeeded(at: now())
+      markPlayingIfNeeded(at: now())
     }
   }
 
@@ -310,11 +310,11 @@ final class NativePlaybackMetricsTracker {
     isPlaybackBufferFull = item.isPlaybackBufferFull
   }
 
-  private func calculateStartupLatencyMs() -> Int? {
-    guard let startupBeganAt, let firstFrameAt else {
+  private func calculatePlayingLatencyMs() -> Int? {
+    guard let startupBeganAt, let playingAt else {
       return nil
     }
-    return max(Int(firstFrameAt.timeIntervalSince(startupBeganAt) * 1000.0), 0)
+    return max(Int(playingAt.timeIntervalSince(startupBeganAt) * 1000.0), 0)
   }
 
   private static func makeAccessLogSummary(

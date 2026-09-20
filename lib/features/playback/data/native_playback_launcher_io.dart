@@ -1,9 +1,9 @@
+import 'package:starflow/core/logging/app_logger.dart';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
-import 'package:starflow/core/utils/playback_trace.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/data/native_fntv_service.dart';
@@ -69,16 +69,6 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       );
     }
 
-    _traceQuarkNativeLaunch(
-      'quark.native-launch.invoke.begin',
-      target: target,
-      fields: {
-        'decodeMode': decodeMode.name,
-        'audioOutputMode': audioOutputMode.name,
-        'streamUrl': target.streamUrl,
-        'headers': target.headers.keys.join('|'),
-      },
-    );
     _episodeResolver = episodeResolver;
     _episodeBrowser = PlaybackEpisodeBrowser(
       resolver: PlaybackEpisodeQueueResolver(read: _ref.read),
@@ -87,7 +77,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
     _resolverSessionId = DateTime.now().microsecondsSinceEpoch.toString();
     final sessionId = _resolverSessionId;
     try {
-      if (Platform.isAndroid && target.sourceKind == MediaSourceKind.fntv) {
+      if (target.sourceKind == MediaSourceKind.fntv) {
         final source = _ref
             .read(appSettingsProvider)
             .mediaSources
@@ -127,15 +117,6 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
               episodeQueue == null ? '' : jsonEncode(episodeQueue.toJson()),
         },
       );
-      _traceQuarkNativeLaunch(
-        'quark.native-launch.invoke.result',
-        target: target,
-        fields: {
-          'decodeMode': decodeMode.name,
-          'audioOutputMode': audioOutputMode.name,
-          'launched': launched == true,
-        },
-      );
       if (launched != true) await _fntvSessions.remove(sessionId)?.close();
       return NativePlaybackLaunchResult(
         launched: launched == true,
@@ -161,21 +142,31 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   }
 
   Future<Object?> _handleResolverMethodCall(MethodCall call) async {
+    if (call.method == 'nativePlaybackMemoryChanged') {
+      _ref.read(playbackMemoryRepositoryProvider).invalidateSnapshotCache();
+      _ref.read(playbackHistoryRevisionProvider.notifier).state++;
+      return {'ok': true};
+    }
+    if (call.method == 'closeNativeFntvSession') {
+      final args = Map<String, dynamic>.from(call.arguments as Map);
+      final sessionId = args['resolverSessionId'] as String? ?? '';
+      if (sessionId == _resolverSessionId) {
+        _episodeResolver = null;
+        _episodeBrowser = null;
+        _resolverSessionId = '';
+      }
+      await _fntvSessions.remove(sessionId)?.close();
+      return {'ok': true};
+    }
     if (const [
       'downloadNativeFntvSubtitle',
       'reportNativeFntvProgress',
       'releaseNativeFntvPlayback',
-      'closeNativeFntvSession'
     ].contains(call.method)) {
       final args = Map<String, dynamic>.from(call.arguments as Map);
       final sessionId = args['resolverSessionId'] as String? ?? '';
       final service = _fntvSessions[sessionId];
       if (service == null) return {'ok': false, 'message': '飞牛播放会话已失效'};
-      if (call.method == 'closeNativeFntvSession') {
-        _fntvSessions.remove(sessionId);
-        await service.close();
-        return {'ok': true};
-      }
       try {
         final target = PlaybackTarget.fromJson(Map<String, dynamic>.from(
           jsonDecode(args['playbackTargetJson'] as String) as Map,
@@ -292,6 +283,11 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       }
       final resolved = await resolver(target);
       await fntv?.sessions.retain(resolved.target);
+      if (resolverSessionId != _resolverSessionId ||
+          (fntv != null && !identical(_fntvSessions[resolverSessionId], fntv))) {
+        await fntv?.sessions.release(resolved.target);
+        return {'ok': false, 'message': '播放会话已失效'};
+      }
       final resolvedPlaybackItemKey = buildPlaybackItemKey(resolved.target);
       return <String, Object?>{
         'ok': true,
@@ -327,15 +323,13 @@ void _traceQuarkNativeLaunch(
   if (target.sourceKind.name != 'quark') {
     return;
   }
-  playbackTrace(
-    stage,
-    fields: <String, Object?>{
-      'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
-      'sourceKind': target.sourceKind.name,
-      'container': target.container,
-      ...fields,
-    },
-    error: error,
-    stackTrace: stackTrace,
-  );
+  appLogError('playback', stage,
+      fields: <String, Object?>{
+        'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+        'sourceKind': target.sourceKind.name,
+        'container': target.container,
+        ...fields,
+      },
+      error: error,
+      stackTrace: stackTrace);
 }

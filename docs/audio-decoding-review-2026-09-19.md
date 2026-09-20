@@ -4,13 +4,35 @@
 
 ## 实施状态
 
+### 2026-09-20 十方向审查后续修复
+
+本节对应十方向报告的 A01、A02、U01、S04；报告及下文既有验证计数均保留为当时快照，不自动作为本节修改的验证结果。
+
+- A01：同一 `playbackItemKey` 下，未消费的音轨身份跨连续播放器重建保留，不再被 prepare 阶段的空 tracks 覆盖；换片时在保存、暂存倍速和恢复入口隔离旧状态。
+- A02：服务端默认音轨与反向 GUID 匹配都排除已知编码冲突，包括 metadata 唯一候选和未压缩序号兜底。编码未知仍可保守匹配，E-AC-3/JOC、DTS/DTS-HD 的通用编码提示不误判为明确冲突。
+- U01：本地关闭、内嵌、全局默认、双字幕、外挂文件及飞牛下载共享字幕选择 revision。下载、文件构建、延迟 UI 操作及服务端重新解析在提交前校验；旧构建只清理准备文件，不挂载、不回滚新偏好。飞牛下载不再占用画质切换 busy 标志，允许新字幕选择使旧请求失效；显式选择后不自动重新下载旧服务端字幕。原始下载缓存仍由 Dart 会话所有者最终清理，原生提前清理仅限受约束的飞牛临时文件。
+- S04：episode `tick()` 和 `onUserSeek()` 使用现有 `peekSeriesSkipPreference`；不修改共享 memory store。正常初始化已预热发布视图；首次未预热时该 API 的同步回退仍需由存储所有者评估，不能据此宣称所有读取都零阻塞。
+
+本批验证记录在收尾时补充；未执行发布预设、版本递增、APK/AAR 构建或设备性能测量。README 与字幕文档由主审集成，不在本分工中修改。
+
+### 此前批次验证
+
+2026-09-20 五项再审修复集成验证：当前主 Kotlin 与 JVM 测试源码在独立目录重新编译，JUnit 全量 **418 项通过**，包含真实 Media3 sink 的配置拒绝/单次回退集成用例；与收尾源码比对一致，`git diff --check` 通过。为避开共享构建目录竞争，本次不是 Gradle/APK 构建，未重建 AAR；`adb devices` 仍无设备。方法与范围见 [主机验证](performance.md)。
+
+2026-09-20 高位深实现前一批验证：完整 Android JVM **357 项通过，0 失败、0 跳过**，含 24-bit/96 kHz 合成 LPCM 与 FFmpeg PCM24 输出逐字节对比、实际 Media3 转换器测试及输出/倍速/回退策略测试。该计数不包含随后输出状态补强；分批命令和范围见 [主机验证](performance.md)。下文此前批次的失败、PCM16 转换和未启用 float 描述如标为原始建议，均是历史快照，不是当前状态；未新增真机验证。
+
+2026-09-20 前一批输出状态补强验证：Android JVM 全量 **368 项通过，0 失败、0 跳过**，包括实际 sink 异常优先级、倍速/直通边界和独立回退预算；`git diff --check` 通过。此为五项再审修复之前的快照，不作为后续修改的验证结果。`adb devices` 无已连接设备，仍不代表 ARM 解码、HDMI 或最终音频格式已验收。
+
 - 已修复：FFmpeg 始终注册，输出策略按实际 MIME 决定；系统 codec 偏好改排序，保留兜底候选。
 - 已修复：原生 ARM32/ARM64 AAR 补齐 `mp3` decoder，API 23、16 KiB 对齐；提供固定源码和哈希校验的重建脚本。
-- 已实现：非 DRM 音频错误单次 FFmpeg/PCM 回退，排除视频、网络和 FFmpeg 自身失败；恢复进度、暂停、倍速、音量和音轨。
+- 已实现：非 DRM 音频解码错误单次 FFmpeg 回退，排除视频、网络和 FFmpeg 自身解码失败；实际高精度/直通输出错误另限额一次 PCM16 回退，不强制软解。恢复进度、暂停、倍速、音量和音轨。
 - 已实现：Exo 首次应用飞牛默认音轨，手动 override 优先；MPV 空元数据返回 null，音频与字幕恢复独立容错，语言别名归一化和歧义匹配保护。
 - 已实现：LPCM 单/双声道及 5.1/7.1 映射；非法格式和截断音频头明确失败。固定 scratch/output 缓冲，10 ms/PES 批量提交，保留分片、seek、PTS 和采样率变化语义。
 - 已实现：真实 decoder 和输出 encoding/采样率/声道掩码日志，音频列表去重；MPV 汇总音频后端、格式和 A/V sync。
-- 保守保留：20/24-bit 仍缩减为 PCM16，其他 HDMV 布局未开放；MPV 未切换输出后端或开启 HDMI 直通，macOS 未替换为未经验证的 full 二进制；飞牛未添加未经协议确认的“仅音频转码”参数。这些是能力扩展评估，不等同于本轮缺陷修复。
+- 2026-09-20 新增：reader 完整保留 20/24-bit 到 PCM24，自动/设备直通正常速度优先 float 输出；PCM 兼容、倍速/音调处理及有界设备输出回退走 PCM16。读取保位深不等于 Android/HDMI bit-perfect；主机检查与设备验收仍分开记录。
+- 2026-09-20 输出补强：非正常倍速/音调禁用压缩直通但不强制 FFmpeg；普通 PCM16 原地调速，实际高精度/直通需要切路径时才重建。每播放器独立记录 sink Format、decoder 与输出 encoding，错误优先看 AudioSink 异常格式，不用压缩 renderer 输入猜输出；日志提供 PCM16/PCM24/Float32 标签与重建决定。
+- 2026-09-20 五项再审修复：高精度最小缓冲区明确拒绝转为类型化配置异常；系统 decoder 倍速后的精度恢复按源轨历史判断；缺少 renderer Format 时按异常格式、当前源轨和 DRM 证据恢复；sink 复用保留活动输出、释放按代次清理；FFmpeg AC-3 不再触发无效 float 恢复。保持现有三种输出设置，不新增用户开关或恢复预算。
+- 保守保留：其他 HDMV 布局未开放；MPV 未切换输出后端或开启 HDMI 直通，macOS 未替换为未经验证的 full 二进制；飞牛未添加未经协议确认的“仅音频转码”参数。
 
 真机验收仍需 API 23 TV、ARM32/ARM64 和 HDMI 输出设备；本轮无设备连接，不能将单元测试和 ELF 检查写成真实解码通过。
 
@@ -31,7 +53,7 @@
 1. 已修复 LPCM 不支持格式阻塞准备及 FFmpeg 注册受启动元数据限制的问题。
 2. 已补齐 MPEG MIME 对应的 `mp3` decoder、单次音频回退和输出切换状态恢复。
 3. 已收口 LPCM 缓冲和提交粒度，增加音频诊断及样本回归；仍需设备 CPU / GC / 同步测量。
-4. 已支持部分多声道 LPCM 布局；其他布局、高精度 PCM、MPV 输出后端及服务端仅音频转码仍是独立能力评估。
+4. 已支持部分多声道 LPCM 布局和高位深读取/float 输出策略；其他布局、硬件高精度输出验收、MPV 输出后端及服务端仅音频转码仍需独立评估。
 
 ## 代码地图
 
@@ -47,8 +69,9 @@
 | Exo 音频策略 | `android/app/src/main/kotlin/com/example/starflow/NativePlaybackAudioPolicy.kt` | 始终注册 FFmpeg，按实际音轨 MIME、输出设置与回退状态决定解码输出 |
 | Exo 会话装配 | `android/app/src/main/kotlin/com/example/starflow/NativePlaybackSession.kt` | 创建 renderer、track selector、extractor 和 ExoPlayer；切换输出模式时重建播放器 |
 | Exo 渲染与输出 | `android/app/src/main/kotlin/com/example/starflow/NativePlaybackRenderersFactory.kt` | 系统及 FFmpeg renderer；`NativePlaybackAudioSink` 按 Format 限制压缩输出并记录实际输出配置 |
+| Exo 输出观测与精度历史 | `android/app/src/main/kotlin/com/example/starflow/NativeAudioOutputState.kt`、`NativeAudioPrecisionHistory.kt`、`NativeAudioDecoderPrecisionPolicy.kt` | 区分配置尝试/活动输出，隔离释放回调，按源轨恢复临时精度损失并排除 AC-3 无效重建 |
 | Exo TS 解封装 | `android/app/src/main/kotlin/com/example/starflow/NativePlaybackExtractorsFactory.kt` | progressive TS 的有证据 `0x80` 流交给 LPCM reader；其他音频继续使用 Media3 默认解析 |
-| LPCM 转换 | `android/app/src/main/kotlin/com/example/starflow/PcmBluRayReader.kt` | PES 音频头、分片残留、大小端转换、位深缩减、PCM16 输出及时间戳 |
+| LPCM 转换 | `android/app/src/main/kotlin/com/example/starflow/PcmBluRayReader.kt` | PES 音频头、分片残留、保位深大小端转换、PCM16/PCM24 输出及时间戳 |
 | Exo 选轨 | `android/app/src/main/kotlin/com/example/starflow/NativePlaybackTrackController.kt`、`NativePlaybackTrackChoices.kt`、`NativeFntvController.kt` | 本地轨道 override、飞牛服务端选轨与会话重开 |
 | Exo 音轨身份 | `android/app/src/main/kotlin/com/example/starflow/NativePlaybackAudioTracks.kt` | 跨播放器重建匹配音轨，避免复用失效的 TrackGroup override |
 | Exo 错误与指标 | `android/app/src/main/kotlin/com/example/starflow/NativePlaybackCoordinator.kt`、`NativePlaybackRecoveryController.kt`、`NativePlaybackDiagnostics.kt` | 错误分派、视频转码回退、音轨和解码器日志、音频欠载计数 |
@@ -82,12 +105,14 @@ TV 标识 + 音频输出设置 + 可选单次音频回退状态
 | 手机自动，或 TV 的其他实际 MIME | 否，按设备能力选择 | 已注册，通常系统优先 |
 | 任意设备，PCM 兼容 | 所有音轨禁用压缩输出 | 已注册，不等于强制软解或双声道 |
 | 设备直通 | 通常否，允许设备能力决策 | 已注册，不保证一定直通 |
-| 符合条件的单次音频失败回退 | 对失败 MIME 使用解码输出 | 优先 FFmpeg，仍需该格式受支持 |
+| 非默认倍速或音调 | 是，所有模式使用解码输出 | 不因此强制 FFmpeg |
+| 符合条件的单次音频解码失败回退 | 对失败 MIME 使用解码输出 | 优先 FFmpeg，仍需该格式受支持 |
+| 实际高精度/直通输出失败回退 | 是，使用 PCM16 兼容输出 | 不改变原解码器选择策略 |
 | 启动编码提示为空或 AAC，但实际有 DTS / TrueHD | 按实际 Format 与模式判断 | 已注册，不被启动提示屏蔽 |
 
 “设备直通”实际是允许 Media3 按设备能力选择直通，并非无条件输出压缩码流。“PCM 兼容”是禁用压缩直通，并不等于强制 FFmpeg，也不等于明确执行双声道 downmix。
 
-系统 codec 偏好只调整顺序，不丢弃其他候选。系统音频解码或输出失败可在条件满足时触发一次 FFmpeg / PCM 重建，排除 DRM、网络、视频及 FFmpeg 自身失败；恢复进度、暂停状态、倍速、音量与音轨身份，不改变视频解码策略，也不扩大原启动期限。
+系统 codec 偏好只调整顺序，不丢弃其他候选。系统音频解码失败在库支持时触发一次 FFmpeg 重建，排除 DRM、网络、视频及 FFmpeg 自身解码失败。AudioTrack 初始化/写入失败按实际 sink 高精度或直通证据，独立回退一次 PCM16；FFmpeg renderer 的输出失败也可走这条路径，已为 PCM16 或无输出证据时不猜测重试。两类恢复保留进度、暂停、倍速、音量与音轨身份，不改变视频解码策略，也不扩大原启动期限。
 
 FFmpeg AAR 当前包含 ARM32 / ARM64，Media3 版本为 `1.10.1`，FFmpeg 为文档固定的 `release/6.0` commit。编译进来的 decoder 是 `ac3 eac3 mlp truehd dca mp1 mp2 mp3`。这不是 full FFmpeg，不含 x86 原生扩展，不能把 MPV 的解码范围套用到 Exo 上。
 
@@ -100,13 +125,14 @@ TsExtractor -> NativeTsPayloadReaderFactory -> PesReader
   -> PcmBluRayReader.packetStarted / consume
   -> 4 字节音频头
   -> 完整采样帧 + 跨 TS 分片残留 + 有效声道映射
-  -> 16-bit 大端转小端，或 20/24-bit 截取高 16 位
-  -> AUDIO_RAW / PCM16 -> Media3 AudioSink
+  -> 16-bit 或 20/24-bit 完整大端转小端
+  -> AUDIO_RAW / PCM16 或 PCM24 -> Media3 AudioSink
+  -> 正常速度高精度 float，或 PCM16 兼容/倍速路径
 ```
 
-当前支持布局 `1 / 3 / 9 / 11`，对应单声道、双声道、5.1、7.1，以及 48/96/192 kHz 的 16/20/24-bit 输入。其他布局、非法头和截断头明确失败，不吞掉输入无限等待。没有重采样或多声道 downmix；20/24-bit 仍取高 16 位输出 PCM16，不是无损转换。
+当前支持布局 `1 / 3 / 9 / 11`，对应单声道、双声道、5.1、7.1，以及 48/96/192 kHz 的 16/20/24-bit 输入。其他布局、非法头和截断头明确失败，不吞掉输入无限等待。reader 不重采样或 downmix，20/24-bit 三字节样本完整保留到 PCM24；下游兼容分支的 PCM16 转换仍会损失精度。
 
-使用固定 24 字节采样帧缓冲、30,720 字节输出缓冲及复用的 `ParsableByteArray`，按最多 10ms 或 PES 边界批量提交。按累计采样帧计算时间戳，每个 PES 重读头，seek 清除残片与时间基线；单声道填充及多声道顺序也由 reader 处理。
+使用固定 24 字节采样帧缓冲、46,080 字节输出缓冲及复用的 `ParsableByteArray`，按最多 10ms 或 PES 边界批量提交。按实际字节宽度与累计采样帧计算时间戳，每个 PES 重读头，seek 清除残片与时间基线；位深变化发布新格式，单声道填充及多声道顺序也由 reader 处理。
 
 已有分片越界、sampleData 参数、PES 包头和时间戳修复应保留，不能在优化缓冲时回退。
 
@@ -201,7 +227,7 @@ Media3 `FfmpegLibrary.getCodecName` 将 `audio/mpeg`、`audio/mpeg-L1`、`audio/
 
 ## 实施前优化建议
 
-下面保留原始建议。固定缓冲、批量提交、输出诊断、音轨日志去重和 MPV 音频汇总已实施；高位深、更多布局及输出后端仍需单独评估。不能将理论小包次数当作测得的 CPU 改善。
+下面保留原始建议，属于实施前快照。固定缓冲、批量提交、输出诊断、音轨日志去重、MPV 音频汇总及高位深路径已实施；更多布局及其他输出后端仍需单独评估。不能将理论小包次数当作测得的 CPU 改善。
 
 ### LPCM 小包分配与提交
 

@@ -2,6 +2,7 @@ import AVFoundation
 import AVKit
 import MediaPlayer
 import UIKit
+import Flutter
 
 final class NativePlaybackViewController: AVPlayerViewController {
   private static let persistThresholdMs: Int64 = 10_000
@@ -11,6 +12,11 @@ final class NativePlaybackViewController: AVPlayerViewController {
   private let backgroundPlaybackEnabled: Bool
   private let subtitlePreference: String
   private let defaultSubtitle: String
+  private let resolverSessionId: String
+  private let resolverChannel: FlutterMethodChannel?
+  private let episodeIntent = NativePlaybackEpisodeIntent()
+  private var playbackGeneration = 0
+  private var episodeResolutionTimeout: DispatchWorkItem?
   private let isoFormatter = ISO8601DateFormatter()
   private var request: NativePlaybackRequest
   private var episodeQueue: NativeEpisodeQueue?
@@ -39,7 +45,9 @@ final class NativePlaybackViewController: AVPlayerViewController {
     backgroundPlaybackEnabled: Bool,
     subtitlePreference: String,
     defaultSubtitle: String,
-    playbackStore: NativePlaybackMemoryStore
+    playbackStore: NativePlaybackMemoryStore,
+    resolverSessionId: String = "",
+    resolverChannel: FlutterMethodChannel? = nil
   ) {
     self.request = request
     self.episodeQueue = episodeQueue
@@ -47,6 +55,8 @@ final class NativePlaybackViewController: AVPlayerViewController {
     self.subtitlePreference = subtitlePreference
     self.defaultSubtitle = defaultSubtitle
     self.playbackStore = playbackStore
+    self.resolverSessionId = resolverSessionId
+    self.resolverChannel = resolverChannel
     super.init(nibName: nil, bundle: nil)
   }
 
@@ -78,21 +88,28 @@ final class NativePlaybackViewController: AVPlayerViewController {
     super.viewDidDisappear(animated)
     if isBeingDismissed || presentingViewController == nil {
       teardownPlayback()
+      resolverChannel?.invokeMethod("closeNativeFntvSession", arguments: ["resolverSessionId": resolverSessionId])
     }
   }
 
   private func configurePlayer() {
     captureCurrentSubtitleSessionPreference()
     teardownPlayback()
-    subtitleSessionPreference = playbackStore.loadSubtitlePreference(
-      seriesKey: request.seriesKey
-    )
+    let generation = playbackGeneration
+    playbackStore.preparePlayback(itemKey: request.playbackItemKey, seriesKey: request.seriesKey) {
+      [weak self] position, subtitle in
+      guard let self, self.playbackGeneration == generation else { return }
+      self.configurePreparedPlayer(resumePositionMs: self.request.allowsResume ? position : 0,
+        subtitle: subtitle)
+    }
+  }
+
+  private func configurePreparedPlayer(resumePositionMs: Int64,
+    subtitle: NativeSubtitleSessionPreference?) {
+    subtitleSessionPreference = subtitle
     automaticallyAppliedSubtitlePreference = nil
     configureAudioSession(enabled: true)
 
-    let resumePositionMs = request.allowsResume
-      ? playbackStore.loadResumePositionMs(itemKey: request.playbackItemKey)
-      : 0
     let assetOptions: [String: Any]? = request.headers.isEmpty
       ? nil
       : ["AVURLAssetHTTPHeaderFieldsKey": request.headers]
@@ -108,7 +125,11 @@ final class NativePlaybackViewController: AVPlayerViewController {
       item.externalMetadata = [metadataItem]
     }
 
-    let player = AVPlayer(playerItem: item)
+    let player = NativePlaybackIntentPlayer(playerItem: item)
+    player.onUserCommand = { [weak self, weak player] in
+      guard let self, let player, self.player === player else { return }
+      self.cancelAutomaticPlaybackWork()
+    }
     let bufferingContext = NativePlaybackBufferingTuning.Context(
       url: request.url,
       headers: request.headers
@@ -162,7 +183,8 @@ final class NativePlaybackViewController: AVPlayerViewController {
       case .failed(let error):
         self.showPlaybackFailure(error: error)
       case .cancelled:
-        break
+        self.playbackStartupTimeoutWorkItem?.cancel()
+        self.playbackStartupTimeoutWorkItem = nil
       }
     }
     refreshRemoteCommandAvailability()
@@ -525,19 +547,106 @@ final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   @discardableResult
-  private func advanceToAdjacentEpisode(forward: Bool) -> Bool {
+  private func advanceToAdjacentEpisode(forward: Bool, automatic: Bool = false) -> Bool {
+    if !automatic { cancelAutomaticPlaybackWork() }
+    guard let generation = episodeIntent.begin(automatic: automatic) else { return false }
+    episodeResolutionTimeout?.cancel()
+    episodeResolutionTimeout = nil
     let nextQueue = forward ? episodeQueue?.moveToNext() : episodeQueue?.moveToPrevious()
     guard let nextQueue, let nextEntry = nextQueue.currentEntry else {
+      _ = episodeIntent.finish(generation)
       return false
     }
 
-    persistPlaybackProgress(force: true)
-    episodeQueue = nextQueue
-    request = nextEntry.request
+    guard let resolverChannel, !resolverSessionId.isEmpty else {
+      _ = episodeIntent.finish(generation)
+      guard let nextRequest = nextEntry.request else { return false }
+      switchEpisode(to: nextRequest, queue: nextQueue)
+      return true
+    }
+    let timeout = DispatchWorkItem { [weak self] in
+      guard let self, self.episodeIntent.finish(generation) else { return }
+      self.episodeResolutionTimeout = nil
+      self.showEpisodeResolutionFailure()
+    }
+    episodeResolutionTimeout = timeout
+    DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: timeout)
+    let sessionId = resolverSessionId
+    resolverChannel.invokeMethod("resolveNativePlaybackEpisode", arguments: [
+      "resolverSessionId": resolverSessionId,
+      "playbackTargetJson": nextEntry.playbackTargetJson,
+    ]) { [weak self] result in
+      let value = result as? [String: Any]
+      let targetJson = value?["playbackTargetJson"] as? String ?? ""
+      guard let self else {
+        if !targetJson.isEmpty {
+          resolverChannel.invokeMethod("releaseNativeFntvPlayback", arguments: [
+            "resolverSessionId": sessionId, "playbackTargetJson": targetJson,
+          ])
+        }
+        return
+      }
+      guard self.episodeIntent.finish(generation) else {
+        self.releaseResolvedPlayback(targetJson)
+        return
+      }
+      self.episodeResolutionTimeout?.cancel()
+      self.episodeResolutionTimeout = nil
+      guard value?["ok"] as? Bool == true,
+        let data = targetJson.data(using: .utf8),
+        let target = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let entry = NativeEpisodeQueueEntry(json: [
+          "target": target,
+          "playbackItemKey": value?["playbackItemKey"] ?? nextEntry.playbackItemKey,
+          "seriesKey": value?["seriesKey"] ?? nextEntry.seriesKey,
+        ]), let nextRequest = entry.request
+      else {
+        self.releaseResolvedPlayback(targetJson)
+        self.showEpisodeResolutionFailure()
+        return
+      }
+      self.switchEpisode(to: nextRequest, queue: nextQueue)
+    }
+    return true
+  }
+
+  private func switchEpisode(to nextRequest: NativePlaybackRequest, queue: NativeEpisodeQueue) {
+    captureCurrentSubtitleSessionPreference()
+    let previous = request.playbackTargetJson
+    teardownPlayback()
+    episodeQueue = queue
+    request = nextRequest
     title = request.title
     configurePlayer()
+    releaseResolvedPlayback(previous)
     updateNowPlayingInfo()
-    return true
+  }
+
+  private func cancelAutomaticPlaybackWork() {
+    episodeIntent.cancelAutomatic()
+    if !episodeIntent.pending {
+      episodeResolutionTimeout?.cancel()
+      episodeResolutionTimeout = nil
+    }
+    startupGate?.cancel()
+    startupGate = nil
+    playbackStartupTimeoutWorkItem?.cancel()
+    playbackStartupTimeoutWorkItem = nil
+    interruptionWasPlaying = false
+  }
+
+  private func releaseResolvedPlayback(_ targetJson: String) {
+    guard !targetJson.isEmpty else { return }
+    resolverChannel?.invokeMethod("releaseNativeFntvPlayback", arguments: [
+      "resolverSessionId": resolverSessionId, "playbackTargetJson": targetJson,
+    ])
+  }
+
+  private func showEpisodeResolutionFailure() {
+    guard viewIfLoaded?.window != nil, presentedViewController == nil else { return }
+    let alert = UIAlertController(title: "切集失败", message: "未取得播放地址，请稍后重试。", preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: "确定", style: .default))
+    present(alert, animated: true)
   }
 
   private func updateNowPlayingInfo() {
@@ -643,6 +752,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
           return
         }
         self.appIsInBackground = true
+        self.episodeIntent.cancelAutomatic()
         self.persistPlaybackProgress(force: true)
         if self.backgroundPlaybackEnabled {
           self.setBackgroundAudioOnly(self.player?.timeControlStatus != .paused)
@@ -707,12 +817,13 @@ final class NativePlaybackViewController: AVPlayerViewController {
 
     switch interruptionType {
     case .began:
-      interruptionWasPlaying = player?.timeControlStatus != .paused
-      if interruptionWasPlaying {
+      let wasPlaying = player?.timeControlStatus != .paused
+      if wasPlaying {
         player?.pause()
         configureAudioSession(enabled: false)
         updateNowPlayingInfo()
       }
+      interruptionWasPlaying = wasPlaying
     case .ended:
       let rawOptions = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
       let options = AVAudioSession.InterruptionOptions(rawValue: rawOptions)
@@ -808,11 +919,15 @@ final class NativePlaybackViewController: AVPlayerViewController {
   private func installPlaybackItemStatusObserver(for item: AVPlayerItem) {
     playbackItemStatusObservation = item.observe(\.status, options: [.new]) {
       [weak self] item, _ in
-      guard item.status == .failed else {
-        return
-      }
       DispatchQueue.main.async {
-        self?.showPlaybackFailure(error: item.error)
+        guard let self, let player = self.player, player.currentItem === item else { return }
+        if item.status == .failed {
+          self.showPlaybackFailure(error: item.error)
+        } else if item.status == .readyToPlay {
+          NativePlaybackBufferingTuning.apply(playerItem: item, player: player,
+            context: .init(url: self.request.url, headers: self.request.headers,
+              isLiveStream: item.duration.isIndefinite))
+        }
       }
     }
   }
@@ -881,7 +996,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
       object: item,
       queue: .main
     ) { [weak self] _ in
-      if self?.advanceToAdjacentEpisode(forward: true) == true {
+      if self?.advanceToAdjacentEpisode(forward: true, automatic: true) == true {
         return
       }
       self?.persistPlaybackProgress(force: true)
@@ -890,6 +1005,10 @@ final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   private func teardownPlayback() {
+    playbackGeneration += 1
+    episodeIntent.cancel()
+    episodeResolutionTimeout?.cancel()
+    episodeResolutionTimeout = nil
     let hadPlayback = !appObservers.isEmpty || player != nil
     if hadPlayback {
       persistPlaybackProgress(force: true)
@@ -922,7 +1041,10 @@ final class NativePlaybackViewController: AVPlayerViewController {
     appObservers.removeAll()
 
     setBackgroundAudioOnly(false)
+    (player as? NativePlaybackIntentPlayer)?.onUserCommand = nil
     player?.pause()
+    player = nil
+    lastSavedPositionMs = -1
     interruptionWasPlaying = false
     appIsInBackground = false
     uninstallRemoteCommands()
@@ -945,14 +1067,32 @@ final class NativePlaybackViewController: AVPlayerViewController {
     }
     lastSavedPositionMs = positionMs
 
-    playbackStore.savePlaybackEntry(
+    playbackStore.enqueuePlaybackEntry(
       targetJson: request.playbackTargetJson,
       itemKey: request.playbackItemKey,
       seriesKey: request.seriesKey,
       positionMs: positionMs,
       durationMs: durationMs,
-      updatedAt: isoFormatter.string(from: Date())
+      updatedAt: isoFormatter.string(from: Date()),
+      final: force
     )
+    let channel = resolverChannel
+    var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    if force {
+      backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Playback progress") {
+        if backgroundTask != .invalid {
+          UIApplication.shared.endBackgroundTask(backgroundTask)
+          backgroundTask = .invalid
+        }
+      }
+    }
+    playbackStore.flush {
+      if backgroundTask != .invalid {
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+      }
+      channel?.invokeMethod("nativePlaybackMemoryChanged", arguments: nil)
+    }
   }
 }
 

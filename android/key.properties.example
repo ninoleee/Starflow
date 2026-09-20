@@ -1,0 +1,5 @@
+# Keep the installed application's existing signing identity. Never commit keys/passwords.
+storeFile=/absolute/path/to/backed-up-starflow.keystore
+storePassword=replace-locally
+keyAlias=replace-locally
+keyPassword=replace-locally

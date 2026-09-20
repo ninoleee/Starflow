@@ -336,8 +336,9 @@ internal class NativePlaybackSettingsController(private val host: Host) {
                 NativePlaybackFormatting.formatPlaybackSpeedLabel(value.toFloat())
             },
         ) { value ->
-            currentPlayer.playbackParameters =
-                currentPlayer.playbackParameters.withSpeed(value.toFloat())
+            host.session.setPlaybackParameters(
+                currentPlayer.playbackParameters.withSpeed(value.toFloat()),
+            )
             host.systemSession.syncPlaybackSystemSession()
         }
         showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)

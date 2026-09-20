@@ -77,31 +77,20 @@ extension _PlayerPageStatePerformance on _PlayerPageState {
     _stopMpvPerformanceSampling();
 
     final target = _resolvedTarget ?? widget.target;
-    final properties = await Future.wait<Object?>([
-      _readMpvIntProperty(player, 'cache-speed'),
-      _readMpvStringProperty(player, 'hwdec-current'),
-      _readMpvStringProperty(player, 'video-codec'),
-      _readMpvIntProperty(player, 'decoder-frame-drop-count'),
-      _readMpvIntProperty(player, 'frame-drop-count'),
-      _readMpvStringProperty(player, 'audio-codec-name'),
-      _readMpvStringProperty(player, 'current-ao'),
-      _readMpvStringProperty(player, 'audio-params/format'),
-      _readMpvStringProperty(player, 'audio-params/channel-count'),
-      _readMpvStringProperty(player, 'audio-out-params/samplerate'),
-      _readMpvStringProperty(player, 'audio-out-params/channel-count'),
-      _readMpvStringProperty(player, 'avsync'),
-    ]);
-    final cacheSpeed = properties[0] as int?;
+    final includeDiagnostics = appLogger.isRecording(AppLogLevel.info);
+    final properties = await readMpvShutdownProperties(
+      readProperty: (name) => _readMpvStringProperty(player, name),
+      includeDiagnostics: includeDiagnostics,
+    );
+    int? intProperty(String name) =>
+        num.tryParse(properties[name] ?? '')?.round();
+    final cacheSpeed = intProperty('cache-speed');
     if (cacheSpeed != null && cacheSpeed > 0) {
       tracker.recordNetworkBytesPerSecond(cacheSpeed);
       _PlayerPageState._hostBandwidthCache.record(target, cacheSpeed);
     }
-    final hardwareDecoder = properties[1] as String?;
-    final videoDecoder = properties[2] as String?;
-    final droppedDecoderFrames = properties[3] as int? ?? 0;
-    final droppedOutputFrames = properties[4] as int? ?? 0;
     final summary = tracker.finish();
-    if (summary == null) {
+    if (summary == null || !includeDiagnostics) {
       return;
     }
     final budget = _resolveMpvBufferBudget(target);
@@ -125,16 +114,19 @@ extension _PlayerPageStatePerformance on _PlayerPageState {
         'sourceBitrate': summary.sourceBitrate,
         'bandwidthRatio':
             summary.bandwidthToBitrateRatio?.toStringAsFixed(2) ?? '',
-        'hardwareDecoder': hardwareDecoder ?? '',
-        'videoDecoder': videoDecoder ?? '',
-        'audioDecoder': properties[5] ?? '',
-        'audioOutput': properties[6] ?? '',
-        'audioSampleFormat': properties[7] ?? '',
-        'audioInputChannels': properties[8] ?? '',
-        'audioOutputSampleRate': properties[9] ?? '',
-        'audioOutputChannels': properties[10] ?? '',
-        'avSyncSeconds': properties[11] ?? '',
-        'droppedFrames': droppedDecoderFrames + droppedOutputFrames,
+        'hardwareDecoder': properties['hwdec-current'] ?? '',
+        'videoDecoder': properties['video-codec'] ?? '',
+        'audioDecoder': properties['audio-codec-name'] ?? '',
+        'audioOutput': properties['current-ao'] ?? '',
+        'audioSampleFormat': properties['audio-params/format'] ?? '',
+        'audioInputChannels': properties['audio-params/channel-count'] ?? '',
+        'audioOutputSampleRate':
+            properties['audio-out-params/samplerate'] ?? '',
+        'audioOutputChannels':
+            properties['audio-out-params/channel-count'] ?? '',
+        'avSyncSeconds': properties['avsync'] ?? '',
+        'droppedFrames': (intProperty('decoder-frame-drop-count') ?? 0) +
+            (intProperty('frame-drop-count') ?? 0),
         'forwardBufferBytes': budget.forwardBytes,
         'backBufferBytes': budget.backBytes,
         'memoryClassMb': _androidMemoryClassMb ?? 0,

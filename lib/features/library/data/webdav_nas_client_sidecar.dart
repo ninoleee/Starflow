@@ -271,6 +271,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     Uri uri, {
     required MediaSourceConfig source,
   }) async {
+    _requireSourceResource(uri, source);
     final request = http.Request('PROPFIND', uri)
       ..headers.addAll({
         ..._headers(source),
@@ -298,6 +299,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
         body: request.body,
         timeout: const Duration(seconds: 30),
         maxBytes: 32 * 1024 * 1024,
+        allowUri: (next) => _isSourceResource(next, source),
       );
     } catch (_) {
       rethrow;
@@ -345,7 +347,22 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
         },
       );
     }
-    return parsed;
+    return parsed
+        .where((entry) =>
+            _isSourceResource(entry.uri, source) &&
+            isWithinHttpDirectory(entry.uri, uri))
+        .toList(growable: false);
+  }
+
+  bool _isSourceResource(Uri uri, MediaSourceConfig source) {
+    final endpoint = Uri.tryParse(source.endpoint.trim());
+    return endpoint != null && isWithinHttpDirectory(uri, endpoint);
+  }
+
+  void _requireSourceResource(Uri uri, MediaSourceConfig source) {
+    if (!_isSourceResource(uri, source)) {
+      throw const WebDavNasException('WebDAV 地址超出来源目录或 origin');
+    }
   }
 
   Map<String, String> _headers(MediaSourceConfig source) {
@@ -477,7 +494,12 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     Uri uri, {
     required MediaSourceConfig source,
   }) async {
-    final response = await _client.get(uri, headers: _headers(source));
+    _requireSourceResource(uri, source);
+    final response = await sendBoundedRequest(_client, 'GET', uri,
+        headers: _headers(source),
+        timeout: const Duration(seconds: 20),
+        maxBytes: 1024 * 1024,
+        allowUri: (next) => _isSourceResource(next, source));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw WebDavNasException(
         'STRM 读取失败：HTTP ${response.statusCode} ($uri)',
@@ -795,11 +817,13 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
         _loadNfoMetadataUncached(entry, source: source).then((value) {
       _nfoCache[key] = value;
       return value;
-    });
-    _nfoInflight[key] = future;
-    future.whenComplete(() {
+    }).catchError((Object _) {
+      // A rejected or unavailable sidecar must not discard the media entry.
+      return null;
+    }).whenComplete(() {
       _nfoInflight.remove(key);
     });
+    _nfoInflight[key] = future;
     return future;
   }
 
@@ -807,7 +831,12 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     _WebDavEntry entry, {
     required MediaSourceConfig source,
   }) async {
-    final response = await _client.get(entry.uri, headers: _headers(source));
+    _requireSourceResource(entry.uri, source);
+    final response = await sendBoundedRequest(_client, 'GET', entry.uri,
+        headers: _headers(source),
+        timeout: const Duration(seconds: 20),
+        maxBytes: 4 * 1024 * 1024,
+        allowUri: (next) => _isSourceResource(next, source));
     if (response.statusCode < 200 || response.statusCode >= 300) {
       return null;
     }
@@ -1026,7 +1055,8 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     required bool includeSidecarMetadata,
   }) {
     final keywords = source.normalizedWebDavExcludedPathKeywords.join(',');
-    return '${source.id}|${includeSidecarMetadata ? 'sidecar' : 'plain'}|$keywords|${uri.toString()}';
+    // Old persisted subtrees may contain hrefs accepted before origin checks.
+    return 'origin-v1|${source.id}|${includeSidecarMetadata ? 'sidecar' : 'plain'}|$keywords|${uri.toString()}';
   }
 
   Uri? _parentDirectoryUri(Uri uri) {
@@ -1188,9 +1218,7 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
     if (endpoint == null) {
       return false;
     }
-    return uri.scheme == endpoint.scheme &&
-        uri.host == endpoint.host &&
-        uri.port == endpoint.port;
+    return isWithinHttpDirectory(uri, endpoint);
   }
 
   Map<String, String> _headersForResolvedStream(

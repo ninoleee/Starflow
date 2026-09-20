@@ -25,13 +25,14 @@ internal class PcmBluRayReader(
     private var frameBytesRead = 0
     private var frameSize = 0
     private var bytesPerSample = 0
+    private var lastDepthCode = 0
     private var channels = intArrayOf(0, 1)
     private var sampleRate = 0
     private var payloadRemaining = 0
     private var timeUs = C.TIME_UNSET
     private var framesWritten = 0L
-    // At most 10 ms at 192 kHz, eight channels, PCM16. Reused for every PES.
-    private val pcm = ByteArray(30_720)
+    // At most 10 ms at 192 kHz, eight channels, PCM24. Reused for every PES.
+    private val pcm = ByteArray(46_080)
     private val pcmData = ParsableByteArray(pcm)
     private var pcmSize = 0
 
@@ -68,11 +69,12 @@ internal class PcmBluRayReader(
             if (frameBytesRead == frameSize) {
                 for (channel in channels) {
                     val offset = channel * bytesPerSample
+                    if (bytesPerSample == 3) pcm[pcmSize++] = frame[offset + 2]
                     pcm[pcmSize++] = frame[offset + 1]
                     pcm[pcmSize++] = frame[offset]
                 }
                 frameBytesRead = 0
-                if (pcmSize >= sampleRate / 100 * channels.size * 2) flush()
+                if (pcmSize >= sampleRate / 100 * channels.size * bytesPerSample) flush()
             }
         }
         if (payloadRemaining == 0) {
@@ -113,7 +115,8 @@ internal class PcmBluRayReader(
             5 -> 192_000
             else -> fail("Invalid Blu-ray LPCM sample rate")
         }
-        bytesPerSample = when ((header[3].toInt() ushr 6) and 3) {
+        val depthCode = (header[3].toInt() ushr 6) and 3
+        bytesPerSample = when (depthCode) {
             1 -> 2
             2, 3 -> 3
             else -> fail("Invalid Blu-ray LPCM sample depth")
@@ -128,13 +131,18 @@ internal class PcmBluRayReader(
             framesWritten = 0
             sampleRate = rate
         }
-        if (format?.sampleRate != rate || format?.channelCount != channels.size) {
+        val encoding = if (bytesPerSample == 3) C.ENCODING_PCM_24BIT else C.ENCODING_PCM_16BIT
+        if (format?.sampleRate != rate || format?.channelCount != channels.size ||
+            format?.pcmEncoding != encoding || lastDepthCode != depthCode) {
             val next = Format.Builder().setId(formatId)
                 .setContainerMimeType(MimeTypes.VIDEO_MP2T).setSampleMimeType(MimeTypes.AUDIO_RAW)
-                .setPcmEncoding(C.ENCODING_PCM_16BIT).setChannelCount(channels.size)
+                .setPcmEncoding(encoding).setChannelCount(channels.size)
                 .setSampleRate(rate).setLanguage(language).setRoleFlags(roleFlags).build()
             output!!.format(next)
             format = next
+            lastDepthCode = depthCode
+            NativeAppLogger.info("playback.audio", "LPCM input bits=${if (depthCode == 1) 16 else if (depthCode == 2) 20 else 24} " +
+                "readerEncoding=$encoding sampleRate=$rate channels=${channels.size}")
         }
     }
 
@@ -146,7 +154,7 @@ internal class PcmBluRayReader(
         track.sampleData(pcmData, pcmSize, TrackOutput.SAMPLE_DATA_PART_MAIN)
         track.sampleMetadata(timeUs + framesWritten * 1_000_000L / sampleRate,
             C.BUFFER_FLAG_KEY_FRAME, pcmSize, 0, null)
-        framesWritten += pcmSize / (channels.size * 2)
+        framesWritten += pcmSize / (channels.size * bytesPerSample)
         pcmSize = 0
     }
 

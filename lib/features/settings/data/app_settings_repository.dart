@@ -37,25 +37,23 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
       return fallback;
     }
 
+    late final AppSettings parsed;
     try {
       final decoded = Map<String, dynamic>.from(jsonDecode(raw) as Map);
-      final parsed = AppSettings.fromCurrentJson(decoded);
-      final cookie = await _preferences.getString(_cloud115CookieKey) ?? '';
-      final settings = parsed.copyWith(
-        networkStorage: parsed.networkStorage.copyWith(
-          cloud115Cookie: cookie,
-        ),
-      );
-      final reconciled = reconcileSettingsMediaSourceReferences(settings);
-      if (jsonEncode(settings.toJson()) != jsonEncode(reconciled.toJson())) {
-        await save(reconciled);
-      }
-      return reconciled;
+      parsed = AppSettings.fromCurrentJson(decoded);
     } catch (_) {
-      final fallback = await _loadBundledOrDefaultSettings();
-      await save(fallback);
-      return fallback;
+      // Preserve the original record and credentials for recovery/export.
+      return _loadBundledOrDefaultSettings();
     }
+    final cookie = await _preferences.getString(_cloud115CookieKey) ?? '';
+    final settings = parsed.copyWith(
+      networkStorage: parsed.networkStorage.copyWith(cloud115Cookie: cookie),
+    );
+    final reconciled = reconcileSettingsMediaSourceReferences(settings);
+    if (jsonEncode(settings.toJson()) != jsonEncode(reconciled.toJson())) {
+      await save(reconciled);
+    }
+    return reconciled;
   }
 
   @override

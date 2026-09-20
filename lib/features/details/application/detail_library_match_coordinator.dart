@@ -1,6 +1,6 @@
+import 'package:starflow/core/logging/app_logger.dart';
 import 'dart:math' as math;
 
-import 'package:starflow/core/utils/detail_resource_switch_trace.dart';
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/data/media_repository.dart';
@@ -144,12 +144,11 @@ class DetailLibraryMatchCoordinator {
       } catch (error, stackTrace) {
         final sourceLabel =
             source.kind.isMediaServer ? 'emby.library' : source.kind.name;
-        detailResourceSwitchTrace(
-          'resource.match.source.$sourceLabel.error',
-          fields: {'sourceId': source.id, 'sourceName': source.name},
-          error: error,
-          stackTrace: stackTrace,
-        );
+        appLogError(
+            'detail-resource', 'resource.match.source.$sourceLabel.error',
+            fields: {'sourceId': source.id, 'sourceName': source.name},
+            error: error,
+            stackTrace: stackTrace);
         return const <DetailLibraryMatchCandidate>[];
       }
     }

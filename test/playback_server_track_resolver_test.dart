@@ -99,6 +99,26 @@ void main() {
         isNull);
   });
 
+  test('unavailable server audio stays visible without guessing missing tracks',
+      () {
+    const english =
+        AudioTrack('1', 'English', 'eng', codec: 'eac3', channelscount: 6);
+    expect(
+        unavailablePlaybackAudioStreams(target: target, tracks: const [english])
+            .map((stream) => stream.id),
+        ['audio-zh']);
+    expect(
+        unavailablePlaybackAudioStreams(target: target, tracks: const [])
+            .length,
+        2);
+    expect(
+        playbackServerAudioLabel(
+            const PlaybackAudioStream(id: 'empty', index: 2)),
+        '音轨 3');
+    expect(
+        playbackServerAudioLabel(target.audioStreams.first), contains('6 声道'));
+  });
+
   test(
       'language aliases resolve reordered tracks without guessing missing rows',
       () {
@@ -181,5 +201,22 @@ void main() {
       preferredPlaybackSubtitleStream(target)?.isExternal,
       isTrue,
     );
+  });
+
+  test('subtitle ordinal never guesses across missing tracks', () {
+    final subtitles =
+        target.copyWith(preferredSubtitleStreamId: 'b', subtitleStreams: const [
+      PlaybackSubtitleStream(id: 'a', index: 0),
+      PlaybackSubtitleStream(id: 'b', index: 1),
+    ]);
+    const track = SubtitleTrack('1', null, null);
+    expect(
+        resolveEmbeddedPlaybackSubtitleTrack(
+            target: subtitles, tracks: const [track]),
+        isNull);
+    expect(
+        matchPlaybackSubtitleStreamForTrack(
+            target: subtitles, tracks: const [track], track: track),
+        isNull);
   });
 }

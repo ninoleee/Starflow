@@ -101,6 +101,8 @@ class _PlaybackEpisodePickerDialogState
   PlaybackEpisodeSeason? _season;
   PlaybackEpisodeSeason? _pendingSeason;
   final _headerFocus = FocusNode();
+  final _gridFocus = FocusNode();
+  final _seasonFocus = FocusNode(debugLabel: 'player-episode-picker-season');
   final _footerFocus = FocusNode();
   final _focusSummary = ValueNotifier<int>(0);
   static const _accent = Color(0xFF2DD4BF);
@@ -211,15 +213,19 @@ class _PlaybackEpisodePickerDialogState
         .catchError((Object _) {}));
   }
 
+  double _rowAlignedOffset(int row, double viewportHeight, double maxOffset) {
+    final centered = row * _rowExtent - viewportHeight / 2 + _rowExtent / 2;
+    return ((centered / _rowExtent).round() * _rowExtent)
+        .clamp(0.0, maxOffset);
+  }
+
   void _focus(int index) {
     if (!mounted || index < 0 || index >= _queue.entries.length) return;
     final row = (index - _start) ~/ (_grid ? 4 : 1);
     final scroll = _scroll;
     if (scroll != null && scroll.hasClients) {
-      final extent = _rowExtent;
-      scroll.jumpTo(
-          (row * extent - scroll.position.viewportDimension / 2 + extent / 2)
-              .clamp(0.0, scroll.position.maxScrollExtent));
+      scroll.jumpTo(_rowAlignedOffset(row, scroll.position.viewportDimension,
+          scroll.position.maxScrollExtent));
     }
     if (widget.isTelevision && _node(index).context != null) {
       _node(index).requestFocus();
@@ -238,6 +244,20 @@ class _PlaybackEpisodePickerDialogState
     } else {
       _initialFocus = false;
       _focus(index);
+    }
+  }
+
+  bool get _canChooseSeason => !_loading && _seasons.length > 1;
+
+  void _focusAboveEpisodes() {
+    (_canChooseSeason ? _seasonFocus : _headerFocus).requestFocus();
+  }
+
+  void _focusBelowHeader() {
+    if (_canChooseSeason) {
+      _seasonFocus.requestFocus();
+    } else {
+      _focus(_focused);
     }
   }
 
@@ -296,10 +316,13 @@ class _PlaybackEpisodePickerDialogState
                 if (event is KeyUpEvent || _loading) {
                   return KeyEventResult.ignored;
                 }
-                if ((focusNode == _headerFocus &&
-                        event.logicalKey == LogicalKeyboardKey.arrowDown) ||
-                    (focusNode == _footerFocus &&
-                        event.logicalKey == LogicalKeyboardKey.arrowUp)) {
+                if ((focusNode == _headerFocus || focusNode == _gridFocus) &&
+                    event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                  _focusBelowHeader();
+                  return KeyEventResult.handled;
+                }
+                if (focusNode == _footerFocus &&
+                    event.logicalKey == LogicalKeyboardKey.arrowUp) {
                   _focus(_focused);
                   return KeyEventResult.handled;
                 }
@@ -456,7 +479,7 @@ class _PlaybackEpisodePickerDialogState
               }
             }
             if (next < 0) {
-              _headerFocus.requestFocus();
+              _focusAboveEpisodes();
             } else if (next >= _queue.entries.length) {
               _footerFocus.requestFocus();
             } else {
@@ -530,44 +553,49 @@ class _PlaybackEpisodePickerDialogState
                             selected: !_grid, focusNode: _headerFocus),
                         _tool(Icons.grid_view_rounded, '网格',
                             _loading ? null : () => _setGrid(true),
-                            selected: _grid),
+                            selected: _grid, focusNode: _gridFocus),
                       ]),
                       SizedBox(
                           height: 36,
                           child: Row(children: [
                             Expanded(
-                                child: Tooltip(
-                                    message: '选择季',
-                                    child: TvFocusableAction(
-                                      onPressed:
-                                          !_loading && _seasons.length > 1
-                                              ? _chooseSeason
-                                              : null,
-                                      borderRadius: BorderRadius.circular(6),
-                                      child: SizedBox(
-                                          height: 36,
-                                          child: Row(children: [
-                                            Flexible(
-                                                child: Text(
-                                                    !_grid && _loading
-                                                        ? '正在加载剧集'
-                                                        : !_grid &&
-                                                                _error != null
-                                                            ? _error!
-                                                            : '${number == 0 ? '特别篇' : '第 $number 季'} · 共 ${_queue.entries.length} 集',
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: TextStyle(
-                                                        fontSize:
-                                                            widget.isTelevision
-                                                                ? 16
-                                                                : 14))),
-                                            if (_seasons.length > 1)
-                                              const Icon(
-                                                  Icons.expand_more_rounded,
-                                                  size: 20),
-                                          ])),
+                                child: TvDirectionalActionPanel(
+                                    enabled: widget.isTelevision,
+                                    onMoveUp: _headerFocus.requestFocus,
+                                    onMoveDown: () => _focus(_focused),
+                                    child: Tooltip(
+                                      message: '选择季',
+                                      child: TvFocusableAction(
+                                        focusNode: _seasonFocus,
+                                        onPressed: _canChooseSeason
+                                            ? _chooseSeason
+                                            : null,
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: SizedBox(
+                                            height: 36,
+                                            child: Row(children: [
+                                              Flexible(
+                                                  child: Text(
+                                                      !_grid && _loading
+                                                          ? '正在加载剧集'
+                                                          : !_grid &&
+                                                                  _error != null
+                                                              ? _error!
+                                                              : '${number == 0 ? '特别篇' : '第 $number 季'} · 共 ${_queue.entries.length} 集',
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: TextStyle(
+                                                          fontSize:
+                                                              widget.isTelevision
+                                                                  ? 16
+                                                                  : 14))),
+                                              if (_seasons.length > 1)
+                                                const Icon(
+                                                    Icons.expand_more_rounded,
+                                                    size: 20),
+                                            ])),
+                                      ),
                                     ))),
                             if (!_grid && _error != null)
                               _tool(Icons.refresh_rounded, '重试', () {
@@ -645,19 +673,22 @@ class _PlaybackEpisodePickerDialogState
                         final extent = _rowExtent;
                         final columns = _grid ? 4 : 1;
                         final row = (_focused - _start) ~/ columns;
-                        final maxOffset = math.max(
+                        final rawMaxOffset = math.max(
                             0.0,
                             ((_end - _start) / columns).ceil() * extent -
                                 constraints.maxHeight);
+                        // Keep the last row visible without leaving a partial row at the top.
+                        final maxOffset =
+                            (rawMaxOffset / extent).ceil() * extent;
                         _scroll ??= ScrollController(
-                            initialScrollOffset: (row * extent -
-                                    constraints.maxHeight / 2 +
-                                    extent / 2)
-                                .clamp(0.0, maxOffset));
+                            initialScrollOffset: _rowAlignedOffset(
+                                row, constraints.maxHeight, maxOffset));
                         // At most 30 lightweight cells are mounted, so D-pad neighbors exist.
                         return SingleChildScrollView(
                             key: ValueKey(_layoutVersion),
                             controller: _scroll,
+                            padding: EdgeInsets.only(
+                                bottom: maxOffset - rawMaxOffset),
                             child: _grid
                                 ? Wrap(
                                     children: List.generate(
@@ -676,6 +707,9 @@ class _PlaybackEpisodePickerDialogState
                       const Divider(
                           height: 12, thickness: 1, color: Color(0x1FFFFFFF)),
                       Row(children: [
+                        if (!widget.isTelevision)
+                          _tool(Icons.close_rounded, '关闭',
+                              () => Navigator.pop(context)),
                         _tool(
                             Icons.chevron_left_rounded,
                             '上一段',
@@ -724,6 +758,8 @@ class _PlaybackEpisodePickerDialogState
   void dispose() {
     _scroll?.dispose();
     _headerFocus.dispose();
+    _gridFocus.dispose();
+    _seasonFocus.dispose();
     _footerFocus.dispose();
     _focusSummary.dispose();
     for (final node in _nodes.values) {

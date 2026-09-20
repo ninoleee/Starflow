@@ -5,7 +5,6 @@ import 'package:starflow/app/router/app_navigator.dart';
 import 'package:starflow/app/router/app_navigation_shell.dart';
 import 'package:starflow/app/router/app_routes.dart';
 import 'package:starflow/core/widgets/no_animation_page_route.dart';
-import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/features/bootstrap/presentation/bootstrap_page.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -18,6 +17,7 @@ import 'package:starflow/features/home/presentation/home_page.dart';
 import 'package:starflow/features/library/domain/library_collection_models.dart';
 import 'package:starflow/features/library/presentation/library_collection_page.dart';
 import 'package:starflow/features/library/presentation/library_page.dart';
+import 'package:starflow/features/live_tv/presentation/live_tv_page.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/playback/presentation/player_page.dart';
@@ -104,6 +104,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   child: const SettingsPage(),
                 ),
               ),
+            ],
+          ),
+          StatefulShellBranch(
+            routes: [
+              GoRoute(
+                path: AppRoutes.liveTv.path,
+                name: AppRoutes.liveTv.name,
+                pageBuilder: (context, state) =>
+                    _buildAppPage(state: state, child: const LiveTvPage()),
+              )
             ],
           ),
         ],
@@ -211,25 +221,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.subtitleSearch.path,
         name: AppRoutes.subtitleSearch.name,
         pageBuilder: (context, state) {
-          subtitleSearchTrace(
-            'router.subtitle-search.route',
-            fields: {
-              'uri': state.uri.toString(),
-              'queryParameters': state.uri.queryParameters.toString(),
-            },
-          );
           final request = SubtitleSearchRequest.fromQueryParameters(
             state.uri.queryParameters,
-          );
-          subtitleSearchTrace(
-            'router.subtitle-search.request',
-            fields: {
-              'query': request.query,
-              'title': request.title,
-              'initialInput': request.initialInput,
-              'applyMode': request.applyMode.name,
-              'standalone': request.standalone,
-            },
           );
           return _buildFullscreenDialogPage(
             state: state,

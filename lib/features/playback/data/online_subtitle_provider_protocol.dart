@@ -2,7 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
-import 'package:starflow/core/utils/subtitle_search_trace.dart';
+import 'package:starflow/core/network/bounded_http_request.dart';
+import 'package:starflow/features/playback/domain/subtitle_operation.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 
@@ -10,6 +11,22 @@ const String _defaultOpenSubtitlesApiKey = String.fromEnvironment(
   'STARFLOW_OPENSUBTITLES_API_KEY',
 );
 const String _assrtRateLimitErrorMessage = 'ASSRT API 请求过于频繁，请稍后再试';
+
+Future<http.Response> _providerRequest(
+    http.Client client, String method, Uri uri,
+    {Map<String, String>? headers,
+    String? body,
+    SubtitleOperation? operation}) async {
+  operation?.throwIfCancelled();
+  final response = await sendBoundedRequest(client, method, uri,
+      headers: headers,
+      body: body,
+      cancel: operation?.whenCancelled,
+      timeout: const Duration(seconds: 30),
+      maxBytes: 4 * 1024 * 1024);
+  operation?.throwIfCancelled();
+  return response;
+}
 
 abstract class OnlineSubtitleStructuredProvider {
   OnlineSubtitleSource get source;
@@ -85,10 +102,12 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
   AssrtStructuredProvider(
     this._client, {
     this.config = const AssrtProviderConfig(),
+    this.operation,
   });
 
   final http.Client _client;
   final AssrtProviderConfig config;
+  final SubtitleOperation? operation;
 
   @override
   OnlineSubtitleSource get source => OnlineSubtitleSource.assrt;
@@ -104,10 +123,6 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
     OnlineSubtitleSearchRequest request,
   ) async {
     if (!isConfigured) {
-      subtitleSearchTrace(
-        'repository.structured.provider.skip-unconfigured',
-        fields: {'source': source.name},
-      );
       return const [];
     }
 
@@ -117,32 +132,17 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
     }
 
     for (final query in queryPlan) {
-      final response = await _client.get(
+      final response = await _providerRequest(
+        _client,
+        'GET',
         _buildAssrtSearchUri(query),
+        operation: operation,
         headers: _assrtHeaders(),
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         if (response.statusCode == 509) {
-          subtitleSearchTrace(
-            'repository.structured.provider.rate-limited',
-            fields: {
-              'source': source.name,
-              'status': response.statusCode,
-              'queryKind': query.kind,
-              'query': query.query,
-            },
-          );
           throw StateError(_assrtRateLimitErrorMessage);
         }
-        subtitleSearchTrace(
-          'repository.structured.provider.request-failed',
-          fields: {
-            'source': source.name,
-            'status': response.statusCode,
-            'queryKind': query.kind,
-            'query': query.query,
-          },
-        );
         continue;
       }
 
@@ -261,32 +261,19 @@ class AssrtStructuredProvider implements OnlineSubtitleStructuredProvider {
     _AssrtSearchCandidate item, {
     required OnlineSubtitleSearchRequest request,
   }) async {
-    final response = await _client.get(
+    final response = await _providerRequest(
+      _client,
+      'GET',
       Uri.parse('${config.baseUrl}/v1/sub/detail').replace(
         queryParameters: {'id': '${item.id}'},
       ),
       headers: _assrtHeaders(),
+      operation: operation,
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       if (response.statusCode == 509) {
-        subtitleSearchTrace(
-          'repository.structured.provider.rate-limited',
-          fields: {
-            'source': source.name,
-            'status': response.statusCode,
-            'detailId': item.id,
-          },
-        );
         throw StateError(_assrtRateLimitErrorMessage);
       }
-      subtitleSearchTrace(
-        'repository.structured.provider.request-failed',
-        fields: {
-          'source': source.name,
-          'status': response.statusCode,
-          'detailId': item.id,
-        },
-      );
       return null;
     }
 
@@ -396,16 +383,16 @@ class OpenSubtitlesStructuredProvider
   static const _sessionTtl = Duration(minutes: 15);
   static final Map<String, _OpenSubtitlesSessionCacheEntry> _sessionCache =
       <String, _OpenSubtitlesSessionCacheEntry>{};
-  static final Map<String, Future<_OpenSubtitlesSession>> _sessionFutures =
-      <String, Future<_OpenSubtitlesSession>>{};
 
   OpenSubtitlesStructuredProvider(
     this._client, {
     this.config = const OpenSubtitlesProviderConfig(),
+    this.operation,
   });
 
   final http.Client _client;
   final OpenSubtitlesProviderConfig config;
+  final SubtitleOperation? operation;
 
   @override
   OnlineSubtitleSource get source => OnlineSubtitleSource.opensubtitles;
@@ -421,10 +408,6 @@ class OpenSubtitlesStructuredProvider
     OnlineSubtitleSearchRequest request,
   ) async {
     if (!isConfigured) {
-      subtitleSearchTrace(
-        'repository.structured.provider.skip-unconfigured',
-        fields: {'source': source.name},
-      );
       return const [];
     }
 
@@ -440,8 +423,11 @@ class OpenSubtitlesStructuredProvider
 
     final results = <ProviderSubtitleHit>[];
     for (final query in searchPlan) {
-      final response = await _client.get(
+      final response = await _providerRequest(
+        _client,
+        'GET',
         _buildSearchUri(request, query, session: session),
+        operation: operation,
         headers: {
           'Api-Key': config.apiKey.trim(),
           'Authorization': 'Bearer ${session.token}',
@@ -450,15 +436,6 @@ class OpenSubtitlesStructuredProvider
         },
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        subtitleSearchTrace(
-          'repository.structured.provider.request-failed',
-          fields: {
-            'source': source.name,
-            'status': response.statusCode,
-            'queryKind': query.kind.name,
-            'query': query.query,
-          },
-        );
         if (response.statusCode == 401 ||
             response.statusCode == 403 ||
             response.statusCode == 429) {
@@ -467,7 +444,7 @@ class OpenSubtitlesStructuredProvider
         }
         continue;
       }
-      results.addAll(_parseOpenSubtitlesSearchResponse(response.body));
+      results.addAll(_parseOpenSubtitlesSearchResponse(response.body, request));
       if (results.isNotEmpty) {
         break;
       }
@@ -482,26 +459,18 @@ class OpenSubtitlesStructuredProvider
     if (cached != null && cached.expiresAt.isAfter(now)) {
       return cached.session;
     }
-    final inFlight = _sessionFutures[cacheKey];
-    if (inFlight != null) {
-      return inFlight;
-    }
+    // In-flight login belongs to this operation; only completed sessions share.
     final future = _performLogin();
-    _sessionFutures[cacheKey] = future;
-    try {
-      final session = await future;
-      if (session.isReady) {
-        _sessionCache[cacheKey] = _OpenSubtitlesSessionCacheEntry(
-          session: session,
-          expiresAt: now.add(_sessionTtl),
-        );
-      } else {
-        _sessionCache.remove(cacheKey);
-      }
-      return session;
-    } finally {
-      _sessionFutures.remove(cacheKey);
+    final session = await future;
+    if (session.isReady) {
+      _sessionCache[cacheKey] = _OpenSubtitlesSessionCacheEntry(
+        session: session,
+        expiresAt: now.add(_sessionTtl),
+      );
+    } else {
+      _sessionCache.remove(cacheKey);
     }
+    return session;
   }
 
   String _sessionCacheKey() {
@@ -514,8 +483,11 @@ class OpenSubtitlesStructuredProvider
   }
 
   Future<_OpenSubtitlesSession> _performLogin() async {
-    final response = await _client.post(
+    final response = await _providerRequest(
+      _client,
+      'POST',
       Uri.parse('${config.baseUrl}/login'),
+      operation: operation,
       headers: {
         'Api-Key': config.apiKey.trim(),
         'User-Agent': config.userAgent.trim(),
@@ -528,13 +500,6 @@ class OpenSubtitlesStructuredProvider
       }),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      subtitleSearchTrace(
-        'repository.structured.provider.auth-failed',
-        fields: {
-          'source': source.name,
-          'status': response.statusCode,
-        },
-      );
       throw StateError('OpenSubtitles 登录失败：HTTP ${response.statusCode}');
     }
     final json = jsonDecode(response.body) as Map<String, dynamic>;
@@ -587,8 +552,11 @@ class OpenSubtitlesStructuredProvider
     }
     for (var attempt = 0; attempt < 2; attempt++) {
       final session = await _login();
-      final response = await _client.post(
+      final response = await _providerRequest(
+        _client,
+        'POST',
         Uri.parse('${session.baseUrl}/download'),
+        operation: operation,
         headers: {
           'Api-Key': config.apiKey.trim(),
           'Authorization': 'Bearer ${session.token}',
@@ -623,10 +591,12 @@ class SubdlStructuredProvider implements OnlineSubtitleStructuredProvider {
   SubdlStructuredProvider(
     this._client, {
     this.config = const SubdlProviderConfig(),
+    this.operation,
   });
 
   final http.Client _client;
   final SubdlProviderConfig config;
+  final SubtitleOperation? operation;
 
   @override
   OnlineSubtitleSource get source => OnlineSubtitleSource.subdl;
@@ -642,17 +612,15 @@ class SubdlStructuredProvider implements OnlineSubtitleStructuredProvider {
     OnlineSubtitleSearchRequest request,
   ) async {
     if (!isConfigured) {
-      subtitleSearchTrace(
-        'repository.structured.provider.skip-unconfigured',
-        fields: {'source': source.name},
-      );
       return const [];
     }
 
     final results = <ProviderSubtitleHit>[];
     for (final query in request.buildQueryPlan()) {
       if (query.kind == StructuredSubtitleQueryKind.hash) continue;
-      final response = await _client.get(
+      final response = await _providerRequest(
+        _client,
+        'GET',
         Uri.parse(config.baseUrl).replace(
           queryParameters: {
             'api_key': config.apiKey.trim(),
@@ -673,20 +641,12 @@ class SubdlStructuredProvider implements OnlineSubtitleStructuredProvider {
           },
         ),
         headers: const {'Accept': 'application/json'},
+        operation: operation,
       );
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        subtitleSearchTrace(
-          'repository.structured.provider.request-failed',
-          fields: {
-            'source': source.name,
-            'status': response.statusCode,
-            'queryKind': query.kind.name,
-            'query': query.query,
-          },
-        );
         continue;
       }
-      results.addAll(_parseSubdlSearchResponse(response.body));
+      results.addAll(_parseSubdlSearchResponse(response.body, request));
       if (results.isNotEmpty) {
         break;
       }
@@ -695,25 +655,33 @@ class SubdlStructuredProvider implements OnlineSubtitleStructuredProvider {
   }
 }
 
-List<ProviderSubtitleHit> _parseOpenSubtitlesSearchResponse(String body) {
+List<ProviderSubtitleHit> _parseOpenSubtitlesSearchResponse(
+    String body, OnlineSubtitleSearchRequest request) {
   final root = jsonDecode(body) as Map<String, dynamic>;
   final items = (root['data'] as List<dynamic>? ?? const []);
   return items
       .map((item) =>
-          _parseOpenSubtitlesHit(Map<String, dynamic>.from(item as Map)))
+          _parseOpenSubtitlesHit(Map<String, dynamic>.from(item as Map), request))
       .whereType<ProviderSubtitleHit>()
       .toList(growable: false);
 }
 
-ProviderSubtitleHit? _parseOpenSubtitlesHit(Map<String, dynamic> json) {
+ProviderSubtitleHit? _parseOpenSubtitlesHit(
+    Map<String, dynamic> json, OnlineSubtitleSearchRequest request) {
   final attributes =
       Map<String, dynamic>.from(json['attributes'] as Map? ?? const {});
   final featureDetails = Map<String, dynamic>.from(
     attributes['feature_details'] as Map? ?? const {},
   );
+  if (_conflictsWithRequestedEpisode(featureDetails, request)) return null;
   final files = (attributes['files'] as List<dynamic>? ?? const [])
       .map((item) => Map<String, dynamic>.from(item as Map))
+      .where((item) => !isExplicitSubtitleEpisodeMismatch(
+          item['file_name'] as String? ?? '',
+          seasonNumber: request.seasonNumber,
+          episodeNumber: request.episodeNumber))
       .toList(growable: false);
+  if (files.isEmpty) return null;
   final firstFile = files.isEmpty ? const <String, dynamic>{} : files.first;
   final fileName = firstFile['file_name'] as String? ?? '';
   final packageName = fileName.trim().isEmpty ? 'subtitle.srt' : fileName;
@@ -738,8 +706,10 @@ ProviderSubtitleHit? _parseOpenSubtitlesHit(Map<String, dynamic> json) {
     downloadCount: (attributes['download_count'] as num?)?.toInt() ?? 0,
     imdbId: '${featureDetails['imdb_id'] ?? ''}',
     tmdbId: '${featureDetails['tmdb_id'] ?? ''}',
-    seasonNumber: (featureDetails['season_number'] as num?)?.toInt(),
-    episodeNumber: (featureDetails['episode_number'] as num?)?.toInt(),
+    seasonNumber: request.seasonNumber ??
+        (featureDetails['season_number'] as num?)?.toInt(),
+    episodeNumber: request.episodeNumber ??
+        (featureDetails['episode_number'] as num?)?.toInt(),
     releaseNames: [
       if ((featureDetails['movie_name'] as String? ?? '').trim().isNotEmpty)
         featureDetails['movie_name'] as String,
@@ -753,16 +723,19 @@ ProviderSubtitleHit? _parseOpenSubtitlesHit(Map<String, dynamic> json) {
   );
 }
 
-List<ProviderSubtitleHit> _parseSubdlSearchResponse(String body) {
+List<ProviderSubtitleHit> _parseSubdlSearchResponse(
+    String body, OnlineSubtitleSearchRequest request) {
   final root = jsonDecode(body) as Map<String, dynamic>;
   final items = (root['subtitles'] as List<dynamic>? ?? const []);
   return items
-      .map((item) => _parseSubdlHit(Map<String, dynamic>.from(item as Map)))
+      .map((item) => _parseSubdlHit(Map<String, dynamic>.from(item as Map), request))
       .whereType<ProviderSubtitleHit>()
       .toList(growable: false);
 }
 
-ProviderSubtitleHit? _parseSubdlHit(Map<String, dynamic> json) {
+ProviderSubtitleHit? _parseSubdlHit(
+    Map<String, dynamic> json, OnlineSubtitleSearchRequest request) {
+  if (_conflictsWithRequestedEpisode(json, request)) return null;
   final url = json['url'] as String? ?? json['download_url'] as String? ?? '';
   final fileName = json['name'] as String? ??
       json['release_name'] as String? ??
@@ -787,8 +760,9 @@ ProviderSubtitleHit? _parseSubdlHit(Map<String, dynamic> json) {
     downloadCount: (json['downloads'] as num?)?.toInt() ?? 0,
     imdbId: json['imdb_id'] as String? ?? '',
     tmdbId: '${json['tmdb_id'] ?? ''}',
-    seasonNumber: (json['season_number'] as num?)?.toInt(),
-    episodeNumber: (json['episode_number'] as num?)?.toInt(),
+    seasonNumber: request.seasonNumber ?? (json['season_number'] as num?)?.toInt(),
+    episodeNumber:
+        request.episodeNumber ?? (json['episode_number'] as num?)?.toInt(),
     releaseNames: (json['releases'] as List<dynamic>? ?? const [])
         .map((item) => '$item')
         .where((item) => item.trim().isNotEmpty)
@@ -796,6 +770,18 @@ ProviderSubtitleHit? _parseSubdlHit(Map<String, dynamic> json) {
     hearingImpaired: json['hi'] as bool? ?? false,
     raw: json,
   );
+}
+
+bool _conflictsWithRequestedEpisode(
+    Map<String, dynamic> metadata, OnlineSubtitleSearchRequest request) {
+  final season = _readNum(metadata['season_number'])?.toInt();
+  final episode = _readNum(metadata['episode_number'])?.toInt();
+  return (request.seasonNumber != null &&
+          season != null &&
+          request.seasonNumber != season) ||
+      (request.episodeNumber != null &&
+          episode != null &&
+          request.episodeNumber != episode);
 }
 
 List<ProviderSubtitleHit> _dedupeHits(List<ProviderSubtitleHit> hits) {
@@ -836,7 +822,11 @@ _AssrtDownloadChoice? _selectAssrtDownloadChoice(
       .where((item) => item.url.isNotEmpty && item.packageName.isNotEmpty)
       .toList(growable: false);
   if (fileEntries.isNotEmpty) {
-    final sorted = fileEntries.toList()
+    final sorted = fileEntries
+        .where((item) => !isExplicitSubtitleEpisodeMismatch(item.packageName,
+            seasonNumber: request.seasonNumber,
+            episodeNumber: request.episodeNumber))
+        .toList()
       ..sort(
         (left, right) => _assrtFileScore(
           right.packageName,
@@ -850,7 +840,7 @@ _AssrtDownloadChoice? _selectAssrtDownloadChoice(
           ),
         ),
       );
-    return sorted.first;
+    return sorted.isEmpty ? null : sorted.first;
   }
 
   final packageUrl = _readString(detail['url']);
@@ -858,7 +848,10 @@ _AssrtDownloadChoice? _selectAssrtDownloadChoice(
     _readString(detail['filename']),
     'assrt-${_readNum(detail['id'])?.toInt() ?? 0}.bin',
   );
-  if (packageUrl.isEmpty) {
+  if (packageUrl.isEmpty ||
+      isExplicitSubtitleEpisodeMismatch(packageName,
+          seasonNumber: request.seasonNumber,
+          episodeNumber: request.episodeNumber)) {
     return null;
   }
   return _AssrtDownloadChoice(

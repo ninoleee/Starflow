@@ -2,19 +2,6 @@
 
 part of '../player_page.dart';
 
-/// One prefetched episode address, bound to the queue slot it was resolved for.
-class _PreparedNextEpisode {
-  const _PreparedNextEpisode({
-    required this.signature,
-    required this.target,
-    required this.preparedAt,
-  });
-
-  final String signature;
-  final PlaybackTarget target;
-  final DateTime preparedAt;
-}
-
 class _ServerSubtitleSelection {
   const _ServerSubtitleSelection(this.stream);
 
@@ -22,30 +9,65 @@ class _ServerSubtitleSelection {
 }
 
 extension _PlayerPageStateRuntimeActions on _PlayerPageState {
+  Future<void> _seekPlayerAutomatically(Player player, Duration position) {
+    return player is PlaybackInteractionPlayer
+        ? player.seekAutomatically(position)
+        : player.seek(position);
+  }
+
+  Future<void> _playPlayerAutomatically(Player player) {
+    return player is PlaybackInteractionPlayer
+        ? player.playAutomatically()
+        : player.play();
+  }
+
+  Player _createInteractionPlayer(PlayerConfiguration configuration) {
+    late final PlaybackInteractionPlayer player;
+    player = PlaybackInteractionPlayer(
+      configuration: configuration,
+      onUserSeek: (position) {
+        if (mounted && identical(_player, player)) {
+          _recoveryIntent.invalidate();
+          _syncSkipFlagsAfterUserSeek(position);
+        }
+      },
+      onUserPlaybackIntent: (playing) {
+        if (!mounted || !identical(_player, player)) return;
+        _recoveryIntent.playback(playing);
+        if (!playing) _cancelPendingAutomaticAdvance();
+      },
+    );
+    return player;
+  }
+
+  Future<void> _setGuardedSubtitleTrack(
+      Player player, SubtitleTrack track) async {
+    if (!_startupTrackWorkIsCurrent ||
+        !mounted ||
+        !identical(_player, player)) {
+      return;
+    }
+    await player.setSubtitleTrack(track);
+  }
+
   Future<void> _applyStartupPlaybackPreferences(
     Player player,
     PlaybackTarget target,
   ) async {
     final settings = _providerContainer.read(appSettingsProvider);
-    _subtitleSessionPreference = await _loadMpvSeriesSubtitlePreference(target);
-
-    try {
-      if ((settings.playbackDefaultSpeed - 1.0).abs() > 0.0001) {
-        await player.setRate(settings.playbackDefaultSpeed);
-      }
-    } catch (_) {
-      // Ignore preference application failures to keep playback available.
-    }
+    final loadedPreference = await _loadMpvSeriesSubtitlePreference(target);
+    if (!_startupTrackWorkIsCurrent) return;
+    _subtitleSessionPreference = loadedPreference;
 
     if (target.isFntvTranscoding) {
       if (target.preferredSubtitleStreamId.isEmpty) {
-        await player.setSubtitleTrack(SubtitleTrack.no());
+        await _setGuardedSubtitleTrack(player, SubtitleTrack.no());
       }
       return;
     }
     if (target.fntvTrackSelectionExplicit &&
         target.preferredSubtitleStreamId.isEmpty) {
-      await player.setSubtitleTrack(SubtitleTrack.no());
+      await _setGuardedSubtitleTrack(player, SubtitleTrack.no());
       return;
     }
 
@@ -71,7 +93,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
 
     if (settings.playbackSubtitlePreference == PlaybackSubtitlePreference.off) {
       try {
-        await player.setSubtitleTrack(SubtitleTrack.no());
+        await _setGuardedSubtitleTrack(player, SubtitleTrack.no());
       } catch (_) {
         // Ignore preference application failures to keep playback available.
       }
@@ -113,7 +135,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
 
     final settings = _providerContainer.read(appSettingsProvider);
     if (settings.playbackSubtitlePreference == PlaybackSubtitlePreference.off) {
-      await player.setSubtitleTrack(SubtitleTrack.no());
+      await _setGuardedSubtitleTrack(player, SubtitleTrack.no());
       return;
     }
     final defaultSubtitle = settings.playbackDefaultSubtitle;
@@ -143,6 +165,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
           : preferredPlaybackAudioStream(target);
       if (preferredAudio != null) {
         final tracks = await _awaitAvailableAudioTracks(player);
+        if (!_startupTrackWorkIsCurrent) return;
         final audioTrack = resolvePlaybackAudioTrack(
           target: target,
           tracks: tracks,
@@ -190,6 +213,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
         return;
       }
       final tracks = await _awaitAvailableSubtitleTracks(player);
+      if (!_startupTrackWorkIsCurrent) return;
       final subtitleTrack = resolveEmbeddedPlaybackSubtitleTrack(
         target: target,
         tracks: tracks,
@@ -198,7 +222,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       if (subtitleTrack != null &&
           player.state.track.subtitle != subtitleTrack) {
         await _disableMpvDualSubtitle(player);
-        await player.setSubtitleTrack(subtitleTrack);
+        await _setGuardedSubtitleTrack(player, subtitleTrack);
       }
     } catch (error, stackTrace) {
       appLogWarning(
@@ -279,18 +303,23 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     );
     final content =
         await processSubtitleContent(bytes, preferredName: stream.title);
-    if (!mounted || !identical(_player, player) || content.trim().isEmpty) {
+    if (!mounted ||
+        !identical(_player, player) ||
+        !_startupTrackWorkIsCurrent ||
+        content.trim().isEmpty) {
       return;
     }
     await _disableMpvDualSubtitle(player);
-    await player.setSubtitleTrack(SubtitleTrack.no());
-    await player.setSubtitleTrack(
+    await _setGuardedSubtitleTrack(player, SubtitleTrack.no());
+    await _setGuardedSubtitleTrack(
+      player,
       SubtitleTrack.data(
         content,
         title: stream.title.isEmpty ? null : stream.title,
         language: stream.language.isEmpty ? null : stream.language,
       ),
     );
+    if (!_startupTrackWorkIsCurrent) return;
     _subtitleSessionPreference = null;
     _showMessage('已加载飞牛字幕：${stream.title.isEmpty ? '未命名字幕' : stream.title}');
   }
@@ -387,7 +416,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     if (secondary == null) {
       return false;
     }
-    await player.setSubtitleTrack(primary);
+    await _setGuardedSubtitleTrack(player, primary);
     await _setMpvSubtitleProperty(player, 'secondary-sid', secondary.id);
     await _applyMpvSubtitleLayout(player);
     _setMpvDualSubtitleSessionEnabled(true);
@@ -420,12 +449,12 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     switch (preference.mode) {
       case PlaybackSubtitleSessionMode.automatic:
         await _setMpvSubtitleProperty(player, 'secondary-sid', 'no');
-        await player.setSubtitleTrack(SubtitleTrack.auto());
+        await _setGuardedSubtitleTrack(player, SubtitleTrack.auto());
         _setMpvDualSubtitleSessionEnabled(false);
         return true;
       case PlaybackSubtitleSessionMode.off:
         await _setMpvSubtitleProperty(player, 'secondary-sid', 'no');
-        await player.setSubtitleTrack(SubtitleTrack.no());
+        await _setGuardedSubtitleTrack(player, SubtitleTrack.no());
         _setMpvDualSubtitleSessionEnabled(false);
         return true;
       case PlaybackSubtitleSessionMode.single:
@@ -439,7 +468,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
           return false;
         }
         await _setMpvSubtitleProperty(player, 'secondary-sid', 'no');
-        await player.setSubtitleTrack(selected);
+        await _setGuardedSubtitleTrack(player, selected);
         _setMpvDualSubtitleSessionEnabled(false);
         return true;
       case PlaybackSubtitleSessionMode.dual:
@@ -468,7 +497,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
         if (secondary == null) {
           return false;
         }
-        await player.setSubtitleTrack(primary);
+        await _setGuardedSubtitleTrack(player, primary);
         await _setMpvSubtitleProperty(player, 'secondary-sid', secondary.id);
         await _applyMpvSubtitleLayout(player);
         _setMpvDualSubtitleSessionEnabled(true);
@@ -477,6 +506,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
   }
 
   void _setMpvDualSubtitleSessionEnabled(bool enabled) {
+    if (!_startupTrackWorkIsCurrent) return;
     if (_mpvDualSubtitleEnabled == enabled) {
       return;
     }
@@ -509,7 +539,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     if (currentTrack.id == selectedTrack.id) {
       return;
     }
-    await player.setSubtitleTrack(selectedTrack);
+    await _setGuardedSubtitleTrack(player, selectedTrack);
   }
 
   Future<List<SubtitleTrack>> _awaitAvailableSubtitleTracks(
@@ -597,23 +627,25 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
 
     _lastProgressPersistedAt = now;
     _lastPersistedPosition = _latestPosition;
+    final position = _latestPosition;
+    final duration = _latestDuration > Duration.zero
+        ? _latestDuration
+        : player.state.duration;
+    final completedByAutoSkip = _completionState.completedByAutoSkip;
 
     await _providerContainer
         .read(playbackMemoryRepositoryProvider)
         .saveProgress(
           target: target,
-          position: _latestPosition,
-          duration: _latestDuration > Duration.zero
-              ? _latestDuration
-              : player.state.duration,
+          position: position,
+          duration: duration,
+          completedByAutoSkip: completedByAutoSkip,
         );
     final report = _reportFntvPlaybackProgress(
       target: target,
       force: force,
-      position: _latestPosition,
-      duration: _latestDuration > Duration.zero
-          ? _latestDuration
-          : player.state.duration,
+      position: completedByAutoSkip ? duration : position,
+      duration: duration,
     );
     if (force) {
       await report;
@@ -810,9 +842,15 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     Player player,
     PlaybackStartPosition start,
   ) {
+    final duration = player.state.duration;
+    if (start.isIntroSkip &&
+        duration > Duration.zero &&
+        start.position >= duration) {
+      start = const PlaybackStartPosition(position: Duration.zero);
+      unawaited(_seekPlayerAutomatically(player, Duration.zero));
+    }
     final position = player.state.position;
     _latestPosition = position > start.position ? position : start.position;
-    final duration = player.state.duration;
     if (duration > Duration.zero) {
       _latestDuration = duration;
     }
@@ -827,7 +865,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     if (start.position > Duration.zero &&
         position + const Duration(seconds: 10) < start.position) {
       _latestPosition = start.position;
-      unawaited(player.seek(start.position));
+      unawaited(_seekPlayerAutomatically(player, start.position));
     }
     if (start.position > Duration.zero && mounted) {
       _showMessage(
@@ -854,7 +892,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       return;
     }
     _latestPosition = Duration.zero;
-    unawaited(player.seek(Duration.zero));
+    unawaited(_seekPlayerAutomatically(player, Duration.zero));
   }
 
   Duration _resolveResumeStartPosition(
@@ -892,6 +930,8 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     final preference = _seriesSkipPreference;
     if (preference == null ||
         !preference.enabled ||
+        _subtitleSearchActive ||
+        _skipPreferenceSaveInProgress ||
         _episodeQueueAdvanceInProgress ||
         !player.state.playing) {
       return;
@@ -908,7 +948,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       } else {
         _introSkipApplied = true;
         _latestPosition = preference.introDuration;
-        unawaited(player.seek(preference.introDuration));
+        unawaited(_seekPlayerAutomatically(player, preference.introDuration));
         _showMessage('已自动跳过片头');
         return;
       }
@@ -946,21 +986,23 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     }
 
     _latestDuration = duration;
-    _latestPosition = duration;
+    _latestPosition = player.state.position;
+    _completionState.markCompletedByAutoSkip();
+    await (player is PlaybackInteractionPlayer
+        ? player.pauseAutomatically()
+        : player.pause());
+    if (!mounted || !identical(_player, player)) {
+      return;
+    }
     await _persistPlaybackProgress(force: true);
-    if (!mounted || _player != player) {
-      return;
-    }
-    await player.pause();
-    if (!mounted) {
-      return;
-    }
+    if (!mounted || !identical(_player, player)) return;
     _showMessage('本集已播放完毕');
   }
 
   void _maybePrepareNextEpisode(Player player, Duration position) {
-    if (_episodeQueueAdvanceInProgress ||
-        _nextEpisodePrepareInProgress ||
+    if (_subtitleSearchActive ||
+        _skipPreferenceSaveInProgress ||
+        _episodeQueueAdvanceInProgress ||
         !player.state.playing) {
       return;
     }
@@ -990,53 +1032,32 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       return;
     }
     final signature = _buildPreparedEpisodeSignature(nextIndex, entry);
-    if (_nextEpisodePrepareAttempt == signature) {
-      return;
-    }
-    _nextEpisodePrepareAttempt = signature;
-    unawaited(
-      _prepareNextEpisodeTarget(
-        signature: signature,
-        index: nextIndex,
-        entry: entry,
-      ),
-    );
+    _syncEpisodePreparationContext();
+    unawaited(_episodePreparation.prepare(
+      key: (null, signature),
+      resolver: () => _resolveEpisodeAddress(entry.target),
+    ));
   }
 
-  /// Caches the adjacent episode address and headers only: no second player and
-  /// no video pre-buffering.
-  Future<void> _prepareNextEpisodeTarget({
-    required String signature,
-    required int index,
-    required PlaybackEpisodeQueueEntry entry,
-  }) async {
-    _nextEpisodePrepareInProgress = true;
-    try {
-      final resolvedTarget =
-          await PlaybackTargetResolver(read: _providerContainer.read)
-              .resolve(entry.target)
-              .timeout(kPlaybackEpisodeResolveTimeout);
-      if (!mounted ||
-          resolvedTarget.streamUrl.trim().isEmpty ||
-          resolvedTarget.needsResolution) {
-        return;
-      }
-      final queue = _episodeQueue;
-      if (queue == null ||
-          index >= queue.entries.length ||
-          _buildPreparedEpisodeSignature(index, queue.entries[index]) !=
-              signature) {
-        return;
-      }
-      _preparedNextEpisode = _PreparedNextEpisode(
-        signature: signature,
-        target: resolvedTarget,
-        preparedAt: DateTime.now(),
-      );
-    } catch (_) {
-      // A background failure stays silent: the boundary switch resolves again.
-    } finally {
-      _nextEpisodePrepareInProgress = false;
+  Future<PlaybackTarget> _resolveEpisodeAddress(PlaybackTarget target) async {
+    final resolved = await PlaybackTargetResolver(read: _providerContainer.read)
+        .resolve(target);
+    if (resolved.streamUrl.trim().isEmpty || resolved.needsResolution) {
+      throw StateError('没有取得可播放地址');
+    }
+    return resolved;
+  }
+
+  void _syncEpisodePreparationContext() {
+    final context = (
+      _startupGeneration,
+      _episodeQueue,
+      _resolvedTarget,
+      _providerContainer.read(appSettingsProvider),
+    );
+    if (_episodePreparationContext != context) {
+      _episodePreparation.reset();
+      _episodePreparationContext = context;
     }
   }
 
@@ -1044,27 +1065,16 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     int index,
     PlaybackEpisodeQueueEntry entry,
   ) {
-    return '$index|${entry.playbackItemKey}|${entry.seriesKey}|'
+    return '$_startupGeneration|${_episodeQueue?.currentEntry?.playbackItemKey}|'
+        '${_seriesSkipPreference?.updatedAt.microsecondsSinceEpoch}|'
+        '$index|${entry.playbackItemKey}|${entry.seriesKey}|'
         '${entry.target.sourceId}|${entry.target.itemId}|'
         '${entry.target.streamUrl}|${entry.target.actualAddress}';
   }
 
-  PlaybackTarget? _takePreparedEpisodeTarget(String signature) {
-    final prepared = _preparedNextEpisode;
-    _preparedNextEpisode = null;
-    if (prepared == null || prepared.signature != signature) {
-      return null;
-    }
-    if (DateTime.now().difference(prepared.preparedAt) >=
-        kPlaybackPreparedEpisodeTtl) {
-      return null;
-    }
-    return prepared.target;
-  }
-
   void _resetPreparedNextEpisode() {
-    _preparedNextEpisode = null;
-    _nextEpisodePrepareAttempt = null;
+    _episodePreparation.reset();
+    _episodePreparationContext = null;
   }
 
   void _syncSkipFlagsWithCurrentPosition() {
@@ -1085,6 +1095,8 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
   /// Mirrors the native `onUserSeek` rule: a manual seek back into the body
   /// re-arms the outro switch, a manual seek into the outro keeps it disarmed.
   void _syncSkipFlagsAfterUserSeek(Duration position) {
+    _cancelPendingAutomaticAdvance();
+    _completionState.clearForManualSeek();
     _latestPosition = position;
     _syncSkipFlagsWithCurrentPosition();
     _introSkipApplied = true;
@@ -1175,6 +1187,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
   }
 
   Future<void> _loadExternalSubtitle(Player player) async {
+    _manualTrackRevision++;
     final isTelevision = _isTelevisionPlaybackDevice;
     if (isTelevision) {
       _showMessage('电视模式暂不打开系统文件选择器，请改用内嵌字幕或在其他设备上准备字幕文件。');
@@ -1216,10 +1229,15 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       if (mounted && identical(_player, player)) _showMessage('加载字幕失败：$error');
       return;
     }
-    if (!mounted || !identical(_player, player)) return;
+    if (!mounted ||
+        !identical(_player, player) ||
+        !_startupTrackWorkIsCurrent) {
+      return;
+    }
     await _disableMpvDualSubtitle(player);
     final applied = await _runPlayerCommand(
-      () => player.setSubtitleTrack(
+      () => _setGuardedSubtitleTrack(
+        player,
         SubtitleTrack.data(
           content,
           title: (displayName?.trim().isNotEmpty ?? false)
@@ -1229,7 +1247,10 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       ),
       failureMessage: '加载字幕失败',
     );
-    if (!applied || !mounted || !identical(_player, player)) {
+    if (!applied ||
+        !mounted ||
+        !identical(_player, player) ||
+        !_startupTrackWorkIsCurrent) {
       return;
     }
     _subtitleSessionPreference = null;
@@ -1258,6 +1279,7 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     Player player,
     PlaybackTarget target,
   ) async {
+    _manualTrackRevision++;
     final query = buildSubtitleSearchQuery(target);
     final initialInput = buildSubtitleSearchInitialInput(target);
     final request = SubtitleSearchRequest(
@@ -1276,55 +1298,29 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       applyMode: SubtitleSearchApplyMode.downloadAndApply,
     );
     final location = request.toLocation();
-    subtitleSearchTrace(
-      'player.open-subtitle-search',
-      fields: {
-        'targetTitle': target.title.trim(),
-        'seriesTitle': target.seriesTitle.trim(),
-        'season': target.seasonNumber,
-        'episode': target.episodeNumber,
-        'originalTitle': target.originalTitle.trim(),
-        'imdbId': target.imdbId.trim(),
-        'tmdbId': target.tmdbId.trim(),
-        'query': query,
-        'initialInput': initialInput,
-        'location': location,
-      },
-    );
     if (query.trim().isEmpty) {
-      subtitleSearchTrace('player.open-subtitle-search.skip-empty-query');
       _showMessage('缺少片名信息，暂时无法搜索字幕');
       return;
     }
 
-    final selection = await context.push<SubtitleSearchSelection>(location);
+    _cancelPendingAutomaticAdvance();
+    _subtitleSearchActive = true;
+    SubtitleSearchSelection? selection;
+    try {
+      selection = await context.push<SubtitleSearchSelection>(location);
+    } finally {
+      _subtitleSearchActive = false;
+    }
     if (selection == null) {
-      subtitleSearchTrace('player.open-subtitle-search.cancelled');
       return;
     }
     if (!mounted) {
       return;
     }
     if (!selection.canApply) {
-      subtitleSearchTrace(
-        'player.open-subtitle-search.selection-not-applyable',
-        fields: {
-          'cachedPath': selection.cachedPath,
-          'displayName': selection.displayName,
-          'subtitleFilePath': selection.subtitleFilePath ?? '',
-        },
-      );
       _showMessage('字幕已缓存，但当前结果暂不能直接挂载播放');
       return;
     }
-    subtitleSearchTrace(
-      'player.open-subtitle-search.selection',
-      fields: {
-        'cachedPath': selection.cachedPath,
-        'displayName': selection.displayName,
-        'subtitleFilePath': selection.subtitleFilePath ?? '',
-      },
-    );
     await _applyExternalSubtitlePath(
       player,
       selection.subtitleFilePath!,
@@ -1358,13 +1354,23 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       currentPosition: currentPosition,
       seedPreference: seedPreference,
     );
-    if (nextPreference == null) {
+    if (nextPreference == null ||
+        !mounted ||
+        !identical(_player, player) ||
+        buildSeriesKeyForTarget(_resolvedTarget ?? widget.target) !=
+            seriesKey) {
       return;
     }
-    await ref
-        .read(playbackMemoryRepositoryProvider)
-        .saveSkipPreference(nextPreference);
-    if (!mounted) {
+    _cancelPendingAutomaticAdvance();
+    _skipPreferenceSaveInProgress = true;
+    try {
+      await _providerContainer
+          .read(playbackMemoryRepositoryProvider)
+          .saveSkipPreference(nextPreference);
+    } finally {
+      _skipPreferenceSaveInProgress = false;
+    }
+    if (!mounted || !identical(_player, player)) {
       return;
     }
     setState(() {

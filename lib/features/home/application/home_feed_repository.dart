@@ -97,10 +97,7 @@ class HomeFeedRepository {
                 ? await mediaRepository.fetchLibrary(
                     sourceId: module.sourceId,
                     sectionId: module.sectionId,
-                    limit: _homeModuleFetchLimit(
-                      module,
-                      sourceKind: sourceKind,
-                    ),
+                    limit: _defaultHomeSectionItemLimit,
                   )
                 : const <MediaItem>[];
             return _buildLibrarySectionSeed(
@@ -194,13 +191,6 @@ Future<T> _runHomeFeedOperation<T>({
     );
     rethrow;
   }
-}
-
-int _homeModuleFetchLimit(
-  HomeModuleConfig module, {
-  required MediaSourceKind sourceKind,
-}) {
-  return _defaultHomeSectionItemLimit;
 }
 
 bool _needsRecentlyAdded(List<HomeModuleConfig> modules) {

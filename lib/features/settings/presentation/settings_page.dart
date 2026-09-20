@@ -11,6 +11,8 @@ import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/live_tv/presentation/live_sources_page.dart';
+import 'package:starflow/features/live_tv/presentation/live_tv_page.dart';
 import 'package:starflow/features/playback/application/playback_engine_support.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
@@ -31,7 +33,7 @@ import 'package:starflow/features/settings/presentation/webdav_sync_settings_pag
 import 'package:starflow/features/settings/presentation/settings_version_label.dart';
 import 'package:starflow/features/settings/presentation/subtitle_settings_page.dart';
 import 'package:starflow/features/settings/presentation/task_scheduling_settings_page.dart';
-import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
+import 'package:starflow/features/settings/presentation/widgets/navigation_destination_dialog.dart';
 
 final Future<PackageInfo> _settingsPagePackageInfoFuture =
     PackageInfo.fromPlatform();
@@ -88,6 +90,23 @@ class SettingsPage extends ConsumerStatefulWidget {
                         title: '媒体源管理',
                         subtitle: _enabledCountSummary(mediaSources),
                         onTap: () => _openMediaSourceSettings(context),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: '直播订阅',
+                        subtitle: 'M3U / TXT 与 XMLTV',
+                        onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                                builder: (_) => const LiveSourcesPage())),
+                      ),
+                      const SizedBox(height: 10),
+                      _SettingsNavigationTile(
+                        title: '直播电视',
+                        subtitle: '频道与节目单',
+                        onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                                builder: (_) =>
+                                    const LiveTvPage(showBackButton: true))),
                       ),
                       const SizedBox(height: 10),
                       _SettingsNavigationTile(
@@ -340,30 +359,11 @@ class SettingsPage extends ConsumerStatefulWidget {
     WidgetRef ref, {
     required List<String> selectedIds,
   }) async {
-    final selected = await showSettingsCheckboxSelectionDialog<String>(
+    final selected = await showDialog<List<String>>(
       context: context,
-      title: '选择菜单栏按钮',
-      initialSelection: selectedIds.toSet(),
-      showAllOption: false,
-      showClearAction: false,
-      sections: const [
-        SettingsCheckboxDialogSection<String>(
-          options: [
-            SettingsCheckboxDialogOption(
-                value: kNavigationDestinationHome, title: '首页'),
-            SettingsCheckboxDialogOption(
-                value: kNavigationDestinationSearch, title: '搜索'),
-            SettingsCheckboxDialogOption(
-                value: kNavigationDestinationFavorites, title: '收藏'),
-            SettingsCheckboxDialogOption(
-                value: kNavigationDestinationLibrary, title: '媒体库'),
-            SettingsCheckboxDialogOption(
-                value: kNavigationDestinationSettings, title: '设置'),
-          ],
-        ),
-      ],
+      builder: (_) => NavigationDestinationDialog(initialSelection: selectedIds),
     );
-    if (selected == null) {
+    if (selected == null || !context.mounted) {
       return;
     }
     await ref
@@ -587,6 +587,7 @@ String _navigationDestinationSummary(List<String> selectedIds) {
     kNavigationDestinationSearch: '搜索',
     kNavigationDestinationFavorites: '收藏',
     kNavigationDestinationLibrary: '媒体库',
+    kNavigationDestinationLiveTv: '直播',
     kNavigationDestinationSettings: '设置',
   };
   final selected = normalizeNavigationDestinationIds(selectedIds);

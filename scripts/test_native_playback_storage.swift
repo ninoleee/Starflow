@@ -23,9 +23,13 @@ enum NativePlaybackStorageTest {
     precondition(queue.moveToNext() == nil)
     let previous = queue.moveToPrevious()!
     precondition(!previous.hasPrevious && previous.hasNext)
-    precondition(previous.currentEntry?.request.headers["X-Test"] == "123")
-    precondition(NativeEpisodeQueue.fromJsonString(queue.toJsonString())?.currentEntry?.request.playbackItemKey == "2")
+    precondition(previous.currentEntry?.request?.headers["X-Test"] == "123")
+    precondition(NativeEpisodeQueue.fromJsonString(queue.toJsonString())?.currentEntry?.request?.playbackItemKey == "2")
     precondition(NativeSubtitleSessionPreference(json: ["mode": "dual"]) == nil)
+    let deferred = NativeEpisodeQueue.fromJsonString(#"{"entries":[{"target":{"streamUrl":""},"playbackItemKey":"unresolved"},{"target":{"streamUrl":"https://example.test/2"},"playbackItemKey":"resolved"}],"currentIndex":1}"#)!
+    precondition(deferred.entries.count == 2 && deferred.currentIndex == 1)
+    precondition(deferred.moveToPrevious()?.currentEntry?.request == nil)
+    precondition(NativeEpisodeQueue.fromJsonString(deferred.toJsonString())?.entries.count == 2)
     precondition(NativeSubtitleTrackFingerprint(json: [:]) == nil)
     let preference = NativeSubtitleSessionPreference.single(
       NativeSubtitleTrackFingerprint(label: "English", language: "en", isForced: true))
@@ -62,6 +66,38 @@ enum NativePlaybackStorageTest {
     store.savePlaybackEntry(targetJson: target, itemKey: "completed", seriesKey: "",
       positionMs: 200_000, durationMs: 100_000, updatedAt: "2026-09-20T00:00:00Z")
     precondition(store.loadResumePositionMs(itemKey: "completed") == 0)
+    for position in 10...30 {
+      store.enqueuePlaybackEntry(targetJson: target, itemKey: "queued", seriesKey: "queued-series",
+        positionMs: Int64(position * 1000), durationMs: 100_000, updatedAt: "2026-09-20T00:00:00Z")
+    }
+    store.enqueuePlaybackEntry(targetJson: target, itemKey: "queued", seriesKey: "queued-series",
+      positionMs: 40_000, durationMs: 100_000, updatedAt: "2026-09-20T00:00:00Z", final: true)
+    store.enqueuePlaybackEntry(targetJson: target, itemKey: "queued", seriesKey: "queued-series",
+      positionMs: 50_000, durationMs: 100_000, updatedAt: "2026-09-20T00:00:00Z")
+    precondition(store.loadResumePositionMs(itemKey: "queued") == 50_000)
+    let stale = defaults.string(forKey: key)
+    store.saveSubtitlePreference(.off, seriesKey: "changed-after-read")
+    precondition(store.loadSubtitlePreference(seriesKey: "changed-after-read") == .off)
+    var conflictResult: Bool?
+    NativePlaybackMemoryStore.compareAndSetShared(expected: stale, value: nil,
+      userDefaults: defaults) { conflictResult = $0 }
+    waitUntil { conflictResult != nil }
+    precondition(conflictResult == false)
+    var clearResult: Bool?
+    NativePlaybackMemoryStore.compareAndSetShared(expected: defaults.string(forKey: key),
+      value: nil, userDefaults: defaults) { clearResult = $0 }
+    waitUntil { clearResult != nil }
+    precondition(clearResult == true)
+    precondition(store.loadResumePositionMs(itemKey: "queued") == 0)
+    precondition(store.loadSubtitlePreference(seriesKey: "changed-after-read") == nil)
     print("Native playback models/storage: queue, subtitle, resume, pruning, cache invalidation passed")
+  }
+
+  private static func waitUntil(_ done: () -> Bool) {
+    let deadline = Date().addingTimeInterval(10)
+    while !done() && Date() < deadline {
+      RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+    }
+    precondition(done(), "Shared storage callback timed out")
   }
 }

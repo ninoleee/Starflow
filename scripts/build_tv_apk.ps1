@@ -6,6 +6,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if ($SkipBuild) {
+  throw "SkipBuild cannot produce a release artifact. Build and verify the APK; no version or settings have been changed."
+}
+
 function Get-DefaultOutputDir {
   return [Environment]::GetFolderPath("Desktop")
 }
@@ -62,6 +66,11 @@ $embeddedPath = $null
 
 Push-Location $repoRoot
 try {
+  & dart (Join-Path $repoRoot "tool/verify_tv_release.dart") --preflight
+  if ($LASTEXITCODE -ne 0) { throw "TV release preflight failed" }
+  if (-not [string]::IsNullOrWhiteSpace($SettingsJsonPath) -and -not (Test-Path -LiteralPath $SettingsJsonPath)) {
+    throw "Settings JSON not found: $SettingsJsonPath"
+  }
   $version = Update-PubspecVersion $pubspecPath
   $buildDate = Get-Date -Format "yyyy-MM-dd"
   $embeddedPath = Set-EmbeddedSettings $repoRoot $SettingsJsonPath
@@ -91,6 +100,10 @@ try {
     throw "Build output not found: $sourceApk"
   }
 
+  $verifyArgs = @((Join-Path $repoRoot "tool/verify_tv_release.dart"), $sourceApk, $version)
+  if (-not [string]::IsNullOrWhiteSpace($SettingsJsonPath)) { $verifyArgs += $SettingsJsonPath }
+  & dart @verifyArgs
+  if ($LASTEXITCODE -ne 0) { throw "TV release artifact verification failed" }
   Copy-Item -LiteralPath $sourceApk -Destination $targetApk -Force
   Write-Output "Version=$version"
   Write-Output "BuildDate=$buildDate"

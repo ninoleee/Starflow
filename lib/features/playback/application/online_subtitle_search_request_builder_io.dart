@@ -124,10 +124,14 @@ Future<String> _computeOpenSubtitlesHash(File file) async {
     final firstChunk = await raf.read(chunkSize);
     await raf.setPosition(length - chunkSize);
     final lastChunk = await raf.read(chunkSize);
+    if (firstChunk.length != chunkSize || lastChunk.length != chunkSize) {
+      return '';
+    }
     hash = _accumulateOpenSubtitlesHash(hash, firstChunk);
     hash = _accumulateOpenSubtitlesHash(hash, lastChunk);
-    final normalized = hash & 0xFFFFFFFFFFFFFFFF;
-    return normalized.toRadixString(16).padLeft(16, '0');
+    final high = (hash >>> 32).toRadixString(16).padLeft(8, '0');
+    final low = (hash & 0xFFFFFFFF).toRadixString(16).padLeft(8, '0');
+    return '$high$low';
   } catch (_) {
     return '';
   } finally {

@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/core/network/bounded_http_request.dart';
+import 'package:starflow/core/network/http_origin_policy.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/nas_media_path_policy.dart';
 import 'package:starflow/features/library/data/webdav_directory_cache_store.dart';
@@ -625,9 +626,15 @@ class WebDavNasClient {
       resourcePath: normalizedResourcePath,
       sectionId: sectionId,
     );
-    final response = await _client.delete(
+    _requireSourceResource(targetUri, source);
+    final response = await sendBoundedRequest(
+      _client,
+      'DELETE',
       targetUri,
       headers: _headers(source),
+      timeout: const Duration(seconds: 30),
+      maxBytes: 1024 * 1024,
+      allowUri: (next) => _isSourceResource(next, source),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw WebDavDeleteException(response.statusCode);
@@ -670,7 +677,11 @@ class WebDavNasClient {
 
     final headers = _headersForResolvedStream(source, resolvedUrl);
     final directSize = await _tryReadContentLength(
-      () => _client.head(uri, headers: headers),
+      () => sendBoundedRequest(_client, 'HEAD', uri,
+          headers: headers,
+          timeout: const Duration(seconds: 5),
+          maxBytes: 0,
+          allowUri: (next) => isSameHttpOrigin(uri, next)),
     );
     if (directSize != null && directSize > 0) {
       return directSize;
@@ -701,10 +712,13 @@ class WebDavNasClient {
     Uri uri, {
     required Map<String, String> headers,
   }) async {
+    final abort = Completer<void>();
     try {
-      final request = http.Request('GET', uri)
-        ..headers.addAll(headers)
-        ..headers['Range'] = 'bytes=0-0';
+      final request =
+          http.AbortableRequest('GET', uri, abortTrigger: abort.future)
+            ..followRedirects = false
+            ..headers.addAll(headers)
+            ..headers['Range'] = 'bytes=0-0';
       final response =
           await _client.send(request).timeout(const Duration(seconds: 5));
       try {
@@ -728,6 +742,8 @@ class WebDavNasClient {
       }
     } catch (_) {
       return null;
+    } finally {
+      abort.complete();
     }
   }
 

@@ -334,7 +334,9 @@ void main() {
             .itemsBySection
             .keys,
         ['new']);
-    expect(preferences.values.keys, hasLength(4));
+    expect(preferences.values.keys, hasLength(5));
+    expect(preferences.values,
+        contains('starflow.local_storage.emby_library_cache.shards.v2'));
     final saveAgain = save('last');
     final clear = repository.clearAllEmbyLibrarySnapshots();
     await Future.wait([saveAgain, clear]);

@@ -1,10 +1,10 @@
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/details/domain/cached_metadata.dart';
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
 import 'package:starflow/features/details/application/detail_metadata_service.dart';
-import 'package:starflow/core/utils/debug_trace_once.dart';
 import 'package:starflow/features/details/application/detail_enrichment_settings.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/domain/cached_artwork.dart';
@@ -91,11 +91,6 @@ class DetailTargetResolver {
     final traceKey = _detailTraceKey(target);
     final playback = nextTarget.playbackTarget;
     if (playback == null) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'playback-resolve',
-        'skipped no playback target',
-      );
       await _persistResolvedTarget(target, nextTarget);
       return nextTarget;
     }
@@ -103,14 +98,6 @@ class DetailTargetResolver {
     final shouldResolve =
         _shouldResolvePlaybackTarget(playback, settings: _settings);
     if (!shouldResolve) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'playback-resolve',
-        'skipped streamReady=${playback.streamUrl.trim().isNotEmpty} '
-            'format=${playback.formatLabel.trim().isNotEmpty} '
-            'resolution=${playback.resolutionLabel.trim().isNotEmpty} '
-            'fileSize=${playback.fileSizeLabel.trim().isNotEmpty}',
-      );
       await _persistResolvedTarget(target, nextTarget);
       return nextTarget;
     }
@@ -119,35 +106,16 @@ class DetailTargetResolver {
       final resolvedPlayback = await _resolvePlayback(
         target: playback,
         settings: _settings,
-        traceKey: traceKey,
       );
       final updatedTarget =
           nextTarget.copyWith(playbackTarget: resolvedPlayback);
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'playback-resolve',
-        'success format=${resolvedPlayback.formatLabel} '
-            'resolution=${resolvedPlayback.resolutionLabel} '
-            'size=${resolvedPlayback.fileSizeLabel}',
-      );
       await _persistResolvedTarget(target, updatedTarget);
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'done',
-        'final poster=${updatedTarget.posterUrl.trim().isNotEmpty} '
-            'backdrop=${updatedTarget.backdropUrl.trim().isNotEmpty} '
-            'logo=${updatedTarget.logoUrl.trim().isNotEmpty} '
-            'ratings=${updatedTarget.ratingLabels.join(' | ')}',
-      );
       return updatedTarget;
     } catch (error, stackTrace) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'playback-resolve',
-        'failed',
-        error: error,
-        stackTrace: stackTrace,
-      );
+      appLogError('metadata', 'detail.playback-resolve',
+          fields: {'key': traceKey, 'message': 'failed'},
+          error: error,
+          stackTrace: stackTrace);
       await _persistResolvedTarget(target, nextTarget);
       return nextTarget;
     }
@@ -158,26 +126,8 @@ class DetailTargetResolver {
     bool forceMetadataRefresh = false,
   }) async {
     final traceKey = _detailTraceKey(target);
-    DebugTraceOnce.logMetadata(
-      traceKey,
-      'start',
-      'title=${target.title} source=${target.sourceKind?.name ?? 'unknown'} '
-          'itemId=${target.itemId} doubanId=${target.doubanId} imdbId=${target.imdbId} '
-          'poster=${target.posterUrl.trim().isNotEmpty} overview=${target.hasUsefulOverview} '
-          'ratings=${target.ratingLabels.join(' | ')}',
-    );
     final cachedState = await _detailCache.loadDetailState(target);
     final cachedTarget = cachedState?.target;
-    DebugTraceOnce.logMetadata(
-      traceKey,
-      'cache-load',
-      cachedTarget == null
-          ? 'cache=miss'
-          : 'cache=hit poster=${cachedTarget.posterUrl.trim().isNotEmpty} '
-              'backdrop=${cachedTarget.backdropUrl.trim().isNotEmpty} '
-              'logo=${cachedTarget.logoUrl.trim().isNotEmpty} '
-              'ratings=${cachedTarget.ratingLabels.join(' | ')}',
-    );
     final currentTarget = normalizeRatingLabelsInTarget(
       cachedTarget == null
           ? target
@@ -196,14 +146,6 @@ class DetailTargetResolver {
     final nextTarget = result.target;
     _updateRatingCount(currentTarget, nextTarget);
 
-    DebugTraceOnce.logMetadata(
-      traceKey,
-      'metadata-done',
-      'final poster=${nextTarget.posterUrl.trim().isNotEmpty} '
-          'backdrop=${nextTarget.backdropUrl.trim().isNotEmpty} '
-          'logo=${nextTarget.logoUrl.trim().isNotEmpty} '
-          'ratings=${nextTarget.ratingLabels.join(' | ')}',
-    );
     return result;
   }
 
@@ -242,34 +184,29 @@ class DetailTargetResolver {
         resolvedTarget: resolved,
       );
     } catch (error, stackTrace) {
-      DebugTraceOnce.logMetadata(
-        _detailTraceKey(seed),
-        'cache-save',
-        'failed',
-        error: error,
-        stackTrace: stackTrace,
-      );
+      appLogError('metadata', 'detail.cache-save',
+          fields: {'key': _detailTraceKey(seed), 'message': 'failed'},
+          error: error,
+          stackTrace: stackTrace);
     }
   }
 
   Future<PlaybackTarget> _resolvePlayback({
     required PlaybackTarget target,
     required DetailEnrichmentSettings settings,
-    required String traceKey,
   }) async {
     if (target.sourceKind.isMediaServer) {
-      return _resolveEmbyPlayback(target, settings, traceKey);
+      return _resolveEmbyPlayback(target, settings);
     }
     if (target.sourceKind == MediaSourceKind.nas) {
-      return _resolveNasPlayback(target, settings, traceKey);
+      return _resolveNasPlayback(target, settings);
     }
-    return _resolveQuarkPlayback(target, settings, traceKey);
+    return _resolveQuarkPlayback(target, settings);
   }
 
   Future<PlaybackTarget> _resolveEmbyPlayback(
     PlaybackTarget target,
     DetailEnrichmentSettings settings,
-    String traceKey,
   ) async {
     MediaSourceConfig? source;
     for (final candidate in settings.mediaSources) {
@@ -279,11 +216,6 @@ class DetailTargetResolver {
       }
     }
     if (source == null || !source.hasActiveSession) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'playback-resolve',
-        'skipped no active emby source',
-      );
       throw const _PlaybackResolutionException();
     }
     return _ref
@@ -294,15 +226,9 @@ class DetailTargetResolver {
   Future<PlaybackTarget> _resolveQuarkPlayback(
     PlaybackTarget target,
     DetailEnrichmentSettings settings,
-    String traceKey,
   ) async {
     final cookie = settings.quarkCookie.trim();
     if (cookie.isEmpty) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'playback-resolve',
-        'skipped missing quark cookie',
-      );
       throw const _PlaybackResolutionException();
     }
     final resolved = await _ref
@@ -318,7 +244,6 @@ class DetailTargetResolver {
   Future<PlaybackTarget> _resolveNasPlayback(
     PlaybackTarget target,
     DetailEnrichmentSettings settings,
-    String traceKey,
   ) async {
     MediaSourceConfig? source;
     for (final candidate in settings.mediaSources) {
@@ -328,11 +253,6 @@ class DetailTargetResolver {
       }
     }
     if (source == null || source.kind != MediaSourceKind.nas) {
-      DebugTraceOnce.logMetadata(
-        traceKey,
-        'playback-resolve',
-        'skipped no active nas source',
-      );
       throw const _PlaybackResolutionException();
     }
     return _ref

@@ -302,13 +302,6 @@ class DetailCacheStore {
     return null;
   }
 
-  Future<DetailMetadataRefreshStatus> loadDetailMetadataRefreshStatus(
-    MediaDetailTarget seedTarget,
-  ) async {
-    return (await loadDetailState(seedTarget))?.metadataRefreshStatus ??
-        DetailMetadataRefreshStatus.never;
-  }
-
   Future<void> saveDetailTarget({
     required MediaDetailTarget seedTarget,
     required MediaDetailTarget resolvedTarget,

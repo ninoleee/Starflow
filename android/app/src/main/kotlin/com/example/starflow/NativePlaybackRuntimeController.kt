@@ -132,7 +132,7 @@ internal class NativePlaybackRuntimeController(
         syncSkipFlagsWithCurrentPosition()
         introSkipApplied = true
         val current = host.session.player ?: return
-        val preference = host.memory.loadSeriesSkipPreference(host.target.seriesKey)
+        val preference = host.memory.peekSeriesSkipPreference(host.target.seriesKey)
         val boundary =
             NativePlaybackSkipPolicy.endBoundaryMs(
                 current.duration,
@@ -167,7 +167,7 @@ internal class NativePlaybackRuntimeController(
         ) {
             return
         }
-        val skipPreference = host.memory.loadSeriesSkipPreference(host.target.seriesKey)
+        val skipPreference = host.memory.peekSeriesSkipPreference(host.target.seriesKey)
         if (skipPreference?.optBoolean("enabled", false) != true) {
             introSkipApplied = true
             outroSkipApplied = true
@@ -209,7 +209,7 @@ internal class NativePlaybackRuntimeController(
 
     fun syncSkipFlagsWithCurrentPosition() {
         val currentPlayer = host.session.player ?: return
-        val skipPreference = host.memory.loadSeriesSkipPreference(host.target.seriesKey)
+        val skipPreference = host.memory.peekSeriesSkipPreference(host.target.seriesKey)
         if (skipPreference?.optBoolean("enabled", false) != true) {
             introSkipApplied = true
             outroSkipApplied = true
@@ -274,7 +274,7 @@ internal class NativePlaybackRuntimeController(
             return
         }
         lastSavedPositionMs = resolvedPosition
-        host.memory.savePlaybackEntry(
+        host.memory.enqueuePlaybackEntry(
             targetJson = host.target.playbackTargetJson,
             itemKey = host.target.playbackItemKey,
             seriesKey = host.target.seriesKey,

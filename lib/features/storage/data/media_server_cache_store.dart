@@ -248,6 +248,8 @@ class MediaServerCacheStore {
       'starflow.local_storage.emby_library_cache.manifest.v2';
   static const _embyLibraryShardPrefix =
       'starflow.local_storage.emby_library_cache.shard.v2';
+  static const _embyShardIndexKey =
+      'starflow.local_storage.emby_library_cache.shards.v2';
 
   _EmbyCacheManifest? _embyManifestCache;
   Future<_EmbyCacheManifest>? _embyManifestLoadFuture;
@@ -713,6 +715,16 @@ class MediaServerCacheStore {
     String sourceId,
     _EncodedEmbySnapshotShards encoded,
   ) async {
+    final keys = await _knownShardKeys();
+    keys.addAll([
+      _embyFallbackShardKey(sourceId),
+      _embySummaryShardKey(sourceId),
+      ...encoded.sectionRaws.keys
+          .map((id) => _embySectionShardKey(sourceId, id)),
+    ]);
+    // Register before any payload write so an interrupted commit stays collectible.
+    await _preferences.setString(
+        _embyShardIndexKey, jsonEncode(keys.toList()..sort()));
     await _writeChangedEmbyPayload(
       _embyFallbackShardKey(sourceId),
       encoded.fallbackRaw,
@@ -746,14 +758,20 @@ class MediaServerCacheStore {
   Future<void> _clearEmbySourceShards(String sourceId) async {
     final manifest = await _loadEmbyManifest();
     final sourceManifest = manifest.sources[sourceId];
-    if (sourceManifest == null) {
-      return;
+    final known = await _knownShardKeys();
+    final prefix = '$_embyLibraryShardPrefix.${_embyShardToken(sourceId)}.';
+    final removing = known.where((key) => key.startsWith(prefix)).toSet()
+      ..addAll([
+        _embyFallbackShardKey(sourceId),
+        _embySummaryShardKey(sourceId),
+        ...?sourceManifest?.sectionIds
+            .map((id) => _embySectionShardKey(sourceId, id)),
+      ]);
+    for (final key in removing) {
+      await _preferences.remove(key);
     }
-    await _preferences.remove(_embyFallbackShardKey(sourceId));
-    await _preferences.remove(_embySummaryShardKey(sourceId));
-    for (final sectionId in sourceManifest.sectionIds) {
-      await _preferences.remove(_embySectionShardKey(sourceId, sectionId));
-    }
+    await _preferences.setString(_embyShardIndexKey,
+        jsonEncode(known.difference(removing).toList()..sort()));
     final nextSources = Map<String, _EmbyCacheSourceManifest>.from(
       manifest.sources,
     )..remove(sourceId);
@@ -763,6 +781,7 @@ class MediaServerCacheStore {
 
   Future<void> _clearAllEmbyShards() async {
     final manifest = await _loadEmbyManifest();
+    final known = await _knownShardKeys();
     for (final entry in manifest.sources.entries) {
       await _preferences.remove(_embyFallbackShardKey(entry.key));
       await _preferences.remove(_embySummaryShardKey(entry.key));
@@ -772,6 +791,10 @@ class MediaServerCacheStore {
         );
       }
     }
+    for (final key in known) {
+      await _preferences.remove(key);
+    }
+    await _preferences.remove(_embyShardIndexKey);
     await _preferences.remove(_embyLibraryManifestKey);
     if (!_isDisposed) _embyManifestCache = const _EmbyCacheManifest();
     _embyManifestLoadFuture = null;
@@ -779,6 +802,25 @@ class MediaServerCacheStore {
     _embySnapshotLoadFutures.clear();
     _embyItemsShardCache.clear();
     _embyItemsShardLoadFutures.clear();
+  }
+
+  Future<Set<String>> _knownShardKeys() async {
+    final keys = <String>{};
+    final raw = await _preferences.getString(_embyShardIndexKey);
+    if (raw != null) {
+      try {
+        keys.addAll((jsonDecode(raw) as List).whereType<String>());
+      } on FormatException {
+        /* Enumerate persisted keys below. */
+      } on TypeError {/* Enumerate persisted keys below. */}
+    }
+    final preferences = _preferences;
+    if (preferences is EnumerablePreferencesStore) {
+      keys.addAll(await (preferences as EnumerablePreferencesStore).getKeys());
+    }
+    return keys
+        .where((key) => key.startsWith('$_embyLibraryShardPrefix.'))
+        .toSet();
   }
 
   Future<void> _enqueueEmbyMutation(Future<void> Function() operation) {

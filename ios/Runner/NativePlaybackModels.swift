@@ -19,46 +19,51 @@ struct NativePlaybackRequest {
 }
 
 struct NativeEpisodeQueueEntry {
-  let request: NativePlaybackRequest
+  let request: NativePlaybackRequest?
+  let playbackTargetJson: String
 
   init?(json: [String: Any]) {
     let target = json["target"] as? [String: Any] ?? [:]
     let streamUrl = (target["streamUrl"] as? String)?.trimmingCharacters(
       in: .whitespacesAndNewlines
     ) ?? ""
-    guard let url = URL(string: streamUrl), url.scheme != nil else {
-      return nil
-    }
-
     let headers = (target["headers"] as? [String: Any] ?? [:]).reduce(into: [String: String]()) {
       partialResult,
       item in
       partialResult[item.key] = "\(item.value)"
     }
     let targetData = (try? JSONSerialization.data(withJSONObject: target)) ?? Data("{}".utf8)
-    let playbackTargetJson = String(data: targetData, encoding: .utf8) ?? "{}"
-    request = NativePlaybackRequest(
-      url: url,
-      title: (target["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-      headers: headers,
-      playbackTargetJson: playbackTargetJson,
-      playbackItemKey: (json["playbackItemKey"] as? String)?
-        .trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-      seriesKey: (json["seriesKey"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        ?? ""
-    )
+    playbackTargetJson = String(data: targetData, encoding: .utf8) ?? "{}"
+    self.playbackItemKey = (json["playbackItemKey"] as? String)?.nonEmptyTrimmed ?? ""
+    self.seriesKey = (json["seriesKey"] as? String)?.nonEmptyTrimmed ?? ""
+    guard !playbackItemKey.isEmpty else { return nil }
+    if let url = URL(string: streamUrl), url.scheme != nil {
+      request = NativePlaybackRequest(
+        url: url,
+        title: (target["title"] as? String)?.nonEmptyTrimmed ?? "",
+        headers: headers,
+        playbackTargetJson: playbackTargetJson,
+        playbackItemKey: playbackItemKey,
+        seriesKey: seriesKey
+      )
+    } else {
+      request = nil
+    }
   }
+
+  let playbackItemKey: String
+  let seriesKey: String
 
   func toJsonObject() -> [String: Any] {
     return [
       "target": targetObject(),
-      "playbackItemKey": request.playbackItemKey,
-      "seriesKey": request.seriesKey,
+      "playbackItemKey": playbackItemKey,
+      "seriesKey": seriesKey,
     ]
   }
 
   private func targetObject() -> [String: Any] {
-    guard let data = request.playbackTargetJson.data(using: .utf8),
+    guard let data = playbackTargetJson.data(using: .utf8),
       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else {
       return [:]

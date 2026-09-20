@@ -1,6 +1,83 @@
 import AVFoundation
 import Foundation
 
+/// AVKit controls and remote commands share this synchronous intent boundary.
+/// Startup commands bypass it; state/KVO notifications are not user commands.
+class NativePlaybackIntentPlayer: AVPlayer {
+  var onUserCommand: (() -> Void)?
+  private var automaticDepth = 0
+
+  func automatically(_ action: () -> Void) {
+    automaticDepth += 1
+    defer { automaticDepth -= 1 }
+    action()
+  }
+
+  private func command(_ action: () -> Void) {
+    if automaticDepth == 0 { onUserCommand?() }
+    automatically(action)
+  }
+
+  override var rate: Float {
+    get { super.rate }
+    set { command { super.rate = newValue } }
+  }
+
+  override func play() { command { super.play() } }
+  override func pause() { command { super.pause() } }
+
+  override func seek(to time: CMTime) {
+    command { super.seek(to: time) }
+  }
+
+  override func seek(to time: CMTime, completionHandler: @escaping (Bool) -> Void) {
+    command { super.seek(to: time, completionHandler: completionHandler) }
+  }
+
+  override func seek(to time: CMTime, toleranceBefore: CMTime, toleranceAfter: CMTime) {
+    command { super.seek(to: time, toleranceBefore: toleranceBefore, toleranceAfter: toleranceAfter) }
+  }
+
+  override func seek(to time: CMTime, toleranceBefore: CMTime, toleranceAfter: CMTime,
+    completionHandler: @escaping (Bool) -> Void) {
+    command {
+      super.seek(to: time, toleranceBefore: toleranceBefore, toleranceAfter: toleranceAfter,
+        completionHandler: completionHandler)
+    }
+  }
+}
+
+/// Only a current resolver result can commit. Manual requests supersede pending
+/// automatic requests; cancellation does not consume the next manual request.
+final class NativePlaybackEpisodeIntent {
+  private(set) var generation = 0
+  private(set) var pending = false
+  private var automatic = false
+
+  func begin(automatic: Bool) -> Int? {
+    if pending && automatic { return nil }
+    cancel()
+    pending = true
+    self.automatic = automatic
+    return generation
+  }
+
+  func cancelAutomatic() {
+    if pending && automatic { cancel() }
+  }
+
+  func cancel() {
+    generation += 1
+    pending = false
+  }
+
+  func finish(_ token: Int) -> Bool {
+    guard pending, generation == token else { return false }
+    pending = false
+    return true
+  }
+}
+
 @MainActor
 final class NativePlaybackStartupGate {
   struct Configuration {
@@ -42,6 +119,7 @@ final class NativePlaybackStartupGate {
   private var completion: ((StartupResult) -> Void)?
   private var hasStarted = false
   private var didComplete = false
+  private var prerollInFlight = false
   private var seekCompleted = false
   private var didApplyResumeSeek = false
   private var didWaitForKeepUp = false
@@ -83,12 +161,18 @@ final class NativePlaybackStartupGate {
       seekTime.seconds > 0
     {
       didApplyResumeSeek = true
-      player.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
-        guard let self else {
-          return
+      automatically {
+        player.seek(to: seekTime, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] succeeded in
+          Task { @MainActor in
+            guard let self, !self.didComplete else { return }
+            guard succeeded else {
+              self.finish(with: .cancelled)
+              return
+            }
+            self.seekCompleted = true
+            self.evaluateStartupGate()
+          }
         }
-        self.seekCompleted = true
-        self.evaluateStartupGate()
       }
     } else {
       seekCompleted = true
@@ -101,35 +185,25 @@ final class NativePlaybackStartupGate {
       return
     }
     finish(with: .cancelled)
+    player.cancelPendingPrerolls()
+    item.cancelPendingSeeks()
   }
 
   private func installObservers() {
     statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] _, _ in
-      guard let self else {
-        return
-      }
-      self.evaluateStartupGate()
+      Task { @MainActor in self?.evaluateStartupGate() }
     }
     keepUpObservation = item.observe(\.isPlaybackLikelyToKeepUp, options: [.initial, .new]) {
       [weak self] _, _ in
-      guard let self else {
-        return
-      }
-      self.evaluateStartupGate()
+      Task { @MainActor in self?.evaluateStartupGate() }
     }
     bufferEmptyObservation = item.observe(\.isPlaybackBufferEmpty, options: [.initial, .new]) {
       [weak self] _, _ in
-      guard let self else {
-        return
-      }
-      self.evaluateStartupGate()
+      Task { @MainActor in self?.evaluateStartupGate() }
     }
     bufferFullObservation = item.observe(\.isPlaybackBufferFull, options: [.initial, .new]) {
       [weak self] _, _ in
-      guard let self else {
-        return
-      }
-      self.evaluateStartupGate()
+      Task { @MainActor in self?.evaluateStartupGate() }
     }
   }
 
@@ -150,7 +224,7 @@ final class NativePlaybackStartupGate {
       return
     }
 
-    guard item.status == .readyToPlay, seekCompleted else {
+    guard item.status == .readyToPlay, seekCompleted, !prerollInFlight else {
       return
     }
 
@@ -193,16 +267,29 @@ final class NativePlaybackStartupGate {
   }
 
   private func beginPlayback() {
-    guard !didComplete else {
+    guard !didComplete, !prerollInFlight else {
       return
     }
     keepUpTimeoutWorkItem?.cancel()
     keepUpTimeoutWorkItem = nil
 
-    if configuration.usePreroll {
-      player.preroll(atRate: configuration.prerollRate) { [weak self] _ in
+    if configuration.usePreroll && !item.duration.isIndefinite {
+      prerollInFlight = true
+      player.preroll(atRate: configuration.prerollRate) { [weak self] succeeded in
         Task { @MainActor in
-          self?.playAndFinish(didUsePreroll: true)
+          guard let self, !self.didComplete else { return }
+          self.prerollInFlight = false
+          guard succeeded else {
+            // AVFoundation also returns false for a time/rate interruption.
+            // Do not restart here: that could undo the user's pause or seek.
+            if self.item.status == .failed || self.item.error != nil {
+              self.finish(with: .failed(self.item.error))
+            } else {
+              self.finish(with: .cancelled)
+            }
+            return
+          }
+          self.playAndFinish(didUsePreroll: true)
         }
       }
       return
@@ -215,7 +302,7 @@ final class NativePlaybackStartupGate {
     guard !didComplete else {
       return
     }
-    player.play()
+    automatically { player.play() }
     finish(
       with: .started(
         StartupDiagnostics(
@@ -232,11 +319,20 @@ final class NativePlaybackStartupGate {
       return
     }
     didComplete = true
+    prerollInFlight = false
     keepUpTimeoutWorkItem?.cancel()
     keepUpTimeoutWorkItem = nil
     invalidateObservers()
     let callback = completion
     completion = nil
     callback?(result)
+  }
+
+  private func automatically(_ action: () -> Void) {
+    if let intentPlayer = player as? NativePlaybackIntentPlayer {
+      intentPlayer.automatically(action)
+    } else {
+      action()
+    }
   }
 }

@@ -339,6 +339,8 @@ class _MetadataIndexManagementPageState
   MetadataMatchResult _tmdbToMetadataMatch(TmdbMetadataMatch match) {
     return MetadataMatchResult(
       provider: MetadataMatchProvider.tmdb,
+      mediaType:
+          match.isSeries ? MetadataMediaType.series : MetadataMediaType.movie,
       title: match.title,
       originalTitle: match.originalTitle,
       posterUrl: match.posterUrl,

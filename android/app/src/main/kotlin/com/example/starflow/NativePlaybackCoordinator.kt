@@ -70,7 +70,10 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
     override val memory by lazy {
         NativePlaybackMemoryStore(
-            activity.getSharedPreferences(SHARED_PREFERENCES_NAME, Activity.MODE_PRIVATE)
+            activity.getSharedPreferences(SHARED_PREFERENCES_NAME, Activity.MODE_PRIVATE),
+            onPersisted = {
+                MainActivity.invokeNativeFntv("nativePlaybackMemoryChanged", emptyMap()) {}
+            },
         )
     }
     override val isPlayerViewInitialized: Boolean

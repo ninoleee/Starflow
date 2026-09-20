@@ -433,7 +433,7 @@ void main() {
       expect(detailRequests, 1);
     });
 
-    test('returns no match when details lookup fails after search hit',
+    test('reports failure when details lookup fails after search hit',
         () async {
       final client = TmdbMetadataClient(
         MockClient((request) async {
@@ -465,13 +465,14 @@ void main() {
         }),
       );
 
-      final result = await client.matchTitle(
-        query: 'The Matrix',
-        readAccessToken: 'tmdb-token',
-        year: 1999,
+      await expectLater(
+        client.matchTitle(
+          query: 'The Matrix',
+          readAccessToken: 'tmdb-token',
+          year: 1999,
+        ),
+        throwsA(isA<TmdbMetadataException>()),
       );
-
-      expect(result, isNull);
     });
 
     test('fetches related credits for actor and director entries', () async {

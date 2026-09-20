@@ -24,8 +24,25 @@
 | 详情／信息管理 | 续播与主操作焦点、剧集恢复不抢主操作；更新忙碌保焦 | `detail_episode_restore_test.dart`、`metadata_index_management_page_focus_test.dart` |
 | 设置／目录 | 设置入口和编辑弹窗统一；WebDAV／夸克“选这里／选择”常驻首焦点 | `settings_hierarchy_navigation_test.dart`、`webdav_directory_picker_focus_test.dart`、`quark_folder_picker_focus_test.dart` |
 | 在线字幕 | 关键词入口首焦点；搜索／下载忙碌保焦；结果单一焦点目标 | `subtitle_search_page_test.dart` |
-| MPV 控件／选集 | 页面命令去重；列表／网格跨段导航与入口恢复保留 | `player_small_dialog_focus_test.dart`、`player_episode_picker_dialog_test.dart` |
-| Android Exo | 原有按压身份去重、控制层焦点超时／取消与弹窗恢复；本轮不改原生实现 | `NativePlaybackRemoteControllerTest.kt`、`NativePlaybackControllerViewTest.kt`、`NativeEpisodePickerNavigationTest.kt` |
+| MPV 控件／选集 | 页面命令去重；首集／首行上移优先到选季，选季与模式按钮上下连通，下移返回原剧集；跨段导航与入口恢复保留 | `player_small_dialog_focus_test.dart`、`player_episode_picker_dialog_test.dart` |
+| Android 点播 Exo | 原有按压身份去重、控制层焦点超时／取消与弹窗恢复；不作为独立直播视图的焦点证据 | `NativePlaybackRemoteControllerTest.kt`、`NativePlaybackControllerViewTest.kt`、`NativeEpisodePickerNavigationTest.kt` |
+| 直播频道／订阅 | 频道页数据就绪后订阅按钮首焦点，来源页添加按钮常驻；搜索／编辑复用设置输入，删除默认取消 | `live_tv_page_test.dart`；来源编辑／系统文件选择仍待补验收 |
+| 直播 MPV／Exo | Flutter 画布、工具栏及频道／节目单叠层拥有焦点；原生 TextureView 不参与寻焦 | `live_tv_page_test.dart`、`live_exo_bridge_test.dart`；通道 mock 不运行原生视图 |
+
+## 直播焦点边界（2026-09-20）
+
+- 一级导航保持原有五个分支索引，直播追加为索引 5；已有菜单配置不强制插入直播，隐藏状态不产生侧栏焦点。设置“内容与来源”仍有直播和订阅入口。路由索引不等于可见菜单索引。
+- 频道页使用 `TvPageFocusScope`，数据就绪后以订阅按钮为首焦点，空频道列表仍可进入订阅；初始数据库加载态只有进度指示，读取失败提供重新读取按钮，不能宣称所有异步阶段都有常驻页头焦点。搜索与频道映射复用 `SettingsTextInputField` 的 TV 松键后编辑机制。
+- 订阅页 AppBar 的添加按钮在加载/错误/空列表时仍存在；编辑页名称首焦点，保存中保焦但不执行重复提交。删除确认默认取消。`LiveIconButton` 固定 48dp、带 Tooltip/语义标签，显式 `focusableWhenDisabled: true`；更新忙碌及本地源无可更新地址时仍可聚焦、确认无效。下拉框、FilterChip 和 Switch 沿用 Flutter 控件，不能将自定义按钮的重复按键契约泛化为已测的所有控件行为。
+- `LivePlayerPage` 初始焦点落在 `live-player` 画布。仅当它持有主焦点、且未打开频道/节目单叠层时，上下/频道键才循环换台，长按允许重复输入，由播放控制器的 180ms 窗口合并开流；确认/左/右/菜单只在 KeyDown 执行打开命令。确认打开频道、左打开频道/分组、右打开节目单，菜单显示控制栏并帧末把焦点移到 `live-tools` 频道列表按钮。
+- 频道和节目单叠层默认聚焦关闭按钮，不自动定位当前频道/当前节目。频道项确认才选台，分组下拉只筛选叠层列表，画布上下换台仍遍历全部可见频道。节目项确认打开简介弹窗，关闭按钮首焦点，不触发回看或 seek。
+- 子控件持有焦点时，画布处理器忽略方向键，防止移动叠层焦点时意外换台。Android `AndroidView` 使用 `ExcludeFocus`，原生 root/TextureView 均不可聚焦；两内核共用 Flutter 交互，不套用点播 Exo 的原生 RemoteController 测试结论。
+- 返回先由顶部弹窗/下拉菜单处理，再关闭频道/节目单叠层或退出显式工具栏模式并恢复画布；再返回退出播放。自动隐藏为 5s，但只有当前路由且画布持主焦点时隐藏；工具栏、叠层及弹窗操作中不应被计时器移走焦点。叠层打开会帧末显式聚焦关闭按钮；选择频道和关闭叠层恢复画布，其他弹窗依赖 Flutter 恢复，须单独设备复验。
+- 失败重试按钮有 autofocus；需在真实遥控器上验证确认、返回、菜单能否离开失败态。主页面刷新引发频道消失/重排、关闭来源和切换内核后的焦点恢复不应只凭稳定 key 推断通过。
+
+TV 直播文件导入复用配置/日志传输的二维码地址组件，弹窗初焦点为“关闭服务”，地址项可聚焦并滚动到可见范围；返回立即停止接收，进入后台同样关闭，不自动重新开放端口。收到文件返回编辑草稿，用户保存后才入库。TV 不再打开系统文件选择器。
+
+验证边界：2026-09-20 五任务合并后指定 9 文件/132 项 Flutter 测试通过，包含导航、旧菜单保留、旧分支索引、7 项直播页面测试。320/390/1280 宽度组件布局已检查，播放器使用 fake engine，不证明真实画面输出；该批早于后续扫码导入修改。记录见 [主机验证](performance.md#2026-09-20-直播前置验证快照)，真实遥控器、TV IME、手机扫码上传与原生 TextureView 未测，设备对照见 [直播验收清单](performance-device.md#直播双内核对比验收2026-09-20)。
 
 ## 本轮修复
 
@@ -35,8 +52,21 @@
 4. WebDAV 目录、查看全部、媒体库合集及演职员作品页提供稳定首焦点；目录读取与异步内容更新只补缺焦。
 5. 在线字幕消除整条结果和内部按钮的重复焦点，搜索／下载忙碌不丢焦点；媒体库多页翻到边界保焦。
 6. 媒体库资源删除确认默认聚焦取消；补齐新抽取弹窗的共享按钮导入。
+7. 播放器选集的首集／网格首行上移优先聚焦选季，不再绕到列表模式按钮；选季上移进入模式按钮，两个模式按钮下移经过选季，选季下移返回原剧集。选季不可用时跳过，原有跨段与底部定位导航不变。MPV 和 Android 原生选集分别在本地控件中处理。
 
 ## 自动化验证
+
+2026-09-20 选集到选季补充回归：指定 3 文件、52 项 Flutter 测试通过，定向静态检查无问题，覆盖多季往返、选季取消恢复、单季跳过及原有跨段导航。详细范围见 [选集焦点验证](performance.md#2026-09-20-选集到选季焦点回归)，不代表 Android 原生 View 或真实遥控器验收。
+
+### 十方向复审 T01–T04 修复（2026-09-20）
+
+- 点播 MPV 使用独立 `PlaybackPlayIntent`、`PlaybackPauseIntent`、`PlaybackToggleIntent`，媒体键不再借用 `ActivateIntent`。Play/Pause 分别是幂等方向命令，确认仍激活当前工具；按住媒体键不重复执行。
+- `TvFocusableAction` 的 TV 分支统一处理 pointer 主点击、右键及长按。主点击请求当前控件焦点；子控件自己的手势通过 Flutter gesture arena 优先处理，不重复调用外层按钮。禁用按钮不响应 pointer。
+- 仅有 `onContextAction` 或 `TvMenuButtonScope` 时注册局部菜单快捷键与 Action；没有 handler 时让页面菜单处理，不吞掉播放器选项菜单。局部 handler 优先于 scope。
+- 搜索历史横排与非 TV 来源横排按实际 text scaler 的行高、垂直 padding 和最大焦点边框计算高度，并保留上下 6dp 空间。共享 chip 的边框布局宽度固定为 3dp，聚焦不再改变内容高度；长文案保持单行省略而非压低行高。
+- 新回归入口：`tv_playback_input_test.dart` 覆盖四类工具焦点、三种媒体命令、重复事件、菜单回退、pointer/长按/禁用及嵌套手势；`search_page_text_scale_test.dart` 覆盖 1.0/1.3/2.0 字号、长文案、390dp 手机和 1280×720 TV 几何与聚焦尺寸稳定性。设置 `STARFLOW_LAYOUT_SCREENSHOTS` 可输出本机截图；不把主机字体截图当作真实 TV 验收。
+
+验证结果与播放生命周期修复合并记于 [播放器流畅度审查的十方向复审补充](player-smoothness-review-2026-09-20.md#十方向复审补充2026-09-20)。上方既有批次仍保留各自历史时间与范围。
 
 本轮主机验证的结果、范围和未通过的非焦点检查统一记录在 [主机性能与回归验证](performance.md#tv-焦点回归2026-09-20)。页面回归入口见上表；公共规则由 `tv_remote_action_test.dart`、`tv_press_only_shortcuts_test.dart`、`tv_dialog_back_focus_test.dart` 和输入组件测试覆盖。
 

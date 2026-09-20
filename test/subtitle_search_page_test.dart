@@ -9,11 +9,117 @@ import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_operation.dart';
 import 'package:starflow/features/playback/presentation/subtitle_search_page.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  testWidgets('successful handoff keeps the accepted download after pop',
+      (tester) async {
+    final repository = _FakeOnlineSubtitleRepository();
+    repository.pendingSearch = Future.value(const [
+      ValidatedSubtitleCandidate(
+        hit: ProviderSubtitleHit(
+            id: 'accepted',
+            source: OnlineSubtitleSource.assrt,
+            providerLabel: 'ASSRT',
+            title: 'ACCEPTED',
+            downloadUrl: 'https://example.com/a.srt',
+            packageName: 'a.srt',
+            packageKind: SubtitlePackageKind.subtitleFile),
+        status: SubtitleValidationStatus.skipped,
+      )
+    ]);
+    repository.pendingDownload = Completer<SubtitleDownloadResult>();
+    final navigator = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+          appSettingsProvider.overrideWithValue(AppSettings.fromJson({
+            'onlineSubtitleSources': ['assrt'],
+            'assrtToken': 'token',
+          })),
+          onlineSubtitleRepositoryProvider.overrideWithValue(repository),
+        ],
+        child: MaterialApp(
+            navigatorKey: navigator,
+            home: const Scaffold(body: Text('Player')))));
+    final selected =
+        navigator.currentState!.push<SubtitleSearchSelection>(MaterialPageRoute(
+            builder: (_) => const SubtitleSearchPage(
+                  request: SubtitleSearchRequest(query: 'Film'),
+                )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('下载并加载'));
+    await tester.pump();
+    var discarded = 0;
+    repository.pendingDownload!.complete(SubtitleDownloadResult(
+      cachedPath: '/accepted',
+      displayName: 'accepted',
+      subtitleFilePath: '/accepted/a.srt',
+      discard: () async {
+        discarded++;
+      },
+    ));
+    await tester.pumpAndSettle();
+    expect((await selected)!.subtitleFilePath, '/accepted/a.srt');
+    expect(repository.downloadOperation!.isCancelled, isTrue);
+    expect(discarded, 0);
+  });
+
+  testWidgets('disposing cancels a download and discards its late result',
+      (tester) async {
+    final repository = _FakeOnlineSubtitleRepository();
+    repository.pendingSearch = Future.value(const [
+      ValidatedSubtitleCandidate(
+        hit: ProviderSubtitleHit(
+            id: 'late',
+            source: OnlineSubtitleSource.assrt,
+            providerLabel: 'ASSRT',
+            title: 'LATE',
+            downloadUrl: 'https://example.com/late.srt',
+            packageName: 'late.srt',
+            packageKind: SubtitlePackageKind.subtitleFile),
+        status: SubtitleValidationStatus.skipped,
+      )
+    ]);
+    repository.pendingDownload = Completer<SubtitleDownloadResult>();
+    await tester.pumpWidget(ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+          appSettingsProvider.overrideWithValue(AppSettings.fromJson({
+            'onlineSubtitleSources': ['assrt'],
+            'assrtToken': 'token',
+          })),
+          onlineSubtitleRepositoryProvider.overrideWithValue(repository),
+        ],
+        child: const MaterialApp(
+            home: SubtitleSearchPage(
+          request: SubtitleSearchRequest(query: 'Film'),
+        ))));
+    await tester.tap(find.byIcon(Icons.search_rounded));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('下载并加载'));
+    await tester.pump();
+    expect(repository.downloadOperation!.isCancelled, isFalse);
+    await tester.pumpWidget(const SizedBox());
+    expect(repository.downloadOperation!.isCancelled, isTrue);
+    var discarded = 0;
+    repository.pendingDownload!.complete(SubtitleDownloadResult(
+        cachedPath: '/late',
+        displayName: 'late',
+        subtitleFilePath: '/late/a.srt',
+        discard: () async {
+          discarded++;
+        }));
+    await tester.pumpAndSettle();
+    expect(discarded, 1);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('TV subtitle search has one result target and retains busy focus',
       (tester) async {
     final repository = _FakeOnlineSubtitleRepository();
@@ -50,7 +156,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
 
-    final submit = tester.widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
+    final submit = tester
+        .widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
         .firstWhere((widget) => widget.focusId == 'subtitle-search:submit');
     submit.focusNode!.requestFocus();
     await tester.pump();
@@ -63,9 +170,12 @@ void main() {
     pending.complete(const [
       ValidatedSubtitleCandidate(
         hit: ProviderSubtitleHit(
-          id: 'result', source: OnlineSubtitleSource.assrt,
-          providerLabel: 'ASSRT', title: 'RESULT',
-          downloadUrl: 'https://example.com/a.srt', packageName: 'a.srt',
+          id: 'result',
+          source: OnlineSubtitleSource.assrt,
+          providerLabel: 'ASSRT',
+          title: 'RESULT',
+          downloadUrl: 'https://example.com/a.srt',
+          packageName: 'a.srt',
           packageKind: SubtitlePackageKind.subtitleFile,
         ),
         status: SubtitleValidationStatus.skipped,
@@ -73,11 +183,18 @@ void main() {
     ]);
     await tester.pumpAndSettle();
     expect(submit.focusNode!.hasPrimaryFocus, isTrue);
-    final result = tester.widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
-        .firstWhere((widget) => widget.focusId == 'subtitle-search:result:result');
-    final node = tester.widget<FocusableActionDetector>(find.descendant(
-      of: find.byWidget(result), matching: find.byType(FocusableActionDetector),
-    ).first).focusNode!;
+    final result = tester
+        .widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
+        .firstWhere(
+            (widget) => widget.focusId == 'subtitle-search:result:result');
+    final node = tester
+        .widget<FocusableActionDetector>(find
+            .descendant(
+              of: find.byWidget(result),
+              matching: find.byType(FocusableActionDetector),
+            )
+            .first)
+        .focusNode!;
     node.requestFocus();
     await tester.pump();
     expect(node.traversalDescendants, isEmpty);
@@ -125,6 +242,7 @@ void main() {
     request.value =
         const SubtitleSearchRequest(query: 'New Film', title: 'New Film');
     await tester.pump();
+    expect(repository.searchOperation!.isCancelled, isTrue);
     pending.complete(const [
       ValidatedSubtitleCandidate(
         hit: ProviderSubtitleHit(
@@ -309,13 +427,17 @@ class _FakeOnlineSubtitleRepository implements OnlineSubtitleRepository {
   Future<List<ValidatedSubtitleCandidate>>? pendingSearch;
   Completer<SubtitleDownloadResult>? pendingDownload;
   int downloadCalls = 0;
+  SubtitleOperation? searchOperation;
+  SubtitleOperation? downloadOperation;
   final requests = <OnlineSubtitleSearchRequest>[];
   final List<String> searchQueries = <String>[];
   final List<List<OnlineSubtitleSource>> searchSources =
       <List<OnlineSubtitleSource>>[];
 
   @override
-  Future<SubtitleDownloadResult> download(SubtitleSearchResult result) {
+  Future<SubtitleDownloadResult> download(SubtitleSearchResult result,
+      {SubtitleOperation? operation}) {
+    downloadOperation = operation;
     downloadCalls++;
     if (pendingDownload != null) return pendingDownload!.future;
     throw UnimplementedError();
@@ -343,7 +465,9 @@ class _FakeOnlineSubtitleRepository implements OnlineSubtitleRepository {
     ],
     int maxResults = 0,
     int maxValidated = 0,
+    SubtitleOperation? operation,
   }) async {
+    searchOperation = operation;
     searchQueries.add(request.normalizedQuery);
     requests.add(request);
     searchSources.add(List<OnlineSubtitleSource>.from(sources));

@@ -15,6 +15,7 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
   }
 
   Future<void> _setMpvOption(Player player, String name, String value) async {
+    if (!_startupTrackWorkIsCurrent) return;
     if (kIsWeb) {
       return;
     }
@@ -34,6 +35,9 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     String name,
     String value,
   ) async {
+    if (!_startupTrackWorkIsCurrent || !mounted || !identical(_player, player)) {
+      return;
+    }
     if (kIsWeb) {
       throw UnsupportedError('Web MPV 不支持原生字幕属性');
     }
@@ -66,7 +70,9 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
   }
 
   void _syncMpvSubtitleRendering(Player player) {
-    if (mounted && identical(_player, player)) _mpvLifecycle.subtitles.refresh();
+    if (mounted && identical(_player, player)) {
+      _mpvLifecycle.subtitles.refresh();
+    }
   }
 
   Future<void> _bindMpvSubtitleRendering(Player player) async {
@@ -76,15 +82,17 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     final binding = MpvSubtitleRenderBinding(
       selected: () => player.state.track.subtitle,
       tracks: () => player.state.tracks.subtitle,
-      readSid: () async => await (native as dynamic).getProperty('sid') as String,
+      readSid: () async =>
+          await (native as dynamic).getProperty('sid') as String,
       write: (name, value) => _setMpvSubtitleProperty(player, name, value),
       onBitmapChanged: (bitmap) {
         if (mounted && identical(_player, player)) {
           setState(() => _mpvBitmapSubtitle = bitmap);
         }
       },
-      onError: (error, stack) => appLogWarning('subtitle.render.failed',
-          'MPV subtitle visibility update failed', error: error, stackTrace: stack),
+      onError: (error, stack) => appLogWarning(
+          'subtitle.render.failed', 'MPV subtitle visibility update failed',
+          error: error, stackTrace: stack),
     );
     await subtitles.bind(
       binding: binding,
@@ -164,17 +172,16 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     if (target.sourceKind != MediaSourceKind.quark) {
       return;
     }
-    playbackTrace(
-      stage,
-      fields: <String, Object?>{
-        'title': target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
-        'sourceKind': target.sourceKind.name,
-        'container': target.container,
-        ...fields,
-      },
-      error: error,
-      stackTrace: stackTrace,
-    );
+    appLogError('playback', stage,
+        fields: <String, Object?>{
+          'title':
+              target.title.trim().isEmpty ? 'Starflow' : target.title.trim(),
+          'sourceKind': target.sourceKind.name,
+          'container': target.container,
+          ...fields,
+        },
+        error: error,
+        stackTrace: stackTrace);
   }
 
   int _resolveMpvBufferSizeBytes(PlaybackTarget target) {
@@ -275,7 +282,6 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     final heavyPlayback = _isHeavyPlaybackTarget(target);
     final aggressiveTuning = _shouldUseAggressiveMpvTuning(target);
     final leanPlayback = _preferLeanPlaybackRendering;
-    final requestedQualityPreset = _playbackMpvQualityPreset;
     final qualityPreset = _resolveEffectiveMpvQualityPreset(target);
     final bufferSizeBytes = _resolveMpvBufferSizeBytes(target);
     final remoteProfile = resolveMpvRemotePlaybackTuningProfile(
@@ -361,26 +367,6 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
       player,
       'vd-lavc-skiploopfilter',
       shouldSkipLoopFilter ? 'nonref' : 'none',
-    );
-    _traceWindowsMpv(
-      'windows-mpv.tuning.summary',
-      fields: {
-        'remotePlayback': remotePlayback,
-        'heavyPlayback': heavyPlayback,
-        'aggressiveTuning': aggressiveTuning,
-        'leanPlayback': leanPlayback,
-        'qualityPresetRequested': requestedQualityPreset.name,
-        'qualityPresetApplied': qualityPreset.name,
-        'bufferSizeBytes': bufferSizeBytes,
-        'backBufferBytes': backBufferBytes,
-        'memoryClassMb': _androidMemoryClassMb ?? 0,
-        'memoryCapApplied': _resolveMpvBufferBudget(target).memoryCapApplied,
-        'quarkTuning': isLikelyQuarkPlaybackTarget(target),
-        'cachedEstimatedMbps':
-            _networkEstimateMegabitsPerSecond?.toStringAsFixed(2) ?? '',
-        'remoteProfile': remoteProfile?.name ?? '',
-        'skipLoopFilter': shouldSkipLoopFilter ? 'nonref' : 'none',
-      },
     );
   }
 

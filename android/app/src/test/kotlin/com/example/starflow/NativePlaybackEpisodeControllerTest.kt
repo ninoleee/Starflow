@@ -46,7 +46,7 @@ class NativePlaybackEpisodeControllerTest {
         `when`(host.session.player!!.playbackState).thenReturn(Player.STATE_READY)
         `when`(host.session.player!!.duration).thenReturn(100_000L)
         `when`(host.session.player!!.currentPosition).thenReturn(60_000L)
-        `when`(host.memory.loadSeriesSkipPreference("series"))
+        `when`(host.memory.peekSeriesSkipPreference("series"))
             .thenReturn(JSONObject("""{"enabled":true,"outroDurationMs":10000}"""))
         val activity = host.activity
         doAnswer { call ->
@@ -55,6 +55,28 @@ class NativePlaybackEpisodeControllerTest {
             }
             .`when`(activity)
             .runOnUiThread(any(Runnable::class.java))
+    }
+
+    @Test
+    fun tickAndUserSeekNeverWaitForStorageQueue() {
+        `when`(host.memory.loadSeriesSkipPreference(anyString()))
+            .thenThrow(AssertionError("Must not wait for storage on the runtime loop"))
+        controller.tick()
+        controller.onUserSeek()
+        verify(host.memory, times(2)).peekSeriesSkipPreference("series")
+        verify(host.memory, never()).loadSeriesSkipPreference(anyString())
+        assertEquals(1, callbacks.size)
+    }
+
+    @Test
+    fun missingPublishedPreferenceUsesNaturalEndWithoutBlocking() {
+        `when`(host.memory.peekSeriesSkipPreference("series")).thenReturn(null)
+        controller.tick()
+        assertTrue(callbacks.isEmpty())
+        `when`(host.session.player!!.currentPosition).thenReturn(75_000L)
+        controller.tick()
+        assertEquals(1, callbacks.size)
+        verify(host.memory, never()).loadSeriesSkipPreference(anyString())
     }
 
     @Test

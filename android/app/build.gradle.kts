@@ -1,5 +1,6 @@
 import java.util.Calendar
 import groovy.json.JsonSlurper
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -9,6 +10,10 @@ plugins {
 }
 
 val starflowMinSdk = 23
+val releaseSigningFile = rootProject.file("key.properties")
+val releaseSigning = Properties().apply {
+    if (releaseSigningFile.exists()) releaseSigningFile.inputStream().use { load(it) }
+}
 
 fun computeStarflowVersionCode(versionName: String): Int {
     val sanitizedVersionName = versionName.substringBefore("+")
@@ -49,6 +54,16 @@ android {
             enableV1Signing = true
             enableV2Signing = true
         }
+        if (releaseSigningFile.exists()) {
+            create("starflowRelease") {
+                storeFile = rootProject.file(requireNotNull(releaseSigning.getProperty("storeFile")))
+                storePassword = releaseSigning.getProperty("storePassword")
+                keyAlias = releaseSigning.getProperty("keyAlias")
+                keyPassword = releaseSigning.getProperty("keyPassword")
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
     }
 
     defaultConfig {
@@ -68,9 +83,17 @@ android {
                 abiFilters.clear()
                 abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
             }
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("starflowRelease")
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name == "validateSigningRelease" || name == "packageRelease") {
+        doFirst {
+            check(releaseSigningFile.exists()) {
+                "Configure android/key.properties with the existing signing identity; release never falls back to a generated debug key."
+            }
         }
     }
 }

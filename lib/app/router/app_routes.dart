@@ -15,6 +15,7 @@ abstract final class AppRoutes {
   static const favorites = AppRouteSpec(name: 'favorites', path: '/favorites');
   static const library = AppRouteSpec(name: 'library', path: '/library');
   static const settings = AppRouteSpec(name: 'settings', path: '/settings');
+  static const liveTv = AppRouteSpec(name: 'live-tv', path: '/live-tv');
   static const homeEditor =
       AppRouteSpec(name: 'home-editor', path: '/home-editor');
   static const homeModuleList =
@@ -38,6 +39,7 @@ abstract final class AppRoutes {
     favorites,
     library,
     settings,
+    liveTv,
   ];
 
   static const all = <AppRouteSpec>[

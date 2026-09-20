@@ -28,4 +28,13 @@ class NativeEpisodePickerNavigationTest {
         assertEquals(30, episodePickerNeighbor(29, 65, false, 1))
         assertEquals(29, episodePickerNeighbor(30, 65, false, -1))
     }
+
+    @Test fun `only the first overall row exits upward for season selection`() {
+        assertEquals(-1, episodePickerNeighbor(0, 65, false, -1))
+        for (column in 0..3) {
+            assertEquals(column - 4, episodePickerNeighbor(column, 65, true, -4))
+            assertEquals(column, episodePickerNeighbor(4 + column, 65, true, -4))
+            assertEquals(28 + minOf(column, 1), episodePickerNeighbor(30 + column, 65, true, -4))
+        }
+    }
 }

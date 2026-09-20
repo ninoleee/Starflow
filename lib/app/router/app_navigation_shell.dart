@@ -90,6 +90,13 @@ const _navigationItems = <_NavigationItemData>[
     icon: Icons.tune_outlined,
     selectedIcon: Icons.tune_rounded,
   ),
+  _NavigationItemData(
+    id: kNavigationDestinationLiveTv,
+    branchIndex: 5,
+    label: '直播',
+    icon: Icons.live_tv_outlined,
+    selectedIcon: Icons.live_tv,
+  ),
 ];
 
 class AppNavigationShell extends ConsumerStatefulWidget {
@@ -340,8 +347,10 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell>
       appSettingsProvider
           .select((settings) => settings.navigationDestinationIds),
     );
-    final visibleNavigationItems = _navigationItems
-        .where((item) => visibleNavigationIds.contains(item.id))
+    final visibleNavigationItems = normalizeNavigationDestinationIds(
+      visibleNavigationIds,
+    )
+        .map((id) => _navigationItems.firstWhere((item) => item.id == id))
         .toList(growable: false);
     final navigationAnimationDuration = navigationAnimationEnabled
         ? const Duration(milliseconds: 220)

@@ -1,5 +1,5 @@
+import 'package:starflow/core/logging/app_logger.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:starflow/core/utils/metadata_search_trace.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
@@ -31,17 +31,6 @@ class MetadataMatchResolver {
     StackTrace? lastStackTrace;
     var hadDefinitiveNoMatch = false;
     var attemptedProviders = 0;
-    metadataSearchTrace(
-      'resolver.match.start',
-      fields: <String, Object?>{
-        'query': request.query,
-        'doubanId': request.doubanId,
-        'imdbId': request.imdbId,
-        'year': request.year,
-        'preferSeries': request.preferSeries,
-        'providers': providers.map((item) => item.name).join('/'),
-      },
-    );
     for (final provider in providers) {
       final attempt = switch (provider) {
         MetadataMatchProvider.tmdb =>
@@ -71,14 +60,6 @@ class MetadataMatchResolver {
       Error.throwWithStackTrace(lastError, lastStackTrace);
     }
 
-    metadataSearchTrace(
-      'resolver.match.no-result',
-      fields: <String, Object?>{
-        'query': request.query,
-        'doubanId': request.doubanId,
-        'imdbId': request.imdbId,
-      },
-    );
     return null;
   }
 
@@ -99,17 +80,6 @@ class MetadataMatchResolver {
     }
     final imdbId = request.imdbId.trim().toLowerCase();
     final mode = imdbId.isNotEmpty ? 'imdbId' : 'title';
-    metadataSearchTrace(
-      'resolver.provider.start',
-      fields: <String, Object?>{
-        'provider': MetadataMatchProvider.tmdb.name,
-        'mode': mode,
-        'query': request.query,
-        'imdbId': imdbId,
-        'year': request.year,
-        'preferSeries': request.preferSeries,
-      },
-    );
     try {
       final match = imdbId.isNotEmpty
           ? await _tmdbMetadataClient.matchByImdbId(
@@ -124,42 +94,20 @@ class MetadataMatchResolver {
               preferSeries: request.preferSeries,
             );
       if (match == null) {
-        metadataSearchTrace(
-          'resolver.provider.no-match',
+        return const _ResolverAttempt.noMatch();
+      }
+      final result = _mapTmdbMatch(match);
+      return _ResolverAttempt.matched(result);
+    } catch (error, stackTrace) {
+      appLogError('metadata', 'resolver.provider.failed',
           fields: <String, Object?>{
             'provider': MetadataMatchProvider.tmdb.name,
             'mode': mode,
             'query': request.query,
             'imdbId': imdbId,
           },
-        );
-        return const _ResolverAttempt.noMatch();
-      }
-      final result = _mapTmdbMatch(match);
-      metadataSearchTrace(
-        'resolver.provider.match',
-        fields: <String, Object?>{
-          'provider': MetadataMatchProvider.tmdb.name,
-          'mode': mode,
-          'query': request.query,
-          'title': result.title,
-          'imdbId': result.imdbId,
-          'tmdbId': result.tmdbId,
-        },
-      );
-      return _ResolverAttempt.matched(result);
-    } catch (error, stackTrace) {
-      metadataSearchTrace(
-        'resolver.provider.failed',
-        fields: <String, Object?>{
-          'provider': MetadataMatchProvider.tmdb.name,
-          'mode': mode,
-          'query': request.query,
-          'imdbId': imdbId,
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
+          error: error,
+          stackTrace: stackTrace);
       return _ResolverAttempt.failed(error, stackTrace);
     }
   }
@@ -173,18 +121,6 @@ class MetadataMatchResolver {
     }
     final doubanId = request.doubanId.trim();
     final mode = doubanId.isNotEmpty ? 'doubanId' : 'title';
-    metadataSearchTrace(
-      'resolver.provider.start',
-      fields: <String, Object?>{
-        'provider': MetadataMatchProvider.wmdb.name,
-        'mode': mode,
-        'query': request.query,
-        'doubanId': doubanId,
-        'year': request.year,
-        'preferSeries': request.preferSeries,
-        'firstActor': request.actors.isEmpty ? '' : request.actors.first,
-      },
-    );
     try {
       final match = doubanId.isNotEmpty
           ? await _wmdbMetadataClient.matchByDoubanId(doubanId: doubanId)
@@ -195,42 +131,19 @@ class MetadataMatchResolver {
               actors: request.actors,
             );
       if (match == null) {
-        metadataSearchTrace(
-          'resolver.provider.no-match',
+        return const _ResolverAttempt.noMatch();
+      }
+      return _ResolverAttempt.matched(match);
+    } catch (error, stackTrace) {
+      appLogError('metadata', 'resolver.provider.failed',
           fields: <String, Object?>{
             'provider': MetadataMatchProvider.wmdb.name,
             'mode': mode,
             'query': request.query,
             'doubanId': doubanId,
           },
-        );
-        return const _ResolverAttempt.noMatch();
-      }
-      metadataSearchTrace(
-        'resolver.provider.match',
-        fields: <String, Object?>{
-          'provider': MetadataMatchProvider.wmdb.name,
-          'mode': mode,
-          'query': request.query,
-          'doubanId': match.doubanId,
-          'imdbId': match.imdbId,
-          'tmdbId': match.tmdbId,
-          'title': match.title,
-        },
-      );
-      return _ResolverAttempt.matched(match);
-    } catch (error, stackTrace) {
-      metadataSearchTrace(
-        'resolver.provider.failed',
-        fields: <String, Object?>{
-          'provider': MetadataMatchProvider.wmdb.name,
-          'mode': mode,
-          'query': request.query,
-          'doubanId': doubanId,
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
+          error: error,
+          stackTrace: stackTrace);
       return _ResolverAttempt.failed(error, stackTrace);
     }
   }

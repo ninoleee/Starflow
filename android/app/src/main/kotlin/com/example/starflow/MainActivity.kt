@@ -76,6 +76,9 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            "starflow/live_tv", LiveTvViewFactory(flutterEngine.dartExecutor.binaryMessenger, lifecycle)
+        )
         activeInstance = WeakReference(this)
 
         platformChannel = MethodChannel(
@@ -84,6 +87,20 @@ class MainActivity : FlutterActivity() {
         )
         platformChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
+                "readPlaybackMemory" -> {
+                    NativePlaybackMemoryStore.readShared(
+                        getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE)
+                    ) { raw -> runOnUiThread { result.success(raw) } }
+                }
+                "compareAndSetPlaybackMemory" -> {
+                    NativePlaybackMemoryStore.compareAndSetShared(
+                        getSharedPreferences(SHARED_PREFERENCES_NAME, Context.MODE_PRIVATE),
+                        call.argument<String>("expected"), call.argument<String>("value")
+                    ) { accepted, error -> runOnUiThread {
+                        if (error != null) result.error("storage", "Playback memory write failed", null)
+                        else result.success(accepted)
+                    } }
+                }
                 "getSystemBrightnessLevel" -> {
                     result.success(getSystemBrightnessLevel())
                 }

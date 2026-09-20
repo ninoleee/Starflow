@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:http/http.dart' as http;
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/network_failure.dart';
+import 'package:starflow/core/network/bounded_http_request.dart';
 
 typedef NetworkCircuitExceptionFactory = Object Function(
   String host,
@@ -54,7 +55,10 @@ class NetworkRequestGuard {
     return run<http.Response>(
       uri: uri,
       idempotent: true,
-      request: () => client.get(uri, headers: headers),
+      request: () => sendBoundedRequest(client, 'GET', uri,
+          headers: headers,
+          timeout: policy.requestTimeout,
+          maxBytes: 32 * 1024 * 1024),
       statusCodeOf: (response) => response.statusCode,
     );
   }

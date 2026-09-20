@@ -1,3 +1,4 @@
+import 'package:starflow/core/logging/app_logger.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -5,12 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
-import 'package:starflow/core/utils/subtitle_search_trace.dart';
 import 'package:starflow/features/playback/application/online_subtitle_search_request_builder.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/playback/data/subtitle_search_host_bridge.dart';
 import 'package:starflow/features/playback/domain/online_subtitle_structured_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
+import 'package:starflow/features/playback/domain/subtitle_operation.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
@@ -40,6 +41,13 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   String? _errorMessage;
   String? _busyResultId;
   int _searchGeneration = 0;
+  SubtitleOperation? _operation;
+
+  void _cancelOperation() {
+    _operation?.cancel();
+    _operation = null;
+    _searchGeneration++;
+  }
 
   @override
   void initState() {
@@ -50,18 +58,6 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     _availableSources =
         ref.read(appSettingsProvider).effectiveOnlineSubtitleSources;
     _selectedSources = _availableSources.toList(growable: false);
-    subtitleSearchTrace(
-      'page.init',
-      fields: {
-        'requestQuery': widget.request.query,
-        'requestTitle': widget.request.title,
-        'initialInput': _controller.text,
-        'availableSources':
-            _availableSources.map((item) => item.name).join('/'),
-        'standalone': widget.request.standalone,
-        'applyMode': widget.request.applyMode.name,
-      },
-    );
   }
 
   @override
@@ -70,7 +66,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     if (oldWidget.request == widget.request) {
       return;
     }
-    _searchGeneration++;
+    _cancelOperation();
     _busyResultId = null;
     _isSearching = false;
     _results = const [];
@@ -88,12 +84,13 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
 
   @override
   void dispose() {
-    _searchGeneration++;
+    _cancelOperation();
     _controller.dispose();
     super.dispose();
   }
 
   Future<bool> _handleClose() async {
+    _cancelOperation();
     if (!widget.request.standalone) {
       return true;
     }
@@ -104,55 +101,26 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   String _resolveInitialInput(SubtitleSearchRequest request) {
     final initialInput = request.initialInput.trim();
     if (initialInput.isNotEmpty) {
-      subtitleSearchTrace(
-        'page.resolve-initial-input',
-        fields: {
-          'source': 'initialInput',
-          'value': initialInput,
-        },
-      );
       return initialInput;
     }
     final title = request.title.trim();
     if (title.isNotEmpty) {
-      subtitleSearchTrace(
-        'page.resolve-initial-input',
-        fields: {
-          'source': 'title',
-          'value': title,
-        },
-      );
       return title;
     }
     final query = request.query.trim();
-    subtitleSearchTrace(
-      'page.resolve-initial-input',
-      fields: {
-        'source': 'query',
-        'value': query,
-      },
-    );
     return query;
   }
 
   Future<void> _performSearch() async {
     if (_isSearching || _busyResultId != null) return;
-    final generation = ++_searchGeneration;
+    _cancelOperation();
+    final operation = _operation = SubtitleOperation();
+    final generation = _searchGeneration;
     final query = _controller.text.trim();
-    subtitleSearchTrace(
-      'page.search.start',
-      fields: {
-        'query': query,
-        'selectedSources': _selectedSources.map((item) => item.name).join('/'),
-        'availableSources':
-            _availableSources.map((item) => item.name).join('/'),
-      },
-    );
     if (query.isEmpty) {
       if (!mounted) {
         return;
       }
-      subtitleSearchTrace('page.search.skip-empty-query');
       setState(() {
         _results = const [];
         _validatedSelectionsByResultId =
@@ -186,13 +154,6 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
         if (!mounted) {
           return;
         }
-        subtitleSearchTrace(
-          'page.search.skip-empty-sources',
-          fields: {
-            'availableSources':
-                _availableSources.map((item) => item.name).join('/'),
-          },
-        );
         setState(() {
           _results = const [];
           _isSearching = false;
@@ -238,20 +199,7 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
           sources: structuredSources,
           maxResults: settings.subtitleSearchMaxValidatedCandidates * 4,
           maxValidated: settings.subtitleSearchMaxValidatedCandidates,
-        );
-        subtitleSearchTrace(
-          'page.search.structured-finished',
-          fields: {
-            'query': query,
-            'sources': structuredSources.map((item) => item.name).join('/'),
-            'returned': candidates.length,
-            'ready': candidates.where((item) => item.canApply).length,
-            'deferredDownload': candidates
-                .where(
-                  (item) => item.status == SubtitleValidationStatus.skipped,
-                )
-                .length,
-          },
+          operation: operation,
         );
         for (final candidate in candidates) {
           final result = candidate.toSearchResult();
@@ -270,17 +218,6 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       if (!mounted || generation != _searchGeneration) {
         return;
       }
-      subtitleSearchTrace(
-        'page.search.finished',
-        fields: {
-          'query': query,
-          'count': nextResults.length,
-          'ready': validatedSelections.length,
-          'downloadable': nextResults.where((item) => item.canDownload).length,
-          'autoLoadable': nextResults.where((item) => item.canAutoLoad).length,
-          'sample': _pageSubtitleResultSample(nextResults),
-        },
-      );
       setState(() {
         _results = nextResults;
         _validatedSelectionsByResultId = validatedSelections;
@@ -292,16 +229,14 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       if (!mounted || generation != _searchGeneration) {
         return;
       }
-      subtitleSearchTrace(
-        'page.search.failed',
-        fields: {
-          'query': query,
-          'selectedSources':
-              _selectedSources.map((item) => item.name).join('/'),
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
+      appLogError('subtitle', 'page.search.failed',
+          fields: {
+            'query': query,
+            'selectedSources':
+                _selectedSources.map((item) => item.name).join('/'),
+          },
+          error: error,
+          stackTrace: stackTrace);
       setState(() {
         _results = const [];
         _validatedSelectionsByResultId =
@@ -317,91 +252,59 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
   Future<void> _handleDownload(SubtitleSearchResult result) async {
     final generation = _searchGeneration;
     if (_busyResultId != null || _isSearching) {
-      subtitleSearchTrace(
-        'page.download.skip-busy',
-        fields: {
-          'currentBusyResultId': _busyResultId,
-          'nextResultId': result.id,
-        },
-      );
       return;
     }
     final validatedSelection = _validatedSelectionsByResultId[result.id];
     if (validatedSelection != null) {
-      subtitleSearchTrace(
-        'page.download.use-validated-selection',
-        fields: {
-          'resultId': result.id,
-          'source': result.source.name,
-          'subtitleFilePath': validatedSelection.subtitleFilePath ?? '',
-        },
-      );
       await _finishSelection(
         result: result,
         selection: validatedSelection,
       );
       return;
     }
-    final candidate = _structuredCandidatesByResultId[result.id];
-    if (candidate != null) {
-      subtitleSearchTrace(
-        'page.download.use-raw-result',
-        fields: {
-          'resultId': result.id,
-          'source': result.source.name,
-          'validationStatus': candidate.status.name,
-          'failureReason': candidate.failureReason,
-        },
-      );
-    }
     if (widget.request.applyMode == SubtitleSearchApplyMode.downloadAndApply &&
         !result.canAutoLoad) {
-      subtitleSearchTrace(
-        'page.download.skip-not-auto-loadable',
-        fields: {
-          'resultId': result.id,
-          'source': result.source.name,
-          'packageKind': result.packageKind.name,
-        },
-      );
       _showMessage('当前先支持自动加载 ZIP / SRT / ASS / SSA / VTT 字幕');
       return;
     }
 
-    subtitleSearchTrace(
-      'page.download.start',
-      fields: {
-        'resultId': result.id,
-        'source': result.source.name,
-        'title': result.title,
-        'packageKind': result.packageKind.name,
-      },
-    );
     setState(() {
       _busyResultId = result.id;
     });
+    _operation?.cancel();
+    final operation = _operation = SubtitleOperation();
+    SubtitleDownloadResult? downloadResult;
+    var accepted = false;
     try {
-      final downloadResult =
-          await ref.read(onlineSubtitleRepositoryProvider).download(result);
+      downloadResult = await ref
+          .read(onlineSubtitleRepositoryProvider)
+          .download(result, operation: operation);
       if (!mounted || generation != _searchGeneration) return;
       final selection = SubtitleSearchSelection(
         cachedPath: downloadResult.cachedPath,
         displayName: downloadResult.displayName,
         subtitleFilePath: downloadResult.subtitleFilePath,
       );
-      await _finishSelection(result: result, selection: selection);
+      accepted = await _finishSelection(result: result, selection: selection);
     } catch (error, stackTrace) {
-      subtitleSearchTrace(
-        'page.download.failed',
-        fields: {
-          'resultId': result.id,
-          'source': result.source.name,
-        },
-        error: error,
-        stackTrace: stackTrace,
-      );
+      if (operation.isCancelled) return;
+      appLogError('subtitle', 'page.download.failed',
+          fields: {
+            'resultId': result.id,
+            'source': result.source.name,
+          },
+          error: error,
+          stackTrace: stackTrace);
       if (mounted && generation == _searchGeneration) _showMessage('$error');
     } finally {
+      if (!accepted) {
+        try {
+          await downloadResult?.discard?.call();
+        } catch (error, stackTrace) {
+          appLogError('subtitle', 'page.download.cleanup.failed',
+              error: error, stackTrace: stackTrace);
+        }
+      }
       if (mounted && generation == _searchGeneration) {
         setState(() {
           _busyResultId = null;
@@ -410,42 +313,30 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     }
   }
 
-  Future<void> _finishSelection({
+  Future<bool> _finishSelection({
     required SubtitleSearchResult result,
     required SubtitleSearchSelection selection,
   }) async {
     if (widget.request.applyMode == SubtitleSearchApplyMode.downloadAndApply &&
         !selection.canApply) {
       _showMessage('字幕已缓存，但当前结果暂不能直接挂载播放');
-      return;
+      return false;
     }
     if (!mounted) {
-      return;
+      return false;
     }
     if (widget.request.standalone) {
+      final generation = _searchGeneration;
       final handled = await SubtitleSearchHostBridge.finishSelection(selection);
-      subtitleSearchTrace(
-        'page.download.finished',
-        fields: {
-          'resultId': result.id,
-          'handledByHost': handled,
-          'subtitleFilePath': selection.subtitleFilePath ?? '',
-        },
-      );
-      if (!handled && mounted) {
+      if (handled) return true;
+      if (mounted && generation == _searchGeneration) {
         Navigator.of(context).pop(selection);
+        return true;
       }
-      return;
+      return false;
     }
-    subtitleSearchTrace(
-      'page.download.finished',
-      fields: {
-        'resultId': result.id,
-        'handledByHost': false,
-        'subtitleFilePath': selection.subtitleFilePath ?? '',
-      },
-    );
     Navigator.of(context).pop(selection);
+    return true;
   }
 
   void _showMessage(String message) {
@@ -467,7 +358,11 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
     return PopScope<Object?>(
       canPop: !request.standalone,
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop || !request.standalone) {
+        if (didPop) {
+          _cancelOperation();
+          return;
+        }
+        if (!request.standalone) {
           return;
         }
         await _handleClose();
@@ -566,16 +461,6 @@ class _SubtitleSearchPageState extends ConsumerState<SubtitleSearchPage> {
       itemCount: _results.length,
     );
   }
-}
-
-String _pageSubtitleResultSample(List<SubtitleSearchResult> results) {
-  if (results.isEmpty) {
-    return '';
-  }
-  return results
-      .take(3)
-      .map((item) => '${item.providerLabel}:${item.title}')
-      .join(' | ');
 }
 
 class _SearchHeader extends StatelessWidget {
