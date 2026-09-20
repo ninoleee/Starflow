@@ -22,7 +22,7 @@ function Get-ResolvedOutputDir([string]$path) {
 }
 
 function Update-PubspecVersion([string]$pubspecPath) {
-  $version = & dart (Join-Path $PSScriptRoot "../tool/release_version.dart") $pubspecPath
+  $version = & $dart (Join-Path $PSScriptRoot "../tool/release_version.dart") $pubspecPath
   if ($LASTEXITCODE -ne 0) { throw "Release version update failed" }
   return $version
 }
@@ -31,7 +31,7 @@ function Set-EmbeddedSettings(
   [string]$repoRoot,
   [string]$settingsPath
 ) {
-  $embeddedDir = Join-Path $repoRoot "assets\\bootstrap"
+  $embeddedDir = Join-Path $repoRoot "assets/bootstrap"
   $embeddedPath = Join-Path $embeddedDir "embedded_settings.json"
   New-Item -ItemType Directory -Force -Path $embeddedDir | Out-Null
 
@@ -63,28 +63,56 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $pubspecPath = Join-Path $repoRoot "pubspec.yaml"
 $resolvedOutputDir = Get-ResolvedOutputDir $OutputDir
 $embeddedPath = $null
+$bootstrapPath = Join-Path $repoRoot "assets/bootstrap/embedded_settings.json"
+$originalSettings = $null
+$bootstrapChanged = $false
+$staging = $null
+
+if ([string]::IsNullOrWhiteSpace($env:STARFLOW_FLUTTER_SDK) -and (Test-Path (Join-Path $repoRoot ".fvm/flutter_sdk"))) {
+  $env:STARFLOW_FLUTTER_SDK = Join-Path $repoRoot ".fvm/flutter_sdk"
+}
+$flutterName = if ($env:OS -eq "Windows_NT") { "flutter.bat" } else { "flutter" }
+$dartName = if ($env:OS -eq "Windows_NT") { "dart.bat" } else { "dart" }
+$flutter = if ([string]::IsNullOrWhiteSpace($env:STARFLOW_FLUTTER_SDK)) {
+  (Get-Command $flutterName -ErrorAction Stop).Source
+} else {
+  Join-Path $env:STARFLOW_FLUTTER_SDK "bin/$flutterName"
+}
+$flutter = (Resolve-Path -LiteralPath $flutter).Path
+$dart = Join-Path (Split-Path $flutter) $dartName
+$env:STARFLOW_FLUTTER_SDK = Split-Path (Split-Path $flutter)
+$env:PATH = "$(Split-Path $flutter)$([IO.Path]::PathSeparator)$env:PATH"
+if (-not [string]::IsNullOrWhiteSpace($SettingsJsonPath)) {
+  $SettingsJsonPath = (Resolve-Path -LiteralPath $SettingsJsonPath).Path
+}
 
 Push-Location $repoRoot
 try {
-  & dart (Join-Path $repoRoot "tool/verify_tv_release.dart") --preflight
+  $preflightArgs = @((Join-Path $repoRoot "tool/verify_tv_release.dart"), "--preflight")
+  if (-not [string]::IsNullOrWhiteSpace($SettingsJsonPath)) { $preflightArgs += $SettingsJsonPath }
+  & $dart @preflightArgs
   if ($LASTEXITCODE -ne 0) { throw "TV release preflight failed" }
-  if (-not [string]::IsNullOrWhiteSpace($SettingsJsonPath) -and -not (Test-Path -LiteralPath $SettingsJsonPath)) {
-    throw "Settings JSON not found: $SettingsJsonPath"
+  if (Test-Path -LiteralPath $bootstrapPath) {
+    $originalSettings = [IO.File]::ReadAllBytes($bootstrapPath)
   }
+  if (-not [string]::IsNullOrWhiteSpace($SettingsJsonPath)) {
+    $staging = [IO.Path]::GetTempFileName()
+    Copy-Item -LiteralPath $SettingsJsonPath -Destination $staging -Force
+    $SettingsJsonPath = $staging
+  }
+  $bootstrapChanged = $true
+  $embeddedPath = Set-EmbeddedSettings $repoRoot $SettingsJsonPath
   $version = Update-PubspecVersion $pubspecPath
   $buildDate = Get-Date -Format "yyyy-MM-dd"
-  $embeddedPath = Set-EmbeddedSettings $repoRoot $SettingsJsonPath
 
-  if (-not $SkipBuild) {
-    flutter build apk `
-      --release `
-      --target-platform android-arm,android-arm64 `
-      --android-skip-build-dependency-validation `
-      --build-name $version `
-      --dart-define "STARFLOW_BUILD_DATE=$buildDate"
-    if ($LASTEXITCODE -ne 0) {
-      throw "flutter build apk failed with exit code $LASTEXITCODE"
-    }
+  & $flutter build apk `
+    --release `
+    --target-platform android-arm,android-arm64 `
+    --android-skip-build-dependency-validation `
+    --build-name $version `
+    --dart-define "STARFLOW_BUILD_DATE=$buildDate"
+  if ($LASTEXITCODE -ne 0) {
+    throw "flutter build apk failed with exit code $LASTEXITCODE"
   }
 
   $namePrefix = if ([string]::IsNullOrWhiteSpace($SettingsJsonPath)) {
@@ -93,7 +121,7 @@ try {
     "starflow-tv-config"
   }
   $targetName = "$namePrefix-$version.apk"
-  $sourceApk = Join-Path $repoRoot "build\\app\\outputs\\flutter-apk\\app-release.apk"
+  $sourceApk = Join-Path $repoRoot "build/app/outputs/flutter-apk/app-release.apk"
   $targetApk = Join-Path $resolvedOutputDir $targetName
 
   if (-not (Test-Path -LiteralPath $sourceApk)) {
@@ -102,7 +130,7 @@ try {
 
   $verifyArgs = @((Join-Path $repoRoot "tool/verify_tv_release.dart"), $sourceApk, $version)
   if (-not [string]::IsNullOrWhiteSpace($SettingsJsonPath)) { $verifyArgs += $SettingsJsonPath }
-  & dart @verifyArgs
+  & $dart @verifyArgs
   if ($LASTEXITCODE -ne 0) { throw "TV release artifact verification failed" }
   Copy-Item -LiteralPath $sourceApk -Destination $targetApk -Force
   Write-Output "Version=$version"
@@ -110,6 +138,10 @@ try {
   Write-Output "APK=$targetApk"
 }
 finally {
-  Remove-EmbeddedSettings $embeddedPath
+  if ($bootstrapChanged) {
+    Remove-EmbeddedSettings $bootstrapPath
+    if ($null -ne $originalSettings) { [IO.File]::WriteAllBytes($bootstrapPath, $originalSettings) }
+  }
+  if ($null -ne $staging) { Remove-Item -LiteralPath $staging -Force }
   Pop-Location
 }

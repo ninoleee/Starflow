@@ -2003,7 +2003,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
   @override
   Widget build(BuildContext context) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    final pageRenderingEnabled = TickerMode.valuesOf(context).enabled;
+    final pageRenderingEnabled = TickerMode.of(context);
     final slimDetailHeroEnabled = ref.watch(
       appSettingsProvider.select(
         (settings) => settings.effectiveSlimDetailHeroEnabled(

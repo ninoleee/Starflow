@@ -2,6 +2,13 @@
 
 核对日期：2026-09-20。本文负责主机侧 smoke 计时、可重复运行方法及自动化回归证据。电视、手机和桌面实际界面的测量方法见 [真机性能验证](performance-device.md)，组件关系见 [架构说明](architecture.md)。下文历史代码优化只说明工作量与策略变化，不代表已经测得设备收益。
 
+## 2026-09-20 订阅保存按钮焦点配色
+
+- `flutter test test/live_source_save_focus_test.dart test/live_sources_layout_test.dart test/live_accent_test.dart --reporter expanded`：3 文件共 52 项通过，其中新增 32 项覆盖全部 8 种强调色、添加／编辑订阅及 TV／非 TV；验证 TV 低亮度底色、白色描边的实际绘制、上下移焦和按钮尺寸稳定性，非 TV 保留强调色。
+- `dart analyze lib/features/live_tv/presentation/live_sources_page.dart test/live_source_save_focus_test.dart`：无问题。
+- 扩展检查未计为通过：运行时工作区的 `live_playlist_transfer_page_test.dart` 有 4 项失败（保存按钮匹配到多个元素及后台恢复状态转换断言）；`settings_text_input_field_test.dart` 因文件末尾存在 import 未通过编译。共用输入组件已修正 `const Semantics` 编译错误；对该组件分析另有一条既有 if 缺少花括号的 info。工作区扫码输入相关改动同期仍在更新，上述为执行时快照，不代表当前全部输入流程验收。
+- 未执行真实 TV／遥控器验收，未生成 APK 或调整版本。此处为主机组件回归，不是设备性能测量。
+
 ## 计时含义
 
 `tool/perf/run_perf_baselines.dart` 串行启动 `flutter test` 子进程，用 wall-clock 记录整个子进程耗时，包含工具启动、可能的依赖检查、编译与测试执行。名称中的 `first_screen` 或 `player_open` 是场景标识，不是设备首屏 / 视频首帧时间，也不是远程服务吞吐量。
@@ -17,6 +24,201 @@
 默认每场景运行 5 次；`--scenario` 接受逗号分隔的场景 ID。每次保存原始 `runsMs`，p50 / p95 使用排序后的 nearest-rank（`ceil(n * p) - 1`）。只有 1 个样本时两者相等，5 个样本的 p95 实际就是最大值，不宜据此宣称稳定尾延迟。
 
 ## 当前验证记录
+
+### 2026-09-20 直播可见频道自动补测
+
+- 固定 Flutter 3.38.10／Dart 3.10.9，以下 10 文件最终共 **124 项主机测试通过**，定向静态分析无问题。不是完整测试套件或真机验收。没有运行发布预设、递增版本或更新此前 iCloud 安装包。
+
+```sh
+.fvm/flutter_sdk/bin/flutter test --no-pub --reporter expanded test/live_channel_probe_test.dart test/live_channel_probe_controller_test.dart test/live_channel_probe_page_test.dart test/live_probe_network_test.dart test/network_proxy_config_test.dart test/live_home_layout_test.dart test/live_tv_page_test.dart test/live_current_programme_test.dart test/live_navigation_resume_test.dart test/live_failure_logging_test.dart
+.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/application/live_channel_probe_controller.dart lib/features/live_tv/presentation/live_tv_page.dart lib/features/live_tv/presentation/live_probe_label.dart test/live_channel_probe_controller_test.dart test/live_channel_probe_page_test.dart
+```
+
+- 覆盖同屏到期刷新、单调度定时器、成功 5 分钟、失败 45／90／180／300 秒退避及成功重置、刷新保留旧结果、离屏取消刷新、暂停清除定时器、恢复只补测可见过期项、路由返回复用有效缓存、播放器返回补测、手动暂停不被筛选／网络解除、后台（含其他路由覆盖期间）返回失效、离线跨后台恢复仍禁止准入。既有两路并发、慢清理占用名额与旧代结果隔离复测通过。
+- 使用 `--dart-define=LIVE_TV_REVIEW=true` 单独运行检测页面的 `initial probe labels fit` 六个尺寸／平台用例，均通过。检查 `build/live-tv-review/probe-refresh-320-false.png` 与 `probe-refresh-1280-true.png`，刷新图标、台名及旧结果无重叠；截图是合成数据，收藏筛选仍有测试字体缺字，不代表真实设备字体或性能。
+- 首页存活期间的系统网络订阅仅被动收事件，不是后台检测；离页／停止无检测定时器或新 HTTP 请求。同类型 Wi-Fi 切换仍依赖系统报告，后台或监听异常后返回保守失效。未验证真实源、网络切换、设备吞吐或 TV 帧率。
+
+### 2026-09-20 直播检测调度与缓存优化
+
+- 以下为自动补测改动前的历史快照；“仅重入 TTL／返回不重开”等旧预期已被上方记录取代，不作为当前行为验收。
+- 使用固定 Flutter 3.38.10／Dart 3.10.9；新增 `connectivity_plus 6.1.5` 系统接口监听，`clock` 显式声明用于可控时钟，通过该 SDK 的 pub get 更新依赖及桌面插件注册。未运行 clean、发布预设、递增版本或生成交付 APK。
+- 以下 10 文件共 **116 项主机测试通过**，包含横屏双列布局。新增覆盖 200ms 准入边界、短暂可见不请求、停止清除等待、TV 焦点优先、成功 5 分钟／失败 45 秒仅重入过期、元数据快照保留任务、线路变化／停用取消、离线恢复、代理变更与不重启停止会话、系统事件去重／取消订阅。初轮一项用例误把早已可见的排队频道作为新入屏频道，修正 fixture 后重跑通过。
+
+```sh
+.fvm/flutter_sdk/bin/flutter test --no-pub --concurrency=1 --reporter expanded test/live_channel_probe_test.dart test/live_channel_probe_controller_test.dart test/live_channel_probe_page_test.dart test/live_probe_network_test.dart test/network_proxy_config_test.dart test/live_home_layout_test.dart test/live_tv_page_test.dart test/live_current_programme_test.dart test/live_navigation_resume_test.dart test/live_failure_logging_test.dart
+.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/application/live_channel_probe_controller.dart lib/features/live_tv/data/live_channel_probe.dart lib/features/live_tv/data/live_probe_network.dart lib/features/live_tv/presentation/live_tv_page.dart lib/core/network/network_proxy_runtime.dart test/live_channel_probe_controller_test.dart test/live_channel_probe_page_test.dart test/live_channel_probe_test.dart test/network_proxy_config_test.dart test/live_probe_network_test.dart
+```
+
+- 定向静态分析无问题。清理测试验证慢清理报警后仍未完成、客户端已关闭但继续等待响应流、完成日志仅含耗时／取消字段；loopback 覆盖等待头／正文时取消。挂起测试由受控 completer 最终释放，不证明任意操作系统故障可在有限时间清理。
+- 在 `android/` 执行 `./gradlew :connectivity_plus:compileDebugJavaWithJavac -Pandroid-skip-build-dependency-validation=true --console=plain` 成功。插件 minSdk 19 与应用 API 23 目标兼容；构建自动安装所需 Android SDK Platform 34，输出本机 build-tools 36.1.0 `package.xml` 损坏告警与 Gradle 弃用告警，最终退出码 0。仅编译插件，不是完整 APK、iOS／桌面原生构建或真机网络切换验证。
+- 系统连接类型通知不是互联网可达性或完整网络身份检测；同类型 Wi-Fi 热切换未报告时依靠后续重入 TTL／前台恢复失效／手动重测。本轮没有新增截图或真实吞吐、TV 帧率测量；历史截图与性能数据不自动升级为当前设备验收。
+
+### 2026-09-20 直播首页横屏分栏
+
+- 在当前横屏分栏与可见范围检测合并的工作区，固定 Flutter 3.38.10／Dart 3.10.9 执行以下 5 文件，共 **73 项主机测试通过**。首次运行的布局草稿误将 Android 内核下拉计作分组下拉；补充分组控件 key 并修正匹配后重跑通过，不改内核选择行为。
+
+```sh
+.fvm/flutter_sdk/bin/flutter test --no-pub --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_home_layout_test.dart test/live_channel_probe_page_test.dart test/live_tv_page_test.dart test/live_current_programme_test.dart test/live_navigation_resume_test.dart
+.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_tv_page.dart test/live_home_layout_test.dart
+```
+
+- 布局专项覆盖 390×844、768×1024 竖屏及 640×360、844×390、1280×720 横屏，均含 TV／非 TV；检查左分组右频道、独立滚动、长名称／1.5 倍字号、分组切换、旋转保留筛选与整理状态、分组删除／空库回退，以及模拟遥控器上下选组和左右跨列。检测、当前节目、导航及原页面交互在分栏后复测通过。
+- 定向静态分析无问题。检查 `build/live-tv-review/library-390.png`、`library-640.png`、`library-1280.png`，确认竖屏下拉保留、横屏分栏及文字／操作无重叠。截图使用合成频道和测试字体，收藏筛选／历史按钮仍有测试字体缺字，不作为真实设备字体或遥控器验收。
+- 未运行发布预设、构建 APK、递增版本或执行真实源／真机测量。与其他历史批次重叠，不累加为全仓测试总数。
+
+### 2026-09-20 直播可见范围检测与取消
+
+- 验证时点：本批完成于后续“横屏首页两列分组”改动之前，不自动覆盖该并行布局修改；后续布局需重跑可见范围和分组交互测试。
+- 固定 Flutter 3.38.10／Dart 3.10.9 下，以下 6 文件共 **78 项主机测试通过**，其中 HTTP 服务 15 项、可见范围调度 6 项、首页检测交互 26 项。此批包含首次自动检测接入，与旧记录不累加；未运行 pub get、clean、发布预设或递增版本。
+
+```sh
+.fvm/flutter_sdk/bin/flutter test --no-pub --concurrency=1 --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_channel_probe_test.dart test/live_channel_probe_controller_test.dart test/live_channel_probe_page_test.dart test/live_tv_page_test.dart test/live_current_programme_test.dart test/live_navigation_resume_test.dart
+.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/data/live_channel_probe.dart lib/features/live_tv/application/live_channel_probe_controller.dart lib/features/live_tv/presentation/live_tv_page.dart lib/features/live_tv/presentation/live_probe_viewport.dart test/live_channel_probe_controller_test.dart test/live_channel_probe_page_test.dart test/live_channel_probe_test.dart
+```
+
+- 定向静态分析无问题。80 频道手机／TV widget 场景验证首次请求集合等于视口相交行，排除已构建但离屏的缓存行；滚动补测、返回复用结果、搜索切换、分组菜单暂停／关闭后继续均通过。检测结果仅局部刷新，未把工作量下降换算为设备帧率收益。
+- 取消回归覆盖离屏移除排队任务、清理完成前保留两路名额、快速停止／重开不混入旧结果、后台／路由／非活动 tab／销毁取消、不自动重启、重复播放点击合并且开播等待清理。HTTP 测试验证取消时立即关闭客户端并等待异步响应流清理；真实 loopback 覆盖等待响应头时取消和首包即终止，不代表所有真实源／操作系统清理耗时都有严格上限。
+- 首次自动检测覆盖空／隐藏／停用／无线路列表延后、等待订阅检查成功或失败、检查期间手动检测、尚未启动时离页不发请求。检查新生成的 `build/live-tv-review/probe-320-false.png` 与 `probe-1280-true.png`，台名／耗时／收藏无重叠；截图为合成结果，既有收藏筛选文本受测试字体缺字影响。没有真实源吞吐、播放器解码或 TV 遥控器验收，不是 APK 交付。
+
+### 2026-09-20 直播首页连通检测
+
+- 以下为首次自动检测前的历史快照：首页仅手动启动的旧预期已被后续实现取代，此批结果不作为自动触发的验证证据。
+- 使用 `.fvmrc` 固定的 Flutter 3.38.10／Dart 3.10.9，以下 6 文件共 **62 项主机测试通过**，其中新增检测服务 14 项、队列 3 项、首页交互 14 项；与既有页面／节目／导航批次重叠，不累加为全仓通过数。
+
+```sh
+.fvm/flutter_sdk/bin/flutter test --no-pub --concurrency=1 --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_channel_probe_test.dart test/live_channel_probe_controller_test.dart test/live_channel_probe_page_test.dart test/live_tv_page_test.dart test/live_current_programme_test.dart test/live_navigation_resume_test.dart
+.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/data/live_channel_probe.dart lib/features/live_tv/application/live_channel_probe_controller.dart lib/features/live_tv/presentation/live_probe_label.dart lib/features/live_tv/presentation/live_tv_page.dart test/live_channel_probe_test.dart test/live_channel_probe_controller_test.dart test/live_channel_probe_page_test.dart
+```
+
+- 服务覆盖真实本机 HTTP 首包返回后主动结束、等待响应头时取消，以及模拟 HTTP 错误、空响应、非媒体类型、头部／正文超时、迟到响应清理、跳转上限／降级拒绝与跨源凭据剥离。队列覆盖只测首选线路、最多两路并发、无自动开始、停止后丢弃迟到结果和地址／headers／线路变化失效。
+- 首页覆盖 320／390／1280 宽度、TV／非 TV，检查台名和数值同一行、手动开始／停止、筛选和快照变化取消、后台／路由／销毁取消、不自动重启、进入播放器前等待取消完成及重复点击合并。定向分析无问题；检查 `build/live-tv-review/probe-320-false.png` 和 `probe-1280-true.png`，结果紧邻台名，标题／结果／收藏操作无重叠。截图使用合成检测结果，部分既有筛选文字仍受测试字体缺字影响，不作为完整字体兼容验收。
+- 本次仅验证主机 HTTP、组件布局及 fake engine／mock 通道交互，不验证实际直播源、解码可播率、真实 TV 网络／遥控器或吞吐量。首包毫秒值不是持续速度，HLS 入口响应不证明分片、密钥和编码可用；未执行发布预设、构建 APK 或递增版本。
+
+### 2026-09-20 播放器选台移除台标
+
+- 检测到工作区依赖来自 Flutter 3.41.6；确认没有本仓库并行 Flutter 构建后，使用 `.fvm/flutter_sdk/bin/flutter pub get` 按 `.fvmrc` 恢复 Flutter 3.38.10／Dart 3.10.9 的依赖解析，锁文件由该 SDK 自动更新，未手工修改 package config 或执行 clean。
+- `.fvm/flutter_sdk/bin/flutter test --no-pub --concurrency=1 --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_channel_picker_test.dart test/live_tv_page_test.dart test/live_current_programme_test.dart test/live_logo_test.dart`：4 文件共 35 项通过。320／390／560 宽度下，原始或自定义台标 URL 均不触发 provider；100 频道列表经过滚动、切换分组、选台及重新打开后请求计数仍为零，组件树无 `LiveLogo`／`Image`。
+- 保留本地电视图标与行尾播放标记，当前节目文字、两倍字号固定行高、焦点、分层返回以及频道首页台标解码回归通过。`.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_channel_picker.dart test/live_channel_picker_test.dart test/live_tv_page_test.dart` 无问题，改动文件 `git diff --check` 通过。
+- 人工检查 `build/live-tv-review/channels-390.png` 与 `channels-1280.png`，无台标区域空槽，频道／当前节目与播放标记无重叠。以上为主机 widget／provider 计数与 fake engine 截图，不是实际媒体带宽、首帧或流畅度测量；不承诺播放器之外的频道首页也停止台标请求。本任务未做真机验收、未构建 APK 或调整版本。
+
+### 2026-09-20 选台当前节目
+
+使用 `.fvm/flutter_sdk` 固定 Flutter 3.38.10，以下 5 文件共 **58 项主机测试通过**，定向静态分析无问题：
+
+```sh
+.fvm/flutter_sdk/bin/flutter test --no-pub --dart-define=LIVE_TV_REVIEW=true --reporter expanded test/live_current_programme_test.dart test/live_channel_picker_test.dart test/live_tv_page_test.dart test/live_navigation_resume_test.dart test/live_playback_lifecycle_test.dart
+.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_widgets.dart lib/features/live_tv/presentation/live_tv_page.dart lib/features/live_tv/presentation/live_channel_picker.dart lib/features/live_tv/presentation/live_player_page.dart test/live_current_programme_test.dart test/live_tv_page_test.dart
+```
+
+新增 5 项验证来源 + 覆盖后的 EPG ID 匹配、同名 ID 来源隔离、过去／未来节目不能显示为正在播出、缺失占位、异步读取、分钟刷新、首页活动恢复、列表重开及前后台切换。保留页面持有旧查询时，播放器重开列表仍刷新；读库失败保留仍有效的缓存，后续分钟恢复。刷新不换台、不逐行查询完整节目、不抢焦点，关闭列表或后台不继续分钟批量查询。320／390／560px、两倍系统字号下检查 64dp 行高、文字无重叠及列表位置稳定。
+
+`build/live-tv-review/channels-390.png`、`channels-1280.png` 及 `library-320.png` 已检查当前节目文本与布局；首页截图既有部分按钮文字使用测试默认字体显示缺字，不作为完整字体验收。截图使用合成 EPG 和 fake engine 黑色画布，未请求实际订阅或执行真实解码，不代表真机遥控器／节目准确度验收。未运行发布预设、未改版本或交付 APK；本集合与其他批次重叠，不累加。
+
+### 2026-09-20 TV 直播隐藏顶部设置按钮
+
+- 固定 Flutter 3.38.10，`.fvm/flutter_sdk/bin/flutter test --no-pub --concurrency=1 --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_tv_page_test.dart test/live_channel_picker_test.dart`：2 文件共 21 项通过。覆盖 TV／非 TV、320／1280 宽度，断言 TV 无设置按钮且网速对齐右侧 12dp 内边距，非 TV 保留右侧按钮；关闭菜单后按钮可见性不变。
+- TV 通过遥控器菜单键、非 TV 通过点击设置按钮打开播放设置，选台／节目单、焦点与分层返回回归通过；菜单关闭不停止或重开播放。原有台标、长列表与跨列导航测试一并通过。
+- `.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_player_page.dart test/live_tv_page_test.dart`：无问题。人工检查 `build/live-tv-review/player-1280.png`，TV 顶栏右侧无设置按钮及空槽，内核与网速靠右排列，无重叠。
+- 此处为主机 widget 与 fake engine 截图，未做真机遥控器或原生播放验收，未构建 APK 或调整版本。
+
+### 2026-09-20 TV 直播隐藏顶部返回按钮
+
+- 固定 Flutter 3.38.10，`.fvm/flutter_sdk/bin/flutter test --no-pub --concurrency=1 --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_tv_page_test.dart test/live_navigation_resume_test.dart`：2 文件共 26 项通过。覆盖 TV／非 TV、320／1280 宽度，断言 TV 无“退出直播”按钮且标题从 12dp 内边距开始，非 TV 保留按钮；关闭菜单恢复顶栏后规则不变。
+- TV 遥控器完整返回按压周期仍可退出，非 TV 分别验证点击返回按钮和系统返回；菜单先关闭、不停止或重开播放的既有回归及菜单栏历史恢复一并通过。
+- `.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_player_page.dart test/live_tv_page_test.dart`：无问题。人工检查 `build/live-tv-review/player-1280.png`，TV 顶栏无返回按钮或空槽，频道信息与右侧设置／网速无重叠。
+- 主机 widget／mock 通道测试与 fake engine 截图，不是实际遥控器或原生播放验收；未构建 APK、未调整版本。
+
+### 2026-09-20 直播菜单透明度与选台台标
+
+以下是移除播放器选台台标及调整背景不透明度前的历史快照；其中加载台标的旧预期已被“不请求／不解码台标”的新回归取代，背景现为顶栏 20%／菜单 70% 不透明，下述旧数值不作为现行行为。
+
+- 固定 Flutter 3.38.10／Dart 3.10.9，执行 `.fvm/flutter_sdk/bin/flutter test --no-pub --concurrency=1 --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_logo_test.dart test/live_channel_picker_test.dart test/live_tv_page_test.dart`：3 文件共 30 项通过。
+- 新增 3 项覆盖 320／390／560 宽度的选台台标：自定义 URL 优先、真实 PNG 等比解码为 192×48、64×40 占位、无图回退、行尾播放标记、文字边界及点击台标选台。原有 100 频道定位、分组、方向焦点与返回测试一并通过。
+- 播放器回归在手机／TV、320／1280 宽度断言顶部背景 alpha 0.3（70% 透明）、设置／频道／节目单 alpha 0.5（50% 透明），设置内部不另绘不透明 Material，不使用整个菜单的 Opacity 淡化文字；保留局部返回后播放不停止、不重开。
+- `.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_logo.dart lib/features/live_tv/presentation/live_tv_page.dart lib/features/live_tv/presentation/live_channel_picker.dart lib/features/live_tv/presentation/live_player_page.dart test/live_logo_test.dart test/live_channel_picker_test.dart test/live_tv_page_test.dart`：无问题，改动文件 `git diff --check` 通过。
+- 人工检查 `build/live-tv-review/player-{390,1280}.png`、`channels-{390,1280}.png` 及 `settings-390.png`，确认布局／占位／当前标记无重叠。截图使用 fake engine 黑底与无台标频道，不能作为实际视频透出效果或真实台标网络的验收；PNG 解码由独立测试覆盖。本任务未做真机验证、未构建 APK 或调整版本。
+
+### 2026-09-20 直播台标比例
+
+- 后续占位加宽至 64×40 逻辑像素、解码上限同步为 192×120 后，再次执行下述两文件命令，22 项全部通过（与初次集合重叠，不累加）。横向 480×120 原图解码为 192×48；页面新增断言覆盖 320／390／1280 宽度下固定台标尺寸、12 逻辑像素文字间距及文字不侵入收藏按钮。对 `live_tv_page.dart`、`live_logo_test.dart` 和 `live_tv_page_test.dart` 的定向分析无问题，未做真机验收或发布构建。
+- 工具链与现有依赖均为 `.fvmrc` 固定的 Flutter 3.38.10／Dart 3.10.9；未切换 SDK，使用 `--no-pub`，未执行 clean 或发布预设。
+- 修复前 `test/live_logo_test.dart` 9 项中三项复现变形：480×120 被解码为 144×120、240×240 被解码为 144×120、120×480 被解码为 120×120。原因是同时指定 `Image.memory` 的缓存宽高默认采用 exact，而非保比例缩放。
+- 初次比例修复快照（加宽前）：改用 `ResizeImagePolicy.fit` 后，`.fvm/flutter_sdk/bin/flutter test --no-pub --concurrency=1 --reporter expanded test/live_logo_test.dart test/live_tv_page_test.dart`：2 文件共 22 项通过。新增 9 项使用主机生成的 PNG 实际解码，检查横向／方形／竖向比例、144×120 解码上限、小图不放大、错误占位，以及加载前后固定 48×40 逻辑像素尺寸；页面回归另覆盖 320／390／1280 宽度与遥控交互。
+- `.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_tv_page.dart test/live_logo_test.dart`：无问题。仅修改台标解码策略，网络、图片请求池与列表尺寸不变。
+- 此处为主机 widget／PNG 解码验证，不代表真实台标网络、设备截图或 TV 验收；本任务未构建 APK、未调整版本。
+
+### 2026-09-20 直播菜单仅 TV 自动播放
+
+- 工具链：`.fvmrc` 固定 Flutter 3.38.10，先执行 `.fvm/flutter_sdk/bin/flutter pub get`，测试与分析均使用同一 SDK。
+- `.fvm/flutter_sdk/bin/flutter test test/live_navigation_resume_test.dart test/app_navigation_shell_tv_focus_test.dart`：2 文件共 36 项通过。覆盖 TV 菜单恢复历史、返回不重开、重复点击、无有效历史及异步取消；非 TV 首次点击、重复点击和切回直播均仅进入频道列表，不读取自动播放历史、不推入播放器。
+- `.fvm/flutter_sdk/bin/dart analyze lib/app/router/app_navigation_shell.dart test/live_navigation_resume_test.dart`：无问题。
+- 菜单测试检查实际播放器路由参数后立即退出，不启动原生解码；这是主机导航与焦点回归，不是设备播放性能或遥控器验收。本次未构建 APK、未调整版本。
+
+### 2026-09-20 直播媒体兼容参数与真实源抽测
+
+- MPV 增加 `Starflow` 默认 User-Agent（订阅显式值优先），配置 HTTP/HTTPS 网络协议白名单，HLS 分片额外重试一次、关闭持久连接复用；不修改 Exo 的既有默认标识或凭据隔离，不改变频道级恢复预算。三项新增测试覆盖默认值、大小写及空值覆盖、FFmpeg 6 参数/协议边界。
+- 本机 curl 对 YanG 同一 CCTV 1 媒体地址的对照：`Starflow / Mozilla/5.0 / mpv/0.40.0` 返回 200，`Lavf/61.7.100` 返回 403。外部新版 FFmpeg 拒绝图片后缀的 HLS 分片，但应用 Android 打包二进制为 FFmpeg 6，核对 n6.0 HLS 实现后确认 HTTP 分片不受该后缀限制；不能把新版探针拒绝推断为应用根因，也不加入新版独有选项。
+- 使用 media_kit macOS 插件缓存随附 libmpv（报告 FFmpeg 6.0），以原生 API、null 音视频输出进行有界真实源抽测：新参数下 CCTV 1 为 1920×1080 H.264，约 8s 内推进 4.04s；翡翠台为 3840×2160 HEVC，约 29s 内推进 4.016s；咪视界为 3840×2160 HEVC，30s 内只推进 1.524s，未达目标。默认参数 CCTV 1 对照也有进度（15s、1280×720），且时间戳有跳跃，不能用此样本宣称提速或根因修复。网络/源内容动态变化、软件解码及并发主机构建负载均可能影响结果；不是屏幕首帧、Android 真机或持续流畅性证明。
+- 对应配置的 Flutter 3.38.10 执行 `flutter test --no-pub --concurrency=1 --reporter expanded test/live_mpv_options_test.dart test/live_playback_lifecycle_test.dart test/live_exo_bridge_test.dart test/live_review_regression_test.dart` **46 项通过**。改动文件定向 `dart analyze` 无问题，`git diff --check` 通过。初次默认 SDK 与工作区依赖 SDK 不匹配导致 Flutter 框架编译失败，已终止该批次并改用匹配 SDK 重跑，不修改依赖来规避。
+- 本任务未使用浏览器、未执行发布预设，未验证电视安装包。原始媒体 URL/分片凭据不写入仓库或公开记录。源端空响应、卡顿或失效仍不能靠客户端保证消除。
+
+### 2026-09-20 直播频道列表定位与分栏
+
+- 后续 TV 页头精简复测：下述两文件 18 项再次通过，新增断言验证 TV 频道列表无关闭按钮／标题行、两列首项向上不丢焦点、返回恢复画布及非 TV 保留关闭按钮；定向静态检查无问题。重新查看 1280px 截图，两列从面板顶部开始，右上角网速无重叠。此结果不额外累加测试数量，未做真机验证。
+- `flutter test --dart-define=LIVE_TV_REVIEW=true test/live_tv_page_test.dart test/live_channel_picker_test.dart`：2 文件共 18 项通过。新增选择器 5 项覆盖当前频道在长列表中的滚动与首焦点、320/390/560px 分栏、跨列返回、连续上下导航、重新打开、浏览不换台、长分组列表、缺失与空频道回退以及触摸选择。
+- `dart analyze lib/features/live_tv/presentation/live_channel_picker.dart lib/features/live_tv/presentation/live_player_page.dart test/live_channel_picker_test.dart test/live_tv_page_test.dart`：无问题。独立重跑选择器 5 项通过，与上述集合重叠、不累加。
+- 人工查看 `build/live-tv-review/channels-390.png` 与 `channels-1280.png`，分组在左、频道在右，正在播放项保持强调色及白色 TV 焦点框，网速与面板内容未重叠。
+- 此处为主机 widget/fake engine 验证，不是实际媒体解码、TV 遥控器或设备性能测量；未构建发布 APK，未修改版本。
+
+### 2026-09-20 直播播放故障诊断
+
+- 用户 16:06 导出日志含 16:03:20 / 16:04:02 的订阅刷新成功及其他刷新失败，无 `live.playback` 成功或具体失败事件。不能据此判断媒体流失效或播放器界面故障；本次补充播放页请求、打开尝试、固定失败类别与重试决策记录，不视为用户故障已经修复。
+- `flutter test --no-pub --concurrency=1 --reporter expanded test/live_playback_lifecycle_test.dart test/live_tv_page_test.dart test/live_review_regression_test.dart` **48 项通过**，包含打开超时/进度超时/内核错误类别及手动重试清空旧故障断言；三处改动的生产文件及生命周期测试定向 `dart analyze` 无问题。
+- 未做浏览器测试、真实媒体解码、真机验证或发布构建。尚需设备、所选内核与失败界面信息，订阅下载成功不等于其中每条媒体线路可播放。
+
+### 2026-09-20 直播右上角网速
+
+- `flutter test test/live_network_speed_label_test.dart test/live_exo_bridge_test.dart test/live_tv_page_test.dart test/live_playback_lifecycle_test.dart`：41 项主机测试通过。覆盖网速刷新／零值／异常、换台迟到采样、隐藏后停止轮询、加载时保留标签、控制栏自动隐藏和生命周期回归；指定实现与测试文件 `dart analyze` 无问题。
+- Android 在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*LiveTvNetworkSpeedTest' --tests '*LiveTvViewTest' --console=plain`：6 项 JVM 测试通过，无失败／跳过；覆盖字节累计、空闲归零、每秒任务采样、换台隔离、后台与释放。Kotlin 实际编译，跳过 Flutter 打包，不作为 APK 或真实下载证据。
+- `LIVE_TV_REVIEW=true` 截图检查了 390/1280 播放器控制栏、缓冲及频道／节目单叠层，网速未与标题和操作重叠。该截图模式整组运行未全绿：订阅编辑 320px 测试未找到 `SwitchListTile`；普通模式最终 41 项通过，不将截图模式宣称为整组通过。
+- 以上为 Flutter fake engine／mock 通道和主机布局，不是实际媒体下载速率、解码或真机测量；未构建 APK、未递增版本。
+
+### 2026-09-20 TV 直播备份扫码
+
+- 直播备份与恢复的 TV 入口改为手机扫码下载/上传，复用共享二维码与会话清理；非 TV 本地文件流程保留。上传限制 32 MiB，校验版本后仍需电视确认合并/替换；普通应用配置 JSON 不可恢复直播库。
+- 指定七文件 **79 项通过**：`live_backup_transfer_page_test.dart`、`live_backup_page_test.dart`、`live_playlist_transfer_service_test.dart`、`live_playlist_transfer_page_test.dart`、`live_review_regression_test.dart`、`live_tv_data_test.dart`、`features/settings/presentation/lan_transfer_qr_address_card_test.dart`。包括实际本机 HTTP 的鉴权、端点隔离、备份字节一致性、单次下载、无效文件及声明/累计大小限制；组件测试覆盖合并/替换确认、取消和后台丢弃，真实仓库回归覆盖原子恢复。
+- 随后增加 320/1280 宽度用例，组合执行发现恢复方式下拉框在 320 宽度溢出；修复为按可用宽度展开后，备份扫码组件文件 **5 项独立复测通过**，与前述集合重叠，不累加。最初新测试有括号语法错误，修复后才计上述通过结果。
+- 最终 `dart analyze lib/features/live_tv test/live_backup_transfer_page_test.dart test/live_backup_page_test.dart test/live_playlist_transfer_service_test.dart test/live_playlist_transfer_page_test.dart` 无问题。未使用浏览器，未做手机到电视跨设备、真实遥控器或下载文件管理验收；未构建发布 APK或递增版本。
+
+### 2026-09-20 APTV 频道表误判修复
+
+- 用户报告“没有频道”，提供的日志在 15:40:59、15:41:12 仅记录订阅刷新失败，无具体阶段。对用户提供的频道目录执行一次主机 HTTP 下载，返回 200、111207 字节；旧解析器遇到 APTV 的两个 `#EXT-X-APTV-*` 扩展便将整个频道表误判为 HLS 媒体清单，已用下载快照复现。
+- 改为识别实际 HLS 标签；客户端扩展注释不再触发误拒绝。修复后同一快照解析为 418 个频道、430 条线路、8 个分组，并发现 EPG 地址。真实目录未作为测试 fixture 入库，不记录其中的线路 token；未访问媒体流或验证节目单下载，也不代表 TV 网络或播放成功。
+- 指定四文件 **65 项通过**：`live_tv_test.dart`、`live_tv_data_test.dart`、`live_playlist_transfer_service_test.dart`、`live_review_regression_test.dart`。新增三项覆盖 APTV 解析、混合真实 HLS 标签仍拒绝，以及网络刷新/本地导入后频道可见。定向 `dart analyze` 无问题；未使用浏览器、未构建发布 APK。
+
+### 2026-09-20 手机输入收键盘
+
+- 应用入口为 Android / iOS 非 TV 接入输入框外点击取消焦点；不接管提交、下一项、多行换行或 TV 返回规则。
+- `flutter test --no-pub test/core/widgets/mobile_text_input_dismissal_test.dart test/features/settings/presentation/settings_text_input_field_test.dart test/features/search/presentation/search_page_focus_test.dart test/core/widgets/tv_dialog_back_focus_test.dart` **45 项通过**，包含新增 Android / iOS 两种平台下共 16 项输入组件测试：空白触摸、保留文本、完成／搜索提交、输入框切换、多行换行、按钮操作、弹窗和 TV 行为隔离。新增测试首轮因焦点刷新时序及平台覆盖清理失败，改用平台测试 variant 并刷新焦点后重跑通过。
+- `flutter analyze --no-pub lib/core/widgets/mobile_text_input_dismissal.dart lib/app/app.dart test/core/widgets/mobile_text_input_dismissal_test.dart` 无问题。这是主机模拟键盘／焦点验证，不是 Android / iOS 真实输入法验收；未构建安装包、递增版本或执行全量测试。
+
+### 2026-09-20 直播强调色统一
+
+- 收藏星标、静音开启态、当前频道／节目和直播下拉选中项接入 `AppActionColors`；列表淡底约 9% 不透明度，白色焦点框与中性普通状态不变。不修改播放、重连、音轨或存储接口。
+- `flutter test --no-pub test/live_tv_page_test.dart test/live_backup_page_test.dart test/live_playlist_transfer_page_test.dart test/live_accent_test.dart test/app_theme_test.dart` **37 项通过**。八色、手机／TV 的选中／未选中／禁用色及固定尺寸分别验证，播放页在共享清理队列的同一测试中循环验证八色双模式、静音、两条线路切换、频道与节目选中态；另覆盖 320/390/1280 布局、收藏、备份和扫码导入。定向 `flutter analyze --no-pub lib/features/live_tv/presentation test/live_tv_page_test.dart test/live_accent_test.dart test/live_backup_page_test.dart` 无问题。
+- `flutter test --no-pub --dart-define=LIVE_TV_REVIEW=true test/live_tv_page_test.dart` **7 项通过**，与上述集合重叠、不累加。组件截图位于 `build/live-tv-review/`，抽查 1280 频道叠层、320 频道页与 390 播放页：强调色状态与白色焦点独立，线路换行无重叠。部分旧按钮标签受测试字体缺字影响，截图不作为完整字体或真机视觉验收；假引擎的黑色画布不是视频解码证据。
+- 初次运行因测试波纹着色器资源格式不兼容失败，相关测试主题改用 `NoSplash` 后重跑通过；应用主题不变。另一次命令误引用不存在的导入测试文件，已以实际 `live_playlist_transfer_page_test.dart` 重跑，失败运行不计通过。没有发布 APK、递增版本或执行真实直播源／设备测量。
+
+### 2026-09-20 选集强调色接入
+
+- MPV 选集列表／网格从主题 `AppActionColors` 取色；Android 原生选集接收 Flutter 启动参数 `episodeAccentColor`，播放文字、图标、当前集淡底和进度线共用该颜色。白色焦点框与已看完的中性标记不变。
+- `flutter test --no-pub test/player_episode_picker_dialog_test.dart test/app_theme_test.dart test/player_menu_style_test.dart` **66 项通过**，覆盖八种强调色、手机／TV、列表／网格状态配色及既有选集交互。上述选集组件、原生启动器及选集测试的定向 `flutter analyze --no-pub` 无问题。
+- Android 在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativePlaybackSettingsAppearanceTest' --tests '*NativeEpisodePickerNavigationTest' --console=plain`，debug Kotlin 编译及 **11 项 JVM 测试通过，0 失败／错误／跳过**。颜色传递与原生控件取色使用源码契约断言，导航使用索引策略测试，不运行真实 Android View。
+- 本轮仅为定向主机回归，不是全量测试、Android 6／TV 真机视觉或设备性能验收；未构建发布 APK、递增版本或修改播放解析策略。
+
+### 2026-09-20 十项审查收尾
+
+代码改动、定向回归和发布核验统一记录在 [十项审查收尾](review-closure-2026-09-20.md)。该记录区分合成网络/存储故障、Flutter 组件、Android JVM、Swift 主机策略与完整 APK 静态检查；不把任一主机通过结果计为 Android 6、TV 遥控器、NAS 转码或 AVPlayer 真机验收。以下同日早期批次保留为各自执行时快照，不自动覆盖收尾后的代码。
 
 ### 2026-09-20 选集到选季焦点回归
 
@@ -89,7 +291,7 @@ dart analyze lib/features/live_tv lib/app/router/app_routes.dart lib/app/router/
 
 本轮未运行发布预设、未递增发布版本或交付 APK；保留既有文档及其他任务改动。真实订阅鉴权/重定向、台标、长播、断流、低内存设备及物理遥控器尚无本轮验收数据。Gradle 仍提示已有弃用特性，不据此宣称 Gradle 9 兼容。
 
-播放任务收尾边界：15s 开流等待只计时并触发失败，不使用 `Future.timeout` 提前释放所有权；旧 open 未 settle 仍阻塞串行清理。`LiveEngine` 没有取消接口，永久挂起仍需等待底层，19 项生命周期及 6 项通道测试不能证明 15s 强制中止媒体网络。专项已纳入上述最终集合，不相加。
+修复前播放任务边界快照：当时 15s 开流等待只计时并触发失败，`LiveEngine` 没有取消接口，旧 open 未 settle 仍阻塞串行清理。后续生产适配器已加入取消确认协议，当前行为见 [直播文档](live-tv.md)。这里的 19 项生命周期及 6 项通道测试不作为新取消协议或 15s 强制中止媒体网络的验证证据。
 
 数据任务收尾边界：10000 频道/每频道 64 线路/全表 50000 线路上限；generation 刷新合并和删除/禁用/同 ID 重建后的旧结果失效；EPG 失败保留节目与台标；手动排序后新频道追加；来源日志 ID 哈希、偏好来源归属。38 项是该次合成数据/仓库回归，不是大规模真实订阅、设备内存或网络吞吐测量。
 
@@ -191,8 +393,32 @@ flutter test --no-pub --concurrency 2 --reporter expanded test/native_fntv_servi
 - `flutter test --no-pub --reporter expanded test/player_episode_picker_dialog_test.dart test/player_small_dialog_focus_test.dart`：42 项通过。新增用例先在旧定位算法下复现未对齐，再验证手机横竖屏、TV、列表/网格、首帧位置稳定、分段/模式切换、定位当前集、末集完整显示与触屏自由滑动。
 - 两个本轮修改的 Dart 文件定向 `dart analyze` 无问题；目视检查 320dp 手机列表/网格及 1280dp TV 列表组件截图。仅为主机组件回归，不是设备播放或性能验收；未修改 Android 原生定位、未运行发布预设或生成安装包。
 
+### 2026-09-20 移除选集定位按钮
+
+- MPV 与 Android 原生选集移除右上角“定位当前集”按钮及其导航逻辑；保留列表／网格切换，重新打开仍自动定位播放集。网格按钮按下进入可用范围入口，范围按上回网格、按下回原剧集；无范围时网格按下仍经过可用选季入口。底部停留不变。
+- `.fvm/flutter_sdk/bin/flutter test --no-pub --concurrency=1 --reporter expanded test/player_episode_picker_dialog_test.dart test/player_small_dialog_focus_test.dart test/core/widgets/tv_dialog_back_focus_test.dart`：**76 项通过**。覆盖按钮不存在、范围键盘入口与返回、重新打开定位、切季加载／重试／关闭后的迟到结果，以及既有末尾停留和跨段导航。两个修改的 Dart 文件定向分析无问题。
+- Android 在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativeEpisodePickerNavigationTest' --tests '*NativePlaybackSettingsAppearanceTest' --console=plain`：Kotlin 编译成功，**13 项 JVM 测试通过，0 失败／错误／跳过**。原生 View 接线为源码断言，导航为索引策略，不替代真机遥控器验收。
+- 未运行发布预设、未修改版本号或生成交付 APK。下方涉及定位按钮的同日记录为移除前历史快照，不作为当前按钮验收。
+
+### 2026-09-20 选集底部停留
+
+- MPV 与 Android 原生选集在本季末集／网格末行继续按下时保持当前焦点和滚动位置，不再回到顶部定位按钮；跨段和首行向上导航不变。
+- 使用 `.fvm/flutter_sdk` 锁定的 Flutter `3.38.10` 执行 `flutter test --no-pub --concurrency=1 --reporter expanded test/player_episode_picker_dialog_test.dart test/player_small_dialog_focus_test.dart test/core/widgets/tv_dialog_back_focus_test.dart`：**76 项通过**。末尾用例覆盖连续按下、单集、30／64／65 集、列表与网格；两个修改的 Dart 文件定向 `dart analyze` 无问题。
+- Android 在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativeEpisodePickerNavigationTest' --tests '*NativePlaybackSettingsAppearanceTest' --console=plain`：debug Kotlin 编译成功，**13 项 JVM 测试通过，0 失败／错误／跳过**。导航策略覆盖网格末行每一列及缺列夹紧，View 接线为源码契约断言，不是真机遥控器验证。
+- 本次仅为主机定向回归；未运行发布预设、未修改版本号、未生成交付 APK，未作真实设备验收。
+
+### 2026-09-20 选集顶部导航
+
+- 历史快照：本节末尾按下进入顶部定位的行为及对应断言，后续已由“选集底部停留”变更替换，不作为当前底部行为验收。
+- MPV 与 Android 原生选集取消底栏，定位移至标题栏，超过 30 集的范围菜单移至第二行；非 TV 左上角返回箭头只关闭面板。本季末尾按下进入顶部定位，按上返回原剧集，确认才定位播放集。
+- 使用项目锁定 Flutter `3.38.10` 执行 `flutter test --no-pub --concurrency=1 --reporter expanded test/player_episode_picker_dialog_test.dart test/player_small_dialog_focus_test.dart test/core/widgets/tv_dialog_back_focus_test.dart`：3 文件共 **76 项通过**。覆盖列表／网格末尾焦点往返、单集／整段／缺列边界、范围确认与取消、首帧整行定位、手机横竖屏返回及加载迟到结果。
+- 两个修改的 Dart 文件定向 `dart analyze` 无问题；中文字体和 Material 图标的组件截图已检查 320dp 手机列表与 1280dp TV 网格。此前一次拖动测试只有越过触摸阈值的单次移动，改为越过阈值后继续移动再验证自由滚动；未改变触屏滚动实现。
+- Android 在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativeEpisodePickerNavigationTest' --tests '*NativePlaybackSettingsAppearanceTest' --console=plain`：2 类 **13 项通过，无失败／跳过**。Kotlin 实际编译；测试覆盖导航索引策略及布局源码契约，不运行真实 Android View／遥控器，也不是 APK 发布验证。
+- SDK 故障修复后，终端、编辑器、依赖索引与 Android 配置统一指向长期目录中的 `3.38.10`，普通 `flutter test` 不再出现 framework／engine 语义 API 混用。此前 SDK 混用编译失败与并行 `flutter clean` 导致的 Android `R.jar` 消失不计为业务断言结果。本节仅记录主机定向回归，不代表真机播放、全仓测试或发布包验收。
+
 ### 2026-09-20 手机选集关闭入口
 
+- 历史快照：下列记录对应旧版左下角关闭 X，后续由“选集顶部导航”变更替换为左上角返回箭头，不作为新版位置验收。
 - 非 TV 的 Flutter / MPV 选集面板左下角新增关闭按钮，TV 焦点布局保持不变。
 - `flutter test --no-pub --reporter expanded test/player_episode_picker_dialog_test.dart test/player_small_dialog_focus_test.dart`：35 项通过。覆盖手机横竖屏、列表/网格的左下角位置与取消返回值、加载中关闭及迟到成功/失败结果，以及原有 TV 焦点回归；另目视检查 320dp 列表/网格组件截图。
 - 两个本轮修改的 Dart 文件定向 `dart analyze` 无问题。这些是主机组件验证，不是真机播放验收；未运行发布预设或生成安装包。
@@ -396,6 +622,18 @@ Review the generated report for regressions in the five baseline IDs: `startup`,
 
 场景失败时脚本提前退出，不会写本轮完整报告；旧路径上的 JSON 可能仍在，必须同时检查退出码与 `generatedAt`。报告不自动收集设备、系统负载、SDK 版本或缓存状态，这些应随测量记录保存。
 
+## 2026-09-20 TV 统一扫码文本输入
+
+本机定向验证：以下 4 文件共 51 项通过，覆盖真实本机 HTTP、空文本/空白/多行原样传输、密码页面遮罩、标题转义、鉴权、64 KiB 声明与流式限制、超时/取消/到期、单次接收，以及 TV 弹窗内入口、输入格式、确认/取消、迟到会话和直播草稿回填。直播回填 widget 覆盖 320×640 与 1280×720；这不是手机到电视跨设备验收，也不代表实际扫码识别、系统输入法或浏览器兼容性已验证。
+
+```sh
+flutter test test/text_input_transfer_service_test.dart test/features/settings/presentation/settings_text_input_field_test.dart test/live_playlist_transfer_page_test.dart test/live_playlist_transfer_service_test.dart
+```
+
+不运行 APK 发布预设，不递增版本或重建二进制；本轮不提供真机性能数字。该集合含其他直播文件/备份回归，与历史集合重叠，不累加为全量通过数。
+
+同日扩大回归 `flutter test test/features/settings/presentation test/live_tv_page_test.dart test/live_backup_page_test.dart` 共 91 项通过；补充方向键切换到扫码按钮并以确认键打开后，独立重跑 `settings_text_input_field_test.dart` 15 项通过。上述集合重叠，不相加。涉及输入服务、弹窗、直播入口及测试的定向 `dart analyze` 无问题，`git diff --check` 通过。曾扩大到整个直播目录时发现并行变动中的 `live_channel_picker.dart` 存在 `listEquals` 未定义问题，因此本条不声明全目录静态检查通过。
+
 ## 全量功能回归
 
 仓库根目录：
@@ -437,3 +675,57 @@ flutter test test/network_failure_test.dart test/network_request_guard_test.dart
 * Re-run the script after applying the fix if the regression was real; this rewrites the baseline JSON, which you can commit alongside the change when the new numbers are expected.
 * If a baseline regresses right after a file split, verify the focused tests first. In this codebase, regressions after refactors are often caused by wiring/state-order changes rather than the split itself.
 * Keep the independent visual/playback switches, both startup refresh switches, the shared concurrency value, scheduler batch/delay values, and log levels identical when comparing two runs. TV-fixed protections are platform rules rather than comparison-time switches.
+## 2026-09-20 直播无底栏与分层返回验证
+
+本轮使用 `.fvm/flutter_sdk` 固定 Flutter 3.38.10，执行：
+
+```sh
+.fvm/flutter_sdk/bin/flutter test --no-pub --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_tv_page_test.dart test/live_channel_picker_test.dart test/live_playback_lifecycle_test.dart test/live_network_speed_label_test.dart test/live_navigation_resume_test.dart
+.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_player_page.dart test/live_tv_page_test.dart
+```
+
+5 文件共 50 项测试通过，定向分析无问题。页面测试中的新增场景覆盖手机／TV、320×640／1280×720、2 倍系统字号、节目单异步加载前后 112dp 固定栏高、无底栏、按需全屏设置，以及设置／频道／节目单各自的系统返回、Escape、Go Back 和直接 `Navigator.pop`。断言关闭局部界面不停止、重建或释放播放内核，恢复画布焦点；音轨弹窗与线路下拉先关闭自身，再返回播放器，最后退出才释放。既有内核切换、强调色、菜单历史恢复、生命周期及网速测试一并通过。
+
+`build/live-tv-review/` 输出 390／1280px 播放器与设置等主机截图，人工检查无底部按钮、设置无遮挡。使用 fake engine，黑色画布不是实际解码截图；未做真实源／电视遥控器验收，本任务未运行发布预设或交付 APK。与本文其他历史批次不累加。
+
+## 2026-09-20 直播失败详情与日志验证
+
+用户 17:31 导出的修复前日志包含 5 个频道共 12 次 Exo `engineError`，每条 `errorType=null`，另有两次订阅刷新失败。日志没有 HTTP 状态、解码错误或媒体地址，不能确定这些频道的根因。此轮补齐原生到 Flutter 的白名单错误摘要及频道列表/节目单刷新阶段，不改变重试、网络鉴权、代理或解码配置。
+
+固定 `.fvm/flutter_sdk` 的 Flutter 3.38.10，以下 9 文件共 **107 项通过**：
+
+```sh
+.fvm/flutter_sdk/bin/flutter test --no-pub --reporter expanded test/live_playback_error_test.dart test/live_failure_logging_test.dart test/live_failure_page_test.dart test/live_exo_bridge_test.dart test/live_playback_lifecycle_test.dart test/live_tv_test.dart test/live_tv_data_test.dart test/live_review_regression_test.dart test/live_tv_page_test.dart
+.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/application/live_playback_error.dart lib/features/live_tv/application/live_playback_controller.dart lib/features/live_tv/data/live_repository.dart lib/features/live_tv/presentation/live_player_page.dart test/live_playback_error_test.dart test/live_failure_logging_test.dart test/live_failure_page_test.dart test/live_exo_bridge_test.dart
+```
+
+定向分析无问题。新增覆盖 HTTP/网络/格式/解码分类、缺失及恶意通道字段过滤、旧代次隔离、停止后保留当前失败摘要、重试清除摘要、真实本地日志导出不含地址/凭据、频道/节目单 HTTP 失败保留缓存，以及 320×640 和 1280×720 的失败提示与手动重试。页面验证使用 mock MethodChannel，不代表真实解码。
+
+Android 在 `android/` 运行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*LiveTv*Test' --console=plain --quiet`，5 类 **31 项通过、0 失败/跳过**。包括 PlaybackError 4、View 7、Policy 13、HttpTransport 6、NetworkSpeed 1；Kotlin/JVM 测试实际编译，排除 Flutter 打包，不是 APK 构建。初次新增 JVM 测试缺少系统时钟 stub、页面两个独立 fake-clock 用例共享清理队列导致失败，补齐测试环境并将双尺寸放入同一时钟用例后重跑通过，未因此改动生产生命周期策略。
+
+`adb devices -l` 无设备，未验证故障源、真机首帧或实际恢复效果；未运行发布预设、未递增版本或交付 APK。上述主机集合与本文历史批次重叠，不累加为全仓通过数。
+
+## 2026-09-20 直播节目单右侧布局
+
+节目单面板改为靠右，频道列表保持靠左；节目单所有宽度共用标题行网速，避免右上角独立标签遮挡面板。保留 440dp 宽屏面板、窄于 480dp 全宽显示及系统安全区。
+
+```sh
+.fvm/flutter_sdk/bin/flutter pub get
+.fvm/flutter_sdk/bin/flutter test --no-pub --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_tv_page_test.dart test/live_channel_picker_test.dart test/live_network_speed_label_test.dart test/live_current_programme_test.dart
+.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_player_page.dart test/live_tv_page_test.dart
+```
+
+固定 Flutter 3.38.10 下，4 文件共 27 项主机测试通过，定向分析无问题。执行前发现生成的依赖配置指向 Flutter 3.41.6，先由固定 SDK 重新解析依赖并同步锁文件，未手动修改 package_config。页面回归检查 320／390／1280 宽度、24dp 右侧安全区、两倍字号下的返回流程、左右面板位置、节目单内仅一份网速，以及节目详情／分层返回不换台、不停止或重建会话。
+
+已检查 `build/live-tv-review/guide-390.png` 与 `guide-1280.png`：窄屏全宽、宽屏右侧显示，标题与网速无重叠。使用 fake engine 黑底截图，不代表真实视频、设备性能或遥控器验收；未运行发布预设、递增版本或交付 APK。与其他历史测试批次重叠，不累加。
+
+## 2026-09-20 直播背景不透明度调整
+
+顶部控制栏背景改为 20% 不透明（alpha 0.2），设置／频道列表／节目单背景改为 70% 不透明（alpha 0.7）。只修改背景色 alpha，文字、图标、焦点框及节目单右侧布局不变。
+
+```sh
+.fvm/flutter_sdk/bin/flutter test --no-pub --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_tv_page_test.dart test/live_channel_picker_test.dart
+.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_player_page.dart test/live_tv_page_test.dart
+```
+
+固定 Flutter 3.38.10 下，两文件共 21 项主机测试通过，定向静态分析无问题。页面测试直接断言顶栏／三类菜单背景 alpha，并检查菜单无重复 Material 底色或整层 Opacity；覆盖 TV／非 TV、320／1280 宽度、焦点、返回和播放保留。已检查生成的 1280px 节目单与 390px 设置截图，未见内容遮挡；fake engine 黑底截图不证明真实视频透出效果。未进行真机验收、发布构建或版本递增，与历史测试批次不累加。

@@ -86,6 +86,7 @@ void main() {
       read: container.read,
       targetResolver: PlaybackTargetResolver(read: container.read),
       engineRouter: const PlaybackEngineRouter(),
+      releaseSession: (_) async => fail('No session should need cleanup'),
     );
 
     final outcome = await coordinator.start(

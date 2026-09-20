@@ -13,6 +13,51 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/interface_settings_page.dart';
 
 void main() {
+  test('live menu autoplay defaults and JSON round trip', () {
+    final defaults = SeedData.defaultSettings;
+    expect(defaults.liveNavigationAutoPlayEnabled, isTrue);
+    final legacyJson = defaults.toJson()
+      ..remove('liveNavigationAutoPlayEnabled');
+    expect(
+        AppSettings.fromJson(legacyJson).liveNavigationAutoPlayEnabled, isTrue);
+    for (final enabled in [false, true]) {
+      final settings =
+          defaults.copyWith(liveNavigationAutoPlayEnabled: enabled);
+      expect(
+          AppSettings.fromJson(settings.toJson()).liveNavigationAutoPlayEnabled,
+          enabled);
+      expect(settings.copyWith().liveNavigationAutoPlayEnabled, enabled);
+    }
+  });
+
+  for (final television in [false, true]) {
+    testWidgets('live menu autoplay toggle persists (TV: $television)',
+        (tester) async {
+      final repository = await _pump(tester,
+          size: television ? const Size(1920, 1080) : const Size(390, 844),
+          television: television);
+      final toggle = find.text('点击直播菜单直接进入播放器');
+      await tester.ensureVisible(toggle);
+      await tester.pumpAndSettle();
+      for (final enabled in [false, true]) {
+        if (television) {
+          final entry = tester
+              .widgetList<TvFocusableAction>(find.byType(TvFocusableAction))
+              .singleWhere((widget) =>
+                  widget.focusId == 'interface:live-navigation-auto-play');
+          entry.focusNode!.requestFocus();
+          await tester.pumpAndSettle();
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        } else {
+          await tester.tap(toggle);
+        }
+        await tester.pumpAndSettle();
+        expect(repository.settings.liveNavigationAutoPlayEnabled, enabled);
+        expect(tester.takeException(), isNull);
+      }
+    });
+  }
+
   for (final size in [const Size(390, 844), const Size(1280, 800)]) {
     testWidgets('accent picker persists and updates the theme at $size',
         (tester) async {

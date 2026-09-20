@@ -24,10 +24,10 @@ struct NativeEpisodeQueueEntry {
 
   init?(json: [String: Any]) {
     let target = json["target"] as? [String: Any] ?? [:]
-    let streamUrl = (target["streamUrl"] as? String)?.trimmingCharacters(
+    let streamUrl = ((json["transportUrl"] ?? target["streamUrl"]) as? String)?.trimmingCharacters(
       in: .whitespacesAndNewlines
     ) ?? ""
-    let headers = (target["headers"] as? [String: Any] ?? [:]).reduce(into: [String: String]()) {
+    let headers = ((json["transportHeaders"] ?? target["headers"]) as? [String: Any] ?? [:]).reduce(into: [String: String]()) {
       partialResult,
       item in
       partialResult[item.key] = "\(item.value)"

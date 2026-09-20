@@ -321,6 +321,10 @@ class MainActivity : FlutterActivity() {
                             putExtra(NativePlaybackActivity.EXTRA_PLAYBACK_ITEM_KEY, playbackItemKey)
                             putExtra(NativePlaybackActivity.EXTRA_SERIES_KEY, seriesKey)
                             putExtra(NativePlaybackActivity.EXTRA_EPISODE_QUEUE_JSON, episodeQueueJson)
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_EPISODE_ACCENT_COLOR,
+                                call.argument<Number>("episodeAccentColor")?.toInt() ?: 0xFF2DD4BF.toInt(),
+                            )
                             putExtra(NativePlaybackActivity.EXTRA_LAUNCH_REQUEST_ID, requestId)
                             putExtra(
                                 NativePlaybackActivity.EXTRA_LAUNCH_RESULT_RECEIVER,

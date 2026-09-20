@@ -24,9 +24,11 @@ class NativePlaybackTrackControllerTest {
             val format = Format.Builder().setId("internal").setLanguage("en")
                 .setSampleMimeType(MimeTypes.TEXT_VTT).build()
             val player = host.session.player!!
-            `when`(player.currentTracks).thenReturn(Tracks(listOf(Tracks.Group(TrackGroup(format), false,
-                intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)))))
-            `when`(player.trackSelectionParameters).thenReturn(TrackSelectionParameters.Builder().build())
+            val tracks = Tracks(listOf(Tracks.Group(TrackGroup(format), false,
+                intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true))))
+            val parameters = TrackSelectionParameters.Builder().build()
+            `when`(player.currentTracks).thenReturn(tracks)
+            `when`(player.trackSelectionParameters).thenReturn(parameters)
             val dialog = mock(AlertDialog::class.java)
             var click: DialogInterface.OnClickListener? = null
             mockConstruction(DefaultTrackNameProvider::class.java) { provider, _ ->

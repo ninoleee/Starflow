@@ -1,4 +1,8 @@
 # Keep the installed application's existing signing identity. Never commit keys/passwords.
+# Historical releases used the pinned Android Debug certificate. Restore that
+# exact key; do not generate a new key or switch signing identities for updates.
+# storeFile is absolute or relative to android/; use / or escaped \\ on Windows.
+# Preflight checks the certificate and private-key access without printing secrets.
 storeFile=/absolute/path/to/backed-up-starflow.keystore
 storePassword=replace-locally
 keyAlias=replace-locally

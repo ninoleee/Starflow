@@ -15,7 +15,6 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
-import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
@@ -107,8 +106,13 @@ internal class NativePlaybackSession(private val host: Host) {
         discardAudioStateForDifferentMedia()
         // A replacement player can be rebuilt again before publishing its audio tracks.
         if (pendingAudioFormat == null) {
-            pendingAudioFormat = NativePlaybackAudioTracks.list(current.currentTracks)
-                .firstOrNull { it.selected }?.format
+            val tracks = NativePlaybackAudioTracks.list(current.currentTracks)
+            val overrides = current.trackSelectionParameters?.overrides
+            // Selection overrides are synchronous; selected flags arrive in a later event batch.
+            pendingAudioFormat = (tracks.firstOrNull { track ->
+                track.supported && overrides?.get(track.override.mediaTrackGroup)
+                    ?.trackIndices?.containsAll(track.override.trackIndices) == true
+            } ?: tracks.firstOrNull { it.selected })?.format
         }
         pendingPlaybackParameters = current.playbackParameters
         pendingVolume = current.volume
@@ -311,14 +315,8 @@ internal class NativePlaybackSession(private val host: Host) {
         // Each player owns its listener so a released stream cannot keep the next startup alive.
         val transferProgress = NativePlaybackTransferProgress()
         playbackTransferProgress = transferProgress
-        val dataSourceFactory =
-            DefaultHttpDataSource.Factory()
-                .setTransferListener(transferProgress)
-                .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(NATIVE_HTTP_CONNECT_TIMEOUT_MS)
-                .setReadTimeoutMs(NATIVE_HTTP_READ_TIMEOUT_MS)
-        dataSourceFactory.setDefaultRequestProperties(
-            NativePlaybackSource.buildRequestHeaders(headersJson),
+        val dataSourceFactory = NativePlaybackHttpDataSource.factory(
+            host.activity, url, NativePlaybackSource.buildRequestHeaders(headersJson), transferProgress,
         )
 
         requestedAudioParameters = pendingPlaybackParameters ?: PlaybackParameters.DEFAULT

@@ -189,6 +189,61 @@ void main() {
   group('DetailLibraryMatchService.buildManualMatchCandidates', () {
     const service = DetailLibraryMatchService();
 
+    for (final (targetType, candidateType) in [
+      ('', 'movie'),
+      ('movie', 'series'),
+      ('series', 'movie'),
+    ]) {
+      test('TMDB id alone cannot match $targetType to $candidateType', () {
+        final target = MediaDetailTarget(
+          title: 'Requested title',
+          posterUrl: '',
+          overview: '',
+          itemType: targetType,
+          tmdbId: '317948',
+        );
+        final candidate = MediaItem(
+          id: 'candidate',
+          title: 'Unrelated title',
+          overview: '',
+          posterUrl: '',
+          year: 2026,
+          durationLabel: '',
+          genres: const [],
+          itemType: candidateType,
+          tmdbId: '317948',
+          sourceId: 'emby-main',
+          sourceName: 'Emby',
+          sourceKind: MediaSourceKind.emby,
+          streamUrl: '',
+          addedAt: DateTime.utc(2026, 9, 20),
+        );
+
+        expect(
+          service.buildManualMatchCandidates(
+            target: target,
+            items: [candidate],
+            titles: const ['Requested title'],
+            year: 2026,
+          ),
+          isEmpty,
+        );
+        final imdbCandidates = service.buildManualMatchCandidates(
+          target: target.copyWith(imdbId: 'tt1234567'),
+          items: [candidate.copyWith(imdbId: 'tt1234567')],
+          titles: const ['Requested title'],
+          year: 2026,
+        );
+        if (targetType.isEmpty) {
+          expect(imdbCandidates, hasLength(1));
+          expect(imdbCandidates.single.matchReason, '按 IMDb ID 匹配');
+          expect(imdbCandidates.single.score, 1e9);
+        } else {
+          expect(imdbCandidates, isEmpty);
+        }
+      });
+    }
+
     test('falls back to title match when external ids miss in a source', () {
       const target = MediaDetailTarget(
         title: '乘风2026',

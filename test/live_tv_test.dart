@@ -21,6 +21,12 @@ https://example.test/two.ts|Referer=https%3A%2F%2Fexample.test
 ''';
 const _source = LiveSource(
     id: 'source', name: 'Test', url: 'https://example.test/list.m3u');
+const _aptvPlaylist = '''#EXTM3U
+#EXT-X-APTV-PREVIEW: FALSE
+#EXT-X-APTV-LATENCY: FALSE
+#EXTINF:-1 tvg-id="news" group-title="News",News Channel
+https://example.test/news.m3u8
+''';
 LiveChannel _channel(String id) =>
     LiveChannel(id: id, sourceId: 'source', name: id, lines: [
       LiveLine('https://example.test/$id'),
@@ -28,6 +34,31 @@ LiveChannel _channel(String id) =>
     ]);
 
 void main() {
+  test('APTV channel-list metadata is not an HLS manifest', () {
+    final parsed = parseLivePlaylist(
+        _aptvPlaylist.replaceFirst(
+            '#EXTM3U', '#EXTM3U x-tvg-url="https://example.test/epg.xml.gz"'),
+        's');
+    expect(parsed.channels.single.name, 'News Channel');
+    expect(parsed.channels.single.group, 'News');
+    expect(parsed.channels.single.epgId, 'news');
+    expect(parsed.epgUrl, 'https://example.test/epg.xml.gz');
+  });
+  test('real HLS tags remain rejected even alongside APTV metadata', () {
+    for (final tag in [
+      '#EXT-X-TARGETDURATION:6',
+      '#EXT-X-STREAM-INF:BANDWIDTH=1280000',
+      '#EXT-X-MEDIA:TYPE=AUDIO',
+      '#EXT-X-VERSION:7',
+      '#EXT-X-ENDLIST',
+      '#EXT-X-PART:DURATION=0.5,URI="part.ts"',
+      '#EXT-X-KEY:METHOD=AES-128,URI="key"',
+    ]) {
+      expect(() => parseLivePlaylist('\uFEFF$_aptvPlaylist\n  $tag', 's'),
+          throwsFormatException,
+          reason: tag);
+    }
+  });
   test('M3U quoted commas, relative addresses, headers and multiple lines', () {
     final result = parseLivePlaylist(_m3u, 'source', baseUrl: _source.url);
     expect(result.epgUrl, 'https://example.test/guide.xml');
@@ -107,6 +138,16 @@ void main() {
           }));
     });
     tearDown(() => repository.dispose());
+    test('APTV subscriptions and local imports populate visible channels',
+        () async {
+      body = _aptvPlaylist;
+      await repository.saveSource(_source);
+      await repository.refresh(_source.id);
+      expect((await repository.load()).visible().single.name, 'News Channel');
+      await repository.saveSource(const LiveSource(id: 'local', name: 'Local'),
+          imported: Uint8List.fromList(utf8.encode(_aptvPlaylist)));
+      expect((await repository.load()).visible(), hasLength(2));
+    });
     test(
         'refresh preserves preferences, failures retain cache, delete cleans source',
         () async {

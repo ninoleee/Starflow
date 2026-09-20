@@ -7,6 +7,8 @@ import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/network_proxy_config.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import '../domain/live_models.dart';
+import 'live_mpv_options.dart';
+import 'live_playback_error.dart';
 
 abstract class LiveEngine {
   Future<void> open(
@@ -18,6 +20,10 @@ abstract class LiveEngine {
   Future<void> selectAudio(String id);
 }
 
+abstract interface class LiveNetworkSpeedSource {
+  Future<int?> readNetworkSpeed(int generation);
+}
+
 /// Cancellation acknowledges resource quiescence, not merely a dropped Future.
 /// No replacement open is permitted until this acknowledgement completes.
 abstract interface class CancellableLiveEngine implements LiveEngine {
@@ -26,7 +32,23 @@ abstract interface class CancellableLiveEngine implements LiveEngine {
 
 class LiveOpenCancelled implements Exception {}
 
-class MpvLiveEngine implements CancellableLiveEngine {
+enum LivePlaybackFailure {
+  openException,
+  openTimeout,
+  progressTimeout,
+  engineError,
+  streamEnded;
+
+  String get label => switch (this) {
+        openException => '播放器启动异常',
+        openTimeout => '播放器打开超时',
+        progressTimeout => '等待播放进度超时',
+        engineError => '播放内核报告错误',
+        streamEnded => '直播流已结束',
+      };
+}
+
+class MpvLiveEngine implements CancellableLiveEngine, LiveNetworkSpeedSource {
   MpvLiveEngine(this.proxy);
   final NetworkProxyConfig proxy;
   Player? player;
@@ -34,19 +56,39 @@ class MpvLiveEngine implements CancellableLiveEngine {
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   Completer<void>? _cancel;
   Future<void>? _cancelling;
+  Future<void>? _preparing;
   double _volume = 1;
   bool _cancelRequested = false;
+  int? _generation;
+
+  @override
+  Future<int?> readNetworkSpeed(int generation) async {
+    final current = player;
+    if (_generation != generation || current?.platform is! NativePlayer) {
+      return null;
+    }
+    final raw =
+        await (current!.platform as NativePlayer).getProperty('cache-speed');
+    if (_generation != generation || !identical(current, player)) return null;
+    final speed = double.tryParse(raw);
+    return speed != null && speed.isFinite && speed >= 0 ? speed.round() : null;
+  }
+
   @override
   Future<void> open(
       LiveLine line, int generation, void Function(int, String) onState) async {
-    await stop();
-    final p = Player(
-        configuration: const PlayerConfiguration(bufferSize: 32 * 1024 * 1024));
-    player = p;
     final cancel = Completer<void>();
     _cancel = cancel;
     _cancelling = null;
     _cancelRequested = false;
+    // Publish cancellation ownership before the first asynchronous boundary.
+    await (_preparing = stop());
+    if (_cancelRequested) throw LiveOpenCancelled();
+    _generation = generation;
+    final p = Player(
+        configuration: const PlayerConfiguration(
+            bufferSize: 32 * 1024 * 1024, protocolWhitelist: liveMpvProtocols));
+    player = p;
     Future<void> step(Future<void> Function() operation) async {
       if (_cancelRequested || cancel.isCompleted) {
         await cancel.future;
@@ -76,9 +118,14 @@ class MpvLiveEngine implements CancellableLiveEngine {
     ]);
     if (!kIsWeb && p.platform is NativePlayer) {
       final native = p.platform as NativePlayer;
+      final headers = liveMediaHeaders(line.headers);
       // media_kit's on_load hook consults this list and Media's header cache.
-      native.current = [Media(line.url, httpHeaders: line.headers)];
+      native.current = [Media(line.url, httpHeaders: headers)];
       for (final entry in {
+        'user-agent': headers.entries
+            .firstWhere((entry) => entry.key.toLowerCase() == 'user-agent')
+            .value,
+        'demuxer-lavf-o': liveMpvDemuxerOptions,
         'http-proxy': proxy.mpvProxyUrlFor(Uri.parse(line.url)),
         'cache-secs': '12',
         'demuxer-max-bytes': '${32 * 1024 * 1024}',
@@ -86,7 +133,7 @@ class MpvLiveEngine implements CancellableLiveEngine {
         'network-timeout': '10',
         'msg-level': 'all=no',
         'volume': '${_volume * 100}',
-        'http-header-fields': line.headers.entries
+        'http-header-fields': headers.entries
             .map((e) => '${e.key}: ${e.value}'.replaceAll(',', '\\,'))
             .join(','),
       }.entries) {
@@ -103,7 +150,8 @@ class MpvLiveEngine implements CancellableLiveEngine {
     if (!identical(player, p)) return;
     onState(generation, 'created');
     await step(() => p.setVolume(_volume * 100));
-    await step(() => p.open(Media(line.url, httpHeaders: line.headers)));
+    await step(() =>
+        p.open(Media(line.url, httpHeaders: liveMediaHeaders(line.headers))));
   }
 
   @override
@@ -114,20 +162,22 @@ class MpvLiveEngine implements CancellableLiveEngine {
 
   Future<void> _cancelOpen() async {
     final cancel = _cancel;
+    await _preparing;
     final p = player;
-    if (cancel == null || cancel.isCompleted || p == null) return;
+    if (cancel == null || cancel.isCompleted) return;
     // The native stop command interrupts the pending load and acknowledges
     // unloading before the serial owner is allowed to dispose or reopen.
-    if (p.platform is NativePlayer) {
-      await (p.platform as NativePlayer).stop(synchronized: false);
+    if (p?.platform is NativePlayer) {
+      await (p!.platform as NativePlayer).stop(synchronized: false);
     } else {
-      await p.stop();
+      await p?.stop();
     }
     if (!cancel.isCompleted) cancel.complete();
   }
 
   @override
   Future<void> stop() async {
+    _generation = null;
     for (final s in _subscriptions) {
       await s.cancel();
     }
@@ -159,33 +209,73 @@ class MpvLiveEngine implements CancellableLiveEngine {
   }
 }
 
-class ExoLiveEngine implements CancellableLiveEngine {
+class ExoLiveEngine
+    implements
+        CancellableLiveEngine,
+        LiveNetworkSpeedSource,
+        LivePlaybackErrorSource {
   ExoLiveEngine(int viewId)
       : channel = MethodChannel('starflow/live_tv/$viewId');
   final MethodChannel channel;
   Completer<void>? _cancel;
   int? _generation;
+  LivePlaybackErrorDetails? _error;
   double _volume = 1;
+  @override
+  LivePlaybackErrorDetails? errorFor(int generation) =>
+      _generation == generation ? _error : null;
+
+  @override
+  Future<int?> readNetworkSpeed(int generation) async {
+    if (_generation != generation) return null;
+    final speed = await channel
+        .invokeMethod<num>('networkSpeed', {'generation': generation});
+    if (_generation != generation ||
+        speed == null ||
+        !speed.isFinite ||
+        speed < 0) {
+      return null;
+    }
+    return speed.round();
+  }
+
   @override
   Future<void> open(
       LiveLine line, int generation, void Function(int, String) onState) async {
     final cancel = Completer<void>();
     _cancel = cancel;
     _generation = generation;
+    _error = null;
     channel.setMethodCallHandler((call) async {
-      if (call.method != 'state') return;
-      final args = Map<String, dynamic>.from(call.arguments as Map);
-      onState(args['generation'] as int, args['state'] as String);
+      if (call.method != 'state' || call.arguments is! Map) return;
+      final args = call.arguments as Map;
+      if (_generation != generation ||
+          !identical(_cancel, cancel) ||
+          args['generation'] != generation ||
+          args['state'] is! String) {
+        return;
+      }
+      if (args['state'] == 'error') {
+        _error = LivePlaybackErrorDetails.fromNative(args['error']);
+      }
+      onState(generation, args['state'] as String);
     });
-    await Future.any([
-      channel.invokeMethod<void>('open', {
-        'url': line.url,
-        'headers': line.headers,
-        'generation': generation,
-        'volume': _volume
-      }),
-      cancel.future.then((_) => throw LiveOpenCancelled()),
-    ]);
+    try {
+      await Future.any([
+        channel.invokeMethod<void>('open', {
+          'url': line.url,
+          'headers': line.headers,
+          'generation': generation,
+          'volume': _volume
+        }),
+        cancel.future.then((_) => throw LiveOpenCancelled()),
+      ]);
+    } on PlatformException catch (error) {
+      if (_generation == generation && identical(_cancel, cancel)) {
+        _error = LivePlaybackErrorDetails.fromNative(error.details);
+      }
+      rethrow;
+    }
   }
 
   @override
@@ -197,7 +287,12 @@ class ExoLiveEngine implements CancellableLiveEngine {
   }
 
   @override
-  Future<void> stop() => channel.invokeMethod<void>('stop');
+  Future<void> stop() {
+    _generation = null;
+    _error = null;
+    return channel.invokeMethod<void>('stop');
+  }
+
   @override
   Future<void> dispose() async {
     channel.setMethodCallHandler(null);
@@ -238,6 +333,9 @@ class LivePlaybackController extends ChangeNotifier {
   LiveChannel? channel;
   int line = 0, generation = 0, retries = 0;
   String status = 'idle';
+  LivePlaybackFailure? failure;
+  LivePlaybackErrorDetails? errorDetails;
+  String? get failureLabel => errorDetails?.label ?? failure?.label;
   bool _closed = false, _remembered = false, muted;
   bool _paused = false;
   String pauseReason = '';
@@ -297,6 +395,8 @@ class LivePlaybackController extends ChangeNotifier {
     line = preferredLine.clamp(0, value.lines.length - 1);
     if (resetBudget) retries = 0;
     _remembered = false;
+    failure = null;
+    errorDetails = null;
     final token = ++generation;
     final selectedLine = value.lines[line];
     _activeToken = null;
@@ -314,15 +414,25 @@ class LivePlaybackController extends ChangeNotifier {
           _openCancellation = null;
           final cancelled = _openCancelled = Completer<void>();
           _paused = false;
-          if (engine is CancellableLiveEngine)
+          pauseReason = '';
+          if (engine is CancellableLiveEngine) {
             await engine.setVolume(muted ? 0 : 1);
+          }
           if (!_isActive(token)) return;
           _startup = Stopwatch()..start();
+          appLogInfo('live.playback', 'Live playback opening', fields: {
+            'channelId': value.id,
+            'line': line,
+            'lineCount': value.lines.length,
+            'engine': engine is ExoLiveEngine ? 'exo' : 'mpv',
+            'attempt': retries + 1,
+            'platform': defaultTargetPlatform.name,
+          });
           _armDeadline(token);
           // The engine cancellation path bypasses this queue, but ownership
           // stays here until native unloading has acknowledged cancellation.
-          final deadline =
-              Timer(const Duration(seconds: 15), () => _fail(token));
+          final deadline = Timer(const Duration(seconds: 15),
+              () => _fail(token, LivePlaybackFailure.openTimeout));
           _openDeadline = deadline;
           try {
             await Future.any([
@@ -338,8 +448,9 @@ class LivePlaybackController extends ChangeNotifier {
             await engine.setVolume(muted ? 0 : 1);
             if (_isActive(token)) notifyListeners();
           }
-        } catch (_) {
-          _fail(token);
+        } catch (error) {
+          _fail(token, LivePlaybackFailure.openException,
+              errorType: error.runtimeType.toString());
         }
       }));
     });
@@ -348,7 +459,8 @@ class LivePlaybackController extends ChangeNotifier {
 
   void _armDeadline(int token) {
     _deadline?.cancel();
-    _deadline = Timer(const Duration(seconds: 18), () => _fail(token));
+    _deadline = Timer(const Duration(seconds: 18),
+        () => _fail(token, LivePlaybackFailure.progressTimeout));
   }
 
   void _event(int token, String value) {
@@ -369,7 +481,11 @@ class LivePlaybackController extends ChangeNotifier {
     }
     if (_paused) return;
     if (value == 'error' || value == 'ended') {
-      _fail(token);
+      _fail(
+          token,
+          value == 'error'
+              ? LivePlaybackFailure.engineError
+              : LivePlaybackFailure.streamEnded);
       return;
     }
     if (value == 'created') {
@@ -401,7 +517,7 @@ class LivePlaybackController extends ChangeNotifier {
     }
   }
 
-  void _fail(int token) {
+  void _fail(int token, LivePlaybackFailure reason, {String? errorType}) {
     if (_closed ||
         token != generation ||
         status == 'retrying' ||
@@ -409,6 +525,26 @@ class LivePlaybackController extends ChangeNotifier {
         status == 'suspended') {
       return;
     }
+    failure = reason;
+    final source = engine;
+    errorDetails = source is LivePlaybackErrorSource &&
+            (reason == LivePlaybackFailure.engineError ||
+                reason == LivePlaybackFailure.openException)
+        ? (source as LivePlaybackErrorSource).errorFor(token)
+        : null;
+    // Native exception messages can contain complete URLs and media headers.
+    appLogWarning('live.playback', 'Live playback attempt failed', fields: {
+      'channelId': channel?.id,
+      'line': line,
+      'lineCount': channel?.lines.length,
+      'engine': engine is ExoLiveEngine ? 'exo' : 'mpv',
+      'attempt': retries + 1,
+      'reason': reason.name,
+      'errorType': errorType,
+      ...?errorDetails?.fields,
+      'elapsedMs': _startup?.elapsedMilliseconds,
+      'willRetry': retries < 3,
+    });
     _activeToken = null;
     _cancelTimers();
     _cancelOpen();

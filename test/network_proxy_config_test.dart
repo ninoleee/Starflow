@@ -1,7 +1,26 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/core/network/network_proxy_config.dart';
+import 'package:starflow/core/network/network_proxy_runtime.dart';
 
 void main() {
+  test('runtime notifies only normalized configuration changes', () {
+    final runtime = NetworkProxyRuntime();
+    addTearDown(runtime.dispose);
+    var changes = 0;
+    void changed() => changes++;
+    runtime.addListener(changed);
+    runtime.configure(const NetworkProxyConfig());
+    expect(changes, 0);
+    runtime
+        .configure(const NetworkProxyConfig(enabled: true, host: 'proxy.test'));
+    runtime.configure(
+        const NetworkProxyConfig(enabled: true, host: ' proxy.test '));
+    expect(changes, 1);
+    expect(runtime.revision, 1);
+    runtime.removeListener(changed);
+    runtime.configure(const NetworkProxyConfig());
+    expect(changes, 1);
+  });
   test('network proxy config defaults to direct connections', () {
     const config = NetworkProxyConfig();
 

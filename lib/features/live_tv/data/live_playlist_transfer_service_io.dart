@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'live_playlist_parser.dart';
+import 'live_backup.dart';
 import 'live_playlist_transfer_service.dart';
 
 LivePlaylistTransferService createLivePlaylistTransferService() =>
@@ -21,7 +22,20 @@ class IoLivePlaylistTransferService implements LivePlaylistTransferService {
   final Duration sessionTimeout;
 
   @override
-  Future<LivePlaylistTransferSession> start() async {
+  Future<LivePlaylistTransferSession> start({
+    LivePlaylistTransferMode mode = LivePlaylistTransferMode.file,
+    Uint8List? backupBytes,
+  }) async {
+    Uint8List? snapshot;
+    if (mode == LivePlaylistTransferMode.backupExport) {
+      if (backupBytes == null || backupBytes.length > liveBackupMaxBytes) {
+        throw const FormatException('直播备份无效');
+      }
+      snapshot = Uint8List.fromList(backupBytes);
+      await compute(LiveBackup.decode, snapshot);
+    } else if (backupBytes != null) {
+      throw ArgumentError('Backup bytes require export mode');
+    }
     final server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
     try {
       final random = Random.secure();
@@ -47,7 +61,8 @@ class IoLivePlaylistTransferService implements LivePlaylistTransferService {
               path: '/',
               queryParameters: {'token': token}).toString(),
       ]..sort();
-      return _Session(server, token, urls, uploadTimeout, sessionTimeout);
+      return _Session(
+          server, token, urls, uploadTimeout, sessionTimeout, mode, snapshot);
     } catch (_) {
       await server.close(force: true);
       rethrow;
@@ -57,7 +72,7 @@ class IoLivePlaylistTransferService implements LivePlaylistTransferService {
 
 class _Session implements LivePlaylistTransferSession {
   _Session(this._server, this._token, this.urls, this._uploadTimeout,
-      Duration sessionTimeout) {
+      Duration sessionTimeout, this._mode, this._backupBytes) {
     _server.idleTimeout = const Duration(seconds: 10);
     _subscription = _server.listen((request) => unawaited(_handle(request)),
         onError: (Object _) => _report('手机传输连接失败，请重新打开'));
@@ -67,10 +82,14 @@ class _Session implements LivePlaylistTransferSession {
   final HttpServer _server;
   final String _token;
   final Duration _uploadTimeout;
+  final LivePlaylistTransferMode _mode;
+  Uint8List? _backupBytes;
+  bool get _isBackupImport => _mode == LivePlaylistTransferMode.backupImport;
+  bool get _isBackupExport => _mode == LivePlaylistTransferMode.backupExport;
   @override
   final List<String> urls;
   final _errors = StreamController<String>.broadcast();
-  final _received = Completer<LivePlaylistUpload?>();
+  final _received = Completer<LivePlaylistTransferResult?>();
   late final StreamSubscription<HttpRequest> _subscription;
   late final Timer _expiry;
   bool _busy = false;
@@ -82,7 +101,7 @@ class _Session implements LivePlaylistTransferSession {
   @override
   Stream<String> get errors => _errors.stream;
   @override
-  Future<LivePlaylistUpload?> get received => _received.future;
+  Future<LivePlaylistTransferResult?> get received => _received.future;
 
   void _report(String message) {
     if (!_closed) _errors.add(message);
@@ -112,20 +131,43 @@ class _Session implements LivePlaylistTransferSession {
         request.response.headers.contentType = ContentType.html;
         request.response.headers.set('Content-Security-Policy',
             "default-src 'none'; script-src 'nonce-$_token'; style-src 'nonce-$_token'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'");
-        request.response.write(_page(_token));
+        request.response.write(_page(_token, _mode));
         await request.response.close();
         return;
       }
-      if (request.method != 'POST' || request.uri.path != '/upload') {
+      if (_isBackupExport &&
+          request.method == 'GET' &&
+          request.uri.path == '/download') {
+        if (_busy) {
+          await _text(request, HttpStatus.conflict, '正在下载，请稍后重试');
+          return;
+        }
+        _busy = ownsUpload = true;
+        final bytes = _backupBytes!;
+        _headers(request.response);
+        request.response.headers.contentType =
+            ContentType('application', 'json', charset: 'utf-8');
+        request.response.headers.set('Content-Disposition',
+            'attachment; filename="starflow-live-tv-${DateTime.now().millisecondsSinceEpoch}.json"');
+        request.response.contentLength = bytes.length;
+        request.response.add(bytes);
+        await request.response.close().timeout(_uploadTimeout);
+        if (!_closed) _received.complete(const LiveBackupDownloaded());
+        return;
+      }
+      if (_isBackupExport ||
+          request.method != 'POST' ||
+          request.uri.path != '/upload') {
         await _text(request, HttpStatus.notFound, '未找到请求路径');
         return;
       }
       if (_busy) {
-        await _text(request, HttpStatus.conflict, '正在接收文件，请稍后重试');
+        await _text(request, HttpStatus.conflict, '正在接收，请稍后重试');
         return;
       }
       if (request.headers.contentType?.mimeType != 'application/octet-stream') {
-        await _text(request, HttpStatus.unsupportedMediaType, '请选择播放列表文件');
+        await _text(request, HttpStatus.unsupportedMediaType,
+            _isBackupImport ? '请选择直播备份文件' : '请选择播放列表文件');
         return;
       }
       _busy = ownsUpload = true;
@@ -133,16 +175,21 @@ class _Session implements LivePlaylistTransferSession {
       if (name.isEmpty ||
           name.length > 160 ||
           RegExp(r'[\x00-\x1f\x7f/\\]').hasMatch(name) ||
-          !RegExp(r'\.(m3u8?|txt)$', caseSensitive: false).hasMatch(name)) {
-        throw const _UploadException('请选择 M3U、M3U8 或 TXT 文件');
+          !RegExp(_isBackupImport ? r'\.json$' : r'\.(m3u8?|txt)$',
+                  caseSensitive: false)
+              .hasMatch(name)) {
+        throw _UploadException(
+            _isBackupImport ? '请选择直播备份 JSON 文件' : '请选择 M3U、M3U8 或 TXT 文件');
       }
       final bytes = await _readBytes(request);
       if (_closed) return;
       // Validate off the UI isolate. The editor still owns the eventual save.
-      final error = await compute(_validate, bytes);
+      final error =
+          await compute(_isBackupImport ? _validateBackup : _validate, bytes);
       if (_closed) return;
       if (error != null) throw _UploadException(error);
-      await _text(request, HttpStatus.ok, '文件已传到电视，请在电视确认保存');
+      await _text(request, HttpStatus.ok,
+          _isBackupImport ? '备份已传到电视，尚未恢复，请在电视确认恢复' : '文件已传到电视，请在电视确认保存');
       if (!_closed) {
         _received.complete(LivePlaylistUpload(name: name, bytes: bytes));
       }
@@ -152,7 +199,9 @@ class _Session implements LivePlaylistTransferSession {
           ? error.message
           : error is TimeoutException
               ? '上传超时，请重试'
-              : '文件接收失败，请重试';
+              : _isBackupExport
+                  ? '备份下载失败，请重试'
+                  : '文件接收失败，请重试';
       if (ownsUpload) _report(message);
       try {
         await _text(
@@ -176,9 +225,13 @@ class _Session implements LivePlaylistTransferSession {
   }
 
   Future<Uint8List> _readBytes(HttpRequest request) async {
-    if (request.contentLength > livePlaylistMaxBytes) {
-      throw const _UploadException(
-          '文件超过 8 MiB', HttpStatus.requestEntityTooLarge);
+    final maxBytes =
+        _isBackupImport ? liveBackupMaxBytes : livePlaylistMaxBytes;
+    final tooLarge = _UploadException(
+        _isBackupImport ? '直播备份超过 32 MiB' : '文件超过 8 MiB',
+        HttpStatus.requestEntityTooLarge);
+    if (request.contentLength > maxBytes) {
+      throw tooLarge;
     }
     final result = Completer<Uint8List>();
     final bytes = BytesBuilder(copy: false);
@@ -192,9 +245,8 @@ class _Session implements LivePlaylistTransferSession {
     _readSubscription = request.listen(
         (chunk) {
           if (result.isCompleted) return;
-          if (bytes.length + chunk.length > livePlaylistMaxBytes) {
-            fail(const _UploadException(
-                '文件超过 8 MiB', HttpStatus.requestEntityTooLarge));
+          if (bytes.length + chunk.length > maxBytes) {
+            fail(tooLarge);
           } else {
             bytes.add(chunk);
           }
@@ -235,6 +287,7 @@ class _Session implements LivePlaylistTransferSession {
 
   Future<void> _close() async {
     _closed = true;
+    _backupBytes = null;
     _expiry.cancel();
     _cancelRead?.call();
     if (!_received.isCompleted) _received.complete(null);
@@ -259,12 +312,36 @@ String? _validate(Uint8List bytes) {
   }
 }
 
-String _page(String token) => '''<!DOCTYPE html>
+String? _validateBackup(Uint8List bytes) {
+  try {
+    LiveBackup.decode(bytes);
+    return null;
+  } catch (_) {
+    return '直播备份格式、版本或内容无效';
+  }
+}
+
+String _page(String token, LivePlaylistTransferMode mode) {
+  final isImport = mode == LivePlaylistTransferMode.backupImport;
+  final isExport = mode == LivePlaylistTransferMode.backupExport;
+  final maxBytes = isImport ? liveBackupMaxBytes : livePlaylistMaxBytes;
+  final title = isExport
+      ? 'Starflow 直播备份下载'
+      : isImport
+          ? 'Starflow 直播备份恢复'
+          : 'Starflow 直播文件传输';
+  final input = isExport
+      ? '''<p>备份包含订阅和媒体凭据，文件未加密。</p>
+<a href="/download?token=$token" download>下载直播备份</a>'''
+      : '''<label for="file">${isImport ? '直播备份' : '播放列表'}</label>
+<input id="file" type="file" accept="${isImport ? '.json' : '.m3u,.m3u8,.txt'}">
+<p>${isImport ? 'JSON · 最大 32 MiB · 上传后需电视确认恢复' : 'M3U / M3U8 / TXT · 最大 8 MiB'}</p>''';
+  return '''<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Starflow 直播文件传输</title>
+<title>$title</title>
 <style nonce="$token">
 :root { color-scheme: light; font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
 * { box-sizing: border-box; }
@@ -282,11 +359,9 @@ button:disabled { opacity: .55; cursor: default; }
 </style>
 </head>
 <body><main>
-<h1>Starflow 直播文件传输</h1>
-<label for="file">播放列表</label>
-<input id="file" type="file" accept=".m3u,.m3u8,.txt">
-<p>M3U / M3U8 / TXT · 最大 8 MiB</p>
-<button id="upload" type="button">上传到电视</button>
+<h1>$title</h1>
+$input
+${isExport ? '' : '<button id="upload" type="button">上传到电视</button>'}
 <p id="status" role="status" aria-live="polite"></p>
 </main>
 <script nonce="$token">
@@ -297,14 +372,14 @@ function show(message, error = false) {
   status.textContent = message;
   status.dataset.error = String(error);
 }
-button.addEventListener('click', async () => {
+button?.addEventListener('click', async () => {
   const file = fileInput.files[0];
-  if (!file || !/\\.(m3u8?|txt)\$/i.test(file.name)) {
-    show('请选择 M3U、M3U8 或 TXT 文件', true);
+  if (!file || !/\\.(${isImport ? 'json' : 'm3u8?|txt'})\$/i.test(file.name)) {
+    show('${isImport ? '请选择直播备份 JSON 文件' : '请选择 M3U、M3U8 或 TXT 文件'}', true);
     return;
   }
-  if (file.size > $livePlaylistMaxBytes) {
-    show('文件超过 8 MiB', true);
+  if (file.size > $maxBytes) {
+    show('${isImport ? '直播备份超过 32 MiB' : '文件超过 8 MiB'}', true);
     return;
   }
   button.disabled = fileInput.disabled = true;
@@ -324,3 +399,4 @@ button.addEventListener('click', async () => {
   }
 });
 </script></body></html>''';
+}

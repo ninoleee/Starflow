@@ -43,6 +43,7 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
     private var volume = 1f
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private var progress: Runnable? = null
+    private var networkSpeed: LiveTvNetworkSpeed? = null
     private val lifecycleObserver = LifecycleEventObserver { _, event ->
         when (event) {
             Lifecycle.Event.ON_STOP -> releasePlayer()
@@ -89,7 +90,10 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
                             volume = (args["volume"] as? Number)?.toFloat()?.takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: volume
                             open(context, url, headers as? Map<*, *> ?: emptyMap<Any, Any>(), (generation as Number).toLong())
                             result.success(null)
-                        } catch (_: Exception) { releasePlayer(); result.error("open", "Live playback failed", null) }
+                        } catch (error: Exception) {
+                            releasePlayer()
+                            result.error("open", "Live playback failed", LiveTvPlaybackError.details(error))
+                        }
                     }
                 }
                 "stop" -> { releasePlayer(); result.success(null) }
@@ -114,6 +118,11 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
                         player?.volume = volume
                         result.success(null)
                     }
+                }
+                "networkSpeed" -> {
+                    result.success(if ((args["generation"] as? Number)?.toLong() == session.generation && player != null) {
+                        networkSpeed?.bytesPerSecond
+                    } else null)
                 }
                 "audioTracks" -> {
                     if ((args["generation"] as? Number)?.toLong() != session.generation) {
@@ -151,7 +160,9 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
         val token = session.open(nextGeneration)
         val policy = LiveTvHttpPolicy(url, headers)
         val fallback = LiveTvHlsFallbackPolicy(url)
-        val http = DataSource.Factory { LiveTvHttpDataSource(policy) }
+        val speed = LiveTvNetworkSpeed { android.os.SystemClock.elapsedRealtime() }
+        networkSpeed = speed
+        val http = DataSource.Factory { LiveTvHttpDataSource(policy).apply { addTransferListener(speed) } }
         val control = DefaultLoadControl.Builder().setBufferDurationsMs(3000, 12000, 1000, 2000)
             .setTargetBufferBytes(32 * 1024 * 1024).setPrioritizeTimeOverSizeThresholds(false).build()
         val current = ExoPlayer.Builder(context).setLoadControl(control)
@@ -161,9 +172,13 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
         current.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
         current.setHandleAudioBecomingNoisy(true)
         current.addListener(object : Player.Listener {
-            private fun emit(state: String) {
+            private fun emit(state: String, error: Throwable? = null) {
                 if (!disposed && player === current && session.event(token, state)) {
-                    channel.invokeMethod("state", mapOf("generation" to nextGeneration, "state" to state))
+                    channel.invokeMethod("state", buildMap<String, Any> {
+                        put("generation", nextGeneration)
+                        put("state", state)
+                        if (error != null) put("error", LiveTvPlaybackError.details(error))
+                    })
                 }
             }
             override fun onPlaybackStateChanged(state: Int) {
@@ -190,8 +205,8 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
                     try {
                         current.setMediaItem(mediaItem(url, hls = true))
                         current.prepare()
-                    } catch (_: Exception) { emit("error"); finish() }
-                } else { emit("error"); finish() }
+                    } catch (fallbackError: Exception) { emit("error", fallbackError); finish() }
+                } else { emit("error", error); finish() }
             }
             private fun finish() {
                 // Release outside listener dispatch; a newer open must not be stopped by this task.
@@ -222,6 +237,7 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
         val poll = object : Runnable {
             override fun run() {
                 if (disposed || player !== current || !session.accepts(token)) return
+                speed.sample()
                 if (session.progress(token, current.currentPosition, current.isPlaying)) {
                     channel.invokeMethod("state", mapOf("generation" to nextGeneration, "state" to "progress"))
                 }
@@ -246,6 +262,7 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
         session.invalidate()
         progress?.let(handler::removeCallbacks)
         progress = null
+        networkSpeed = null
         val old = player
         player = null
         root.keepScreenOn = false

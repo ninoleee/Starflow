@@ -6,9 +6,14 @@ import 'package:starflow/features/settings/presentation/widgets/lan_transfer_qr_
 import '../data/live_playlist_transfer_service.dart';
 
 class LivePlaylistTransferDialog extends StatefulWidget {
-  const LivePlaylistTransferDialog({super.key, required this.start});
+  const LivePlaylistTransferDialog({
+    super.key,
+    required this.start,
+    this.mode = LivePlaylistTransferMode.file,
+  });
 
   final Future<LivePlaylistTransferSession> Function() start;
+  final LivePlaylistTransferMode mode;
 
   @override
   State<LivePlaylistTransferDialog> createState() =>
@@ -44,7 +49,10 @@ class _LivePlaylistTransferDialogState extends State<LivePlaylistTransferDialog>
       _errors = session.errors.listen((message) {
         if (mounted && !_finished) setState(() => _status = message);
       });
-      setState(() => _status = '等待手机上传');
+      setState(() => _status = switch (widget.mode) {
+            LivePlaylistTransferMode.backupExport => '等待手机下载直播备份',
+            _ => '等待手机上传',
+          });
       final uploaded = await session.received;
       if (mounted && !_finished) _finish(uploaded);
     } catch (_) {
@@ -60,7 +68,7 @@ class _LivePlaylistTransferDialogState extends State<LivePlaylistTransferDialog>
     unawaited(_session?.close());
   }
 
-  void _finish([LivePlaylistUpload? uploaded]) {
+  void _finish([LivePlaylistTransferResult? uploaded]) {
     _stop();
     Navigator.of(context).pop(uploaded);
   }
@@ -87,7 +95,7 @@ class _LivePlaylistTransferDialogState extends State<LivePlaylistTransferDialog>
   }
 
   @override
-  Widget build(BuildContext context) => PopScope<LivePlaylistUpload>(
+  Widget build(BuildContext context) => PopScope<LivePlaylistTransferResult>(
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) _stop();
       },
@@ -98,7 +106,11 @@ class _LivePlaylistTransferDialogState extends State<LivePlaylistTransferDialog>
         contentFocusNodes: _urlsFocus,
         actionFocusNodes: [_closeFocus],
         child: AlertDialog(
-          title: const Text('手机导入直播文件'),
+          title: Text(switch (widget.mode) {
+            LivePlaylistTransferMode.backupImport => '手机上传直播备份',
+            LivePlaylistTransferMode.backupExport => '手机下载直播备份',
+            _ => '手机导入直播文件',
+          }),
           content: SizedBox(
             width: 620,
             child: SingleChildScrollView(

@@ -5,6 +5,7 @@ import 'package:starflow/core/logging/app_logger.dart';
 import 'package:riverpod/misc.dart';
 import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
+import 'package:starflow/features/playback/application/playback_engine_support.dart';
 import 'package:starflow/features/playback/application/playback_startup_preparation.dart';
 import 'package:starflow/features/playback/application/playback_startup_routing.dart';
 import 'package:starflow/features/playback/application/playback_target_resolver.dart';
@@ -21,17 +22,22 @@ class PlaybackStartupCoordinator {
     required this.read,
     required this.targetResolver,
     required this.engineRouter,
+    required this.releaseSession,
   });
 
   final PlaybackStartupCoordinatorReader read;
   final PlaybackTargetResolver targetResolver;
   final PlaybackEngineRouter engineRouter;
+  final Future<void> Function(PlaybackTarget) releaseSession;
 
   Future<PlaybackStartupOutcome> start({
     required PlaybackTarget initialTarget,
     required bool isTelevision,
     required bool isWeb,
     bool targetAlreadyResolved = false,
+    Future<void> Function(PlaybackTarget, PlaybackStartupRouteAction)?
+        onTargetResolved,
+    void Function()? checkActive,
   }) async {
     // Stop new scan work immediately, but do not join unrelated HTTP bodies.
     unawaited(read(mediaRepositoryProvider)
@@ -43,25 +49,47 @@ class PlaybackStartupCoordinator {
     final resolvedTarget = targetAlreadyResolved
         ? initialTarget
         : await targetResolver.resolve(initialTarget);
-    final settings = read(appSettingsProvider);
-    final startupPreparation = await preparePlaybackStartup(
-      PlaybackStartupPreparationInput(
+    try {
+      final settings = read(appSettingsProvider);
+      final routeAction = engineRouter.route(PlaybackStartupRouteInput(
+        playbackEngine: effectivePlaybackEngine(
+          selected: settings.playbackEngine,
+          isWeb: isWeb,
+          platform: defaultTargetPlatform,
+        ),
+        target: resolvedTarget,
+      ));
+      await onTargetResolved?.call(resolvedTarget, routeAction);
+      checkActive?.call();
+      final startupPreparation = await preparePlaybackStartup(
+        PlaybackStartupPreparationInput(
+          resolvedTarget: resolvedTarget,
+          settings: settings,
+          isTelevision: isTelevision,
+          isWeb: isWeb,
+          platform: defaultTargetPlatform,
+        ),
+        playbackMemoryRepository: read(playbackMemoryRepositoryProvider),
+      );
+      checkActive?.call();
+      return PlaybackStartupOutcome(
         resolvedTarget: resolvedTarget,
         settings: settings,
-        isTelevision: isTelevision,
-        isWeb: isWeb,
-        platform: defaultTargetPlatform,
-      ),
-      playbackMemoryRepository: read(playbackMemoryRepositoryProvider),
-    );
-    final routeAction =
-        engineRouter.route(startupPreparation.startupRouteInput);
-    return PlaybackStartupOutcome(
-      resolvedTarget: resolvedTarget,
-      settings: settings,
-      startupPreparation: startupPreparation,
-      routeAction: routeAction,
-    );
+        startupPreparation: startupPreparation,
+        routeAction: routeAction,
+      );
+    } catch (error, stackTrace) {
+      // Resolution may create a session before storage or routing can fail.
+      if (resolvedTarget.isFntvTranscoding) {
+        try {
+          await releaseSession(resolvedTarget);
+        } catch (releaseError, releaseStackTrace) {
+          appLogWarning('playback.startup', 'Session cleanup failed',
+              error: releaseError, stackTrace: releaseStackTrace);
+        }
+      }
+      Error.throwWithStackTrace(error, stackTrace);
+    }
   }
 }
 

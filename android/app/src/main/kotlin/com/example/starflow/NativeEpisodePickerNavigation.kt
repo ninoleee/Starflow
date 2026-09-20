@@ -1,8 +1,8 @@
 package com.example.starflow
 
-// Returns the same index at horizontal boundaries, and out-of-range indices for toolbar exits.
+// Stops at horizontal and bottom boundaries; negative indices exit to the toolbar.
 internal fun episodePickerNeighbor(index: Int, count: Int, grid: Boolean, delta: Int): Int {
-    if (!grid) return index + delta
+    if (!grid) return if (index + delta >= count) index else index + delta
     val start = index / 30 * 30
     val end = minOf(start + 30, count)
     val column = (index - start) % 4
@@ -12,7 +12,7 @@ internal fun episodePickerNeighbor(index: Int, count: Int, grid: Boolean, delta:
     if (delta == 4 && next >= end) {
         return if (end < count) minOf(end + column, count - 1)
         else if ((index - start) / 4 < (end - start - 1) / 4) end - 1
-        else count
+        else index
     }
     if (delta == -4 && next < start && start > 0) return start - 2 + minOf(column, 1)
     return next

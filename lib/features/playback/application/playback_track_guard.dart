@@ -10,13 +10,18 @@ class PlaybackTrackGuard {
   static bool get allowsWrite =>
       (Zone.current[_key] as PlaybackTrackGuard?)?.isCurrent() ?? true;
 
-  Future<void> run(Iterable<Future<void> Function()> steps) => runZoned(
-        () async {
-          for (final step in steps) {
-            if (!isCurrent()) return;
-            await step();
-          }
-        },
-        zoneValues: {_key: this},
-      );
+  Future<void> run(Iterable<Future<void> Function()> steps) {
+    final parent = Zone.current[_key] as PlaybackTrackGuard?;
+    final guard =
+        PlaybackTrackGuard(() => isCurrent() && (parent?.isCurrent() ?? true));
+    return runZoned(
+      () async {
+        for (final step in steps) {
+          if (!guard.isCurrent()) return;
+          await step();
+        }
+      },
+      zoneValues: {_key: guard},
+    );
+  }
 }

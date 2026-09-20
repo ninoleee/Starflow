@@ -247,7 +247,13 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     });
 
     try {
-      await scope.wait(_applyMpvNetworkProxy(player, resolvedTarget));
+      // Only the transport copy reaches libmpv. Identity, history, recovery and
+      // server session ownership keep the original resolved target.
+      final relay = createPlaybackStreamRelayService();
+      _mpvRelays[player] = relay;
+      final engineTarget = await scope.wait(relay.prepareTarget(resolvedTarget));
+      ensurePlayerActive();
+      await scope.wait(_applyMpvNetworkProxy(player, engineTarget));
       ensurePlayerActive();
       await scope.wait(_applyMpvPerformanceTuning(player, resolvedTarget));
       ensurePlayerActive();
@@ -278,7 +284,7 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
       stage = 'open';
       await scope.wait(_openResolvedTargetWithMpv(
         player,
-        resolvedTarget,
+        engineTarget,
         deadline: deadline,
         beginStartupWait: beginStartupWait,
         startPosition: startPosition.position,

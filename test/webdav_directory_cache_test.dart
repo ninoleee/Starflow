@@ -92,7 +92,7 @@ void main() {
       enabled: true,
     );
     const cacheKey =
-        'persistent-webdav-cache-invalidation|plain||https://nas.example.com/dav/Shows/';
+        'origin-v1|persistent-webdav-cache-invalidation|plain||https://nas.example.com/dav/Shows/';
 
     final first = WebDavNasClient(
       httpClient,

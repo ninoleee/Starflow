@@ -21,6 +21,11 @@ class InterfaceSettingsPage extends ConsumerWidget {
       ),
     );
     final controller = ref.read(settingsControllerProvider.notifier);
+    final liveNavigationAutoPlayEnabled = ref.watch(
+      appSettingsProvider.select(
+        (settings) => settings.liveNavigationAutoPlayEnabled,
+      ),
+    );
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final theme = Theme.of(context);
 
@@ -115,6 +120,13 @@ class InterfaceSettingsPage extends ConsumerWidget {
           ),
         ]),
         const SettingsSectionTitle(label: '导航交互'),
+        SettingsToggleTile(
+          title: '点击直播菜单直接进入播放器',
+          subtitle: '仅 TV 生效',
+          value: liveNavigationAutoPlayEnabled,
+          focusId: 'interface:live-navigation-auto-play',
+          onChanged: controller.setLiveNavigationAutoPlayEnabled,
+        ),
         SettingsToggleTile(
           title: '单击首页时清理后台任务',
           subtitle: '开启后，单击菜单栏首页会停止非播放后台刷新、解除调度等待并回到顶部；双击首页仍执行刷新。',

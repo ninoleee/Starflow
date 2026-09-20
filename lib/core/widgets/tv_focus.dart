@@ -303,7 +303,7 @@ void scheduleTvFocusRecovery({
     if (!context.mounted ||
         (lifecycle != null && lifecycle != AppLifecycleState.resumed) ||
         ModalRoute.of(context)?.isCurrent == false ||
-        !TickerMode.valuesOf(context).enabled ||
+        !TickerMode.of(context) ||
         hasActionableTvFocus() ||
         focusNode.context == null ||
         !focusNode.canRequestFocus) {
@@ -1154,7 +1154,7 @@ class StarflowChipButton extends StatefulWidget {
     this.focusNode,
     this.focusId,
     this.accentColor,
-    this.showSelectedCheckmark = true,
+    this.showSelectedCheckmark = false,
     this.onMoveLeft,
     this.onMoveRight,
     this.onMoveUp,
@@ -1186,7 +1186,7 @@ class StarflowChipButton extends StatefulWidget {
       textScaler: MediaQuery.textScalerOf(context),
       maxLines: 1,
     )..layout();
-    final height = (painter.height < 20 ? 20.0 : painter.height) + 26 + 6;
+    final height = (painter.height < 20 ? 20.0 : painter.height) + 24 + 6;
     painter.dispose();
     return height < 50 ? 50 : height;
   }
@@ -1295,7 +1295,7 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
           curve: Curves.easeOutCubic,
           constraints: BoxConstraints(
               minHeight: StarflowChipButton.minimumHeight(context)),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
           decoration: BoxDecoration(
             color: backgroundColor,
             borderRadius: radius,

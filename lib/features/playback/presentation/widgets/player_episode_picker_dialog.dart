@@ -103,9 +103,9 @@ class _PlaybackEpisodePickerDialogState
   final _headerFocus = FocusNode();
   final _gridFocus = FocusNode();
   final _seasonFocus = FocusNode(debugLabel: 'player-episode-picker-season');
-  final _footerFocus = FocusNode();
+  final _rangeFocus = FocusNode(debugLabel: 'player-episode-picker-range');
   final _focusSummary = ValueNotifier<int>(0);
-  static const _accent = Color(0xFF2DD4BF);
+  Color get _accent => AppActionColors.of(Theme.of(context)).primary;
   double get _rowExtent => 72;
   String? _error;
   bool _loading = false;
@@ -215,8 +215,7 @@ class _PlaybackEpisodePickerDialogState
 
   double _rowAlignedOffset(int row, double viewportHeight, double maxOffset) {
     final centered = row * _rowExtent - viewportHeight / 2 + _rowExtent / 2;
-    return ((centered / _rowExtent).round() * _rowExtent)
-        .clamp(0.0, maxOffset);
+    return ((centered / _rowExtent).round() * _rowExtent).clamp(0.0, maxOffset);
   }
 
   void _focus(int index) {
@@ -318,12 +317,12 @@ class _PlaybackEpisodePickerDialogState
                 }
                 if ((focusNode == _headerFocus || focusNode == _gridFocus) &&
                     event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                  _focusBelowHeader();
-                  return KeyEventResult.handled;
-                }
-                if (focusNode == _footerFocus &&
-                    event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                  _focus(_focused);
+                  if (focusNode == _gridFocus &&
+                      _queue.entries.length > _pageSize) {
+                    _rangeFocus.requestFocus();
+                  } else {
+                    _focusBelowHeader();
+                  }
                   return KeyEventResult.handled;
                 }
                 return KeyEventResult.ignored;
@@ -480,9 +479,7 @@ class _PlaybackEpisodePickerDialogState
             }
             if (next < 0) {
               _focusAboveEpisodes();
-            } else if (next >= _queue.entries.length) {
-              _footerFocus.requestFocus();
-            } else {
+            } else if (next < _queue.entries.length) {
               _move(next);
             }
             return KeyEventResult.handled;
@@ -538,6 +535,9 @@ class _PlaybackEpisodePickerDialogState
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
                     child: Column(children: [
                       Row(children: [
+                        if (!widget.isTelevision)
+                          _tool(Icons.arrow_back_rounded, '返回',
+                              () => Navigator.pop(context)),
                         Expanded(
                             child: Text(
                                 target.resolvedSeriesTitle.isEmpty
@@ -586,10 +586,10 @@ class _PlaybackEpisodePickerDialogState
                                                       overflow:
                                                           TextOverflow.ellipsis,
                                                       style: TextStyle(
-                                                          fontSize:
-                                                              widget.isTelevision
-                                                                  ? 16
-                                                                  : 14))),
+                                                          fontSize: widget
+                                                                  .isTelevision
+                                                              ? 16
+                                                              : 14))),
                                               if (_seasons.length > 1)
                                                 const Icon(
                                                     Icons.expand_more_rounded,
@@ -597,6 +597,44 @@ class _PlaybackEpisodePickerDialogState
                                             ])),
                                       ),
                                     ))),
+                            if (_queue.entries.length > _pageSize)
+                              Flexible(
+                                  child: TvDirectionalActionPanel(
+                                      enabled: widget.isTelevision,
+                                      onMoveUp: _gridFocus.requestFocus,
+                                      onMoveDown: () => _focus(_focused),
+                                      child: Tooltip(
+                                          message: '选择集数范围',
+                                          child: TvFocusableAction(
+                                              focusNode: _rangeFocus,
+                                              onPressed: _loading
+                                                  ? null
+                                                  : _chooseRange,
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                              child: SizedBox(
+                                                  height: 36,
+                                                  child: Row(
+                                                      mainAxisSize:
+                                                          MainAxisSize.min,
+                                                      children: [
+                                                        Flexible(
+                                                            child: Text(
+                                                                '${_queue.entries[_start].target.episodeNumber ?? _start + 1}–${_queue.entries[_end - 1].target.episodeNumber ?? _end} 集',
+                                                                maxLines: 1,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                                style: const TextStyle(
+                                                                    fontSize:
+                                                                        13,
+                                                                    color: AppColors
+                                                                        .foregroundMuted))),
+                                                        const Icon(
+                                                            Icons
+                                                                .expand_more_rounded,
+                                                            size: 20),
+                                                      ])))))),
                             if (!_grid && _error != null)
                               _tool(Icons.refresh_rounded, '重试', () {
                                 if (_pendingSeason != null) {
@@ -704,51 +742,6 @@ class _PlaybackEpisodePickerDialogState
                                             height: _rowExtent,
                                             child: _tile(_start + i)))));
                       })),
-                      const Divider(
-                          height: 12, thickness: 1, color: Color(0x1FFFFFFF)),
-                      Row(children: [
-                        if (!widget.isTelevision)
-                          _tool(Icons.close_rounded, '关闭',
-                              () => Navigator.pop(context)),
-                        _tool(
-                            Icons.chevron_left_rounded,
-                            '上一段',
-                            !_loading && _page > 0
-                                ? () => _move(_start - _pageSize, direct: true)
-                                : null),
-                        Expanded(
-                            child: Center(
-                                child: _queue.entries.length > _pageSize
-                                    ? TextButton(
-                                        style: TextButton.styleFrom(
-                                            foregroundColor:
-                                                AppColors.foregroundMuted),
-                                        onPressed:
-                                            _loading ? null : _chooseRange,
-                                        child: Text(
-                                            '${_queue.entries[_start].target.episodeNumber ?? _start + 1}–${_queue.entries[_end - 1].target.episodeNumber ?? _end} 集'))
-                                    : Text('${_queue.entries.length} 集',
-                                        style: const TextStyle(
-                                            color:
-                                                AppColors.foregroundMuted)))),
-                        _tool(
-                            Icons.chevron_right_rounded,
-                            '下一段',
-                            !_loading && _end < _queue.entries.length
-                                ? () => _move(_end, direct: true)
-                                : null),
-                        _tool(Icons.my_location_rounded, '定位当前集', () {
-                          ++_request;
-                          setState(() {
-                            _queue = widget.queue;
-                            _season = null;
-                            _pendingSeason = null;
-                            _loading = false;
-                            _error = null;
-                          });
-                          _move(widget.queue.currentIndex, direct: true);
-                        }, focusNode: _footerFocus),
-                      ]),
                     ])))),
       ),
     );
@@ -760,7 +753,7 @@ class _PlaybackEpisodePickerDialogState
     _headerFocus.dispose();
     _gridFocus.dispose();
     _seasonFocus.dispose();
-    _footerFocus.dispose();
+    _rangeFocus.dispose();
     _focusSummary.dispose();
     for (final node in _nodes.values) {
       node.dispose();

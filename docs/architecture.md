@@ -170,7 +170,7 @@ lib/
 - 通用组件
 - 网络图片请求头和调试工具
 - `TV` 焦点组件、菜单键动作和页面边界处理
-- 详情季标签不设置固定或最小宽度，由文字、选中图标和对称内边距决定宽度，季选择区域维持 `52dp` 高度。`_DetailSeasonTabs` 用稳定 key 保留标签，只在实例首次布局后调用一次横向 `ScrollPosition.ensureVisible(alignment: 0.5)`，按打开详情时的当前季实际布局定位，并夹紧首尾滚动边界；不再使用 `index * 120` 估算，也不监听选中季或可用宽度触发重新定位。季标签使用完整 Row 以便定位远处选中项，剧集卡片仍保持懒构建；切换季、手动滚动、尺寸变化和播放器返回不重置横向位置，不滚动外层页面，不请求焦点。
+- 详情季标签不设置固定或最小宽度，由文字和对称内边距决定宽度，选中时不添加对号或改变宽度，季选择区域维持 `52dp` 高度。共享 `StarflowChipButton` 默认关闭 `showSelectedCheckmark`，各页面 Tab / 标签按钮保留原有功能图标和文字、底色、边框高亮；复选框与菜单勾选标记不变。`_DetailSeasonTabs` 用稳定 key 保留标签，只在实例首次布局后调用一次横向 `ScrollPosition.ensureVisible(alignment: 0.5)`，按打开详情时的当前季实际布局定位，并夹紧首尾滚动边界；不再使用 `index * 120` 估算，也不监听选中季或可用宽度触发重新定位。季标签使用完整 Row 以便定位远处选中项，剧集卡片仍保持懒构建；切换季、手动滚动、尺寸变化和播放器返回不重置横向位置，不滚动外层页面，不请求焦点。
 - 详情页的延迟内容一旦显示，不再使用 `TickerMode` 控制其挂载寿命；播放器覆盖期间保留剧集组件和滚动状态，剧集 provider 的监听仍由页面可见性与 `TickerMode` 共同限制。
 - `DetailHeroSection` 监听 `playbackMemorySnapshotProvider`，使用仓库同步快照计算续播入口。“从头播放”只依赖 `MediaDetailTarget.hasMatchedResource`（已有直接播放目标，或来源 ID 与资源 ID 均非空）；不依赖历史、剧集加载或地址解析。历史 readiness 仅控制自动首焦点，避免记录晚到前先抢焦点。操作行由稳定 key 的 `KeyedSubtree` 包装，补充续播位置文字时不重建按钮子树。剧集区域将 `DetailBlock` 放在异步分支外，保留加载到完成期间标题的 Element 和布局位置。
 - 详情启动将 `_seriesSourceReady` 与 `_detailEnrichmentReady` 分开：本地缓存和版本恢复后允许剧集读取，在线元数据刷新结束后再订阅 enrichment，保留解析防重约束。剧集 provider 在区域内的 `Consumer` 监听，卡片角标通过 `select` 订阅最终显示文字；无关快照更新不会重建图片。季列表和可选历史查询使用 record `.wait` 并行，历史失败回退默认季。单季列表高度为 `292dp`，多季另加 `68dp` 季选择条空间；错误态按内容高度显示，无可用分组仍隐藏。
@@ -215,13 +215,20 @@ lib/
 
 直播页面和持久化的具体所有权：
 
-- `liveSnapshotProvider` 订阅仓库变更，`liveGuideProvider / liveNowNextProvider` 读取本地节目单；频道页活动时每分钟刷新 now/next 查询，播放页每分钟更新当前节目显示，不发起分钟级网络轮询。`refreshDue` 只在页面激活时检查来源期限，离开/后台阻止开始下一来源，已开始的有界请求允许收尾。
+- `live_player_page.dart` 不提供底栏，顶部固定 112dp，独立全屏设置视图拥有频道、节目单、线路、音轨和 Android 内核入口，不提供上下频道按钮。频道／节目单／设置共用一个 `LocalHistoryEntry`，返回先移除局部界面并恢复画布焦点；弹窗／下拉由自己的路由优先返回，退出播放器后才释放会话。设置期间禁止自动收栏，不新增播放控制器。
+- 播放器顶部背景 alpha 0.2（20% 不透明），设置／频道／节目单背景 alpha 0.7（70% 不透明），仅背景混合，设置内部 Material 不重复叠加底色。`live_logo.dart` 独立承载频道首页的 `LiveLogo`，使用 64×40 占位、192×120 上限等比解码及失败占位；展示 URL 由首页按 `LiveSnapshot.logo` 解析，下载与取消仍归 `live_logo_provider.dart`。播放器选台菜单只用本地图标，不依赖台标组件／provider，也不发起台标下载或解码；节目查询与播放所有权不变。
+
+- `live_widgets.dart` 的 `LiveIconButton.selected` 与 `LiveSelectionLabel` 统一消费 `AppActionColors`，分别承载收藏状态及线路、分组、内核、更新间隔、恢复方式的选中勾。下拉标记固定 24dp，长标签单行省略；禁用优先弱化。播放器当前频道／节目 `ListTile` 显式配置强调色与 9% 淡底，不依赖保持中性的 `ColorScheme.primary`。`live_channel_picker.dart` 拥有左分组／右频道叠层的筛选、固定行高惰性滚动和 TV 焦点，每次挂载定位当前播放频道；选台通过回调交回 `LivePlayerPage`，不修改播放控制器或全局换台范围。原有白色焦点框、黑色视频底色、音轨查询和播放控制器接口不变，MPV／Exo 共用这些 Flutter 样式。
+- `liveSnapshotProvider` 订阅仓库变更，`liveGuideProvider / liveNowNextProvider` 读取本地节目单；频道页激活及活动时每分钟刷新 now/next，播放页仅在选台列表打开时订阅批量 now/next，打开、列表回前台及前台列表每分钟重读。`LiveChannelPicker` 只接收结果快照，不逐频道读库；频道页和选择器按来源 + 手动覆盖后的 EPG ID 匹配，`LiveCurrentProgramme` 共享标题／空态／完整语义标签，节目刷新不改变列表身份或播放会话。播放页当前频道完整节目查询保持独立，前台每分钟更新显示时间，不发起分钟级网络轮询。`refreshDue` 只在页面激活时检查来源期限，离开/后台阻止开始下一来源，已开始的有界请求允许收尾。
 - `LiveTvPage` 拥有搜索、分组、收藏筛选和整理 UI；`LiveSourcesPage` 拥有来源编辑、文件选择、首次/手动刷新和删除确认。只有 `/live-tv` 是具名壳路由；订阅页用 `MaterialPageRoute`，播放页经 root navigator 打开 `LivePlayerPage(initialChannel, snapshot)`，没有契约草稿中的 `/live-tv/sources` 或 `/live-tv/player?channel=...` 路由。
+- 首页独立持有 `LiveChannelProbeController`，每次可见且 `refreshDue` 结束、列表就绪后自动补测未测／过期频道，不依赖首次标记。`LiveProbeViewport` 检查行与视口相交、排除离屏缓存；controller 连续可见 200ms 准入、TV 焦点优先、两路并发，离屏取消并等待清理后复用名额。一个定时器合并准入和可见项最近到期，成功 TTL 5 分钟，连续失败 45／90／180／300 秒退避，成功／线路／网络变化重置；停止保留有效缓存但清除定时器和视口。刷新保留旧结果并显示图标。快照按 ID 与 URL／headers／首选线路协调，元数据保留匹配工作，隐藏／删除／停用移除对应任务。`live_probe_network.dart` 提供系统连接事件流，页面存活期间被动订阅；网络和代理变化使缓存失效但不重启已停止任务，正常路由返回复用缓存，后台或监听异常后返回保守失效。监听随销毁解除。分组菜单临时覆盖暂停；真正失活／后台停止任务，返回自动恢复；手动暂停本次停留不被筛选／网络解除，下次真正返回重置。标签／进度局部刷新。`LiveChannelProbe` 独占 HTTP 客户端和响应流，慢清理只报警、不伪造释放，开播等待清理；无数据库、后台检测、解码或 HLS 子请求，Web 隐藏入口。
 - TV 文件入口由 `LivePlaylistTransferDialog` 持有临时 `LivePlaylistTransferSession`，复用 `LanTransferQrAddressCard` 和 TV 对话框返回处理；返回/后台/销毁都会关闭会话，启动后迟到的 session 也会立即关闭。接收服务只校验并返回文件名与原始字节，不接触数据库或应用配置；`LiveSourcesPage` 收到后保留草稿，仍由保存动作交给 `LiveRepository`。非 TV 保留本地文件选择，Web 使用不启动 HTTP 服务的 stub。
 - `LivePlayerPage` 拥有画布/工具栏/频道/节目单的 Flutter 焦点、当前频道与内核切换、生命周期和播放优先状态。`LiveTvView` 的根视图与 TextureView 不接受焦点，Flutter 的 `AndroidView` 也被 `ExcludeFocus` 包装；原生不接管遥控器、EPG 或影视历史。音轨弹窗只向当前 engine 回写，频道及线路记忆在当前代次首次 progress/frame 时提交，而非 ready 时提交。
-- IO 库为应用支持目录 `starflow-db/live_tv.db`，Web 库为 `starflow-live-tv`。`sources / channels / preferences / epg / meta` 分离直播数据；直播内核、收藏和线路偏好不写入 `AppSettings`。只有菜单可见项仍属于配置，不代表直播数据库随配置 JSON、Web/TV 传输、WebDAV 手动备份或影视收藏自动同步。没有专属直播备份/恢复、缓存容量管理或自动过期清扫入口。
+- IO 库为应用支持目录 `starflow-db/live_tv.db`，Web 库为 `starflow-live-tv`。`sources / channels / preferences / channelOwners / epg / epgLogos / meta` 分离直播数据；直播内核、收藏和线路偏好不写入 `AppSettings`。只有菜单可见项属于应用配置。`LiveBackup` 负责独立版本化备份校验，仓库以单事务合并/替换七个 store，并使旧刷新 epoch 失效；`LiveBackupDialog` 负责非 TV 文件选择/路径、TV 手机扫码、凭据提示和恢复确认。没有缓存容量管理或自动过期清扫入口。
 - `live_logo_provider.dart` 拥有独立四路传输池、15s/2 MiB 单图边界和 provider 释放时取消；不接入影视海报磁盘缓存。订阅、EPG 和台标不携带媒体 headers，`LiveSource` 无自定义请求头字段；`LiveLine.headers` 仅来自播放列表的媒体选项。代理与正文边界以 [开发网络](development-network.md#直播订阅与媒体流2026-09-20) 为准。
-- 15s 开流计时触发失败，不通过 `Future.timeout` 释放旧 open 所有权，也不强制取消媒体请求；必须等待旧 open settle 后串行 stop/dispose，再开始后续 open。`LiveEngine` 无取消接口，底层永久挂起仍会阻塞清理和换台，这是当前限制。18s 只由 progress/frame 续期，ready/buffering 不续期；重连按 2/4/6s 退避。手动选线路也重置恢复预算，前台恢复不重置，切换内核建立新控制器。Exo 与 MPV 信号不完全等价，结构化 `live.playback` 只记录首次 progress/frame 的类型和耗时，不自动生成双内核可比的像素首帧报告。
+- `LivePlaylistTransferService` 以 `file / backupImport / backupExport` 模式启动单次 LAN 会话，返回 `LivePlaylistUpload / LiveBackupDownloaded` 类型结果，不访问仓库。导出模式只持有已校验的备份快照，导入模式只返回校验后的字节；`LiveBackupDialog` 确认后才调用仓库恢复。`LivePlaylistTransferDialog` 复用二维码、遥控器焦点和前后台清理，不扩展普通应用配置接口。
+- TV 文本扫码统一属于设置输入层：`SettingsTextInputField` 在输入弹窗右侧提供扫码按钮，`TextInputTransferDialog` 拥有二维码会话生命周期，`TextInputTransferService` 仅接收单次 UTF-8 文本，不依赖直播、配置仓库或业务 URL 校验。回填时执行单行及 `inputFormatters` 规则，弹窗保存才更新外层 controller 并触发 `onChanged`，取消不修改原值。直播订阅 URL 确认后可清除文件草稿，来源页保存后才刷新；名称/EPG 同样使用共用入口。独立搜索/播放器输入框不隐式迁移。
+- 15s 开流计时触发失败；生产适配器实现 `CancellableLiveEngine.cancelOpen`，取消请求绕过开流队列，但串行 stop/dispose/新 open 必须等待原生卸载确认，不能仅以 `Future.timeout` 释放所有权。无取消能力的适配器仍等待旧 open settle，原生卸载本身挂起也不授权并发重开。18s 看门狗仅由 progress/frame 续期；音频焦点暂停/抑制停止检测与重连。手动选线路重置恢复预算，前台恢复不重置；切换内核建立新控制器但继承页面静音。Exo 与 MPV 的首次 progress/frame 不自动等同于可比的像素首帧。
 
 收尾源码补充：仓库增加 `channelOwners / epgLogos` 保存历史频道归属和来源台标缓存，删除来源同时清理可归属的旧偏好及上次播放标记；停用来源不开始刷新，刷新合并按来源及版本隔离。设置入口使用 `LiveTvPage(showBackButton: true)`，一级直播页不显示该返回按钮。播放页增加 session/attachment 代次、切换内核防重入和显式工具栏返回模式；这些后续实现不自动获得前置测试结果背书。
 
@@ -268,7 +275,7 @@ lib/
 - TV 文件名使用 `starflow-tv[-config]-主版本.月份.序号.apk`
 - 当前显示版本号按标准三段式 `主版本.月份.序号` 自动递增
 - TV PowerShell / Bash、iOS Bash 和 Windows PowerShell 发布脚本统一调用 `tool/release_version.dart`；默认按月递增，显式同批发布可用 `STARFLOW_RELEASE_VERSION`。Android `versionCode` 与 Dart 范围校验共用 `config/release_version.json`，显示三段版本与数字版本码是不同概念；运行工具会写入 pubspec
-- 当前 Release APK 会继续启用 `v1 + v2` 签名，并沿用本机 debug keystore
+- Release 启用 `v1 + v2` 签名，通过忽略提交的 `android/key.properties` 显式配置既有安装身份；不回退自动生成的 debug key。历史证书为 Android Debug，发布校验固定其 SHA-256，保留覆盖升级能力，不代表已经迁移为新正式证书。
 - `scripts/build_windows_installer.ps1` 默认把 Windows 安装器输出到桌面
 - 这条脚本会先执行 `flutter build windows`，再调用 Inno Setup 生成单个安装器
 - 当前安装器文件名使用 `starflow-windows-版本号-setup.exe`
@@ -367,6 +374,7 @@ lib/
 - `PlaybackTargetResolver`：先把播放目标解析到可播地址/headers。
 - `PlaybackStartupCoordinator`：统一串起目标解析、续播/跳过配置读取与路由判定输入准备。
 - `PlaybackEngineRouter`：封装路由判定（系统播放器 / 原生容器 / 内置 MPV）。
+- `PlaybackStreamRelayService`：MPV/iOS 的 NAS/Quark 敏感凭据传输边界，逐跳隔离来源认证；每个播放器或原生会话拥有并释放自己的代理。传输目标与持久化媒体身份分离，认证清单格式限制见网络文档。Android 点播由 `NativePlaybackHttpDataSource` 保护实际媒体子请求。
 - `PlaybackStartupExecutor`：执行路由动作，并返回是否继续走内置 `MPV` 打开链。
 - `player_page.dart`：只保留页面壳、状态字段和顶层装配；平台会话、启动/MPV、运行期动作和播放器控制已经沉到 `presentation/widgets/player_page_*.part.dart` 与独立 widgets。
 - `PlaybackMemoryRepository`：负责最近播放/续播记忆，并通过单调递增 `updatedAt` 保证最近播放列表稳定排序。
@@ -870,6 +878,8 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 
 MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播放器代次和手动选轨优先；`PlaybackSeekCoalescer` 合并 TV 长按输入，稳定的播放页 key 不因 ready 状态销毁视频子树。AVPlayer StartupGate 只允许一个 preroll，ready 时间轴区分点播/直播，不以 `.m3u8` 判断直播。iOS 呈现回调和 `playing` 不是实际像素首帧。处理状态与限制见 [播放器审查](player-smoothness-review-2026-09-20.md)。
 
+同日审查收尾：硬恢复仅释放旧 FNTV 会话，页面级 `FntvSessionOwner.close` 限于最终退出/销毁。`PlaybackRecoveryIntent` 在暂停、拖动、后台和退出时使延迟恢复失效；原生 iOS 以用户命令和 episode intent 拒绝迟到切集。手动飞牛字幕下载也使用 `PlaybackTrackGuard`，嵌套保护保留父任务有效性，过期结果不能挂载或回写目标/偏好。策略与设备证据分列于 [审查收尾记录](review-closure-2026-09-20.md)。
+
 播放器页基于 `media_kit`，当前是“三种播放内核”分支：
 
 - 内置播放器负责应用内播放、字幕增强、续播和跳过逻辑
@@ -883,7 +893,7 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 2. `PlaybackStartupCoordinator` 解析播放目标，读取本地续播和按剧跳过偏好，并得到路由动作
 3. 按 `Emby / 飞牛 / WebDAV / Quark` 来源解析真实播放地址和请求头；飞牛默认重新协商，已解析的会话切换目标可显式跳过重复申请
 4. `PlaybackStartupExecutor` 按用户选择的播放器内核执行系统播放器、原生容器或内置 MPV 分支
-5. 内置播放进入等待态并直接打开，不做独立 Range 启动预检或测速；SmartStrm 轻量格式探测只服务原生 Exo 分支
+5. 内置播放进入等待态，不做旧式独立启动测速；敏感凭据安全 relay 先验证有界媒体前缀，其余路径直接打开。SmartStrm 轻量格式探测只服务原生 Exo 分支
 6. 调用内置 `MPV` 打开链并应用启动期调优
 7. MPV 临时网络失败在同一启动期限内最多创建 `3` 次播放器（包含首次）；永久与未知错误不无条件重试
 8. 超过配置的最大打开超时时间则终止
@@ -1055,10 +1065,10 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 - Android TV 原生播放器内切换远程剧集时，`releasePlayer()` 先清理旧 Exo、Surface、Analytics/带宽监听、运行循环、看门狗和系统媒体会话；新集不继承旧 URL、MediaSource 或缓冲数据。低内存 TV 的内部切集档使用 `minBuffer=30s / start=6s / rebuffer=12s / target=48 MB`，首次外部启动继续使用原快启档。`native.queue.old-player-released` 与 `native.buffer-policy episodeSwitchWarmup=true` 用于验证两段边界
 - 内置 MPV 的 TV、Material 和 Material Desktop 控制层都直接消费 `PlaybackEpisodeQueue`，不使用 media_kit 内部单媒体 playlist 的上一项/下一项按钮；三端统一显示边界可用状态和右侧选集面板。手动选集、相邻集及自动续播最终收口到 `_switchPlaybackQueueIndex`：先取用命中的预解析地址，否则用 `PlaybackTargetResolver` 解析目标单集并校验可播地址，成功后才保存旧集进度、关闭旧播放器并初始化新集，解析失败时队列索引和当前播放器保持不变
 - MPV 的 TV 下键由独立 `_OpenTvEpisodePickerIntent` 处理：有可浏览队列时直接打开选集，没有队列时打开播放设置；选集不主动收起或显示控制栏，控制栏是否可见保持进入前的状态
-- Flutter `player_episode_picker_dialog.dart` 在非 TV 模式的底栏最左侧提供关闭图标，复用现有工具按钮的 44dp 点击区域及语义标签；关闭返回空选择，不提交剧集或候选队列，切季加载时仍可使用。TV 不增加按钮，保留返回键与既有焦点布局。
-- Flutter 选集初始定位、模式/分段切换、定位当前集与方向键移动共用整行对齐偏移：取最接近居中位置的 72dp 行边界。滚动内容底部仅在需要时补不足一行的余量，使末尾最大偏移也对齐行边界且最后一行完整可见；不改变条目高度，不干预手动滑动，也不使用首帧后的补滚动。Android 原生选集定位策略不受此变更影响。
+- Flutter `player_episode_picker_dialog.dart` 在非 TV 模式的标题栏最左侧提供返回箭头，复用现有工具按钮的 44dp 点击区域及语义标签；关闭返回空选择，不提交剧集或候选队列，切季加载时仍可使用。TV 不增加返回按钮，保留返回键关闭；剧集末尾继续按下保持当前焦点和滚动位置。
+- Flutter 选集初始定位、模式/分段切换与方向键移动共用整行对齐偏移：取最接近居中位置的 72dp 行边界。滚动内容底部仅在需要时补不足一行的余量，使末尾最大偏移也对齐行边界且最后一行完整可见；不改变条目高度，不干预手动滑动，也不使用首帧后的补滚动。Android 原生选集定位策略不受此变更影响。
 - `PlaybackEpisodeBrowser` 负责选集会话内的季列表、单季元数据及 in-flight 缓存，失败清除对应缓存后可重试；`PlaybackEpisodeQueueResolver.loadSeasons/loadSeason` 复用媒体服务子列表和 NAS 本地索引，不解析播放地址。浏览其他季的队列使用 `currentIndex=-1`，通过 `PlaybackEpisodeSelection` 将候选队列与选择索引交给播放层，MPV 在地址解析成功且原队列仍有效后才提交。Android 经 `browseNativePlaybackEpisodes` 回调同一服务，`NativePlaybackEpisodePicker` 只负责面板；`NativePlaybackEpisodeController.selectedSeasonQueue` 暂存跨季候选，失败清除，成功才提交为播放队列。
-- 两端选集面板采用列表/四列网格，TV 宽度为可用宽度的 `30%` 并夹紧在 `320–600dp`，窄屏继续占满可用宽度；每段最多挂载 30 个轻量条目，按真实集号显示分段边界，遥控器移动可跨段。当前播放依据资源 key 标识而不是焦点位置；本地历史仅作显示，不修改历史保留策略。Flutter 选集及季/范围弹窗使用 `AnimationStyle.noAnimation`；Android 对应窗口在显示前设置 `windowAnimations=0`，主面板的尺寸与位置也在显示前确定，避免默认窗口缩放和显示后扩张。Flutter 关闭后恢复原 FocusNode，Android 优先恢复仍挂载的入口 View。单季加载带请求代次校验和 30 秒超时，关闭面板、定位当前集或切换请求后忽略迟到结果；不加载剧照、不预解析整季。
+- 两端选集面板采用列表/四列网格，TV 宽度为可用宽度的 `30%` 并夹紧在 `320–600dp`，窄屏继续占满可用宽度；每段最多挂载 30 个轻量条目，按真实集号显示分段边界，遥控器移动可跨段。当前播放依据资源 key 标识而不是焦点位置；本地历史仅作显示，不修改历史保留策略。Flutter 选集及季/范围弹窗使用 `AnimationStyle.noAnimation`；Android 对应窗口在显示前设置 `windowAnimations=0`，主面板的尺寸与位置也在显示前确定，避免默认窗口缩放和显示后扩张。Flutter 关闭后恢复原 FocusNode，Android 优先恢复仍挂载的入口 View。单季加载带请求代次校验和 30 秒超时，关闭面板或切换请求后忽略迟到结果；不加载剧照、不预解析整季。
 - MPV 的跳过与连续播放规则由 `playback_auto_skip_policy.dart` 提供，与 Kotlin `NativePlaybackStartPolicy` / `NativePlaybackSkipPolicy` 对应：`resolvePlaybackStartPosition` 在创建播放器之前决定开流起点（自动下一集忽略旧续播并应用片头，非自动入口按 allowResume 用续播点，无续播点才用片头），`resolvePlaybackEndBoundary` 给出结束边界，`shouldPrepareNextEpisode` 给出边界前 `30s` 的预解析窗口。
 - MPV 起点通过 media_kit `Media(start:)` 交给 mpv 的 `on_load` 钩子（`on_unload` 会自动复位）。`PlaybackIntroStartGuard` 在开流前订阅 duration，在首帧 / 稳定播放等待期间发现越界便同步将有效起点改为零并执行自动 seek；纠正期间不确认就绪，结束后重新建立位置基线、确认窗口与 watchdog，迟到 position 回退也重置基线。订阅在成功、失败和取消时释放；`_OpenedPlayback.effectiveStartPosition` 传递最终起点，ISO 后续尝试及 finalize 不恢复无效片头。有效起点仍仅在后端偏差超过 `10s` 时兜底 seek，不新增常规二次缓冲。
 - MPV 的剧集队列只在没有队列时解析：切集和故障恢复复用内存队列并替换当前条目；冷启动的内嵌路线在开流后台解析队列，`launchSystemPlayer / launchNativeContainer` 两条路线仍在 executor 前同步解析
@@ -1077,10 +1087,10 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 - Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 的 `native_network_speed` 不设置独立背景，直接使用所在顶栏的背景，保留原文字样式和间距。手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
 - 选集初始定位在首次绘制前完成：Flutter 在 `LayoutBuilder` 中按当前分段、行高和实际视口高度设置 `ScrollController.initialScrollOffset`，由当前集 autofocus 接收焦点，不再首帧后 jump；Android 预先构建条目，在一次性 `OnPreDrawListener` 中请求当前集焦点并 `scrollTo`，抑制初始焦点回调的平滑滚动。打开后的遥控器浏览继续沿用原有滚动行为。
 - 播放器弹窗经 `showPlaybackMenuDialog` 统一挂载 `PlaybackMenuTheme`，背景唯一配置为 `playbackMenuBackground = #CC18181B`（80% 不透明），禁用 surface tint 和 elevation，避免叠加背景使透明度失真；选集及各级设置菜单不单独重复配置。退出确认通过通用 action dialog 的可选 `dialogWrapper` 接入主题，其他页面不受影响。Android 的 `NativePlaybackSettingsDialogTheme` 仅由 windowBackground 绘制 `native_settings_background = #CC18181B`，内容 colorBackground 透明，选集自绘底板复用同一颜色。前景控件及各入口原有遮罩保持不变。
-- 选集结构切换（季、布局、分段、定位）复用绘制前定位：Flutter 用布局代次更换滚动子树和初始 offset，旧控制器在卸载后释放，过时代次不请求焦点；同段方向移动直接更新焦点和滚动，不调用面板 setState。Android 仅保留一个待执行 pre-draw listener，同段焦点回调只发起一次居中，不再 post 重复滚动，关闭移除 listener。
-- 列表/网格偏好使用 `episode_picker_layout`（`list`/`grid`），Flutter 经 `SharedPreferencesStore.reloading` 在打开前读取；Android 使用 `FlutterSharedPreferences` 的 `flutter.episode_picker_layout`，两种播放器共享本地模式。仍以当前播放集初始化位置，不记忆临时浏览位置。每段保留 30 集，网格左右停止在本行边界，上下跨段使用段内列号，缺列夹紧到可用项；本季第一集／网格首行上移优先连接可用选季入口，选季上移连接列表模式按钮，两个模式按钮下移先到选季，选季下移返回原剧集。选季不可用时跳过；剧集末尾仍连接底部定位按钮，反向返回原剧集。Flutter 的节点和 Android View 方向处理均由各自选集面板持有，不改变公共寻焦或跨段索引策略。TV 保留返回关闭，Flutter 非 TV 左下角提供关闭 X。
-- 切季保留旧队列、标题和条目，固定高度状态区显示加载/错误，加载中禁止确认旧集；成功提交新队列和季标题后再定位，失败保留旧内容并支持重试。Flutter 单独维护待加载季，空季按失败处理；定位当前集使在途结果失效。窄网格集号保持单行，Flutter 必要时缩小，Android 超长集号省略。
-- 选集样式统一为深灰面板、6dp 控件圆角、44dp 工具按钮及 22dp 图标。标题右侧排列列表/网格切换；36dp 副标题行合并季名与总集数，作为选择季入口。列表加载/错误原位替换副标题，网格另设 28dp 焦点信息行显示标题/状态或加载/错误。布局选中态用低亮灰底，焦点使用白色描边；Flutter 用独立 ValueNotifier 局部更新信息行，Android 只更新 TextView。TV 列表使用 16/13 字号，手机为 15/12；列表与网格统一 72dp 行高，条目垂直内边距 4dp；Flutter 行距 1.2，Android 标题/状态关闭额外字体 padding，以容纳双行中文标题和状态。滚动定位与渲染共用行高。播放标记和进度线统一青绿色，网格采用角标而非格内小字，补充语义标签；原生使用本地 Material 风格 vector 图标替代平台旧图标，分段箭头不再使用媒体上一集/下一集图标。
+- 选集结构切换（季、布局、分段）复用绘制前定位：Flutter 用布局代次更换滚动子树和初始 offset，旧控制器在卸载后释放，过时代次不请求焦点；同段方向移动直接更新焦点和滚动，不调用面板 setState。Android 仅保留一个待执行 pre-draw listener，同段焦点回调只发起一次居中，不再 post 重复滚动，关闭移除 listener。
+- 列表/网格偏好使用 `episode_picker_layout`（`list`/`grid`），Flutter 经 `SharedPreferencesStore.reloading` 在打开前读取；Android 使用 `FlutterSharedPreferences` 的 `flutter.episode_picker_layout`，两种播放器共享本地模式。仍以当前播放集初始化位置，不记忆临时浏览位置。每段保留 30 集，网格左右停止在本行边界，上下跨段使用段内列号，缺列夹紧到可用项；本季第一集／网格首行上移优先连接可用选季入口，选季上移连接列表模式按钮，列表按钮下移先到选季，选季下移返回原剧集。选季不可用时跳过；本季末集／网格末行继续下移时消费按键，保留当前焦点和滚动位置，不返回标题栏。Android 邻项策略在底部返回原索引，View 不重复执行移动。右上角定位按钮及其焦点节点已移除；网格按钮下移先到可用范围入口，否则到选季或原剧集，范围入口上移回网格按钮、下移回原剧集。Flutter 的节点和 Android View 方向处理均由各自选集面板持有，不改变公共寻焦或跨段索引策略。TV 保留返回键关闭；Flutter 非 TV 和 Android 原生手机端左上角提供返回箭头，加载中仍可关闭，不提交选择。
+- 切季保留旧队列、标题和条目，固定高度状态区显示加载/错误，加载中禁止确认旧集；成功提交新队列和季标题后再定位，失败保留旧内容并支持重试。Flutter 单独维护待加载季，空季按失败处理。窄网格集号保持单行，Flutter 必要时缩小，Android 超长集号省略。
+- 选集样式统一为深灰面板、6dp 控件圆角、44dp 工具按钮及 22dp 图标。标题右侧仅排列列表/网格切换；36dp 副标题行合并季名与总集数，作为选择季入口，超过 30 集时右侧显示范围菜单。取消底栏、左右分段箭头与重复集数，滚动区直接延伸至面板底部内边距。列表加载/错误原位替换季信息，网格另设 28dp 焦点信息行显示标题/状态或加载/错误。布局选中态用低亮灰底，焦点使用白色描边；Flutter 用独立 ValueNotifier 局部更新信息行，Android 只更新 TextView。TV 列表使用 16/13 字号，手机为 15/12；列表与网格统一 72dp 行高，条目垂直内边距 4dp；Flutter 行距 1.2，Android 标题/状态关闭额外字体 padding，以容纳双行中文标题和状态。滚动定位与渲染共用行高。播放标记、正在播放文字和进度线跟随全局强调色，当前集底色为同色约 9% 不透明度，已看完标记保持中性弱化；网格采用角标而非格内小字，补充语义标签。Flutter 从 `AppActionColors` 取色；原生启动器将当前设置的 ARGB 值作为 `episodeAccentColor` 经 MethodChannel、Activity Intent 传入 Android 选集面板，原生不维护八色映射，缺少参数时兼容默认松石青。该参数仅影响选集状态，不改变其他原生菜单主题或白色焦点框。原生复用本地 Material 风格 vector 图标。
 - Exo 手机 / TV 布局的 `exo_play_pause` 直接放在 `exo_bottom_bar` 左侧、播放时间前面，时间行预留按钮宽度及间距，使用 48dp 按钮及无描边的圆形半透明背景，并随底栏收起。TV 在 XML 和运行时均禁用该按钮焦点，保留状态显示及点击；`PRIMARY` 改为 `exo_progress`，不可聚焦时回退播放器容器。手机中央控制组仅保留快退/快进，播放/暂停仍加入底栏横向焦点链并保留焦点高亮。
 - MPV 启动和错误状态的 `PlayerAdaptiveTopChrome` 共用 `playbackControlsPadding` 的系统 `viewPadding` 加上下各 `6`、左右各 `12` 逻辑像素规则（临时顶栏将底部 padding 置零），与 Material / MaterialDesktop 控制层共用 `playbackButtonBarHeight = 56`；不叠加其他边距，按钮垂直居中，显隐和点击行为不变。
 - `NativePlaybackRemoteController` 在 TV 进度条持焦且无字幕搜索/设置弹窗时接管确定键：仅首次 `ACTION_DOWN` 调用 `togglePlayback`，消费重复按下和抬起事件，刷新控制栏显示但不转移进度条焦点。左右方向键仍由既有 TV seek 策略处理。
@@ -1274,6 +1284,8 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 ### SharedPreferences
 
+配置加载的解析失败与存储 IO 失败分开处理：损坏 payload 仅在内存降级，原始记录与本地凭据保留；Cookie 读取或来源引用协调保存异常向上传递，不通过保存默认配置覆盖有效数据。多个偏好键的保存不是跨键事务，这项修复不声称设备断电期间具备原子提交能力。
+
 用于保存：
 
 - 应用设置
@@ -1335,14 +1347,15 @@ Android TV 下的设置页还额外做了遥控器适配：
 
 项目有一层明确的平台适配：
 
+- `StarflowApp` 在 `MaterialApp.router.builder` 内挂载 `MobileTextInputDismissal`，仅 Android / iOS 非 TV 覆盖 `EditableTextTapOutsideIntent`，取消对应输入框焦点以收起键盘。复用 Flutter 的输入区域判定，不拦截按钮手势；提交、下一项、多行换行仍由 `EditableText` 默认处理。覆盖路由和弹窗，不接管原生播放器 UI 或 TV 的编辑／返回焦点规则。
 - Android 会识别 `TV` 设备
 - TV 模式切换为左侧窄栏磨砂菜单和焦点式交互
 - 左侧菜单是否自动隐藏由设置控制；开启后启动进入页面和切换分支都会先把菜单隐藏，页面 autofocus 成功后焦点自然落到内容区。焦点离开菜单时同样由菜单焦点范围直接同步显隐，而不是监听全局焦点后延迟推断；隐藏中的菜单会被排除出寻焦树，已聚焦菜单则不会压缩成零宽布局
 - 设置首页及部分设置子页会优先使用更适合遥控器操作的可聚焦按钮与入口
 - Android 主清单显式声明了 `INTERNET`、`ACCESS_NETWORK_STATE` 和明文流量支持，保证 TV 端能访问局域网与在线元数据资源
-- Android 当前实际最低兼容版本固定为 `API 23 / Android 6.0`
+- Android 最低兼容目标固定为 `API 23 / Android 6.0`；发布锁定 Flutter SDK 并检查原生库构建标记/强符号，不能单凭 manifest 声明证明实际兼容，仍需 API 23 真机验收。
 - Release APK 当前启用了 `v1 + v2` 签名，兼容老一些的电视安装器
-- 当前 Release APK 仍使用本机 debug keystore 签名；如果设备已有不同签名的 `com.example.starflow`，不能覆盖安装。优先保持原签名，卸载前先备份重要配置和数据
+- Release 必须显式恢复既有签名并通过固定指纹检查；设备已有不同签名的 `com.example.starflow` 时不能覆盖安装。历史安装身份为 Android Debug 证书，不能随意换 key 后声称可升级；卸载前先分别备份应用配置和直播数据。
 - `TvMenuButtonScope` 用来把菜单键语义统一上抛到页面壳
 - `TvDirectionalFocusBoundary` 处理方向越界，页头／Hero 路径由页面显式动作负责；不存在单独的 `TvReturnToTopScope`，普通候选仍由 Flutter 默认策略决定
 - 首页、搜索、媒体库、详情与设置页不再挂载空的焦点记忆作用域，也不做坐标校验或反向候选拦截

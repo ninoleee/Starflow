@@ -12,6 +12,86 @@ class _MenuIntent extends Intent {
 }
 
 void main() {
+  for (final television in [false, true]) {
+    for (final control in [
+      'button',
+      'adaptive',
+      'icon',
+      'chip',
+      'selection',
+      'toggle',
+      'checkbox',
+    ]) {
+      testWidgets('shared $control mouse/touch and disabled: TV=$television',
+          (tester) async {
+        final enabled = ValueNotifier(true);
+        addTearDown(enabled.dispose);
+        var activations = 0;
+        await tester.pumpWidget(ProviderScope(
+          overrides: [
+            isTelevisionProvider.overrideWith((ref) => television),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: enabled,
+                  builder: (context, active, child) {
+                    final VoidCallback? onPressed =
+                        active ? () => activations++ : null;
+                    final ValueChanged<bool>? onChanged =
+                        active ? (_) => activations++ : null;
+                    return switch (control) {
+                      'button' => StarflowButton(
+                          label: 'Tool', onPressed: onPressed),
+                      'adaptive' => TvAdaptiveButton(
+                          label: 'Tool',
+                          icon: Icons.settings,
+                          onPressed: onPressed),
+                      'icon' => StarflowIconButton(
+                          icon: Icons.settings, onPressed: onPressed),
+                      'chip' => StarflowChipButton(
+                          label: 'Tool', selected: true, onPressed: onPressed),
+                      'selection' => StarflowSelectionTile(
+                          title: 'Tool', onPressed: onPressed),
+                      'toggle' => StarflowToggleTile(
+                          title: 'Tool', value: false, onChanged: onChanged),
+                      _ => StarflowCheckboxTile(
+                          title: 'Tool', value: false, onChanged: onChanged),
+                    };
+                  },
+                ),
+              ),
+            ),
+          ),
+        ));
+        await tester.pumpAndSettle();
+        final action = find.byType(TvFocusableAction);
+        final size = tester.getSize(action);
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: tester.getCenter(action));
+        await mouse.down(tester.getCenter(action));
+        await mouse.up();
+        await tester.pumpAndSettle();
+        expect(activations, 1);
+        expect(tester.getSize(action), size);
+        await tester.tap(action);
+        await tester.pumpAndSettle();
+        expect(activations, 2);
+        enabled.value = false;
+        await tester.pumpAndSettle();
+        await mouse.down(tester.getCenter(action));
+        await mouse.up();
+        await tester.tap(action);
+        await tester.pumpAndSettle();
+        expect(activations, 2);
+        expect(tester.getSize(action), size);
+        expect(tester.takeException(), isNull);
+        await mouse.removePointer();
+      });
+    }
+  }
+
   for (final tool in ['Subtitle', 'Audio', 'Next episode', 'Options']) {
     testWidgets('media commands and menu bypass focused $tool activation',
         (tester) async {

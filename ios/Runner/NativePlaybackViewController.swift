@@ -16,6 +16,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
   private let resolverChannel: FlutterMethodChannel?
   private let episodeIntent = NativePlaybackEpisodeIntent()
   private var playbackGeneration = 0
+  private var playbackSessionClosed = false
   private var episodeResolutionTimeout: DispatchWorkItem?
   private let isoFormatter = ISO8601DateFormatter()
   private var request: NativePlaybackRequest
@@ -65,7 +66,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  deinit { teardownPlayback() }
+  deinit { closePlaybackSession() }
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -82,23 +83,41 @@ final class NativePlaybackViewController: AVPlayerViewController {
     super.viewWillDisappear(animated)
     captureCurrentSubtitleSessionPreference()
     persistPlaybackProgress(force: true)
+    if isBeingDismissed || isMovingFromParent || navigationController?.isBeingDismissed == true {
+      playbackGeneration += 1
+      cancelPendingPlaybackWork()
+    }
   }
 
   override func viewDidDisappear(_ animated: Bool) {
     super.viewDidDisappear(animated)
-    if isBeingDismissed || presentingViewController == nil {
-      teardownPlayback()
-      resolverChannel?.invokeMethod("closeNativeFntvSession", arguments: ["resolverSessionId": resolverSessionId])
+    if isBeingDismissed || isMovingFromParent || presentingViewController == nil {
+      closePlaybackSession()
     }
   }
 
+  override func dismiss(animated flag: Bool, completion: (() -> Void)? = nil) {
+    if presentedViewController == nil {
+      closePlaybackSession()
+    }
+    super.dismiss(animated: flag, completion: completion)
+  }
+
+  private func closePlaybackSession() {
+    guard !playbackSessionClosed else { return }
+    playbackSessionClosed = true
+    teardownPlayback()
+    resolverChannel?.invokeMethod("closeNativeFntvSession", arguments: ["resolverSessionId": resolverSessionId])
+  }
+
   private func configurePlayer() {
+    guard !playbackSessionClosed else { return }
     captureCurrentSubtitleSessionPreference()
     teardownPlayback()
     let generation = playbackGeneration
     playbackStore.preparePlayback(itemKey: request.playbackItemKey, seriesKey: request.seriesKey) {
       [weak self] position, subtitle in
-      guard let self, self.playbackGeneration == generation else { return }
+      guard let self, !self.playbackSessionClosed, self.playbackGeneration == generation else { return }
       self.configurePreparedPlayer(resumePositionMs: self.request.allowsResume ? position : 0,
         subtitle: subtitle)
     }
@@ -128,7 +147,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
     let player = NativePlaybackIntentPlayer(playerItem: item)
     player.onUserCommand = { [weak self, weak player] in
       guard let self, let player, self.player === player else { return }
-      self.cancelAutomaticPlaybackWork()
+      self.cancelPendingPlaybackWork()
     }
     let bufferingContext = NativePlaybackBufferingTuning.Context(
       url: request.url,
@@ -548,7 +567,8 @@ final class NativePlaybackViewController: AVPlayerViewController {
 
   @discardableResult
   private func advanceToAdjacentEpisode(forward: Bool, automatic: Bool = false) -> Bool {
-    if !automatic { cancelAutomaticPlaybackWork() }
+    guard !playbackSessionClosed, !isBeingDismissed else { return false }
+    if !automatic { cancelPendingPlaybackWork() }
     guard let generation = episodeIntent.begin(automatic: automatic) else { return false }
     episodeResolutionTimeout?.cancel()
     episodeResolutionTimeout = nil
@@ -578,7 +598,14 @@ final class NativePlaybackViewController: AVPlayerViewController {
     ]) { [weak self] result in
       let value = result as? [String: Any]
       let targetJson = value?["playbackTargetJson"] as? String ?? ""
+      let transportUrl = value?["transportUrl"] as? String ?? ""
+      func releaseTransport() {
+        resolverChannel.invokeMethod("releaseNativePlaybackTransport", arguments: [
+          "resolverSessionId": sessionId, "transportUrl": transportUrl,
+        ])
+      }
       guard let self else {
+        releaseTransport()
         if !targetJson.isEmpty {
           resolverChannel.invokeMethod("releaseNativeFntvPlayback", arguments: [
             "resolverSessionId": sessionId, "playbackTargetJson": targetJson,
@@ -587,6 +614,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
         return
       }
       guard self.episodeIntent.finish(generation) else {
+        releaseTransport()
         self.releaseResolvedPlayback(targetJson)
         return
       }
@@ -599,8 +627,11 @@ final class NativePlaybackViewController: AVPlayerViewController {
           "target": target,
           "playbackItemKey": value?["playbackItemKey"] ?? nextEntry.playbackItemKey,
           "seriesKey": value?["seriesKey"] ?? nextEntry.seriesKey,
+          "transportUrl": value?["transportUrl"] ?? target["streamUrl"] ?? "",
+          "transportHeaders": value?["transportHeaders"] ?? target["headers"] ?? [:],
         ]), let nextRequest = entry.request
       else {
+        releaseTransport()
         self.releaseResolvedPlayback(targetJson)
         self.showEpisodeResolutionFailure()
         return
@@ -613,21 +644,23 @@ final class NativePlaybackViewController: AVPlayerViewController {
   private func switchEpisode(to nextRequest: NativePlaybackRequest, queue: NativeEpisodeQueue) {
     captureCurrentSubtitleSessionPreference()
     let previous = request.playbackTargetJson
+    let previousTransport = request.url.absoluteString
     teardownPlayback()
     episodeQueue = queue
     request = nextRequest
     title = request.title
     configurePlayer()
     releaseResolvedPlayback(previous)
+    resolverChannel?.invokeMethod("releaseNativePlaybackTransport", arguments: [
+      "resolverSessionId": resolverSessionId, "transportUrl": previousTransport,
+    ])
     updateNowPlayingInfo()
   }
 
-  private func cancelAutomaticPlaybackWork() {
-    episodeIntent.cancelAutomatic()
-    if !episodeIntent.pending {
-      episodeResolutionTimeout?.cancel()
-      episodeResolutionTimeout = nil
-    }
+  private func cancelPendingPlaybackWork() {
+    episodeIntent.cancel()
+    episodeResolutionTimeout?.cancel()
+    episodeResolutionTimeout = nil
     startupGate?.cancel()
     startupGate = nil
     playbackStartupTimeoutWorkItem?.cancel()
@@ -731,8 +764,9 @@ final class NativePlaybackViewController: AVPlayerViewController {
       options: [.initial, .new]
     ) { [weak self] player, _ in
       DispatchQueue.main.async {
-        self?.syncAudioSessionForPlaybackState(player)
-        self?.updateNowPlayingInfo()
+        guard let self, self.player === player else { return }
+        self.syncAudioSessionForPlaybackState(player)
+        self.updateNowPlayingInfo()
       }
     }
   }
@@ -908,11 +942,12 @@ final class NativePlaybackViewController: AVPlayerViewController {
     timeObserverToken = player.addPeriodicTimeObserver(
       forInterval: interval,
       queue: .main
-    ) { [weak self] time in
+    ) { [weak self, weak player] time in
+      guard let self, let player, self.player === player else { return }
       if time.seconds.isFinite && time.seconds > 0 {
-        self?.markPlaybackFirstFrameReady()
+        self.markPlaybackFirstFrameReady()
       }
-      self?.persistPlaybackProgress()
+      self.persistPlaybackProgress()
     }
   }
 
@@ -983,6 +1018,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
           return
         }
         self.playbackFailureAlert = nil
+        self.closePlaybackSession()
         self.dismiss(animated: true)
       }
     )
@@ -995,12 +1031,13 @@ final class NativePlaybackViewController: AVPlayerViewController {
       forName: .AVPlayerItemDidPlayToEndTime,
       object: item,
       queue: .main
-    ) { [weak self] _ in
-      if self?.advanceToAdjacentEpisode(forward: true, automatic: true) == true {
+    ) { [weak self, weak item] _ in
+      guard let self, let item, self.player?.currentItem === item else { return }
+      if self.advanceToAdjacentEpisode(forward: true, automatic: true) {
         return
       }
-      self?.persistPlaybackProgress(force: true)
-      self?.updateNowPlayingInfo()
+      self.persistPlaybackProgress(force: true)
+      self.updateNowPlayingInfo()
     }
   }
 

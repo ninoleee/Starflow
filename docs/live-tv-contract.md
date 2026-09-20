@@ -12,7 +12,7 @@
 - `LiveBackup` v1 保存七个 store：sources、channels、preferences、channelOwners、epg、epgLogos、meta。导入保留原 ID，32 MiB 上限，未知版本/非法关系拒绝；merge 只加入新来源、同 ID 保留本地，replace 单事务替换。刷新 epoch 防迟到回填；凭据按明文备份处理，UI 二次确认。
 - UI 入口 `LiveSourcesPage -> LiveBackupDialog`，本地路径/文件选取，Web 文件下载；不修改共享配置 JSON/LAN/WebDAV 流程。TV 路径权限与跨设备搬运需实际设备核验。
 
-验证状态：本次定向 Flutter、Dart analyze 和 Android JVM 命令执行中；本节不引用下方历史测试作为本次通过结果。收尾填写实际结果。
+2026-09-20 收尾验证：直播备份/审查回归/生命周期/Exo 通道/基础数据/页面/扫码传输等 9 个 Flutter 文件共 105 项通过，定向 `dart analyze` 无问题。备份文件 IO 移入测试真实异步区，TV 路径弹窗资源由路由内 State 持有；生产 MPV 在首个 await 前建立取消所有权。本地重导入改变有效 EPG 时使旧 TTL 失效，恢复后的旧失败也受 epoch 保护。Android/最终全量结果见 [审查收尾记录](review-closure-2026-09-20.md)。不把下方历史测试或 fake 引擎结果当真机验收。
 
 ## 原始约定（实现前快照）
 

@@ -16,6 +16,7 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
 import 'package:starflow/features/metadata/data/tmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -188,11 +189,15 @@ void main() {
         progressController: WebDavScrapeProgressController(),
       );
       addTearDown(indexer.dispose);
+      final playbackMemory = PlaybackMemoryRepository(
+        sharedPreferences: await SharedPreferences.getInstance(),
+      );
       final container = ProviderContainer(overrides: [
         appSettingsProvider.overrideWithValue(settings),
         webDavNasClientProvider.overrideWithValue(webDav),
         cloud115SaveClientProvider.overrideWithValue(drive),
         nasMediaIndexerProvider.overrideWithValue(indexer),
+        playbackMemoryRepositoryProvider.overrideWithValue(playbackMemory),
       ]);
       addTearDown(container.dispose);
 

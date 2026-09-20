@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_theme.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_menu_style.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -42,6 +44,57 @@ void main() {
   Finder episode(int index) => find.byWidgetPredicate((w) =>
       w is TvFocusableAction && w.focusId == 'player:episode-picker:$index');
 
+  for (final accent in AppAccent.values) {
+    for (final television in [false, true]) {
+      testWidgets('episode states follow $accent television=$television',
+          (tester) async {
+        final queue = _queue(currentIndex: 0);
+        await _openPicker(tester, queue,
+            television: television,
+            theme: AppTheme.dark(accent: accent),
+            loadHistory: () async => PlaybackMemorySnapshot(items: {
+                  for (final entry in queue.entries.take(2))
+                    entry.playbackItemKey: PlaybackProgressEntry(
+                        key: entry.playbackItemKey,
+                        target: entry.target,
+                        updatedAt: DateTime(2026),
+                        progress: .4),
+                  queue.entries.last.playbackItemKey: PlaybackProgressEntry(
+                      key: queue.entries.last.playbackItemKey,
+                      target: queue.entries.last.target,
+                      updatedAt: DateTime(2026),
+                      completed: true),
+                }));
+        for (final mode in ['列表', '网格']) {
+          await tester.tap(find.byTooltip(mode));
+          await tester.pumpAndSettle();
+          expect(
+              tester.widget<Icon>(find.byIcon(Icons.play_arrow_rounded)).color,
+              accent.primary);
+          expect(tester.widget<Icon>(find.byIcon(Icons.check_rounded)).color,
+              AppColors.foregroundMuted);
+          if (mode == '列表') {
+            expect(tester.widget<Text>(find.text('正在播放')).style!.color,
+                accent.primary);
+          }
+          final bars = tester.widgetList<LinearProgressIndicator>(
+              find.byType(LinearProgressIndicator));
+          expect(bars, hasLength(2));
+          expect(bars.map((bar) => bar.color), everyElement(accent.primary));
+          final backgrounds = tester.widgetList<Container>(find.descendant(
+              of: episode(0), matching: find.byType(Container)));
+          expect(
+              backgrounds.any((widget) =>
+                  widget.decoration is BoxDecoration &&
+                  (widget.decoration! as BoxDecoration).color ==
+                      accent.primary.withValues(alpha: .09)),
+              isTrue);
+          expect(tester.takeException(), isNull);
+        }
+      });
+    }
+  }
+
   for (final width in [320.0, 1280.0]) {
     testWidgets(
         'styled panel at width $width keeps titles and status in bounds',
@@ -55,8 +108,14 @@ void main() {
       entries[15] = _entry(season: 1, episode: 16, title: '穿过漫长的夜晚，在海边等待黎明');
       final queue = PlaybackEpisodeQueue(entries: entries, currentIndex: 15);
       await _openPicker(tester, queue, television: width > 600);
-      expect(find.byTooltip('关闭'),
-          width > 600 ? findsNothing : findsOneWidget);
+      expect(find.byTooltip('返回'), width > 600 ? findsNothing : findsOneWidget);
+      expect(find.byTooltip('上一段'), findsNothing);
+      expect(find.byTooltip('下一段'), findsNothing);
+      expect(find.byType(Divider), findsNothing);
+      expect(find.byTooltip('定位当前集'), findsNothing);
+      expect(find.byIcon(Icons.my_location_rounded), findsNothing);
+      expect(tester.getCenter(find.byTooltip('选择集数范围')).dy,
+          closeTo(tester.getCenter(find.byTooltip('选择季')).dy, 1));
       expect(
           Theme.of(tester.element(find.byType(Dialog)))
               .dialogTheme
@@ -98,24 +157,119 @@ void main() {
     });
   }
 
-  testWidgets('episode boundaries enter tools and return to the same episode',
+  testWidgets('top boundary enters tools and returns to the same episode',
       (tester) async {
     await _openPicker(tester, _queue(currentIndex: 0, count: 1));
-    for (final key in [
-      LogicalKeyboardKey.arrowUp,
-      LogicalKeyboardKey.arrowDown
-    ]) {
-      await tester.sendKeyEvent(key);
-      await tester.pumpAndSettle();
-      expect(tester.widget<TvFocusableAction>(episode(0)).focusNode!.hasFocus,
-          isFalse);
-      await tester.sendKeyEvent(key == LogicalKeyboardKey.arrowUp
-          ? LogicalKeyboardKey.arrowDown
-          : LogicalKeyboardKey.arrowUp);
-      await tester.pumpAndSettle();
-      expect(tester.widget<TvFocusableAction>(episode(0)).focusNode!.hasFocus,
-          isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TvFocusableAction>(episode(0)).focusNode!.hasFocus,
+        isFalse);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TvFocusableAction>(episode(0)).focusNode!.hasFocus,
+        isTrue);
+  });
+
+  for (final grid in [false, true]) {
+    for (final count in [1, 30, 64, 65]) {
+      testWidgets('season end keeps focus and scroll grid=$grid count=$count',
+          (tester) async {
+        SharedPreferences.setMockInitialValues(
+            {'episode_picker_layout': grid ? 'grid' : 'list'});
+        final queue = _queue(currentIndex: count - 1, count: count);
+        final result = Completer<PlaybackEpisodeSelection?>();
+        await _openPicker(tester, queue, onResult: result.complete);
+        final scroll = tester
+            .widget<SingleChildScrollView>(find.byType(SingleChildScrollView))
+            .controller!;
+        final offset = scroll.offset;
+        for (var repeat = 0; repeat < 3; repeat++) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+          await tester.pumpAndSettle();
+          expect(
+              tester.widget<TvFocusableAction>(episode(count - 1))
+                  .focusNode!.hasFocus,
+              isTrue);
+          expect(scroll.offset, offset);
+        }
+        expect(find.byTooltip('定位当前集'), findsNothing);
+        expect(scroll.offset, offset);
+        expect(result.isCompleted, isFalse);
+        expect(
+            tester
+                .widget<TvFocusableAction>(episode(count - 1))
+                .focusNode!
+                .hasFocus,
+            isTrue);
+        expect(find.byTooltip('选择集数范围'),
+            count > 30 ? findsOneWidget : findsNothing);
+        expect(tester.takeException(), isNull);
+      });
     }
+  }
+
+  testWidgets('header range is keyboard accessible through the grid tool',
+      (tester) async {
+    final queue = _queue(currentIndex: 0, count: 65);
+    final result = Completer<PlaybackEpisodeSelection?>();
+    await _openPicker(tester, queue, onResult: result.complete);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('61–65 集'));
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 5; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pumpAndSettle();
+    }
+    bool toolFocused(String label) => tester
+        .widget<TvFocusableAction>(find.descendant(
+            of: find.byTooltip(label),
+            matching: find.byType(TvFocusableAction)))
+        .focusNode!
+        .hasFocus;
+    Future<void> focusGridTool() async {
+      tester
+          .widget<TvFocusableAction>(find.descendant(
+              of: find.byTooltip('网格'),
+              matching: find.byType(TvFocusableAction)))
+          .focusNode!
+          .requestFocus();
+      await tester.pumpAndSettle();
+    }
+    expect(tester.widget<TvFocusableAction>(episode(64)).focusNode!.hasFocus,
+        isTrue);
+    await focusGridTool();
+    expect(toolFocused('网格'), isTrue);
+    expect(find.text('61–65 集'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(toolFocused('选择集数范围'), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pumpAndSettle();
+    expect(find.text('选择集数范围'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(toolFocused('选择集数范围'), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(tester.widget<TvFocusableAction>(episode(64)).focusNode!.hasFocus,
+        isTrue);
+    await focusGridTool();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(toolFocused('选择集数范围'), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(toolFocused('网格'), isTrue);
+    expect(queue.currentIndex, 0);
+    expect(result.isCompleted, isFalse);
+    expect(tester.takeException(), isNull);
   });
 
   for (final grid in [false, true]) {
@@ -127,11 +281,14 @@ void main() {
         final queue = _queue(currentIndex: index, count: 65);
         await _openPicker(tester, queue,
             browser: PlaybackEpisodeBrowser(
-                resolver: _PickerResolver(), target: queue.currentEntry!.target));
+                resolver: _PickerResolver(),
+                target: queue.currentEntry!.target));
 
-        bool toolHasFocus(String label) => Focus.of(tester.element(
-            find.descendant(of: find.byTooltip(label), matching: find.byType(Icon))
-                .first)).hasFocus;
+        bool toolHasFocus(String label) => Focus.of(tester.element(find
+                .descendant(
+                    of: find.byTooltip(label), matching: find.byType(Icon))
+                .first))
+            .hasFocus;
 
         Future<void> press(LogicalKeyboardKey key) async {
           await tester.sendKeyEvent(key);
@@ -141,7 +298,11 @@ void main() {
         await press(LogicalKeyboardKey.arrowUp);
         expect(toolHasFocus('选择季'), isTrue);
         await press(LogicalKeyboardKey.arrowDown);
-        expect(tester.widget<TvFocusableAction>(episode(index)).focusNode!.hasFocus,
+        expect(
+            tester
+                .widget<TvFocusableAction>(episode(index))
+                .focusNode!
+                .hasFocus,
             isTrue);
         await press(LogicalKeyboardKey.arrowUp);
         await press(LogicalKeyboardKey.enter);
@@ -156,9 +317,13 @@ void main() {
         await press(LogicalKeyboardKey.arrowRight);
         expect(toolHasFocus('网格'), isTrue);
         await press(LogicalKeyboardKey.arrowDown);
-        expect(toolHasFocus('选择季'), isTrue);
+        expect(toolHasFocus('选择集数范围'), isTrue);
         await press(LogicalKeyboardKey.arrowDown);
-        expect(tester.widget<TvFocusableAction>(episode(index)).focusNode!.hasFocus,
+        expect(
+            tester
+                .widget<TvFocusableAction>(episode(index))
+                .focusNode!
+                .hasFocus,
             isTrue);
         expect(tester.takeException(), isNull);
       });
@@ -216,9 +381,8 @@ void main() {
         void expectAligned(int current, {required bool grid}) {
           final viewportFinder = find.byType(SingleChildScrollView);
           final viewport = tester.getRect(viewportFinder);
-          final scroll = tester
-              .widget<SingleChildScrollView>(viewportFinder)
-              .controller!;
+          final scroll =
+              tester.widget<SingleChildScrollView>(viewportFinder).controller!;
           expect(scroll.offset % 72, closeTo(0, .01));
           final first = current ~/ 30 * 30 +
               (scroll.offset / 72).round() * (grid ? 4 : 1);
@@ -242,13 +406,19 @@ void main() {
           await tester.pumpAndSettle();
           expectAligned(grid ? 19 : 16, grid: grid);
         }
-        await tester.tap(find.byTooltip('下一段'));
+        await tester.tap(find.byTooltip('选择集数范围'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('31–60 集'));
         await tester.pumpAndSettle();
         expectAligned(30, grid: grid);
-        await tester.tap(find.byTooltip('下一段'));
+        await tester.tap(find.byTooltip('选择集数范围'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('61–65 集'));
         await tester.pumpAndSettle();
         expectAligned(60, grid: grid);
-        await tester.tap(find.byTooltip('定位当前集'));
+        await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('打开'));
         await tester.pump();
         expectAligned(15, grid: grid);
         await tester.pumpAndSettle();
@@ -277,6 +447,8 @@ void main() {
     final scroll = tester.widget<SingleChildScrollView>(viewport).controller!;
     final initial = scroll.offset;
     final gesture = await tester.startGesture(tester.getCenter(viewport));
+    await gesture.moveBy(const Offset(0, -24));
+    await tester.pump();
     await gesture.moveBy(const Offset(0, -53));
     await tester.pump(const Duration(milliseconds: 300));
     await gesture.up();
@@ -286,7 +458,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('layout changes and locate are positioned before painting',
+  testWidgets('layout and range changes are positioned before painting',
       (tester) async {
     await _openPicker(tester, _queue(currentIndex: 25, count: 65));
     for (final mode in ['网格', '列表']) {
@@ -299,13 +471,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.getRect(episode(25)), rect);
     }
-    await tester.tap(find.byTooltip('下一段'));
+    await tester.tap(find.byTooltip('选择集数范围'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('定位当前集'));
+    await tester.tap(find.text('31–60 集'));
     await tester.pump();
-    final rect = tester.getRect(episode(25));
+    final rect = tester.getRect(episode(30));
     await tester.pumpAndSettle();
-    expect(tester.getRect(episode(25)), rect);
+    expect(tester.getRect(episode(30)), rect);
   });
 
   testWidgets('grid does not wrap horizontally and crosses ranges in column',
@@ -362,7 +534,7 @@ void main() {
   });
 
   testWidgets(
-      'loading keeps the old season and ignores late results after locate',
+      'loading keeps the old season until the new season is ready',
       (tester) async {
     final queue = _queue(currentIndex: 1);
     final pending = Completer<PlaybackEpisodeQueue>();
@@ -376,17 +548,15 @@ void main() {
     await tester.tap(find.text('第二季'));
     await tester.pumpAndSettle();
     expect(find.text('正在加载剧集'), findsOneWidget);
-    expect(find.text('正在加载剧集'), findsOneWidget);
     expect(find.text('正在播放'), findsOneWidget);
     expect(tester.widget<TvFocusableAction>(episode(1)).onPressed, isNull);
-    await tester.tap(find.byTooltip('定位当前集'));
-    await tester.pumpAndSettle();
     pending.complete(PlaybackEpisodeQueue(currentIndex: -1, entries: [
-      _entry(season: 2, episode: 1, title: '迟到结果'),
+      _entry(season: 2, episode: 1, title: '第二季开篇'),
     ]));
     await tester.pumpAndSettle();
-    expect(find.text('迟到结果'), findsNothing);
-    expect(find.text('第 1 季 · 共 3 集'), findsOneWidget);
+    expect(find.text('第二季开篇'), findsOneWidget);
+    expect(find.text('第 2 季 · 共 1 集'), findsOneWidget);
+    expect(find.text('正在播放'), findsNothing);
   });
   for (final index in [0, 15, 29, 58, 64]) {
     testWidgets('episode $index is positioned in the first painted frame',
@@ -521,7 +691,7 @@ void main() {
     expect(current.focusNode!.hasFocus, isTrue);
     expect(find.text('31–60 集'), findsOneWidget);
     expect(find.text('正在播放'), findsNothing);
-    await tester.tap(find.byTooltip('定位当前集'));
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await tester.pumpAndSettle();
     expect(find.text('正在播放'), findsOneWidget);
   });
@@ -557,8 +727,7 @@ void main() {
 
   for (final size in [const Size(320, 640), const Size(844, 390)]) {
     for (final grid in [false, true]) {
-      testWidgets(
-          'mobile bottom-left close cancels at $size with grid=$grid',
+      testWidgets('mobile top-left back cancels at $size with grid=$grid',
           (tester) async {
         tester.view.physicalSize = size;
         tester.view.devicePixelRatio = 1;
@@ -571,17 +740,18 @@ void main() {
         await _openPicker(tester, queue,
             television: false, onResult: result.complete);
 
-        final close = find.byTooltip('关闭');
-        final panel = tester.getRect(
-            find.byKey(const ValueKey('player:episode-picker:panel')));
+        final close = find.byTooltip('返回');
+        final panel = tester
+            .getRect(find.byKey(const ValueKey('player:episode-picker:panel')));
         final closeRect = tester.getRect(close);
-        final previousRect = tester.getRect(find.byTooltip('上一段'));
-        expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+        final titleRect = tester.getRect(find.text('Series'));
+        expect(find.byIcon(Icons.arrow_back_rounded), findsOneWidget);
+        expect(find.byIcon(Icons.close_rounded), findsNothing);
         expect(closeRect.size, const Size(44, 44));
         expect(closeRect.left, closeTo(panel.left + 20, .1));
-        expect(panel.bottom - closeRect.bottom, inInclusiveRange(8, 24));
-        expect(closeRect.right, lessThanOrEqualTo(previousRect.left));
-        expect(closeRect.center.dy, closeTo(previousRect.center.dy, .1));
+        expect(closeRect.top - panel.top, inInclusiveRange(12, 40));
+        expect(closeRect.right, lessThanOrEqualTo(titleRect.left));
+        expect(closeRect.center.dy, closeTo(titleRect.center.dy, .1));
         expect(tester.takeException(), isNull);
 
         await tester.tap(close);
@@ -614,7 +784,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('正在加载剧集'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('关闭'));
+      await tester.tap(find.byTooltip('返回'));
       await tester.pumpAndSettle();
       expect(find.byType(Dialog), findsNothing);
       expect(result.isCompleted, isTrue);
@@ -673,7 +843,9 @@ void main() {
     expect(find.text('第二季开篇'), findsOneWidget);
     expect(find.text('正在播放'), findsNothing);
     expect(queue.currentIndex, 1);
-    await tester.tap(find.byTooltip('定位当前集'));
+    await tester.tap(find.byTooltip('选择季'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('第一季'));
     await tester.pumpAndSettle();
     expect(find.text('正在播放'), findsOneWidget);
   });
@@ -742,6 +914,7 @@ class _PickerResolver extends PlaybackEpisodeQueueResolver {
 Future<void> _openPicker(WidgetTester tester, PlaybackEpisodeQueue queue,
     {bool television = true,
     bool settle = true,
+    ThemeData? theme,
     PlaybackEpisodeBrowser? browser,
     ValueChanged<PlaybackEpisodeSelection?>? onResult,
     Future<PlaybackMemorySnapshot> Function()? loadHistory}) async {
@@ -751,12 +924,14 @@ Future<void> _openPicker(WidgetTester tester, PlaybackEpisodeQueue queue,
           key: const ValueKey('picker-preview'),
           child: MaterialApp(
               debugShowCheckedModeBanner: false,
-              theme: ThemeData.dark().copyWith(
-                  textTheme: ThemeData.dark().textTheme.apply(
-                      fontFamily:
-                          Platform.environment['EPISODE_PREVIEW_FONT'] == null
-                              ? null
-                              : 'EpisodePreview')),
+              theme: theme ??
+                  ThemeData.dark().copyWith(
+                      textTheme: ThemeData.dark().textTheme.apply(
+                          fontFamily:
+                              Platform.environment['EPISODE_PREVIEW_FONT'] ==
+                                      null
+                                  ? null
+                                  : 'EpisodePreview')),
               home: Scaffold(
                   body: Builder(
                       builder: (context) => ElevatedButton(

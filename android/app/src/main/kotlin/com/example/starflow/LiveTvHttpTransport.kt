@@ -8,7 +8,13 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /** No automatic redirects: every manifest, key, segment and redirect gets an origin check. */
-internal class LiveTvHttpTransport(private val policy: LiveTvHttpPolicy) {
+internal class LiveTvHttpTransport(
+    private val policy: LiveTvHttpPolicy,
+    private val connectTimeoutMs: Int = 10000,
+    private val readTimeoutMs: Int = 10000,
+) {
+    class HttpStatusException(val status: Int, val headers: Map<String, List<String>>) :
+        IOException("Live HTTP status $status")
     data class Response(
         val connection: HttpURLConnection,
         val stream: InputStream,
@@ -24,8 +30,8 @@ internal class LiveTvHttpTransport(private val policy: LiveTvHttpPolicy) {
             val connection = URL(target).openConnection() as HttpURLConnection
             try {
                 connection.instanceFollowRedirects = false
-                connection.connectTimeout = 10000
-                connection.readTimeout = 10000
+                connection.connectTimeout = connectTimeoutMs
+                connection.readTimeout = readTimeoutMs
                 connection.useCaches = false
                 connection.setRequestProperty("User-Agent", "Starflow")
                 headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
@@ -46,7 +52,13 @@ internal class LiveTvHttpTransport(private val policy: LiveTvHttpPolicy) {
                     connection.disconnect()
                     return@repeat
                 }
-                if (code !in 200..299) throw IOException("Live HTTP status $code")
+                if (code == 416 && connection.getHeaderField("Content-Range") == "bytes */$position") {
+                    return Response(connection, java.io.ByteArrayInputStream(ByteArray(0)), 0)
+                }
+                if (code !in 200..299) throw HttpStatusException(code,
+                    connection.headerFields.entries.mapNotNull { (name, values) ->
+                        if (name == null || values == null) null else name to values
+                    }.toMap())
                 if (code == 206) {
                     val rangeStart = connection.getHeaderField("Content-Range")
                         ?.let { Regex("bytes (\\d+)-\\d+/.*").matchEntire(it)?.groupValues?.get(1)?.toLongOrNull() }

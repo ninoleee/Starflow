@@ -87,6 +87,7 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_PLAYBACK_ITEM_KEY = "playbackItemKey"
         const val EXTRA_SERIES_KEY = "seriesKey"
         const val EXTRA_EPISODE_QUEUE_JSON = "episodeQueueJson"
+        const val EXTRA_EPISODE_ACCENT_COLOR = "episodeAccentColor"
         const val EXTRA_LAUNCH_REQUEST_ID = "launchRequestId"
         const val EXTRA_LAUNCH_RESULT_RECEIVER = "launchResultReceiver"
         const val RESULT_DATA_REQUEST_ID = "requestId"

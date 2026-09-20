@@ -52,6 +52,7 @@
 | `core/scheduling/queue_wait_diagnostics.dart` | 队列等待诊断，不自行执行网络请求 |
 | `core/state/riverpod_retry.dart` | provider 重试策略 |
 | `core/widgets/` | TV 焦点、图片并发门、海报、对话框、横向翻页、Logo 等共享 UI |
+| `core/widgets/mobile_text_input_dismissal.dart` | 应用入口统一挂载的手机输入框外点击收键盘规则；回归见 `test/core/widgets/mobile_text_input_dismissal_test.dart` |
 | `core/utils/` | 文本、评分、图片 headers、默认 seed；旧静默 trace helper 已删除，结构化日志与错误记录保持活跃 |
 
 本节路径除 `lib/main.dart` 外相对于 `lib/`。`SeedData` 提供默认配置，不应将已经接入真实数据的仓库称为 mock 仓库。
@@ -146,12 +147,22 @@ SearchPage -> SearchRequest -> SearchSession -> SearchRepository
 | `data/live_database.dart` 及 `live_database_io / web / stub.dart` | 条件导出；IO 应用支持目录 `starflow-db/live_tv.db`，Web `starflow-live-tv`，其他目标明确不支持 |
 | `data/live_playlist_parser.dart / live_epg_parser.dart` | M3U/TXT、媒体 headers、XMLTV/时区及保留窗口；Gzip 有界解压由仓库入口执行 |
 | `data/live_logo_provider.dart` | 独立四路、15s/2 MiB 台标请求和取消，不是影视图片磁盘缓存 |
+| `presentation/live_logo.dart` | 频道首页的 64×40 台标；192×120 上限等比解码、完整显示及同尺寸失败占位；播放器选台菜单不加载台标 |
+| `data/live_channel_probe.dart` | 线路首包检测：自动补测与手动恢复共用 GET／Range 提示、6 秒总期限、首块即关闭、重定向与凭据隔离；不解码、不验证 HLS 子资源 |
+| `application/live_channel_probe_controller.dart` | 可见 200ms 准入、TV 焦点优先、两路并发与离屏取消；单定时器可见项到期刷新、5 分钟成功缓存及失败退避、暂停保留缓存、线路协调及网络失效，不写数据库 |
+| `data/live_probe_network.dart` | 前台首页系统连接类型事件，集合去重，无互联网可达性探测；页面拥有订阅和释放 |
+| `presentation/live_probe_viewport.dart` | 布局／滚动后检查已挂载行与列表视口相交，排除离屏预构建行，不自行请求网络 |
+| `presentation/live_probe_label.dart` | 台名同行的响应耗时／失败状态及线路／时间提示，不将连通性标为可播放 |
 | `application/live_playback_controller.dart` | `LiveEngine` 的 MPV/Exo 适配、单实例串行所有权、换台合并、失效事件、有限重连及全局清理注册 |
+| `application/live_mpv_options.dart` | MPV 直播默认请求标识、订阅覆盖优先级、网络协议白名单及 FFmpeg 6 HLS 分片参数；不改变点播配置 |
+| `application/live_playback_error.dart` | Android `LiveTvPlaybackError.kt` 摘要的白名单解析、固定错误类别和失败文案；控制器按 generation 读取，不保留原始异常或媒体地址 |
 | `presentation/live_tv_page.dart` | 频道列表、搜索/收藏/分组、映射/隐藏/排序、主页面活动状态和本地 now/next 更新 |
 | `presentation/live_sources_page.dart` | 来源编辑、文件导入草稿、保存后刷新、启停、更新及删除确认；TV 手机扫码，其他平台本地选文件 |
-| `data/live_playlist_transfer_service{,_io,_stub}.dart` | 单次 LAN 文件接收、随机令牌/来源校验、8 MiB/30s 边界及会话关闭；不保存来源 |
+| `data/live_playlist_transfer_service{,_io,_stub}.dart` | 单次 LAN 文件/备份接收及备份下载、类型化结果、随机令牌/来源校验；频道文件 8 MiB / 备份 32 MiB / 接收 30s 边界及会话关闭；不写仓库 |
 | `presentation/live_playlist_transfer_dialog.dart` | 复用 `LanTransferQrAddressCard`，拥有 TV 扫码弹窗、后台/退出清理和迟到会话隔离 |
-| `presentation/live_player_page.dart / live_widgets.dart` | 独立全屏页、Flutter TV 焦点、频道/节目单叠层、音轨/静音/线路/内核及共享直播按钮 |
+| `presentation/live_player_page.dart / live_widgets.dart` | 固定顶栏、无底栏的全屏播放器，按需全屏设置（频道/节目单/音轨/线路/内核）、本地返回记录、Flutter TV 焦点及共享直播按钮；不提供上下频道按钮或静音入口 |
+| `presentation/live_channel_picker.dart` | 播放器左分组／右频道选择器，固定 64dp 行高、当前频道定位、独立列滚动与 TV 跨列焦点；接收本地批量 now/next，复用 `live_widgets.dart` 的 `LiveCurrentProgramme` 显示各台当前节目，不自行读库或拥有播放会话 |
+| `presentation/live_network_speed_label.dart` | 加载／控制栏右上角每秒读取网速，复用 `LiveNetworkSpeedSource`，隔离换台与迟到采样；Exo 原生统计位于 `LiveTvNetworkSpeed.kt` |
 
 ```text
 AppRoutes.liveTv (/live-tv) -> LiveTvPage -> LiveRepository -> 独立直播数据库
@@ -164,11 +175,13 @@ AppRoutes.liveTv (/live-tv) -> LiveTvPage -> LiveRepository -> 独立直播数�
 
 设置“内容与来源”另提供直播与订阅入口。直播不调用点播 `PlaybackTargetResolver`、影视观看历史或 NAS 匹配；独立库及直播内核偏好不随配置 JSON/WebDAV 配置备份/影视收藏同步。实现边界见 [直播电视](live-tv.md)，焦点见 [TV 清单](tv-focus.md#直播焦点边界2026-09-20)。
 
-扫码导入专项：`test/live_playlist_transfer_service_test.dart` 覆盖真实本机 HTTP、原始编码、鉴权、上传边界和清理，`test/live_playlist_transfer_page_test.dart` 覆盖 TV 分流、共享二维码、草稿确认、返回/后台及迟到启动；不等于手机到电视的跨设备验收。
+扫码传输专项：`test/live_playlist_transfer_service_test.dart` 覆盖真实本机 HTTP、原始编码、备份校验、模式端点隔离、鉴权、上传边界、单次备份下载和清理，`test/live_playlist_transfer_page_test.dart` 覆盖 TV 分流、共享二维码、文件/地址草稿确认、返回/后台及迟到启动；`test/live_backup_transfer_page_test.dart` 覆盖 TV 手机备份/恢复、合并/替换确认、取消和后台丢弃，不等于手机到电视的跨设备验收。
+
+共用文本扫码：`features/settings/presentation/widgets/settings_text_input_field.dart` 在 TV 输入弹窗内提供入口，同目录 `text_input_transfer_dialog.dart` 拥有会话，`features/settings/data/text_input_transfer_service{,_io,_stub}.dart` 接收最多 64 KiB 文本。服务边界见 `test/text_input_transfer_service_test.dart`；密码、多行、数字及确认取消见 `test/features/settings/presentation/settings_text_input_field_test.dart`。不依赖直播传输服务。
 
 测试导航：`test/live_tv_test.dart` 为解析/仓库/控制器，`test/live_tv_data_test.dart` 为数据边界，`test/live_playback_lifecycle_test.dart` 为串行所有权/迟到事件/恢复预算，`test/live_tv_page_test.dart` 为布局/模拟遥控器，`test/live_exo_bridge_test.dart` 为 mock MethodChannel。路由、菜单配置和设置层级另见 `test/app/router/app_routes_test.dart`、`test/app_navigation_shell_tv_focus_test.dart`、`test/app_settings_test.dart`、`test/features/settings/presentation/settings_hierarchy_navigation_test.dart`。合并后这 9 文件共 132 项通过，最终统计见 [主机记录](performance.md#2026-09-20-直播前置验证快照)。Android 的 `LiveTvPolicyTest / LiveTvHttpTransportTest` 覆盖会话、画面比例、同源 headers、重定向与 HTTP 字节范围，共 17 项主机 JVM 测试。
 
-收尾补充 `test/live_tv_data_test.dart` 为数据边界专项，与 `live_tv_test.dart` 的该次集合 38 项通过，不作为最终总数。仓库的 `channelOwners / epgLogos` 分别记录历史频道归属及 EPG 台标，偏好携带来源归属；解析上限为 10000 频道/单频道 64 线路/全表 50000 线路。generation 隔离删除、禁用和同 ID 重建；EPG 失败不清除旧节目/台标，手动排序后新增频道追加。`LivePlaybackController` 的 15s 计时不取消底层 open，永久挂起仍阻塞串行清理，详见直播文档。
+`test/live_tv_data_test.dart` 与 `live_tv_test.dart` 的历史集合 38 项通过，不作为当前最终总数。`live_review_regression_test.dart` 覆盖独立 EPG TTL、发现地址、身份迁移、备份和取消确认；`live_backup_page_test.dart` 覆盖文件与弹窗。`channelOwners / epgLogos` 记录历史归属和台标。`live_backup.dart` 定义版本化备份，文件 IO 与界面分别由 `live_backup_file_*`、`live_backup_dialog.dart` 承担。生产播放适配器通过 `CancellableLiveEngine` 在队列外请求取消，控制器等待卸载确认再串行清理；原生永久挂起仍不是已验证的限时清理场景，详见直播文档。
 
 ### 播放与字幕
 
@@ -180,6 +193,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 ```
 
 - `player_page.dart` 是页面壳；`presentation/widgets/player_page_*.part.dart` 共享该 library 的状态，分别承载 MPV 启动、调参、恢复、控制、系统会话、运行动作和性能采集。
+- `application/playback_stream_relay_service_io.dart` 负责 MPV/iOS 的敏感来源认证代理、媒体前缀验证和有界资源注册/过期回收；`playback_hls_rewriter.dart` 解析标准 HLS 点播/动态清单白名单并改写子请求，将 LL-HLS 回退为完整分片，不负责完整低延迟协议或 DRM。`native_playback_launcher_io.dart` 将传输地址与原始目标分开传递、回收迟到/关闭会话。Android `NativePlaybackHttpDataSource.kt` 复用逐跳 origin 策略，覆盖点播和媒体子请求。
 - `playback_seek_coalescer.dart` 累计和合并 TV 定位输入；`playback_track_guard.dart` 给异步自动选轨提供会话/手动操作边界；`external_playback_file_store.dart` 只清理专属播放列表分配目录，不扫描系统临时根目录。
 - `MpvPlaybackLifecycle` 持有单实例订阅及 `MpvSubtitleSession`，关闭时先失效回调并捕获旧资源的清理 Future；页面级恢复预算不随实例重建重置。`PlaybackPlatformSessionOwner` 持有系统媒体会话绑定、发布快照与生命周期代次，页面继续提供播放状态及遥控命令适配。
 - 非 TV 控件基于 media_kit Adaptive Material / MaterialDesktop，TV 使用专用遥控层；Web 的 `embeddedMpv` 枚举值实际路由浏览器后端，不是浏览器里运行 libmpv。
@@ -188,7 +202,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 - `playback_episode_browser.dart` 管季集浏览缓存，queue / next-episode 策略只预解析一个目标，不预建第二个播放器。
 - `playback_episode_advance_guard.dart` 管自动切集取消、手动优先、失败去重和提交令牌；`playback_episode_preparation.dart` 管地址缓存、在途复用及一次前台期限。两者分别拥有操作意图和网络结果。
 - `playback_interaction_player.dart` 在后端命令前截获手动 seek / 播放意图；`playback_intro_start_guard.dart` 在启动期间校验片头越界与就绪基线；`playback_completion_state.dart` 保存独立于真实进度的会话完成标记。
-- `playback_remote_preflight.dart` 保留给原生 SmartStrm 格式探测，不应据文件名推断 MPV 仍执行 Range 启动预检。
+- `playback_remote_preflight.dart` 保留给原生 SmartStrm 格式探测；MPV 不调用该旧式启动预检。敏感凭据 relay 的有界媒体前缀验证属于独立安全传输边界。
 - 在线字幕的 provider protocol、IO repository、validation pipeline 与共享 content processing 分工见 [subtitles.md](subtitles.md)；搜索结果不等于已经下载验证。
 - `mpv_subtitle_render_binding.dart` 串行合并每个 Player 的字幕可见性属性写入；`player_menu_style.dart` 为播放菜单提供共享半透明主题，不改变解码逻辑。
 - `playback_memory_repository.dart` 保存续播、最近播放、跳过规则和剧集字幕偏好；外挂文件仍限定当前集。
@@ -197,7 +211,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 
 ### Android
 
-直播专用 `LiveTvView.kt` 由 `MainActivity.configureFlutterEngine` 注册，视图类型 `starflow/live_tv`、实例通道 `starflow/live_tv/<viewId>`。Flutter 使用 `open / stop / volume / audioTracks / audio`；原生另有 `pause / play` 分支，但直播 UI 没有暂停/时移入口。状态携带换台 generation，TextureView 非焦点；不进入点播 NativePlaybackActivity，也不继承其自定义 FFmpeg/TS/双字幕/音频输出策略。能力边界见 [直播电视](live-tv.md)。
+直播专用 `LiveTvView.kt` 由 `MainActivity.configureFlutterEngine` 注册，视图类型 `starflow/live_tv`、实例通道 `starflow/live_tv/<viewId>`。Flutter 使用 `open / cancelOpen / stop / volume / audioTracks / audio / networkSpeed`；原生另有 `pause / play` 分支，但直播 UI 没有暂停/时移入口。状态携带换台 generation，TextureView 非焦点；不进入点播 NativePlaybackActivity，也不继承其自定义 FFmpeg/TS/双字幕/音频输出策略。能力边界见 [直播电视](live-tv.md)。
 
 主要目录：`android/app/src/main/kotlin/com/example/starflow/`。
 

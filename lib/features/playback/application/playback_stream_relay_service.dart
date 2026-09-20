@@ -6,6 +6,10 @@ import 'package:starflow/features/playback/application/playback_stream_relay_ser
     if (dart.library.io) 'package:starflow/features/playback/application/playback_stream_relay_service_io.dart'
     as impl;
 
+// Each engine owns its transport lifetime; closing one cannot revoke another.
+PlaybackStreamRelayService createPlaybackStreamRelayService() =>
+    impl.createPlaybackStreamRelayService();
+
 final playbackStreamRelayServiceProvider =
     Provider<PlaybackStreamRelayService>((ref) {
   final service = impl.createPlaybackStreamRelayService();

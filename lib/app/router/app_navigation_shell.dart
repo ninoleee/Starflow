@@ -22,6 +22,8 @@ import 'package:starflow/features/home/application/home_feed_load_scheduler.dart
 import 'package:starflow/features/home/application/home_metadata_auto_refresh.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/live_tv/data/live_repository.dart';
+import 'package:starflow/features/live_tv/presentation/live_player_page.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
@@ -114,6 +116,9 @@ class AppNavigationShell extends ConsumerStatefulWidget {
 class _AppNavigationShellState extends ConsumerState<AppNavigationShell>
     with WidgetsBindingObserver {
   static const int _homeBranchIndex = 0;
+  static const int _liveTvBranchIndex = 5;
+  int _liveNavigationRevision = 0;
+  bool _livePlayerOpen = false;
   bool _isBottomBarVisible = true;
   bool _coldStartHomeRefreshScheduled = false;
   int _tvFocusRecoveryRevision = 0;
@@ -210,6 +215,9 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _liveNavigationRevision += 1;
+    }
     if (state == AppLifecycleState.resumed) {
       _requestTvFocusRecovery();
     }
@@ -241,11 +249,18 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell>
   }
 
   void _handleDestinationSelected(int index) {
+    final liveRevision = ++_liveNavigationRevision;
     _setBottomBarVisible(true);
     if (index != _homeBranchIndex) {
       _homeNavigationTapCoordinator.cancel();
       widget.navigationShell.goBranch(index);
       _requestTvFocusRecovery();
+      if (index == _liveTvBranchIndex &&
+          (ref.read(isTelevisionProvider).value ?? false) &&
+          ref.read(appSettingsProvider).liveNavigationAutoPlayEnabled &&
+          !_livePlayerOpen) {
+        unawaited(_resumeLastLiveChannel(liveRevision));
+      }
       return;
     }
 
@@ -270,6 +285,55 @@ class _AppNavigationShellState extends ConsumerState<AppNavigationShell>
       },
       onDoubleTap: _refreshHomeFromNavigation,
     );
+  }
+
+  Future<void> _resumeLastLiveChannel(int revision) async {
+    try {
+      final snapshot = await ref.read(liveRepositoryProvider).load();
+      // goBranch publishes the new shell widget on the next frame.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted ||
+          revision != _liveNavigationRevision ||
+          !(ref.read(isTelevisionProvider).value ?? false) ||
+          !ref.read(appSettingsProvider).liveNavigationAutoPlayEnabled ||
+          widget.navigationShell.currentIndex != _liveTvBranchIndex ||
+          _livePlayerOpen ||
+          ModalRoute.of(context)?.isCurrent == false) {
+        return;
+      }
+      final channel = snapshot
+          .visible()
+          .where(
+            (channel) => channel.id == snapshot.lastChannel,
+          )
+          .firstOrNull;
+      if (channel == null) return;
+      _livePlayerOpen = true;
+      try {
+        appLogInfo(
+            'live.playback', 'Last live channel requested from navigation',
+            fields: {
+              'channelId': channel.id,
+              'lineCount': channel.lines.length,
+              'preferredEngine': snapshot.engine,
+            });
+        await Navigator.of(context, rootNavigator: true).push<void>(
+          MaterialPageRoute<void>(
+            fullscreenDialog: true,
+            builder: (_) => LivePlayerPage(
+              initialChannel: channel,
+              snapshot: snapshot,
+            ),
+          ),
+        );
+      } finally {
+        _livePlayerOpen = false;
+        if (mounted) _requestTvFocusRecovery();
+      }
+    } catch (_) {
+      // Keep the channel page available when local history cannot be read.
+      appLogWarning('live.playback', 'Last live channel could not be restored');
+    }
   }
 
   Future<void> _handleHomeSingleTap() async {

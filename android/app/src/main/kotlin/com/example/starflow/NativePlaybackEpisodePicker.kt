@@ -37,14 +37,13 @@ internal class NativePlaybackEpisodePicker(
     private var loading = false
     private var initialPositionPending = true
     private var positionListener: ViewTreeObserver.OnPreDrawListener? = null
-    private var locateButton: View? = null
     private val handler = Handler(Looper.getMainLooper())
     private val root = LinearLayout(activity)
     private val subtitle = TextView(activity)
     private val seasonButton = Button(activity)
     private val scroll = ScrollView(activity)
     private val rows = LinearLayout(activity)
-    private val footer = LinearLayout(activity)
+    private val rangeButton = Button(activity)
     private val status = Button(activity)
     private val information = FrameLayout(activity)
     private val seasonRow = FrameLayout(activity)
@@ -52,7 +51,9 @@ internal class NativePlaybackEpisodePicker(
     private lateinit var gridButton: ImageButton
     private val television = (activity.getSystemService(Activity.UI_MODE_SERVICE) as android.app.UiModeManager)
         .currentModeType == android.content.res.Configuration.UI_MODE_TYPE_TELEVISION
-    private val accent = activity.getColor(R.color.native_settings_title)
+    private val accent = activity.intent.getIntExtra(
+        NativePlaybackActivity.EXTRA_EPISODE_ACCENT_COLOR, 0xFF2DD4BF.toInt(),
+    )
     private val cells = mutableMapOf<Int, View>()
     private var popup: AlertDialog? = null
     private val target = JSONObject(original.currentEntry()?.playbackTargetJson ?: "{}")
@@ -68,6 +69,7 @@ internal class NativePlaybackEpisodePicker(
             setColor(activity.getColor(R.color.native_settings_background)); setStroke(dp(1), Color.argb(31, 255, 255, 255))
         }
         val header = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
+        if (!television) header.addView(tool(R.drawable.native_player_back_24, "返回") { dismiss() })
         header.addView(label(target.optString("seriesTitle").ifBlank { "选择剧集" }, 22f).apply {
             maxLines = 2; ellipsize = TextUtils.TruncateAt.END
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -94,7 +96,26 @@ internal class NativePlaybackEpisodePicker(
             }
         }
         seasonRow.addView(seasonButton, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        root.addView(seasonRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)))
+        styleButton(rangeButton); rangeButton.textSize = 13f
+        rangeButton.setTextColor(muted)
+        rangeButton.setPadding(dp(4), 0, 0, 0)
+        rangeButton.minWidth = 0; rangeButton.minimumWidth = 0
+        rangeButton.maxLines = 1; rangeButton.ellipsize = TextUtils.TruncateAt.END
+        rangeButton.contentDescription = "选择集数范围"
+        rangeButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.episode_expand, 0)
+        rangeButton.setOnClickListener { chooseRange() }
+        rangeButton.setOnKeyListener { _, key, event ->
+            if (event.action != KeyEvent.ACTION_DOWN || loading) false
+            else when (key) {
+                KeyEvent.KEYCODE_DPAD_UP -> { gridButton.requestFocus(); true }
+                KeyEvent.KEYCODE_DPAD_DOWN -> { focus(focusedIndex); true }
+                else -> false
+            }
+        }
+        root.addView(LinearLayout(activity).apply {
+            addView(seasonRow, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+            addView(rangeButton, LinearLayout.LayoutParams(dp(112), ViewGroup.LayoutParams.MATCH_PARENT))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)))
         styleButton(status); status.textSize = if (television) 13f else 12f; status.visibility = View.INVISIBLE
         status.maxLines = 1; status.ellipsize = TextUtils.TruncateAt.END
         status.gravity = Gravity.START or Gravity.CENTER_VERTICAL; status.setPadding(0, 0, 0, 0)
@@ -108,10 +129,6 @@ internal class NativePlaybackEpisodePicker(
         scroll.isFillViewport = false
         scroll.addView(rows)
         root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        footer.gravity = Gravity.CENTER_VERTICAL
-        root.addView(View(activity).apply { setBackgroundColor(Color.argb(31, 255, 255, 255)) },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)).apply { topMargin = dp(6); bottomMargin = dp(6) })
-        root.addView(footer)
         setContentView(root)
         window?.apply {
             decorView.elevation = 0f
@@ -163,7 +180,7 @@ internal class NativePlaybackEpisodePicker(
     private fun background(playing: Boolean = false): StateListDrawable {
         fun shape(focus: Boolean, selected: Boolean = false) = GradientDrawable().apply {
             cornerRadius = dp(6).toFloat()
-            setColor(if (selected) Color.argb(41, 250, 250, 250) else if (playing) Color.argb(23, 45, 212, 191) else Color.TRANSPARENT)
+            setColor(if (selected) Color.argb(41, 250, 250, 250) else if (playing) (accent and 0x00FFFFFF) or (23 shl 24) else Color.TRANSPARENT)
             if (focus) setStroke(dp(2), Color.WHITE)
         }
         return StateListDrawable().apply {
@@ -187,11 +204,9 @@ internal class NativePlaybackEpisodePicker(
             if (event.action != KeyEvent.ACTION_DOWN || loading) false
             else when {
                 (this === listButton || this === gridButton) && key == KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    if (!focusSeason()) focus(focusedIndex)
+                    if (this === gridButton && rangeButton.isShown && rangeButton.isEnabled) rangeButton.requestFocus()
+                    else if (!focusSeason()) focus(focusedIndex)
                     true
-                }
-                this === locateButton && key == KeyEvent.KEYCODE_DPAD_UP -> {
-                    focus(focusedIndex); true
                 }
                 else -> false
             }
@@ -225,12 +240,15 @@ internal class NativePlaybackEpisodePicker(
 
     private fun render() {
         initialPositionPending = true
-        rows.removeAllViews(); cells.clear(); footer.removeAllViews()
+        rows.removeAllViews(); cells.clear()
         val season = currentSeasonNumber()
         seasonButton.text = "${if (season == 0) "特别篇" else "第 $season 季"} · 共 ${queue.entries.size} 集"
         seasonButton.isEnabled = !loading && seasons.size > 1
         seasonButton.setCompoundDrawablesWithIntrinsicBounds(0, 0, if (seasons.size > 1) R.drawable.episode_expand else 0, 0)
         listButton.isSelected = !grid; gridButton.isSelected = grid
+        rangeButton.visibility = if (queue.entries.size > PAGE_SIZE) View.VISIBLE else View.GONE
+        rangeButton.isEnabled = !loading && queue.entries.size > PAGE_SIZE
+        rangeButton.text = "${number(page * PAGE_SIZE)}–${number(minOf((page + 1) * PAGE_SIZE, queue.entries.size) - 1)} 集"
         updateInformation()
         run {
             val start = page * PAGE_SIZE
@@ -249,24 +267,6 @@ internal class NativePlaybackEpisodePicker(
                 row?.addView(View(activity), LinearLayout.LayoutParams(0, 1, 1f))
             }
         }
-        footer.addView(tool(R.drawable.episode_chevron_left, "上一段") { move((page - 1) * PAGE_SIZE) }.apply { isEnabled = !loading && page > 0; alpha = if (isEnabled) 1f else .3f })
-        val range = Button(activity).apply {
-            styleButton(this); textSize = 13f
-            setTextColor(muted)
-            val start = page * PAGE_SIZE
-            text = "${number(start)}–${number(minOf(start + PAGE_SIZE, queue.entries.size) - 1)} 集"
-            isEnabled = !loading && queue.entries.size > PAGE_SIZE
-            setOnClickListener { chooseRange() }
-        }
-        footer.addView(range, LinearLayout.LayoutParams(0, dp(44), 1f))
-        footer.addView(tool(R.drawable.episode_chevron_right, "下一段") { move((page + 1) * PAGE_SIZE) }.apply { isEnabled = !loading && (page + 1) * PAGE_SIZE < queue.entries.size; alpha = if (isEnabled) 1f else .3f })
-        locateButton = tool(R.drawable.episode_locate, "定位当前集") {
-            requestId++; loading = false; status.visibility = View.INVISIBLE; queue = original
-            page = original.currentIndex.coerceAtLeast(0) / PAGE_SIZE
-            focusedIndex = original.currentIndex.coerceAtLeast(0)
-            render(); positionBeforeDraw()
-        }
-        footer.addView(locateButton)
     }
 
     private fun cell(index: Int): View {
@@ -310,7 +310,7 @@ internal class NativePlaybackEpisodePicker(
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         } else content.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         if (progress > 0 && !watched) content.addView(ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 1000; this.progress = (progress * 1000).toInt(); progressTintList = ColorStateList.valueOf(Color.rgb(45, 212, 191))
+            max = 1000; this.progress = (progress * 1000).toInt(); progressTintList = ColorStateList.valueOf(accent)
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2)))
         content.setOnClickListener { if (!loading) select(queue, index) }
         content.setOnFocusChangeListener { _, hasFocus ->
@@ -334,8 +334,7 @@ internal class NativePlaybackEpisodePicker(
                 val next = episodePickerNeighbor(index, queue.entries.size, grid, delta)
                 when {
                     next < 0 -> { if (!focusSeason()) listButton.requestFocus() }
-                    next >= queue.entries.size -> locateButton?.requestFocus()
-                    else -> move(next)
+                    next in queue.entries.indices && next != index -> move(next)
                 }
                 true
             }
@@ -408,6 +407,7 @@ internal class NativePlaybackEpisodePicker(
     }
     private fun loadSeason(id: String) {
         loading = true
+        rangeButton.isEnabled = false
         status.visibility = View.VISIBLE; status.text = "正在加载剧集"; status.isEnabled = false
         seasonButton.requestFocus()
         updateInformation()
@@ -415,6 +415,7 @@ internal class NativePlaybackEpisodePicker(
         request(id) { result ->
             val loaded = if (result["ok"] == true) NativeEpisodeQueue.fromJsonString(result["queueJson"]?.toString().orEmpty()) else null
             loading = false; status.isEnabled = true
+            rangeButton.isEnabled = queue.entries.size > PAGE_SIZE
             if (loaded == null) {
                 status.text = "本季加载失败 · 重试"; status.setOnClickListener { loadSeason(id) }; status.requestFocus()
             } else {

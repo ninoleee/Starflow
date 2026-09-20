@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -13,6 +14,8 @@ import '../application/live_playback_controller.dart';
 import '../data/live_repository.dart';
 import '../domain/live_models.dart';
 import 'live_widgets.dart';
+import 'live_network_speed_label.dart';
+import 'live_channel_picker.dart';
 
 class LivePlayerPage extends ConsumerStatefulWidget {
   const LivePlayerPage(
@@ -37,14 +40,18 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
       defaultTargetPlatform == TargetPlatform.android &&
       widget.snapshot.engine == 'exo';
   bool _list = false, _controls = true, _guide = false;
-  bool _tools = false, _switching = false, _exiting = false;
+  bool _settings = false;
+  bool _switching = false, _exiting = false;
+  PhysicalKeyboardKey? _exitBackKey;
+  LocalHistoryEntry? _overlayEntry;
+  bool get _hasOverlay => _list || _guide || _settings;
   bool _foreground = true;
   bool _muted = false;
-  String _group = '';
+  final _channelPicker = GlobalKey<LiveChannelPickerState>();
   int _viewKey = 0, _session = 0, _attachment = 0;
   Timer? _hide, _clock;
   final _focus = FocusNode(debugLabel: 'live-player', skipTraversal: true);
-  final _toolsFocus = FocusNode(debugLabel: 'live-tools');
+  final _settingsFocus = FocusNode(debugLabel: 'live-settings-close');
   final _overlayFocus = FocusNode(debugLabel: 'live-overlay-close');
   final _guideFirstFocus = FocusNode(debugLabel: 'live-guide-first');
   late final _performance = ref.read(playbackPerformanceModeProvider.notifier);
@@ -69,7 +76,9 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
       _autoHide();
     });
     _clock = Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) setState(() {});
+      if (!mounted || !_foreground) return;
+      if (_list) ref.invalidate(liveNowNextProvider);
+      setState(() {});
     });
   }
 
@@ -125,7 +134,7 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
 
   void _autoHide() {
     _hide?.cancel();
-    if (_list || _guide || _tools) return;
+    if (_hasOverlay) return;
     _hide = Timer(const Duration(seconds: 5), () {
       if (!mounted) return;
       if (ModalRoute.of(context)?.isCurrent == false ||
@@ -139,11 +148,9 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
   }
 
   void _select(LiveChannel channel) {
+    _closeOverlay();
     setState(() {
       _channel = channel;
-      _list = false;
-      _guide = false;
-      _tools = false;
       _controls = true;
     });
     if (_foreground) {
@@ -162,16 +169,51 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
   }
 
   void _openOverlay({required bool guide}) {
+    if (!guide) ref.invalidate(liveNowNextProvider);
+    _retainPlayerRoute();
     setState(() {
+      _settings = false;
       _guide = guide;
       _list = !guide;
-      _tools = false;
       _controls = true;
     });
     _hide?.cancel();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && (_list || _guide)) _overlayFocus.requestFocus();
+      if (!mounted) return;
+      if (_list) {
+        _channelPicker.currentState?.focusChannels();
+      } else if (_guide) {
+        _overlayFocus.requestFocus();
+      }
     });
+  }
+
+  void _openSettings() {
+    _retainPlayerRoute();
+    setState(() {
+      _list = false;
+      _guide = false;
+      _settings = true;
+      _controls = true;
+    });
+    _hide?.cancel();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _settings) _settingsFocus.requestFocus();
+    });
+  }
+
+  void _retainPlayerRoute() {
+    if (_overlayEntry != null) return;
+    // Local history also intercepts Navigator.pop, which bypasses PopScope.
+    final entry = LocalHistoryEntry(
+      impliesAppBarDismissal: false,
+      onRemove: () {
+        _overlayEntry = null;
+        if (mounted && !_exiting) _closeOverlay();
+      },
+    );
+    _overlayEntry = entry;
+    ModalRoute.of(context)!.addLocalHistoryEntry(entry);
   }
 
   Future<void> _switchEngine() async {
@@ -248,15 +290,27 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
   }
 
   KeyEventResult _key(FocusNode _, KeyEvent event) {
-    if (event is KeyUpEvent) return KeyEventResult.ignored;
     if (ModalRoute.of(context)?.isCurrent == false) {
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
-      if (event is KeyDownEvent) Navigator.of(context).maybePop();
+      if (event is KeyDownEvent) {
+        _exitBackKey = null;
+        if (_hasOverlay) {
+          _closeOverlay();
+        } else {
+          // Keep this route focused until it has consumed the release.
+          _exitBackKey = event.physicalKey;
+        }
+      } else if (event is KeyUpEvent && _exitBackKey == event.physicalKey) {
+        _exitBackKey = null;
+        Navigator.of(context).maybePop();
+      }
+      // Android must not redispatch the release as a second system back.
       return KeyEventResult.handled;
     }
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
     if (!_focus.hasPrimaryFocus) {
       final direction = switch (key) {
         LogicalKeyboardKey.arrowUp => TraversalDirection.up,
@@ -267,7 +321,11 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
       };
       if (direction != null) {
         final primary = FocusManager.instance.primaryFocus;
-        if (_guide &&
+        if (_list &&
+            _overlayFocus.hasPrimaryFocus &&
+            direction == TraversalDirection.down) {
+          _channelPicker.currentState?.focusChannels();
+        } else if (_guide &&
             _overlayFocus.hasPrimaryFocus &&
             direction == TraversalDirection.down &&
             _guideFirstFocus.context != null) {
@@ -284,21 +342,10 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
       return KeyEventResult.ignored;
     }
     if (key == LogicalKeyboardKey.contextMenu) {
-      if (event is KeyDownEvent) {
-        setState(() {
-          _controls = true;
-          _list = false;
-          _guide = false;
-          _tools = true;
-        });
-        _hide?.cancel();
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _toolsFocus.requestFocus();
-        });
-      }
+      if (event is KeyDownEvent) _openSettings();
       return KeyEventResult.handled;
     }
-    if (_list || _guide || _tools) return KeyEventResult.ignored;
+    if (_hasOverlay) return KeyEventResult.ignored;
     if (key == LogicalKeyboardKey.arrowUp ||
         key == LogicalKeyboardKey.channelUp) {
       _step(-1);
@@ -319,8 +366,7 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowLeft ||
-        key == LogicalKeyboardKey.arrowRight ||
-        key == LogicalKeyboardKey.contextMenu) {
+        key == LogicalKeyboardKey.arrowRight) {
       if (event is KeyDownEvent) {
         _openOverlay(guide: key == LogicalKeyboardKey.arrowRight);
       }
@@ -333,8 +379,10 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
+    if (!_foreground) _exitBackKey = null;
     if (_exiting) return;
     if (state == AppLifecycleState.resumed) {
+      if (_list) ref.invalidate(liveNowNextProvider);
       if (_controller?.status == 'suspended') {
         _controller?.select(_channel,
             preferredLine: _controller!.channel?.id == _channel.id
@@ -356,7 +404,7 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
     _hide?.cancel();
     _clock?.cancel();
     _focus.dispose();
-    _toolsFocus.dispose();
+    _settingsFocus.dispose();
     _overlayFocus.dispose();
     _guideFirstFocus.dispose();
     _controller?.removeListener(_changed);
@@ -369,10 +417,16 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
   }
 
   void _closeOverlay() {
+    if (_overlayEntry != null) {
+      _overlayEntry!.remove();
+      return;
+    }
+    if (!_hasOverlay) return;
     setState(() {
       _list = false;
       _guide = false;
-      _tools = false;
+      _settings = false;
+      _controls = true;
     });
     _focus.requestFocus();
     _autoHide();
@@ -380,33 +434,34 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
 
   @override
   Widget build(BuildContext context) {
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    final accent = AppActionColors.of(Theme.of(context)).primary;
     final latest = ref.watch(liveSnapshotProvider).value;
     if (latest != null) _snapshot = latest;
     final controller = _controller;
     final session = _session;
+    final loading = controller == null || controller.busy;
+    final showTopBar = _controls && !_hasOverlay;
+    final fullWidthOverlay =
+        MediaQuery.sizeOf(context).width < (_list ? 720 : 480);
+    final speedSource = controller != null &&
+            (controller.busy || controller.status == 'playing') &&
+            controller.engine is LiveNetworkSpeedSource
+        ? controller.engine as LiveNetworkSpeedSource
+        : null;
+    Widget speedLabel() => LiveNetworkSpeedLabel(
+        source: _foreground ? speedSource : null,
+        generation: controller?.generation ?? 0);
     final guide = ref.watch(liveGuideProvider(_channel.id));
+    final nowNext = _list ? ref.watch(liveNowNextProvider).value : null;
     final programmes = guide.value ?? [];
     final now = DateTime.now(),
         current =
             programmes.where((p) => p.contains(DateTime.now())).firstOrNull;
     final next = programmes.where((p) => p.start.isAfter(now)).firstOrNull;
-    final groups = _snapshot
-        .visible()
-        .map(_snapshot.group)
-        .where((g) => g.isNotEmpty)
-        .toSet()
-        .toList();
-    final group = groups.contains(_group) ? _group : '';
-    final channels = _snapshot
-        .visible()
-        .where((c) => group.isEmpty || _snapshot.group(c) == group)
-        .toList();
     return PopScope(
-      canPop: !_list && !_guide && !_tools,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) {
-          _closeOverlay();
-        } else {
+        if (didPop) {
           _exiting = true;
           ++_session;
           ++_attachment;
@@ -427,12 +482,13 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                     DirectionalFocusIntent(TraversalDirection.right),
               },
               child: TvPageFocusScope(
-                  isTelevision: ref.watch(isTelevisionProvider).value ?? false,
+                  isTelevision: isTelevision,
                   child: Focus(
                     focusNode: _focus,
                     onKeyEvent: _key,
                     child: GestureDetector(
                       onTap: () {
+                        if (_hasOverlay) return;
                         setState(() => _controls = !_controls);
                         _autoHide();
                       },
@@ -452,7 +508,7 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                               controller:
                                   (controller.engine as MpvLiveEngine).video!,
                               controls: NoVideoControls),
-                        if (controller == null || controller.busy)
+                        if (loading)
                           const Center(child: CircularProgressIndicator()),
                         if (controller?.status == 'failed' ||
                             controller?.status == 'paused')
@@ -466,6 +522,14 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                                         : '当前频道播放失败',
                                     style:
                                         const TextStyle(color: Colors.white)),
+                                if (controller?.status == 'failed' &&
+                                    controller?.failureLabel != null)
+                                  Padding(
+                                      padding: const EdgeInsets.all(12),
+                                      child: Text(controller!.failureLabel!,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(
+                                              color: Colors.white70))),
                                 const SizedBox(height: 12),
                                 StarflowButton(
                                     label: controller?.status == 'paused'
@@ -476,107 +540,169 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                                         _channel,
                                         preferredLine: controller.line)),
                               ])),
-                        if (_controls && !_list && !_guide)
+                        if (showTopBar)
                           SafeArea(
                               child: Align(
                                   alignment: Alignment.topCenter,
                                   child: ColoredBox(
-                                      color: const Color(0xD9000000),
-                                      child: Padding(
-                                          padding: const EdgeInsets.all(12),
-                                          child: Row(children: [
-                                            LiveIconButton(
-                                                icon: Icons.arrow_back,
-                                                label: '退出直播',
-                                                onPressed: () =>
-                                                    Navigator.pop(context)),
-                                            Expanded(
-                                                child: Column(
-                                                    mainAxisSize:
-                                                        MainAxisSize.min,
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                  Text(_snapshot.name(_channel),
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: const TextStyle(
-                                                          color: Colors.white,
-                                                          fontSize: 20)),
-                                                  Text(
-                                                      current == null
-                                                          ? '暂无节目单'
-                                                          : '${liveTime(current.start)} ${current.title}',
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                      style: const TextStyle(
-                                                          color:
-                                                              Colors.white70)),
-                                                  if (next != null)
-                                                    Text(
-                                                        '接下来 ${liveTime(next.start)} ${next.title}',
-                                                        maxLines: 1,
-                                                        overflow: TextOverflow
-                                                            .ellipsis,
-                                                        style: const TextStyle(
-                                                            color: Colors
-                                                                .white70)),
-                                                ])),
-                                            Text(_exo ? 'Exo' : 'MPV',
-                                                style: const TextStyle(
-                                                    color: Colors.white70)),
-                                          ]))))),
-                        if (_controls && !_list && !_guide)
-                          SafeArea(
+                                      key: const ValueKey(
+                                          'live-player-top-bar-background'),
+                                      color: Colors.black.withValues(alpha: .2),
+                                      child: SizedBox(
+                                          key: const ValueKey(
+                                              'live-player-top-bar'),
+                                          height: 112,
+                                          child:
+                                              MediaQuery.withClampedTextScaling(
+                                                  maxScaleFactor: 1.2,
+                                                  child: Padding(
+                                                      padding:
+                                                          const EdgeInsets.all(
+                                                              12),
+                                                      child: Row(children: [
+                                                        if (!isTelevision)
+                                                          LiveIconButton(
+                                                              icon: Icons
+                                                                  .arrow_back,
+                                                              label: '退出直播',
+                                                              onPressed: () =>
+                                                                  Navigator.pop(
+                                                                      context)),
+                                                        Expanded(
+                                                            child: Column(
+                                                                mainAxisSize:
+                                                                    MainAxisSize
+                                                                        .min,
+                                                                mainAxisAlignment:
+                                                                    MainAxisAlignment
+                                                                        .center,
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .start,
+                                                                children: [
+                                                              Text(
+                                                                  _snapshot.name(
+                                                                      _channel),
+                                                                  maxLines: 1,
+                                                                  overflow:
+                                                                      TextOverflow
+                                                                          .ellipsis,
+                                                                  style: const TextStyle(
+                                                                      color: Colors
+                                                                          .white,
+                                                                      fontSize:
+                                                                          20)),
+                                                              Text(
+                                                                  current ==
+                                                                          null
+                                                                      ? '暂无节目单'
+                                                                      : '${liveTime(current.start)} ${current.title}',
+                                                                  maxLines: 1,
+                                                                  overflow:
+                                                                      TextOverflow
+                                                                          .ellipsis,
+                                                                  style: const TextStyle(
+                                                                      color: Colors
+                                                                          .white70)),
+                                                              if (next != null)
+                                                                Text(
+                                                                    '接下来 ${liveTime(next.start)} ${next.title}',
+                                                                    maxLines: 1,
+                                                                    overflow:
+                                                                        TextOverflow
+                                                                            .ellipsis,
+                                                                    style: const TextStyle(
+                                                                        color: Colors
+                                                                            .white70)),
+                                                            ])),
+                                                        Column(
+                                                          mainAxisSize:
+                                                              MainAxisSize.min,
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .end,
+                                                          children: [
+                                                            Text(
+                                                                _exo
+                                                                    ? 'Exo'
+                                                                    : 'MPV',
+                                                                style: const TextStyle(
+                                                                    color: Colors
+                                                                        .white70)),
+                                                            const SizedBox(
+                                                                height: 4),
+                                                            speedLabel(),
+                                                          ],
+                                                        ),
+                                                        if (!isTelevision) ...[
+                                                          const SizedBox(
+                                                              width: 12),
+                                                          LiveIconButton(
+                                                            icon:
+                                                                Icons.settings,
+                                                            label: '播放设置',
+                                                            onPressed:
+                                                                _openSettings,
+                                                          ),
+                                                        ],
+                                                      ]))))))),
+                        if (_settings)
+                          Material(
+                            key: const ValueKey('live-settings-background'),
+                            color:
+                                const Color(0xFF202020).withValues(alpha: .7),
+                            child: SafeArea(
                               child: Align(
-                                  alignment: Alignment.bottomCenter,
-                                  child: ColoredBox(
-                                      color: const Color(0xD9000000),
-                                      child: Wrap(
-                                          alignment: WrapAlignment.center,
-                                          crossAxisAlignment:
-                                              WrapCrossAlignment.center,
-                                          children: [
+                                alignment: Alignment.topCenter,
+                                child: ConstrainedBox(
+                                  constraints:
+                                      const BoxConstraints(maxWidth: 360),
+                                  child: Material(
+                                    type: MaterialType.transparency,
+                                    child: SingleChildScrollView(
+                                      padding: const EdgeInsets.all(12),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Row(children: [
+                                            const Expanded(child: Text('播放设置')),
                                             LiveIconButton(
-                                                icon: Icons.skip_previous,
-                                                label: '上一频道',
-                                                onPressed: () => _step(-1)),
+                                              icon: Icons.close,
+                                              label: '关闭设置',
+                                              focusNode: _settingsFocus,
+                                              onPressed: _closeOverlay,
+                                            ),
+                                          ]),
+                                          Row(children: [
+                                            const Expanded(child: Text('频道列表')),
                                             LiveIconButton(
                                                 icon: Icons.list,
-                                                focusNode: _toolsFocus,
                                                 label: '频道列表',
                                                 onPressed: () =>
                                                     _openOverlay(guide: false)),
-                                            LiveIconButton(
-                                                icon: Icons.skip_next,
-                                                label: '下一频道',
-                                                onPressed: () => _step(1)),
+                                          ]),
+                                          Row(children: [
+                                            const Expanded(child: Text('节目单')),
                                             LiveIconButton(
                                                 icon: Icons.calendar_view_day,
                                                 label: '节目单',
                                                 onPressed: () =>
                                                     _openOverlay(guide: true)),
+                                          ]),
+                                          Row(children: [
+                                            const Expanded(child: Text('音轨')),
                                             LiveIconButton(
                                                 icon: Icons.audiotrack,
                                                 label: '音轨',
                                                 onPressed: _audio),
-                                            LiveIconButton(
-                                                icon: controller?.muted == true
-                                                    ? Icons.volume_off
-                                                    : Icons.volume_up,
-                                                label: '静音切换',
-                                                onPressed: () async {
-                                                  try {
-                                                    await controller
-                                                        ?.toggleMute();
-                                                  } catch (_) {}
-                                                }),
-                                            if (!kIsWeb &&
-                                                defaultTargetPlatform ==
-                                                    TargetPlatform.android)
+                                          ]),
+                                          if (!kIsWeb &&
+                                              defaultTargetPlatform ==
+                                                  TargetPlatform.android)
+                                            Row(children: [
+                                              Expanded(
+                                                  child: Text(
+                                                      '播放内核 · ${_exo ? 'Exo' : 'MPV'}')),
                                               LiveIconButton(
                                                   icon: Icons.swap_horiz,
                                                   label: '切换播放内核',
@@ -585,74 +711,89 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                                                               _switching
                                                           ? null
                                                           : _switchEngine),
-                                            DropdownButton<int>(
-                                                value: controller?.line ?? 0,
-                                                dropdownColor: Colors.black,
-                                                items: [
-                                                  for (var i = 0;
-                                                      i < _channel.lines.length;
-                                                      i++)
-                                                    DropdownMenuItem(
-                                                        value: i,
-                                                        child: Text(
-                                                            '线路 ${i + 1}',
-                                                            style:
-                                                                const TextStyle(
-                                                                    color: Colors
-                                                                        .white)))
-                                                ],
-                                                onChanged: controller == null ||
-                                                        !_foreground
-                                                    ? null
-                                                    : (v) {
-                                                        if (v != null) {
-                                                          controller.select(
-                                                              _channel,
-                                                              preferredLine: v);
-                                                        }
-                                                      }),
-                                          ])))),
+                                            ]),
+                                          if (_channel.lines.length > 1)
+                                            Row(children: [
+                                              const Expanded(
+                                                  child: Text('播放线路')),
+                                              DropdownButton<int>(
+                                                  value: controller?.line ?? 0,
+                                                  dropdownColor: Colors.black,
+                                                  items: [
+                                                    for (var i = 0;
+                                                        i <
+                                                            _channel
+                                                                .lines.length;
+                                                        i++)
+                                                      DropdownMenuItem(
+                                                          value: i,
+                                                          child: LiveSelectionLabel(
+                                                              label:
+                                                                  '线路 ${i + 1}',
+                                                              selected: i ==
+                                                                  (controller
+                                                                          ?.line ??
+                                                                      0),
+                                                              enabled: controller !=
+                                                                      null &&
+                                                                  _foreground))
+                                                  ],
+                                                  onChanged:
+                                                      controller == null ||
+                                                              !_foreground
+                                                          ? null
+                                                          : (v) {
+                                                              if (v != null) {
+                                                                controller.select(
+                                                                    _channel,
+                                                                    preferredLine:
+                                                                        v);
+                                                              }
+                                                            }),
+                                            ]),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                         if (_list || _guide)
                           SafeArea(
                               child: Align(
-                                  alignment: Alignment.centerLeft,
+                                  alignment: _guide
+                                      ? Alignment.centerRight
+                                      : Alignment.centerLeft,
                                   child: SizedBox(
-                                    width:
-                                        MediaQuery.sizeOf(context).width < 480
-                                            ? MediaQuery.sizeOf(context).width
-                                            : 440,
+                                    width: fullWidthOverlay
+                                        ? MediaQuery.sizeOf(context).width
+                                        : (_list ? 560 : 440),
                                     child: Material(
-                                        color: const Color(0xF0202020),
+                                        key: ValueKey(_list
+                                            ? 'live-channels-background'
+                                            : 'live-guide-background'),
+                                        color: const Color(0xFF202020)
+                                            .withValues(alpha: .7),
                                         child: Column(children: [
-                                          Row(children: [
-                                            LiveIconButton(
-                                                icon: Icons.close,
-                                                label: '关闭',
-                                                focusNode: _overlayFocus,
-                                                autofocus: true,
-                                                onPressed: _closeOverlay),
-                                            Expanded(
-                                                child:
-                                                    Text(_guide ? '节目单' : '频道'))
-                                          ]),
-                                          if (_list)
-                                            DropdownButton<String>(
-                                                value: group,
-                                                isExpanded: true,
-                                                items: [
-                                                  const DropdownMenuItem(
-                                                      value: '',
-                                                      child: Text('全部分组')),
-                                                  for (final g in groups)
-                                                    DropdownMenuItem(
-                                                        value: g,
-                                                        child: Text(g,
-                                                            overflow:
-                                                                TextOverflow
-                                                                    .ellipsis))
-                                                ],
-                                                onChanged: (v) => setState(
-                                                    () => _group = v ?? '')),
+                                          if (!_list || !isTelevision)
+                                            Row(children: [
+                                              LiveIconButton(
+                                                  icon: Icons.close,
+                                                  label: '关闭',
+                                                  focusNode: _overlayFocus,
+                                                  autofocus: _guide,
+                                                  onPressed: _closeOverlay),
+                                              Expanded(
+                                                  child: Text(
+                                                      _guide ? '节目单' : '频道')),
+                                              if (_guide || fullWidthOverlay)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.all(12),
+                                                  child: speedLabel(),
+                                                ),
+                                            ]),
                                           Expanded(
                                               child: _guide
                                                   ? (programmes.isEmpty
@@ -677,28 +818,29 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                                                             final p =
                                                                 programmes[i];
                                                             return TvFocusableAction(
-                                                                focusNode: i ==
-                                                                        0
+                                                                focusNode: i == 0
                                                                     ? _guideFirstFocus
                                                                     : null,
                                                                 onPressed: () => showDialog<
                                                                         void>(
                                                                     context:
                                                                         context,
-                                                                    builder: (c) =>
-                                                                        AlertDialog(
-                                                                          title:
-                                                                              Text(p.title),
-                                                                          content:
-                                                                              SingleChildScrollView(child: Text(p.description.isEmpty ? '暂无节目简介' : p.description)),
-                                                                          actions: [
-                                                                            StarflowButton(
-                                                                                label: '关闭',
-                                                                                autofocus: true,
-                                                                                onPressed: () => Navigator.pop(c))
-                                                                          ],
-                                                                        )),
+                                                                    builder:
+                                                                        (c) =>
+                                                                            AlertDialog(
+                                                                              title: Text(p.title),
+                                                                              content: SingleChildScrollView(child: Text(p.description.isEmpty ? '暂无节目简介' : p.description)),
+                                                                              actions: [
+                                                                                StarflowButton(label: '关闭', autofocus: true, onPressed: () => Navigator.pop(c))
+                                                                              ],
+                                                                            )),
                                                                 child: ListTile(
+                                                                    selectedColor:
+                                                                        accent,
+                                                                    selectedTileColor:
+                                                                        accent.withValues(
+                                                                            alpha:
+                                                                                .09),
                                                                     selected: p
                                                                         .contains(
                                                                             now),
@@ -711,39 +853,43 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                                                                         overflow:
                                                                             TextOverflow.ellipsis)));
                                                           }))
-                                                  : ListView.builder(
-                                                      cacheExtent: 0,
-                                                      itemCount:
-                                                          channels.length,
-                                                      itemBuilder: (ctx, i) {
-                                                        final c = channels[i];
-                                                        return TvFocusableAction(
-                                                            focusId:
-                                                                'live-overlay:${c.id}',
-                                                            onPressed: () =>
-                                                                _select(c),
-                                                            child: ListTile(
-                                                                selected: c
-                                                                        .id ==
-                                                                    _channel.id,
-                                                                leading: Icon(c.id ==
-                                                                        _channel
-                                                                            .id
-                                                                    ? Icons
-                                                                        .play_arrow
-                                                                    : Icons
-                                                                        .live_tv),
-                                                                title: Text(
-                                                                    _snapshot
-                                                                        .name(
-                                                                            c),
-                                                                    maxLines: 1,
-                                                                    overflow:
-                                                                        TextOverflow
-                                                                            .ellipsis)));
-                                                      })),
+                                                  : LiveChannelPicker(
+                                                      key: _channelPicker,
+                                                      snapshot: _snapshot,
+                                                      currentChannel: _channel,
+                                                      nowNext:
+                                                          nowNext ?? const {},
+                                                      closeFocus: isTelevision
+                                                          ? null
+                                                          : _overlayFocus,
+                                                      onSelected: _select)),
                                         ])),
                                   ))),
+                        if (!_settings &&
+                            !_guide &&
+                            !showTopBar &&
+                            (loading || _controls) &&
+                            (!(_list || _guide) || !fullWidthOverlay))
+                          SafeArea(
+                            child: Align(
+                              alignment: Alignment.topRight,
+                              child: IgnorePointer(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xD9000000),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(8),
+                                      child: speedLabel(),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                       ]),
                     ),
                   )))),

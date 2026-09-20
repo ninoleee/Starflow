@@ -26,6 +26,18 @@ class NativePlaybackIntentPlayer: AVPlayer {
   override func play() { command { super.play() } }
   override func pause() { command { super.pause() } }
 
+  override func playImmediately(atRate rate: Float) {
+    command { super.playImmediately(atRate: rate) }
+  }
+
+  override func seek(to date: Date) {
+    command { super.seek(to: date) }
+  }
+
+  override func seek(to date: Date, completionHandler: @escaping (Bool) -> Void) {
+    command { super.seek(to: date, completionHandler: completionHandler) }
+  }
+
   override func seek(to time: CMTime) {
     command { super.seek(to: time) }
   }
@@ -147,7 +159,7 @@ final class NativePlaybackStartupGate {
     resumeSeekTime: CMTime? = nil,
     completion: @escaping (StartupResult) -> Void
   ) {
-    guard !hasStarted else {
+    guard !hasStarted, !didComplete else {
       return
     }
     hasStarted = true
@@ -184,9 +196,7 @@ final class NativePlaybackStartupGate {
     guard !didComplete else {
       return
     }
-    finish(with: .cancelled)
-    player.cancelPendingPrerolls()
-    item.cancelPendingSeeks()
+    finish(with: .cancelled, cancelPendingOperations: true)
   }
 
   private func installObservers() {
@@ -314,7 +324,7 @@ final class NativePlaybackStartupGate {
     )
   }
 
-  private func finish(with result: StartupResult) {
+  private func finish(with result: StartupResult, cancelPendingOperations: Bool = false) {
     guard !didComplete else {
       return
     }
@@ -325,6 +335,11 @@ final class NativePlaybackStartupGate {
     invalidateObservers()
     let callback = completion
     completion = nil
+    // Invalidate first, then drain AVFoundation before a callback can start new work.
+    if cancelPendingOperations {
+      player.cancelPendingPrerolls()
+      item.cancelPendingSeeks()
+    }
     callback?(result)
   }
 

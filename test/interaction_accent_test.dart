@@ -33,10 +33,11 @@ void main() {
         node.requestFocus();
         await tester.pumpAndSettle();
         expect(node.hasFocus, isTrue);
+        expect(find.byIcon(Icons.check_circle_rounded), findsNothing);
         if (selected) {
           expect(
               tester
-                  .widget<Icon>(find.byIcon(Icons.check_circle_rounded))
+                  .widget<Icon>(find.byIcon(Icons.tune))
                   .color,
               accent.primary);
         }

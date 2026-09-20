@@ -119,8 +119,9 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     PlaybackTarget target,
   ) async {
     final uri = Uri.tryParse(target.streamUrl.trim());
-    final proxyUrl =
-        uri == null ? '' : _playbackSettings.networkProxy.mpvProxyUrlFor(uri);
+    // A local capability URL must never be handed to an external HTTP proxy.
+    final proxyUrl = uri == null || isLoopbackPlaybackRelayUrl(target.streamUrl)
+        ? '' : _playbackSettings.networkProxy.mpvProxyUrlFor(uri);
     await _setMpvOption(player, 'http-proxy', proxyUrl);
   }
 

@@ -155,7 +155,7 @@ class _MetadataIndexManagementPageState
       final route = ModalRoute.of(context);
       final routeIsCurrent = route == null || route.isCurrent;
       final pageIsActive =
-          routeIsCurrent && TickerMode.valuesOf(context).enabled;
+          routeIsCurrent && TickerMode.of(context);
       if (!pageIsActive ||
           _autoRefreshFocusNode.context == null ||
           !_autoRefreshFocusNode.canRequestFocus) {
@@ -191,7 +191,7 @@ class _MetadataIndexManagementPageState
       final route = ModalRoute.of(context);
       final routeIsCurrent = route == null || route.isCurrent;
       if (!routeIsCurrent ||
-          !TickerMode.valuesOf(context).enabled ||
+          !TickerMode.of(context) ||
           _autoRefreshFocusNode.context == null ||
           !_autoRefreshFocusNode.canRequestFocus) {
         return;

@@ -1185,6 +1185,7 @@ class AppSettings {
     this.homeStartupAutoRefreshEnabled = true,
     this.homeStartupAutoRefreshEmbyEnabled,
     this.homeNavigationSingleTapCleanupEnabled = true,
+    this.liveNavigationAutoPlayEnabled = true,
     this.translucentEffectsEnabled = true,
     this.appAccent = AppAccent.teal,
     this.autoHideNavigationBarEnabled = true,
@@ -1270,6 +1271,7 @@ class AppSettings {
   // null = follow platform default (TV defaults to off, others default to on).
   final bool? homeStartupAutoRefreshEmbyEnabled;
   final bool homeNavigationSingleTapCleanupEnabled;
+  final bool liveNavigationAutoPlayEnabled;
   final bool translucentEffectsEnabled;
   final AppAccent appAccent;
   final bool autoHideNavigationBarEnabled;
@@ -1345,6 +1347,7 @@ class AppSettings {
     bool? homeStartupAutoRefreshEnabled,
     bool? homeStartupAutoRefreshEmbyEnabled,
     bool? homeNavigationSingleTapCleanupEnabled,
+    bool? liveNavigationAutoPlayEnabled,
     bool? translucentEffectsEnabled,
     AppAccent? appAccent,
     bool? autoHideNavigationBarEnabled,
@@ -1430,6 +1433,8 @@ class AppSettings {
       homeNavigationSingleTapCleanupEnabled:
           homeNavigationSingleTapCleanupEnabled ??
               this.homeNavigationSingleTapCleanupEnabled,
+      liveNavigationAutoPlayEnabled:
+          liveNavigationAutoPlayEnabled ?? this.liveNavigationAutoPlayEnabled,
       translucentEffectsEnabled:
           translucentEffectsEnabled ?? this.translucentEffectsEnabled,
       appAccent: appAccent ?? this.appAccent,
@@ -1591,6 +1596,7 @@ class AppSettings {
       'homeStartupAutoRefreshEmbyEnabled': homeStartupAutoRefreshEmbyEnabled,
       'homeNavigationSingleTapCleanupEnabled':
           homeNavigationSingleTapCleanupEnabled,
+      'liveNavigationAutoPlayEnabled': liveNavigationAutoPlayEnabled,
       'translucentEffectsEnabled': translucentEffectsEnabled,
       'appAccent': appAccent.name,
       'autoHideNavigationBarEnabled': autoHideNavigationBarEnabled,
@@ -1723,6 +1729,8 @@ class AppSettings {
           json['homeStartupAutoRefreshEmbyEnabled'] as bool?,
       homeNavigationSingleTapCleanupEnabled:
           json['homeNavigationSingleTapCleanupEnabled'] as bool? ?? true,
+      liveNavigationAutoPlayEnabled:
+          json['liveNavigationAutoPlayEnabled'] as bool? ?? true,
       translucentEffectsEnabled:
           json['translucentEffectsEnabled'] as bool? ?? true,
       appAccent: AppAccent.fromJson(json['appAccent']),

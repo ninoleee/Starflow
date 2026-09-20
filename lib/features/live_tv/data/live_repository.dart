@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:sembast/sembast.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/bounded_http_request.dart';
+import 'package:starflow/core/network/network_failure.dart';
 import 'package:starflow/core/network/starflow_http_transport.dart';
 import '../domain/live_models.dart';
 import 'live_database.dart';
@@ -146,7 +147,13 @@ class LiveRepository {
               ? incomingSources
               : incomingSources.difference(existingSources);
           // Merge preserves whole existing sources, avoiding partial ID collisions.
-      for (final name in ['channels', 'channelOwners', 'preferences', 'epg', 'epgLogos']) {
+          for (final name in [
+            'channels',
+            'channelOwners',
+            'preferences',
+            'epg',
+            'epgLogos'
+          ]) {
             final store = StoreRef<String, Object?>(name);
             for (final entry in backup.stores[name]!.entries) {
               final owner = name == 'channelOwners'
@@ -202,27 +209,41 @@ class LiveRepository {
       return db.transaction((txn) async {
         if ((_versions[source.id] ?? 0) != version) return;
         final previous = await _sources.record(source.id).get(txn);
+        final discoveredEpgUrl = parsed?.epgUrl ??
+            (previous?['url'] == source.url
+                ? (previous?['discoveredEpgUrl'] ?? source.discoveredEpgUrl)
+                : '');
         final endpointChanged = previous != null &&
             (previous['url'] != source.url ||
                 previous['epgUrl'] != source.epgUrl);
+        final discoveredEpgChanged = source.epgUrl.isEmpty &&
+            previous?['discoveredEpgUrl'] != discoveredEpgUrl;
         await _sources.record(source.id).put(txn, {
           ...source.toJson(),
           if (previous != null) 'updatedAt': previous['updatedAt'] ?? 0,
           if (previous != null) 'epgUpdatedAt': previous['epgUpdatedAt'] ?? 0,
           if (endpointChanged) 'updatedAt': 0,
-          if (endpointChanged) 'epgUpdatedAt': 0,
+          if (endpointChanged || discoveredEpgChanged) 'epgUpdatedAt': 0,
           if (parsed != null)
             'updatedAt': DateTime.now().millisecondsSinceEpoch,
-          'discoveredEpgUrl': parsed?.epgUrl ??
-              (previous?['url'] == source.url
-                  ? (previous?['discoveredEpgUrl'] ?? source.discoveredEpgUrl)
-                  : ''),
+          'discoveredEpgUrl': discoveredEpgUrl,
         });
         if (parsed != null) {
           await _replaceChannels(txn, source.id, parsed.channels);
         }
       });
     });
+  }
+
+  Future<void> setSourceEnabled(String id, bool enabled) async {
+    _versions[id] = (_versions[id] ?? 0) + 1;
+    _attempts.remove(id);
+    await _write((db) => db.transaction((txn) async {
+          final record = _sources.record(id);
+          if (await record.exists(txn)) {
+            await record.update(txn, {'enabled': enabled});
+          }
+        }));
   }
 
   Future<void> removeSource(String id) async {
@@ -366,7 +387,9 @@ class LiveRepository {
       if (previousId != c.id) {
         final preference = await _prefs.record(previousId).get(db);
         if (preference != null && !await _prefs.record(c.id).exists(db)) {
-          await _prefs.record(c.id).put(db, {...preference, 'sourceId': sourceId});
+          await _prefs
+              .record(c.id)
+              .put(db, {...preference, 'sourceId': sourceId});
         }
         if (await _meta.record('lastChannel').get(db) == previousId) {
           await _meta.record('lastChannel').put(db, c.id);
@@ -394,11 +417,15 @@ class LiveRepository {
     try {
       response = await sendBoundedRequest(client, 'GET', Uri.parse(url),
           timeout: const Duration(seconds: 30), maxBytes: maxBytes);
-    } catch (_) {
-      throw StateError('直播下载失败或超过大小/时间限制');
+    } catch (error) {
+      final category = error is http.ClientException &&
+              error.message == 'Response exceeds byte limit'
+          ? 'sizeLimit'
+          : classifyNetworkFailure(error).kind.name;
+      throw _LiveDownloadFailure(category);
     }
     if (response.statusCode != 200) {
-      throw StateError('HTTP ${response.statusCode}');
+      throw _LiveDownloadFailure('httpStatus', status: response.statusCode);
     }
     return response.bodyBytes;
   }
@@ -420,6 +447,7 @@ class LiveRepository {
     final source = (await load()).sources.where((s) => s.id == id).firstOrNull;
     if (source == null || !source.enabled || !_current(id, version)) return;
     _attempts[id] = DateTime.now();
+    var stage = 'playlist';
     try {
       var epgUrl = source.effectiveEpgUrl;
       if (source.url.isNotEmpty) {
@@ -446,12 +474,14 @@ class LiveRepository {
             }));
       }
       if (epgUrl.isNotEmpty && _current(id, version) && epoch == _backupEpoch) {
+        stage = 'epg';
         final epg = await compute(
             _parseEpgBytes, await _download(epgUrl, livePlaylistMaxBytes));
         if (!_current(id, version) || epoch != _backupEpoch) return;
         await _write((db) => db.transaction((txn) async {
-              if (epoch != _backupEpoch || (_versions[id] ?? 0) != version)
+              if (epoch != _backupEpoch || (_versions[id] ?? 0) != version) {
                 return;
+              }
               final current = await _sources.record(id).get(txn);
               if (current == null) return;
               await _epg.delete(txn,
@@ -486,16 +516,30 @@ class LiveRepository {
               });
             }));
       }
-      if (!_current(id, version)) return;
+      if (!_current(id, version) || epoch != _backupEpoch) return;
       appLogInfo('live.refresh', 'Subscription refreshed',
           fields: {'sourceId': liveId(id)});
     } catch (error) {
-      if (!_current(id, version)) return;
+      if (!_current(id, version) || epoch != _backupEpoch) return;
       appLogWarning(
           'live.refresh', 'Subscription refresh failed; cache retained',
-          fields: {'sourceId': liveId(id)});
+          fields: {
+            'sourceId': liveId(id),
+            'stage': stage,
+            'errorCategory': error is _LiveDownloadFailure
+                ? error.category
+                : error is FormatException
+                    ? 'format'
+                    : 'unknown',
+            if (error is _LiveDownloadFailure && error.status != null)
+              'httpStatus': error.status,
+          });
       if (error is FormatException) {
         throw const FormatException('直播数据格式无效，已保留缓存');
+      }
+      if (error is _LiveDownloadFailure && error.status != null) {
+        throw StateError(
+            '${stage == 'epg' ? '节目单' : '频道列表'}更新失败（HTTP ${error.status}），已保留缓存');
       }
       throw StateError('直播更新失败，已保留缓存');
     }
@@ -572,6 +616,12 @@ class LiveRepository {
       await (await _db)?.close();
     }));
   }
+}
+
+class _LiveDownloadFailure implements Exception {
+  const _LiveDownloadFailure(this.category, {this.status});
+  final String category;
+  final int? status;
 }
 
 LivePlaylist _parsePlaylistBytes((Uint8List, String, String) input) {

@@ -13,6 +13,18 @@ const String _originHeaderName = 'origin';
 void main() {
   test('playback relay forwards quark auth state and reuses redirected target',
       () async {
+    final media = [
+      0,
+      0,
+      0,
+      16,
+      ...ascii.encode('ftypisom'),
+      0,
+      0,
+      0,
+      0,
+      ...List<int>.generate(240, (i) => i),
+    ];
     final upstreamRequests = <_RecordedUpstreamRequest>[];
     final upstreamServer =
         await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -38,9 +50,14 @@ void main() {
       }
 
       if (request.uri.path == '/cdn/video.mkv') {
-        final body = utf8.encode('relay-ok');
         final requestedRange =
             request.headers.value(HttpHeaders.rangeHeader) ?? '';
+        final match = RegExp(r'^bytes=(\d+)-(\d+)$').firstMatch(requestedRange);
+        final start = match == null ? 0 : int.parse(match[1]!);
+        final end = match == null
+            ? media.length - 1
+            : int.parse(match[2]!).clamp(start, media.length - 1);
+        final body = media.sublist(start, end + 1);
         request.response.statusCode =
             requestedRange.isNotEmpty ? HttpStatus.partialContent : 200;
         request.response.headers
@@ -50,7 +67,7 @@ void main() {
         if (requestedRange.isNotEmpty) {
           request.response.headers.set(
             HttpHeaders.contentRangeHeader,
-            'bytes 0-${body.length - 1}/${body.length}',
+            'bytes $start-$end/${media.length}',
           );
         }
         request.response.add(body);
@@ -113,12 +130,14 @@ void main() {
     );
 
     expect(relayResponse.statusCode, HttpStatus.partialContent);
-    expect(utf8.decode(bytes), 'relay-ok');
+    expect(bytes, media.sublist(100, 200));
+    expect(relayResponse.headers.value(HttpHeaders.contentRangeHeader),
+        'bytes 100-199/256');
     expect(
       upstreamRequests.map((item) => item.path).toList(),
       ['/start', '/cdn/video.mkv', '/cdn/video.mkv'],
     );
-    expect(upstreamRequests[0].range, 'bytes=0-0');
+    expect(upstreamRequests[0].range, 'bytes=0-511');
     expect(upstreamRequests[0].cookie, contains('kps=base'));
     expect(upstreamRequests[1].cookie, contains('vip=1'));
     expect(upstreamRequests[2].cookie, contains('vip=1'));

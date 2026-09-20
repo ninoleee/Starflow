@@ -38,6 +38,18 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    // Mobile history now reads through the native channel, not preferences.
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('starflow/platform'),
+            (call) async {
+      if (call.method == 'readPlaybackMemory') return null;
+      throw MissingPluginException('Unexpected platform call: ${call.method}');
+    });
+  });
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('starflow/platform'), null);
   });
 
   testWidgets('failed enrichment refresh retains resolved actions and series',
@@ -545,7 +557,7 @@ void main() {
     await tester.tap(
       find.ancestor(
         of: find.text('匹配资源库'),
-        matching: find.byType(TextButton),
+        matching: find.byWidgetPredicate((widget) => widget is TextButton),
       ),
     );
     await tester.pump();
@@ -1551,6 +1563,9 @@ void main() {
           mediaRepositoryProvider.overrideWithValue(
             const _SingleMatchMediaRepository(),
           ),
+          detailExternalEpisodeVariantServiceProvider.overrideWithValue(
+            _FakeDetailExternalEpisodeVariantService(),
+          ),
           localStorageCacheRepositoryProvider.overrideWithValue(
             _RecordingRestoreCacheRepository(),
           ),
@@ -1567,6 +1582,7 @@ void main() {
               sourceName: '豆瓣',
               imdbId: 'tt1234567',
               tmdbId: '7654321',
+              itemType: 'movie',
             ),
           ),
         ),
@@ -1582,7 +1598,7 @@ void main() {
     await tester.tap(
       find.ancestor(
         of: find.text('匹配资源库'),
-        matching: find.byType(TextButton),
+        matching: find.byWidgetPredicate((widget) => widget is TextButton),
       ),
     );
     await tester.pump();

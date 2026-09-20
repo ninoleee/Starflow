@@ -100,7 +100,7 @@ void main() {
     });
   }
 
-  testWidgets('selected season tab expands for its checkmark', (tester) async {
+  testWidgets('selected season tab keeps its width without a checkmark', (tester) async {
     var selected = 's1';
     await tester.pumpWidget(ProviderScope(
       overrides: [
@@ -132,15 +132,15 @@ void main() {
         closeTo(bounds.right - labelBounds.right, 0.1));
     await tester.tap(find.text('第 2 季'));
     await tester.pumpAndSettle();
-    expect(tester.getSize(second).width, greaterThan(before));
+    expect(tester.getSize(second).width, before);
     expect(selected, 's2');
     final selectedBounds = tester.getRect(second);
-    final iconBounds = tester.getRect(find.descendant(
+    expect(find.descendant(
       of: second,
       matching: find.byIcon(Icons.check_circle_rounded),
-    ));
+    ), findsNothing);
     final selectedLabelBounds = tester.getRect(find.text('第 2 季'));
-    expect(iconBounds.left - selectedBounds.left,
+    expect(selectedLabelBounds.left - selectedBounds.left,
         closeTo(selectedBounds.right - selectedLabelBounds.right, 0.1));
   });
 

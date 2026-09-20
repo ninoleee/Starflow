@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
@@ -21,6 +22,20 @@ class LiveSourcesPage extends ConsumerStatefulWidget {
 
 class _LiveSourcesPageState extends ConsumerState<LiveSourcesPage> {
   final _busy = <String>{};
+  final _toggling = <String>{};
+
+  Future<void> _setEnabled(LiveSource source, bool enabled) async {
+    if (_toggling.contains(source.id)) return;
+    setState(() => _toggling.add(source.id));
+    try {
+      await ref.read(liveRepositoryProvider).setSourceEnabled(source.id, enabled);
+    } catch (_) {
+      if (mounted) liveMessage(context, '订阅状态保存失败，请重试');
+    } finally {
+      if (mounted) setState(() => _toggling.remove(source.id));
+    }
+  }
+
   Future<void> _refresh(LiveSource source) async {
     if (_busy.contains(source.id)) return;
     setState(() => _busy.add(source.id));
@@ -97,7 +112,12 @@ class _LiveSourcesPageState extends ConsumerState<LiveSourcesPage> {
                     child:
                         StarflowButton(label: '添加订阅', onPressed: () => _edit()))
                 : ListView.separated(
-                    padding: const EdgeInsets.all(16),
+                    padding: EdgeInsets.fromLTRB(
+                        16,
+                        16,
+                        16,
+                        kBottomReservedSpacing +
+                            MediaQuery.viewPaddingOf(context).bottom),
                     itemCount: s.sources.length,
                     separatorBuilder: (_, __) => const Divider(),
                     itemBuilder: (context, i) {
@@ -105,8 +125,37 @@ class _LiveSourcesPageState extends ConsumerState<LiveSourcesPage> {
                       return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(source.name,
-                                style: Theme.of(context).textTheme.titleMedium),
+                            Row(children: [
+                              Expanded(
+                                  child: Text(source.name,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium)),
+                              const SizedBox(width: 12),
+                              Semantics(
+                                  label: '启用订阅 ${source.name}',
+                                  toggled: source.enabled,
+                                  child: Tooltip(
+                                      message: source.enabled ? '停用订阅' : '启用订阅',
+                                      child: TvFocusableAction(
+                                          key: ValueKey(
+                                              'source-enabled-${source.id}'),
+                                          focusableWhenDisabled: true,
+                                          onPressed: _toggling.contains(source.id)
+                                              ? null
+                                              : () => _setEnabled(
+                                                  source, !source.enabled),
+                                          child: ExcludeFocus(
+                                              child: ExcludeSemantics(
+                                                  child: IgnorePointer(
+                                                      child: Switch(
+                                                          value: source.enabled,
+                                                          onChanged: _toggling
+                                                                  .contains(source.id)
+                                                              ? null
+                                                              : (value) =>
+                                                                  _setEnabled(source, value)))))))),
+                            ]),
                             Text(
                                 '${s.channels.where((c) => c.sourceId == source.id).length} 个频道 · ${source.url.isEmpty ? "本地导入" : "订阅"} · ${source.enabled ? "已启用" : "已停用"}'),
                             Text(source.updatedAt == 0
@@ -120,13 +169,17 @@ class _LiveSourcesPageState extends ConsumerState<LiveSourcesPage> {
                               LiveIconButton(
                                   icon: Icons.edit_outlined,
                                   label: '编辑订阅',
-                                  onPressed: () => _edit(source)),
+                                  onPressed: _toggling.contains(source.id)
+                                      ? null
+                                      : () => _edit(source)),
                               LiveIconButton(
                                   icon: _busy.contains(source.id)
                                       ? Icons.hourglass_top
                                       : Icons.refresh,
                                   label: '更新频道与节目单',
                                   onPressed: _busy.contains(source.id) ||
+                                          _toggling.contains(source.id) ||
+                                          !source.enabled ||
                                           (source.url.isEmpty &&
                                               source.effectiveEpgUrl.isEmpty)
                                       ? null
@@ -152,7 +205,6 @@ class _SourceEditorState extends ConsumerState<_SourceEditor> {
   late final _name = TextEditingController(text: widget.source?.name);
   late final _url = TextEditingController(text: widget.source?.url);
   late final _epg = TextEditingController(text: widget.source?.epgUrl);
-  late bool _enabled = widget.source?.enabled ?? true;
   late int _hours = widget.source?.refreshHours ?? 24;
   Uint8List? _bytes;
   String _fileName = '', _error = '';
@@ -174,10 +226,12 @@ class _SourceEditorState extends ConsumerState<_SourceEditor> {
       if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
       if (isTelevision) {
         final service = ref.read(livePlaylistTransferServiceProvider);
-        final upload = await showDialog<LivePlaylistUpload>(
+        final upload = await showDialog<LivePlaylistTransferResult>(
             context: context,
             builder: (_) => LivePlaylistTransferDialog(start: service.start));
-        if (upload != null && mounted) _acceptFile(upload.name, upload.bytes);
+        if (upload is LivePlaylistUpload && mounted) {
+          _acceptFile(upload.name, upload.bytes);
+        }
         return;
       }
       final file = await openFile(acceptedTypeGroups: [
@@ -233,7 +287,7 @@ class _SourceEditorState extends ConsumerState<_SourceEditor> {
         url: _url.text.trim(),
         epgUrl: _epg.text.trim(),
         discoveredEpgUrl: widget.source?.discoveredEpgUrl ?? '',
-        enabled: _enabled,
+        enabled: widget.source?.enabled ?? true,
         refreshHours: _hours,
         updatedAt: widget.source?.updatedAt ?? 0,
         epgUpdatedAt: widget.source?.epgUpdatedAt ?? 0);
@@ -265,14 +319,28 @@ class _SourceEditorState extends ConsumerState<_SourceEditor> {
             AppBar(title: Text(widget.source == null ? '添加直播订阅' : '编辑直播订阅')),
         body: AbsorbPointer(
             absorbing: _saving,
-            child: ListView(padding: const EdgeInsets.all(24), children: [
+            child: ListView(padding: EdgeInsets.fromLTRB(
+                24,
+                24,
+                24,
+                kBottomReservedSpacing +
+                    MediaQuery.viewPaddingOf(context).bottom), children: [
               SettingsTextInputField(
                   controller: _name, labelText: '名称', autofocus: true),
               const SizedBox(height: 16),
               SettingsTextInputField(
                   controller: _url,
                   labelText: 'M3U / TXT 订阅地址',
-                  autocorrect: false),
+                  autocorrect: false,
+                  onChanged: (value) {
+                    if (value.trim().isNotEmpty && _bytes != null) {
+                      setState(() {
+                        _bytes = null;
+                        _fileName = '';
+                        _error = '';
+                      });
+                    }
+                  }),
               const SizedBox(height: 16),
               SettingsTextInputField(
                   controller: _epg,
@@ -297,17 +365,14 @@ class _SourceEditorState extends ConsumerState<_SourceEditor> {
                             _fileName = '';
                           })),
               ]),
-              SwitchListTile(
-                  title: const Text('启用订阅'),
-                  value: _enabled,
-                  onChanged: (v) => setState(() => _enabled = v)),
               DropdownButtonFormField<int>(
                   initialValue: _hours,
                   decoration: const InputDecoration(labelText: '更新间隔'),
                   items: [
                     for (final h
                         in {6, 12, 24, 48, 168, _hours}.toList()..sort())
-                      DropdownMenuItem(value: h, child: Text('$h 小时'))
+                      DropdownMenuItem(value: h, child: LiveSelectionLabel(
+                          label: '$h 小时', selected: _hours == h, enabled: !_saving))
                   ],
                   onChanged: (v) => setState(() => _hours = v ?? 24)),
               const SizedBox(height: 24),
@@ -317,6 +382,9 @@ class _SourceEditorState extends ConsumerState<_SourceEditor> {
                         TextStyle(color: Theme.of(context).colorScheme.error)),
               StarflowButton(
                   label: _saving ? '保存中' : '保存',
+                  variant: isTelevision
+                      ? StarflowButtonVariant.secondary
+                      : StarflowButtonVariant.primary,
                   onPressed: _saving || _picking ? null : _save,
                   focusableWhenDisabled: true),
             ])));

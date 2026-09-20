@@ -203,7 +203,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
     final route = ModalRoute.of(context);
     final visible = widget.favoritesOnly &&
         (route == null || route.isCurrent) &&
-        TickerMode.valuesOf(context).enabled;
+        TickerMode.of(context);
     if (visible && !_favoriteRouteVisible) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && _favoriteRouteVisible) {
@@ -1081,7 +1081,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   bool _canRequestInitialTelevisionFocus() {
     final route = ModalRoute.of(context);
     final routeIsCurrent = route == null || route.isCurrent;
-    return routeIsCurrent && TickerMode.valuesOf(context).enabled;
+    return routeIsCurrent && TickerMode.of(context);
   }
 
   void _scheduleTelevisionFocusRecoveryIfLost() {

@@ -148,7 +148,7 @@ class NativePlaybackSessionTest {
 
     @Test
     fun compatibleSpeedChangesDoNotRebuildAndStaleCallbacksAreIgnored() {
-        val session = spy(NativePlaybackSession(mock(NativePlaybackSession.Host::class.java)))
+        val session = spy(NativePlaybackSession(mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)))
         val current = mock(ExoPlayer::class.java)
         session.player = current
         session.audioOutputMode = NativeAudioOutputMode.PCM_COMPATIBILITY
@@ -207,8 +207,9 @@ class NativePlaybackSessionTest {
         val selected = Format.Builder().setId("manual").setLanguage("ja")
             .setSampleMimeType(MimeTypes.AUDIO_DTS).build()
         val old = mock(ExoPlayer::class.java)
-        `when`(old.currentTracks).thenReturn(Tracks(listOf(Tracks.Group(TrackGroup(selected), false,
-            intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)))))
+        val oldTracks = Tracks(listOf(Tracks.Group(TrackGroup(selected), false,
+            intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true))))
+        `when`(old.currentTracks).thenReturn(oldTracks)
         `when`(old.playbackParameters).thenReturn(PlaybackParameters.DEFAULT)
         session.player = old
         session.audioOutputState.sinkInput = selected
@@ -220,6 +221,9 @@ class NativePlaybackSessionTest {
         assertTrue(session.restoreAudioTrack(Tracks.EMPTY))
         session.setPlaybackParameters(PlaybackParameters.DEFAULT)
         verify(session, times(2)).rebuildPlayer()
+        // A third output rebuild can happen before discovery or selection finishes.
+        session.restartPlayerWithAudioOutputMode(NativeAudioOutputMode.PCM_COMPATIBILITY)
+        verify(session, times(3)).rebuildPlayer()
         val fresh = mock(ExoPlayer::class.java)
         `when`(fresh.trackSelectionParameters).thenReturn(TrackSelectionParameters.Builder().build())
         session.player = fresh
@@ -229,6 +233,74 @@ class NativePlaybackSessionTest {
         val captor = org.mockito.ArgumentCaptor.forClass(TrackSelectionParameters::class.java)
         verify(fresh).trackSelectionParameters = captor.capture()
         assertSame(group, captor.value.overrides.values.single().mediaTrackGroup)
+    }
+
+    @Test
+    fun preparingDefaultTrackDoesNotReplacePendingManualSelection() {
+        val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+        `when`(host.target.playbackItemKey).thenReturn("episode")
+        val session = NativePlaybackSession(host)
+        val manual = Format.Builder().setId("manual").setLanguage("ja")
+            .setSampleMimeType(MimeTypes.AUDIO_AAC).build()
+        val default = manual.buildUpon().setId("default").setLanguage("en").build()
+        val old = mock(ExoPlayer::class.java)
+        val oldTracks = Tracks(listOf(Tracks.Group(TrackGroup(manual), false,
+            intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true))))
+        `when`(old.currentTracks).thenReturn(oldTracks)
+        `when`(old.playbackParameters).thenReturn(PlaybackParameters.DEFAULT)
+        session.player = old
+        session.preserveAudioSession()
+        val preparing = mock(ExoPlayer::class.java)
+        val group = TrackGroup(manual)
+        val preparingTracks = Tracks(listOf(
+            Tracks.Group(TrackGroup(default), false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)),
+            Tracks.Group(group, false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(false)),
+        ))
+        `when`(preparing.currentTracks).thenReturn(preparingTracks)
+        `when`(preparing.playbackParameters).thenReturn(PlaybackParameters(1.5f))
+        session.player = preparing
+        session.preserveAudioSession()
+        val parameters = TrackSelectionParameters.Builder().build()
+        `when`(preparing.trackSelectionParameters).thenReturn(parameters)
+        assertTrue(session.restoreAudioTrack(preparingTracks))
+        val captor = org.mockito.ArgumentCaptor.forClass(TrackSelectionParameters::class.java)
+        verify(preparing).trackSelectionParameters = captor.capture()
+        assertSame(group, captor.value.overrides.values.single().mediaTrackGroup)
+    }
+
+    @Test
+    fun rebuildImmediatelyAfterRestoreUsesOverrideBeforeSelectedFlagsCatchUp() {
+        val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+        `when`(host.target.playbackItemKey).thenReturn("episode")
+        val session = NativePlaybackSession(host)
+        val manual = Format.Builder().setId("manual").setLanguage("ja")
+            .setSampleMimeType(MimeTypes.AUDIO_AAC).build()
+        val default = manual.buildUpon().setId("default").setLanguage("en").build()
+        val player = mock(ExoPlayer::class.java)
+        val initial = Tracks(listOf(Tracks.Group(TrackGroup(manual), false,
+            intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true))))
+        `when`(player.currentTracks).thenReturn(initial)
+        `when`(player.playbackParameters).thenReturn(PlaybackParameters.DEFAULT)
+        var parameters = TrackSelectionParameters.Builder().build()
+        `when`(player.trackSelectionParameters).thenAnswer { parameters }
+        doAnswer { parameters = it.getArgument(0); null }.`when`(player).setTrackSelectionParameters(any())
+        session.player = player
+        session.preserveAudioSession()
+        val manualGroup = TrackGroup("new-manual", manual)
+        val preparing = Tracks(listOf(
+            Tracks.Group(TrackGroup(default), false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)),
+            Tracks.Group(manualGroup, false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(false)),
+        ))
+        `when`(player.currentTracks).thenReturn(preparing)
+        assertTrue(session.restoreAudioTrack(preparing))
+        session.preserveAudioSession()
+        val finalGroup = TrackGroup("final-manual", manual)
+        val finalTracks = Tracks(listOf(
+            Tracks.Group(TrackGroup("final-default", default), false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(true)),
+            Tracks.Group(finalGroup, false, intArrayOf(C.FORMAT_HANDLED), booleanArrayOf(false)),
+        ))
+        assertTrue(session.restoreAudioTrack(finalTracks))
+        assertSame(finalGroup, parameters.overrides.values.single().mediaTrackGroup)
     }
 
     @Test

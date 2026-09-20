@@ -75,11 +75,14 @@ class NativePlaybackAudioTracksTest {
     }
 
     @Test fun codecContradictionRejectsMetadataAndOrdinalInBothDirections() {
-        val aac = track("1", "en")
-        for (metadata in listOf("", "\"language\":\"eng\",\"channels\":2,")) {
-            val target = JSONObject("""{"preferredAudioStreamId":"ac3","audioStreams":[{${metadata}"id":"ac3","index":0,"codec":"ac3"}]}""")
-            assertNull(NativePlaybackAudioTracks.serverDefault(listOf(aac), target))
-            assertNull(NativePlaybackAudioTracks.serverStream(listOf(aac), aac, target))
+        for ((mime, codec) in listOf(MimeTypes.AUDIO_AAC to "ac3", MimeTypes.AUDIO_AC3 to "aac")) {
+            val format = track("1", "en").format.buildUpon().setSampleMimeType(mime).build()
+            val local = NativeAudioTrack(format, TrackSelectionOverride(TrackGroup(format), 0), true, true)
+            for (metadata in listOf("", "\"language\":\"eng\",\"channels\":2,")) {
+                val target = JSONObject("""{"preferredAudioStreamId":"a","audioStreams":[{${metadata}"id":"a","index":0,"codec":"$codec"}]}""")
+                assertNull(NativePlaybackAudioTracks.serverDefault(listOf(local), target))
+                assertNull(NativePlaybackAudioTracks.serverStream(listOf(local), local, target))
+            }
         }
     }
 

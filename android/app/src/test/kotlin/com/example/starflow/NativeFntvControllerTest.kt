@@ -307,7 +307,8 @@ class NativeFntvControllerTest {
         val newReply = pending!!
         newReply(mapOf("ok" to true, "path" to "/tmp/new.srt", "displayName" to "new"))
         oldReply(mapOf("ok" to true, "path" to "/tmp/old.srt"))
-        verify(host.externalSubtitles).loadCachedSubtitleFile(eq("/tmp/new.srt"), eq("new"), any(), eq(2L))
+        verify(host.externalSubtitles).loadCachedSubtitleFile(
+            eq("/tmp/new.srt") ?: "", eq("new") ?: "", any(), eq(2L))
         verify(host.externalSubtitles).discardFntvDownload("/tmp/old.srt")
         assertEquals(2L, subtitles.subtitleSelectionRevision)
     }

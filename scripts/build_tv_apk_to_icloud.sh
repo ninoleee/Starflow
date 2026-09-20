@@ -9,7 +9,7 @@
 #
 # Usage:
 #   ./build_tv_apk_to_icloud.sh [path/to/settings.json]
-#   STARFLOW_RELEASE_VERSION=1.9.6 ./build_tv_apk_to_icloud.sh
+#   STARFLOW_FLUTTER_SDK=/path/to/flutter ./build_tv_apk_to_icloud.sh
 #
 # When a settings JSON path is supplied, the APK is named
 # starflow-tv-config-<ver>.apk and the settings are embedded; otherwise it
@@ -23,6 +23,10 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ICLOUD_ROOT="${ICLOUD_ROOT:-$HOME/Library/Mobile Documents/com~apple~CloudDocs}"
 ICLOUD_INSTALLER_DIR="${ICLOUD_INSTALLER_DIR:-$ICLOUD_ROOT/Installers}"
 
+SETTINGS_JSON_PATH="${1:-}"
+if [[ -n "$SETTINGS_JSON_PATH" ]]; then
+  SETTINGS_JSON_PATH="$(cd "$(dirname "$SETTINGS_JSON_PATH")" && pwd)/$(basename "$SETTINGS_JSON_PATH")"
+fi
 cd "$PROJECT_ROOT"
 
 if [[ ! -f "pubspec.yaml" ]]; then
@@ -30,32 +34,52 @@ if [[ ! -f "pubspec.yaml" ]]; then
   exit 1
 fi
 
-if ! command -v flutter >/dev/null 2>&1; then
-  echo "Error: flutter command not found in PATH." >&2
+if [[ $# -gt 1 ]]; then
+  echo "Usage: $0 [path/to/settings.json]" >&2
   exit 1
 fi
 
-# Version stepping is shared with the PowerShell presets.
-dart "$PROJECT_ROOT/tool/verify_tv_release.dart" --preflight
-if [[ -n "${1:-}" && ! -f "$1" ]]; then
-  echo "Error: settings JSON not found: $1" >&2
-  exit 1
+if [[ -z "${STARFLOW_FLUTTER_SDK:-}" && -d "$PROJECT_ROOT/.fvm/flutter_sdk" ]]; then
+  STARFLOW_FLUTTER_SDK="$PROJECT_ROOT/.fvm/flutter_sdk"
 fi
+if [[ -n "${STARFLOW_FLUTTER_SDK:-}" ]]; then
+  FLUTTER="$STARFLOW_FLUTTER_SDK/bin/flutter"
+else
+  FLUTTER="$(command -v flutter)" || { echo "Error: select the pinned Flutter SDK." >&2; exit 1; }
+fi
+DART="$(dirname "$FLUTTER")/dart"
+export STARFLOW_FLUTTER_SDK="$(cd "$(dirname "$FLUTTER")/.." && pwd)"
+export PATH="$STARFLOW_FLUTTER_SDK/bin:$PATH"
 
-VERSION="$(dart "$PROJECT_ROOT/tool/release_version.dart" pubspec.yaml)"
-BUILD_DATE="$(date +%Y-%m-%d)"
+PREFLIGHT_ARGS=("$PROJECT_ROOT/tool/verify_tv_release.dart" --preflight)
+if [[ -n "$SETTINGS_JSON_PATH" ]]; then PREFLIGHT_ARGS+=("$SETTINGS_JSON_PATH"); fi
+"$DART" "${PREFLIGHT_ARGS[@]}"
 
-SETTINGS_JSON_PATH="${1:-}"
-
-# Embedded settings handling (mirrors Set-EmbeddedSettings / Remove-EmbeddedSettings)
+# Preserve local bootstrap data even when a build fails.
 EMBEDDED_DIR="$PROJECT_ROOT/assets/bootstrap"
 EMBEDDED_PATH="$EMBEDDED_DIR/embedded_settings.json"
-mkdir -p "$EMBEDDED_DIR"
-rm -f "$EMBEDDED_PATH"   # clean start, mirrors the empty-settings branch
+STAGING="$(mktemp -d)"
+HAD_EMBEDDED=0
+BOOTSTRAP_CHANGED=0
 cleanup() {
-  rm -f "$EMBEDDED_PATH"
+  if [[ "$BOOTSTRAP_CHANGED" == 1 ]]; then
+    rm -f "$EMBEDDED_PATH"
+    if [[ "$HAD_EMBEDDED" == 1 ]]; then cp -p "$STAGING/original.json" "$EMBEDDED_PATH"; fi
+  fi
+  rm -rf "$STAGING"
 }
 trap cleanup EXIT
+if [[ -f "$EMBEDDED_PATH" ]]; then
+  cp -p "$EMBEDDED_PATH" "$STAGING/original.json"
+  HAD_EMBEDDED=1
+fi
+if [[ -n "$SETTINGS_JSON_PATH" ]]; then
+  cp "$SETTINGS_JSON_PATH" "$STAGING/settings.json"
+  SETTINGS_JSON_PATH="$STAGING/settings.json"
+fi
+mkdir -p "$EMBEDDED_DIR"
+BOOTSTRAP_CHANGED=1
+rm -f "$EMBEDDED_PATH"
 
 NAME_PREFIX="starflow-tv"
 if [[ -n "$SETTINGS_JSON_PATH" ]]; then
@@ -67,9 +91,11 @@ if [[ -n "$SETTINGS_JSON_PATH" ]]; then
   cp -f "$SETTINGS_JSON_PATH" "$EMBEDDED_PATH"
 fi
 
+VERSION="$("$DART" "$PROJECT_ROOT/tool/release_version.dart" pubspec.yaml)"
+BUILD_DATE="$(date +%Y-%m-%d)"
 echo "Building TV APK for starflow ($VERSION, $BUILD_DATE)..."
 
-flutter build apk \
+"$FLUTTER" build apk \
   --release \
   --target-platform android-arm,android-arm64 \
   --android-skip-build-dependency-validation \
@@ -87,7 +113,7 @@ VERIFY_ARGS=("$PROJECT_ROOT/tool/verify_tv_release.dart" "$SOURCE_APK" "$VERSION
 if [[ -n "$SETTINGS_JSON_PATH" ]]; then
   VERIFY_ARGS+=("$SETTINGS_JSON_PATH")
 fi
-dart "${VERIFY_ARGS[@]}"
+"$DART" "${VERIFY_ARGS[@]}"
 mkdir -p "$ICLOUD_INSTALLER_DIR"
 cp -f "$SOURCE_APK" "$ICLOUD_INSTALLER_DIR/$TARGET_NAME"
 

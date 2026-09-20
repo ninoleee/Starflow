@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:sembast/sembast.dart';
 import 'package:sembast/sembast_memory.dart';
 import 'package:starflow/features/live_tv/application/live_playback_controller.dart';
 import 'package:starflow/features/live_tv/data/live_backup.dart';
@@ -12,6 +11,7 @@ import 'package:starflow/features/live_tv/data/live_repository.dart';
 import 'package:starflow/features/live_tv/data/live_playlist_parser.dart';
 import 'package:starflow/features/live_tv/domain/live_models.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
+import 'package:starflow/core/network/network_proxy_config.dart';
 
 Uint8List bytes(String text) => Uint8List.fromList(utf8.encode(text));
 String playlist(String name, {String epg = '', String group = 'News'}) =>
@@ -33,6 +33,76 @@ LiveRepository repository([http.Client? client]) {
 }
 
 void main() {
+  test(
+      'local reimport invalidates changed discovered EPG but preserves override TTL',
+      () async {
+    final requests = <String>[];
+    final r = repository(MockClient((request) async {
+      requests.add(request.url.toString());
+      return http.Response('<tv/>', 200);
+    }));
+    const local = LiveSource(id: 's', name: 'Local');
+    await r.saveSource(local,
+        imported: bytes(playlist('A', epg: 'https://a.test/a.xml')));
+    await r.refreshDue();
+    await r.saveSource(local,
+        imported: bytes(playlist('B', epg: 'https://a.test/b.xml')));
+    expect((await r.load()).sources.single.epgUpdatedAt, 0);
+    await r.refreshDue();
+    expect(requests, ['https://a.test/a.xml', 'https://a.test/b.xml']);
+    const override = LiveSource(
+        id: 's', name: 'Local', epgUrl: 'https://a.test/override.xml');
+    await r.saveSource(override);
+    await r.refreshDue();
+    final updatedAt = (await r.load()).sources.single.epgUpdatedAt;
+    await r.saveSource(override,
+        imported: bytes(playlist('C', epg: 'https://a.test/c.xml')));
+    await r.refreshDue();
+    expect((await r.load()).sources.single.epgUpdatedAt, updatedAt);
+    expect(requests, [
+      'https://a.test/a.xml',
+      'https://a.test/b.xml',
+      'https://a.test/override.xml'
+    ]);
+  });
+
+  test('late refresh failure after restore is discarded with its old epoch',
+      () async {
+    final started = Completer<void>();
+    final response = Completer<http.Response>();
+    final r = repository(MockClient((_) {
+      started.complete();
+      return response.future;
+    }));
+    await r.saveSource(source, imported: bytes(playlist('Saved')));
+    final backup = await r.exportBackup();
+    final refresh = r.refresh('s');
+    await started.future;
+    await r.importBackup(backup, LiveBackupImportMode.replace);
+    response.complete(http.Response('failed', 503));
+    await refresh;
+    expect(await r.exportBackup(), backup);
+  });
+
+  test('MPV cancellation during prior disposal prevents player creation',
+      () async {
+    final engine = PreparingMpvEngine();
+    final opening = engine.open(channel.lines.single, 1, (_, __) {});
+    final rejected = expectLater(opening, throwsA(isA<LiveOpenCancelled>()));
+    var acknowledged = false;
+    final cancellation = engine.cancelOpen().then((_) => acknowledged = true);
+    await Future<void>.delayed(Duration.zero);
+    expect(acknowledged, isFalse);
+    expect(engine.player, isNull);
+    engine.preparation.complete();
+    await rejected;
+    await cancellation;
+    expect(acknowledged, isTrue);
+    expect(engine.player, isNull);
+    expect(engine.video, isNull);
+    await engine.dispose();
+  });
+
   test(
       'discovery follows A to B, override wins, clearing override restores discovery',
       () async {
@@ -269,6 +339,28 @@ void main() {
     c.dispose();
   });
 
+  testWidgets('close waits for native cancellation acknowledgement, not open',
+      (tester) async {
+    final engine = CancelEngine()..blockOpen = true;
+    engine.cancelGate = Completer<void>();
+    final c = LivePlaybackController(engine: engine, onReady: (_, __) async {});
+    c.select(channel);
+    await tester.pump(const Duration(milliseconds: 180));
+    var closed = false;
+    final closing = c.close().then((_) => closed = true);
+    await tester.pump(const Duration(minutes: 1));
+    expect(closed, isFalse);
+    expect(engine.active, 1);
+    expect(engine.cancellations, 1);
+    engine.cancelGate!.complete();
+    await tester.pump();
+    await closing;
+    expect(engine.pendingOpen.isCompleted, isFalse);
+    expect(engine.active, 0);
+    expect(closed, isTrue);
+    c.dispose();
+  });
+
   testWidgets(
       'pause and suppression stop watchdog; old audio generation cannot select',
       (tester) async {
@@ -278,15 +370,19 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 180));
     final old = c.generation;
-    for (final pause in ['paused:3', 'paused:2', 'suppressed:1']) {
-      engine.emit(pause);
-      engine.emit('buffering');
-      engine.emit('progress');
-      await tester.pump(const Duration(minutes: 1));
-      expect(c.status, 'paused');
-      expect(c.retries, 0);
-      engine.emit('resumed');
-    }
+      for (final pause in ['paused:3', 'paused:2', 'suppressed:1']) {
+        engine.emit(pause);
+        engine.emit('buffering');
+        engine.emit('progress');
+        engine.emit('error');
+        engine.emit('ended');
+        await tester.pump(const Duration(minutes: 1));
+        expect(c.status, 'paused');
+        expect(c.pauseReason, pause);
+        expect(c.retries, 0);
+        engine.emit('resumed');
+        expect(c.pauseReason, isEmpty);
+      }
     engine.emit('error');
     await tester.pump(const Duration(seconds: 2));
     await tester.pump(const Duration(milliseconds: 180));
@@ -362,4 +458,12 @@ class CancelEngine implements CancellableLiveEngine {
   Future<void> selectAudio(String id) async {
     selections.add(id);
   }
+}
+
+class PreparingMpvEngine extends MpvLiveEngine {
+  PreparingMpvEngine() : super(const NetworkProxyConfig());
+  final preparation = Completer<void>();
+
+  @override
+  Future<void> stop() => preparation.future;
 }

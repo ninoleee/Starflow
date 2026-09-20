@@ -8,7 +8,13 @@ final livePlaylistTransferServiceProvider =
     Provider<LivePlaylistTransferService>(
         (ref) => impl.createLivePlaylistTransferService());
 
-class LivePlaylistUpload {
+enum LivePlaylistTransferMode { file, backupImport, backupExport }
+
+sealed class LivePlaylistTransferResult {
+  const LivePlaylistTransferResult();
+}
+
+class LivePlaylistUpload extends LivePlaylistTransferResult {
   const LivePlaylistUpload({required this.name, required this.bytes});
 
   final String name;
@@ -18,10 +24,17 @@ class LivePlaylistUpload {
 abstract class LivePlaylistTransferSession {
   List<String> get urls;
   Stream<String> get errors;
-  Future<LivePlaylistUpload?> get received;
+  Future<LivePlaylistTransferResult?> get received;
   Future<void> close();
 }
 
+class LiveBackupDownloaded extends LivePlaylistTransferResult {
+  const LiveBackupDownloaded();
+}
+
 abstract class LivePlaylistTransferService {
-  Future<LivePlaylistTransferSession> start();
+  Future<LivePlaylistTransferSession> start({
+    LivePlaylistTransferMode mode = LivePlaylistTransferMode.file,
+    Uint8List? backupBytes,
+  });
 }

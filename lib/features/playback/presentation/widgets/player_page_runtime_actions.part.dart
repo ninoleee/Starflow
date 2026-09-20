@@ -294,34 +294,40 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       _showMessage('当前飞牛字幕是位图字幕，不能作为文本字幕加载');
       return;
     }
-    final client = _providerContainer.read(
-      mediaServerClientProvider(target.sourceKind),
-    );
-    final bytes = await client.downloadExternalSubtitleBytes(
-      source: _sourceForTarget(target),
-      subtitleId: stream.id,
-    );
-    final content =
-        await processSubtitleContent(bytes, preferredName: stream.title);
-    if (!mounted ||
-        !identical(_player, player) ||
-        !_startupTrackWorkIsCurrent ||
-        content.trim().isEmpty) {
-      return;
-    }
-    await _disableMpvDualSubtitle(player);
-    await _setGuardedSubtitleTrack(player, SubtitleTrack.no());
-    await _setGuardedSubtitleTrack(
-      player,
-      SubtitleTrack.data(
-        content,
-        title: stream.title.isEmpty ? null : stream.title,
-        language: stream.language.isEmpty ? null : stream.language,
-      ),
-    );
-    if (!_startupTrackWorkIsCurrent) return;
-    _subtitleSessionPreference = null;
-    _showMessage('已加载飞牛字幕：${stream.title.isEmpty ? '未命名字幕' : stream.title}');
+    final generation = _startupGeneration;
+    final revision = _manualTrackRevision;
+    await PlaybackTrackGuard(() =>
+        mounted &&
+        identical(_player, player) &&
+        generation == _startupGeneration &&
+        revision == _manualTrackRevision).run([
+      () async {
+        final client = _providerContainer.read(
+          mediaServerClientProvider(target.sourceKind),
+        );
+        final bytes = await client.downloadExternalSubtitleBytes(
+          source: _sourceForTarget(target),
+          subtitleId: stream.id,
+        );
+        if (!_startupTrackWorkIsCurrent) return;
+        final content =
+            await processSubtitleContent(bytes, preferredName: stream.title);
+        if (!_startupTrackWorkIsCurrent || content.trim().isEmpty) return;
+        await _disableMpvDualSubtitle(player);
+        await _setGuardedSubtitleTrack(player, SubtitleTrack.no());
+        await _setGuardedSubtitleTrack(
+          player,
+          SubtitleTrack.data(
+            content,
+            title: stream.title.isEmpty ? null : stream.title,
+            language: stream.language.isEmpty ? null : stream.language,
+          ),
+        );
+        if (!_startupTrackWorkIsCurrent) return;
+        _subtitleSessionPreference = null;
+        _showMessage('已加载飞牛字幕：${stream.title.isEmpty ? '未命名字幕' : stream.title}');
+      },
+    ]);
   }
 
   MediaSourceConfig _sourceForTarget(PlaybackTarget target) {

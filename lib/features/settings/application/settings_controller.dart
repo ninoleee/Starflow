@@ -558,6 +558,11 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(appAccent: accent));
   }
 
+  Future<void> setLiveNavigationAutoPlayEnabled(bool enabled) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(current.copyWith(liveNavigationAutoPlayEnabled: enabled));
+  }
+
   Future<void> setSimplifiedVisualEffectsEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
     await _persist(

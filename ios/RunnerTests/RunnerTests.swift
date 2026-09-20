@@ -1,9 +1,91 @@
 import Flutter
+import AVFoundation
 import UIKit
 import XCTest
 @testable import Runner
 
 class RunnerTests: XCTestCase {
+
+  @MainActor
+  func testLateEpisodeResolverReleasesTargetAfterPauseSeekOrExit() async throws {
+    for command in ["pause", "seek", "exit"] {
+      let suite = "starflow.episode.tests.\(UUID().uuidString)"
+      let defaults = UserDefaults(suiteName: suite)!
+      defer { defaults.removePersistentDomain(forName: suite) }
+      let channel = PlaybackResolverTestChannel()
+      let queue = NativeEpisodeQueue.fromJsonString(
+        #"{"entries":[{"target":{"streamUrl":"file:///tmp/starflow-missing-first.mp4"},"playbackItemKey":"first"},{"target":{},"playbackItemKey":"second"}],"currentIndex":0}"#)!
+      let controller = NativePlaybackViewController(request: queue.currentEntry!.request!,
+        episodeQueue: queue, backgroundPlaybackEnabled: false, subtitlePreference: "off",
+        defaultSubtitle: "", playbackStore: NativePlaybackMemoryStore(userDefaults: defaults),
+        resolverSessionId: "test-session", resolverChannel: channel)
+      controller.loadViewIfNeeded()
+      for _ in 0..<100 where controller.player == nil {
+        try await Task.sleep(nanoseconds: 10_000_000)
+      }
+      let player = try XCTUnwrap(controller.player)
+      let item = try XCTUnwrap(player.currentItem)
+      NotificationCenter.default.post(name: .AVPlayerItemDidPlayToEndTime, object: item)
+      let resolver = try XCTUnwrap(channel.pendingResolver)
+      switch command {
+      case "pause": player.pause()
+      case "seek": player.seek(to: CMTime(seconds: 10, preferredTimescale: 1)) { _ in }
+      default: controller.dismiss(animated: false)
+      }
+      let target = #"{"streamUrl":"file:///tmp/starflow-missing-second.mp4","sourceKind":"fntv","sessionId":"synthetic-late-session"}"#
+      resolver(["ok": true, "playbackTargetJson": target, "playbackItemKey": "second"])
+      XCTAssertEqual(channel.releasedTargets, [target], command)
+      if command == "exit" {
+        XCTAssertNil(controller.player)
+        XCTAssertEqual(channel.closeCalls, 1)
+      } else {
+        XCTAssertTrue(controller.player === player, command)
+        XCTAssertTrue(controller.player?.currentItem === item, command)
+        XCTAssertEqual(channel.closeCalls, 0, "pause/seek must retain the active session")
+      }
+      controller.dismiss(animated: false)
+      controller.viewDidDisappear(false)
+      XCTAssertEqual(channel.closeCalls, 1, "exit cleanup must be idempotent")
+    }
+  }
+
+  @MainActor
+  func testExitInvalidatesPendingPlaybackPreparation() async throws {
+    let suite = "starflow.exit.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let channel = PlaybackResolverTestChannel()
+    let request = NativePlaybackRequest(url: URL(fileURLWithPath: "/tmp/starflow-missing.mp4"),
+      title: "", headers: [:], playbackTargetJson: "{}", playbackItemKey: "first", seriesKey: "")
+    var controller: NativePlaybackViewController? = NativePlaybackViewController(request: request,
+      episodeQueue: nil, backgroundPlaybackEnabled: false, subtitlePreference: "off",
+      defaultSubtitle: "", playbackStore: NativePlaybackMemoryStore(userDefaults: defaults),
+      resolverSessionId: "test-session", resolverChannel: channel)
+    controller?.loadViewIfNeeded()
+    controller?.dismiss(animated: false)
+    try await Task.sleep(nanoseconds: 50_000_000)
+    XCTAssertNil(controller?.player)
+    controller = nil
+    XCTAssertEqual(channel.closeCalls, 1)
+  }
+
+  @MainActor
+  func testDeinitClosesResolverSessionWithoutViewDisappearance() {
+    let suite = "starflow.deinit.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let channel = PlaybackResolverTestChannel()
+    let request = NativePlaybackRequest(url: URL(fileURLWithPath: "/tmp/starflow-missing.mp4"),
+      title: "", headers: [:], playbackTargetJson: "{}", playbackItemKey: "first", seriesKey: "")
+    var controller: NativePlaybackViewController? = NativePlaybackViewController(request: request,
+      episodeQueue: nil, backgroundPlaybackEnabled: false, subtitlePreference: "off",
+      defaultSubtitle: "", playbackStore: NativePlaybackMemoryStore(userDefaults: defaults),
+      resolverSessionId: "test-session", resolverChannel: channel)
+    weak var releasedController = controller
+    controller = nil
+    XCTAssertNil(releasedController)
+    XCTAssertEqual(channel.closeCalls, 1)
+  }
 
   func testEpisodeQueueRoundTripAndBoundaries() {
     let raw = #"{"entries":[{"target":{"streamUrl":"https://example.test/1"},"playbackItemKey":"first"},{"target":{"streamUrl":"https://example.test/2"},"playbackItemKey":"second"}],"currentIndex":0}"#
@@ -38,4 +120,43 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(store.loadResumePositionMs(itemKey: "item"), 0)
   }
 
+}
+
+private final class PlaybackResolverTestChannel: FlutterMethodChannel {
+  var pendingResolver: FlutterResult?
+  var releasedTargets: [String] = []
+  var closeCalls = 0
+
+  override init() {
+    super.init(name: "starflow.test.resolver", binaryMessenger: PlaybackTestMessenger(),
+      codec: FlutterStandardMethodCodec.sharedInstance())
+  }
+
+  override func invokeMethod(_ method: String, arguments: Any?) {
+    if method == "releaseNativeFntvPlayback",
+      let arguments = arguments as? [String: Any],
+      let target = arguments["playbackTargetJson"] as? String {
+      releasedTargets.append(target)
+    } else if method == "closeNativeFntvSession" {
+      closeCalls += 1
+    }
+  }
+
+  override func invokeMethod(_ method: String, arguments: Any?, result callback: FlutterResult?) {
+    if method == "resolveNativePlaybackEpisode" {
+      pendingResolver = callback
+    } else {
+      callback?(nil)
+    }
+  }
+}
+
+private final class PlaybackTestMessenger: NSObject, FlutterBinaryMessenger {
+  func send(onChannel channel: String, message: Data?) {}
+  func send(onChannel channel: String, message: Data?, binaryReply callback: FlutterBinaryReply?) {
+    callback?(nil)
+  }
+  func setMessageHandlerOnChannel(_ channel: String,
+    binaryMessageHandler handler: FlutterBinaryMessageHandler?) -> FlutterBinaryMessengerConnection { 0 }
+  func cleanUpConnection(_ connection: FlutterBinaryMessengerConnection) {}
 }

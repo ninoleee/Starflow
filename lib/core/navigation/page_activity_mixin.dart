@@ -22,7 +22,7 @@ mixin PageActivityMixin<T extends StatefulWidget> on State<T> {
     }
     final route = ModalRoute.of(context);
     final nextVisible = (route == null || route.isCurrent) &&
-        TickerMode.valuesOf(context).enabled &&
+        TickerMode.of(context) &&
         _appAllowsPageActivity(WidgetsBinding.instance.lifecycleState);
     // Backgrounding can stop frames entirely. Cancel page work even if a
     // route-driven deactivation is already queued for the end of a frame.

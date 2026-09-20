@@ -56,33 +56,38 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       return;
     }
 
-    PlaybackTarget? retainedRecoveryTarget;
+    PlaybackTarget? retainedStartupTarget;
     try {
       final coordinator = PlaybackStartupCoordinator(
         read: _providerContainer.read,
         targetResolver: PlaybackTargetResolver(read: _providerContainer.read),
         engineRouter: const PlaybackEngineRouter(),
+        releaseSession: (target) async {
+          await _fntvSessions.retain(target);
+          await _fntvSessions.release(target);
+        },
       );
-      final outcome = await scope.wait(coordinator
-          .start(
+      final outcome = await scope.wait(coordinator.start(
         initialTarget: startupTarget,
         isTelevision: _isTelevisionPlaybackDevice,
         isWeb: kIsWeb,
         targetAlreadyResolved: targetAlreadyResolved,
-      )
-          .then((outcome) async {
-        // Ownership precedes the cancellation check, including late results.
-        if (outcome.routeAction == PlaybackStartupRouteAction.openEmbeddedMpv) {
-          await _fntvSessions.retain(outcome.resolvedTarget);
-          if (recoveryIntent != null) {
-            retainedRecoveryTarget = outcome.resolvedTarget;
+        checkActive: () {
+          scope.checkActive();
+          if (!startupIsCurrent()) throw const MpvStartupCancelled();
+        },
+        onTargetResolved: (target, routeAction) async {
+          // Ownership precedes the cancellation check, including late results.
+          if (routeAction == PlaybackStartupRouteAction.openEmbeddedMpv ||
+              !startupIsCurrent()) {
+            await _fntvSessions.retain(target);
+            retainedStartupTarget = target;
+            if (!startupIsCurrent()) {
+              await _fntvSessions.release(target);
+            }
           }
-          if (!startupIsCurrent()) {
-            await _fntvSessions.release(outcome.resolvedTarget);
-          }
-        }
-        return outcome;
-      }));
+        },
+      ));
       if (!startupIsCurrent()) {
         return;
       }
@@ -335,8 +340,8 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
     } finally {
       final cancelled = !startupIsCurrent();
       await _finishCancelledRecovery(generation, recoveryIntent);
-      if (cancelled && retainedRecoveryTarget != null) {
-        await _fntvSessions.release(retainedRecoveryTarget!);
+      if (cancelled && retainedStartupTarget != null) {
+        await _fntvSessions.release(retainedStartupTarget!);
       }
       if (_isCurrentStartup(generation)) _recoveryStartupIntent = null;
     }

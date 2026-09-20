@@ -18,10 +18,21 @@ class NativeEpisodePickerNavigationTest {
         assertEquals(28, episodePickerNeighbor(30, 65, true, -4))
     }
 
-    @Test fun `partial final row clamps before leaving for footer`() {
+    @Test fun `partial final row clamps and stops at the bottom`() {
         assertEquals(64, episodePickerNeighbor(63, 65, true, 4))
-        assertEquals(65, episodePickerNeighbor(64, 65, true, 4))
+        assertEquals(64, episodePickerNeighbor(64, 65, true, 4))
         assertEquals(-4, episodePickerNeighbor(0, 65, true, -4))
+    }
+
+    @Test fun `season end stops downward in both layouts`() {
+        for (count in listOf(1, 30, 64, 65)) {
+            assertEquals(count - 1, episodePickerNeighbor(count - 1, count, false, 1))
+            val pageStart = (count - 1) / 30 * 30
+            val rowStart = pageStart + (count - 1 - pageStart) / 4 * 4
+            for (index in rowStart until count) {
+                assertEquals(index, episodePickerNeighbor(index, count, true, 4))
+            }
+        }
     }
 
     @Test fun `list navigation keeps adjacent episodes across ranges`() {

@@ -1,47 +1,54 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/home/application/home_feed_load_scheduler.dart';
 
 void main() {
-  test('home scheduler delays work after the configured first batch', () async {
-    final scheduler = HomeFeedLoadScheduler(
-      backgroundBatchDelay: const Duration(milliseconds: 40),
-      resultApplySpacing: Duration.zero,
-      idleResetDelay: const Duration(milliseconds: 20),
-    );
-    addTearDown(scheduler.dispose);
-    final firstGate = Completer<void>();
-    final secondGate = Completer<void>();
-    final starts = <String>[];
+  test('home scheduler delays work after the configured first batch', () {
+    fakeAsync((clock) {
+      final scheduler = HomeFeedLoadScheduler(
+        backgroundBatchDelay: const Duration(milliseconds: 40),
+        resultApplySpacing: Duration.zero,
+        idleResetDelay: const Duration(milliseconds: 20),
+      );
+      addTearDown(scheduler.dispose);
+      final firstGate = Completer<void>();
+      final secondGate = Completer<void>();
+      final starts = <String>[];
 
-    final first = scheduler.runLoad<void>(
-      moduleId: 'first',
-      maxConcurrency: 2,
-      initialBatchSize: 1,
-      task: () async {
-        starts.add('first');
-        await firstGate.future;
-      },
-    );
-    final second = scheduler.runLoad<void>(
-      moduleId: 'second',
-      maxConcurrency: 2,
-      initialBatchSize: 1,
-      task: () async {
-        starts.add('second');
-        await secondGate.future;
-      },
-    );
+      final first = scheduler.runLoad<void>(
+        moduleId: 'first',
+        maxConcurrency: 2,
+        initialBatchSize: 1,
+        task: () async {
+          starts.add('first');
+          await firstGate.future;
+        },
+      );
+      final second = scheduler.runLoad<void>(
+        moduleId: 'second',
+        maxConcurrency: 2,
+        initialBatchSize: 1,
+        task: () async {
+          starts.add('second');
+          await secondGate.future;
+        },
+      );
 
-    await Future<void>.delayed(const Duration(milliseconds: 10));
-    expect(starts, <String>['first']);
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-    expect(starts, <String>['first', 'second']);
+      clock.elapse(const Duration(milliseconds: 10));
+      expect(starts, <String>['first']);
+      clock.elapse(const Duration(milliseconds: 50));
+      expect(starts, <String>['first', 'second']);
 
-    firstGate.complete();
-    secondGate.complete();
-    await Future.wait(<Future<void>>[first, second]);
+      firstGate.complete();
+      secondGate.complete();
+      var completed = false;
+      Future.wait(<Future<void>>[first, second]).then((_) => completed = true);
+      clock.flushMicrotasks();
+      expect(completed, isTrue);
+      scheduler.dispose();
+    });
   });
 
   test('home scheduler serializes result application', () async {

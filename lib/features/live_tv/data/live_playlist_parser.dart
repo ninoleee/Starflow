@@ -54,7 +54,16 @@ LivePlaylist parseLivePlaylist(String text, String sourceId,
   if (text.length > livePlaylistMaxBytes) {
     throw const FormatException('频道列表超过 8 MiB');
   }
-  if (RegExp(r'^\s*#EXT-X-', multiLine: true)
+  // IPTV clients also use EXT-X-* for channel-list metadata (e.g. APTV).
+  // Only actual HLS tags identify a media/master manifest.
+  if (RegExp(
+          r'^\s*#EXT-X-(?:VERSION|TARGETDURATION|MEDIA-SEQUENCE|DISCONTINUITY-SEQUENCE|'
+          r'ENDLIST|PLAYLIST-TYPE|I-FRAMES-ONLY|INDEPENDENT-SEGMENTS|START|DEFINE|'
+          r'BYTERANGE|DISCONTINUITY|KEY|MAP|PROGRAM-DATE-TIME|DATERANGE|GAP|'
+          r'BITRATE|MEDIA|STREAM-INF|I-FRAME-STREAM-INF|SESSION-DATA|SESSION-KEY|'
+          r'SERVER-CONTROL|PART-INF|PART|PRELOAD-HINT|RENDITION-REPORT|SKIP|'
+          r'CONTENT-STEERING)(?=:|\s*$)',
+          multiLine: true)
       .hasMatch(text.replaceFirst('\uFEFF', ''))) {
     throw const FormatException('这是媒体播放清单，请导入频道列表或使用 TXT 添加该地址');
   }

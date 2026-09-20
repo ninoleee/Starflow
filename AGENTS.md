@@ -1,5 +1,11 @@
 # Starflow project instructions
 
+## Flutter SDK consistency
+
+- Use the SDK pinned by `.fvmrc` through `.fvm/flutter_sdk` for dependency resolution, tests, analysis, and builds, not only TV release builds.
+- Keep Flutter and Dart from the same SDK. After changing SDKs, run that SDK's `flutter pub get` before testing; do not manually edit `.dart_tool/package_config.json`.
+- Do not run different Flutter SDK versions or `flutter clean` concurrently in the same checkout. Coordinate shared builds or use a separate checkout for incompatible toolchains.
+
 ## Android TV APK delivery
 
 - For every user-facing Android TV APK, follow `scripts/build_tv_apk.ps1` and the release rules documented in `README.md`.

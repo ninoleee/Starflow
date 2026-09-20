@@ -345,8 +345,86 @@ void main() {
       tester.getSize(find.byKey(const ValueKey<String>('unified-chip'))).height,
       50,
     );
-    expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.check_circle_rounded), findsNothing);
   });
+
+  for (final television in [false, true]) {
+    for (final textScale in [1.0, 2.0]) {
+      for (final hasIcon in [false, true]) {
+        testWidgets(
+            'chip height stays stable across selection and focus: '
+            'TV=$television scale=$textScale icon=$hasIcon', (tester) async {
+          final focus = FocusNode();
+          final selected = ValueNotifier(false);
+          addTearDown(focus.dispose);
+          addTearDown(selected.dispose);
+          late double minimumHeight;
+          await tester.pumpWidget(ProviderScope(
+            overrides: [
+              isTelevisionProvider.overrideWith((ref) => television),
+            ],
+            child: MaterialApp(
+              home: Scaffold(
+                body: MediaQuery(
+                  data: MediaQueryData(
+                    textScaler: TextScaler.linear(textScale),
+                  ),
+                  child: Center(
+                    child: Builder(builder: (context) {
+                      minimumHeight = StarflowChipButton.minimumHeight(context);
+                      return ValueListenableBuilder<bool>(
+                        valueListenable: selected,
+                        builder: (context, value, child) => StarflowChipButton(
+                          label: 'Library',
+                          selected: value,
+                          icon: hasIcon ? Icons.video_library : null,
+                          focusNode: focus,
+                          onPressed: () => selected.value = !selected.value,
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          ));
+          await tester.pumpAndSettle();
+          final chip = find.byType(StarflowChipButton);
+          final initialHeight = tester.getSize(chip).height;
+          expect(initialHeight, minimumHeight);
+          if (textScale == 1) {
+            expect(initialHeight, 50);
+          } else {
+            expect(initialHeight, greaterThan(50));
+          }
+          await tester.tap(chip);
+          await tester.pumpAndSettle();
+          expect(selected.value, isTrue);
+          expect(find.byIcon(Icons.check_circle_rounded), findsNothing);
+          expect(find.byIcon(Icons.video_library),
+              hasIcon ? findsOneWidget : findsNothing);
+          expect(tester.getSize(chip).height, initialHeight);
+          if (television) {
+            expect(focus.hasPrimaryFocus, isTrue);
+            await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          } else {
+            await tester.tap(chip);
+          }
+          await tester.pumpAndSettle();
+          expect(selected.value, isFalse);
+          expect(tester.getSize(chip).height, initialHeight);
+          focus.unfocus();
+          await tester.pumpAndSettle();
+          expect(tester.getSize(chip).height, initialHeight);
+          final bounds = tester.getRect(chip);
+          final textBounds = tester.getRect(find.text('Library'));
+          expect(textBounds.top, greaterThanOrEqualTo(bounds.top));
+          expect(textBounds.bottom, lessThanOrEqualTo(bounds.bottom));
+          expect(tester.takeException(), isNull);
+        });
+      }
+    }
+  }
 
   testWidgets('StarflowButton reports TV focus', (tester) async {
     final focusNode = FocusNode(debugLabel: 'test-starflow-button');

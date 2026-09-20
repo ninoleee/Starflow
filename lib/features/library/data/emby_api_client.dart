@@ -136,14 +136,18 @@ class EmbyApiClient implements MediaServerClient {
   }) async {
     if (target.streamUrl.trim().isNotEmpty) {
       final baseUri = Uri.parse(source.endpoint.trim());
+      final sessionTokens = _streamSessionTokens(source.accessToken,
+          headers: target.headers, uri: Uri.parse(target.streamUrl));
       final uri = _resolveRelativeStreamUri(
         baseUri: baseUri,
         rawUrl: target.streamUrl,
         accessToken: source.accessToken,
+        sessionTokens: sessionTokens,
       );
       return target.copyWith(
           streamUrl: uri.toString(),
-          headers: _streamHeaders(target.headers, source.accessToken));
+          headers: _streamHeaders(target.headers, source.accessToken,
+              sessionTokens: sessionTokens));
     }
     if (target.itemId.trim().isEmpty) {
       throw const EmbyApiException('没有可解析的 Emby 播放目标');
@@ -345,14 +349,51 @@ class EmbyApiClient implements MediaServerClient {
 
   // Native engines may forward custom headers across redirects. Keep stream
   // credentials separate from the reusable Emby session (including old cache).
-  Map<String, String> _streamHeaders(
-          Map<String, dynamic> headers, String token) =>
-      {
-        for (final entry in headers.entries)
-          if (!entry.key.toLowerCase().startsWith('x-emby-') &&
-              (token.isEmpty || !entry.value.toString().contains(token)))
-            entry.key: entry.value.toString(),
-      };
+  Set<String> _streamSessionTokens(String token,
+      {required Map<String, dynamic> headers, Uri? uri}) {
+    final tokens = <String>{if (token.trim().isNotEmpty) token.trim()};
+    for (final entry in uri?.queryParametersAll.entries ??
+        const <MapEntry<String, List<String>>>[]) {
+      if (entry.key.toLowerCase() == 'api_key') {
+        tokens.addAll(entry.value.where((value) => value.isNotEmpty));
+      }
+    }
+    for (final entry in headers.entries) {
+      final key = entry.key.trim().toLowerCase();
+      final value = entry.value.toString().trim();
+      if (key == 'x-emby-token' && value.isNotEmpty) tokens.add(value);
+      if (key == 'x-emby-authorization' ||
+          (key == 'authorization' && _isEmbyAuthorization(value))) {
+        for (final match in RegExp(
+                r'''\bToken\s*=\s*(?:"([^"]+)"|'([^']+)'|([^,\s]+))''',
+                caseSensitive: false)
+            .allMatches(value)) {
+          tokens.add(match[1] ?? match[2] ?? match[3]!);
+        }
+      }
+    }
+    return tokens;
+  }
+
+  bool _isEmbyAuthorization(String value) =>
+      RegExp(r'^\s*(?:Emby|MediaBrowser)\s', caseSensitive: false)
+          .hasMatch(value);
+
+  Map<String, String> _streamHeaders(Map<String, dynamic> headers, String token,
+      {Set<String> sessionTokens = const {}}) {
+    final tokens = {
+      ...sessionTokens,
+      ..._streamSessionTokens(token, headers: headers),
+    };
+    return {
+      for (final entry in headers.entries)
+        if (!entry.key.trim().toLowerCase().startsWith('x-emby-') &&
+            !(entry.key.trim().toLowerCase() == 'authorization' &&
+                _isEmbyAuthorization(entry.value.toString())) &&
+            !tokens.any(entry.value.toString().contains))
+          entry.key: entry.value.toString(),
+    };
+  }
 
   String _playbackVariantKey(PlaybackTarget target) {
     return [
@@ -1077,6 +1118,7 @@ class EmbyApiClient implements MediaServerClient {
     required Uri baseUri,
     required String rawUrl,
     required String accessToken,
+    Set<String> sessionTokens = const {},
   }) {
     final parsed = Uri.parse(rawUrl);
     final normalizedBasePath = _trimTrailingSlash(baseUri.path);
@@ -1089,28 +1131,45 @@ class EmbyApiClient implements MediaServerClient {
             path: hasEmbeddedBasePath
                 ? parsed.path
                 : _joinPath(baseUri.path, parsed.path),
-            queryParameters: parsed.hasQuery ? parsed.queryParameters : null,
+            query: parsed.hasQuery ? parsed.query : null,
           );
 
     if (!isHttpUri(resolved)) {
       throw const EmbyApiException('Emby 返回了不安全的播放地址');
     }
     if (!isSameHttpOrigin(baseUri, resolved)) {
-      // Do not let a server echo this session token into an external URL.
-      if (accessToken.isNotEmpty &&
-          Uri.decodeFull(resolved.toString()).contains(accessToken)) {
+      // api_key is an Emby session parameter even after the source token rotates.
+      // Reject instead of rewriting an external URL's independent signature.
+      final tokens = {
+        ...sessionTokens,
+        if (accessToken.trim().isNotEmpty) accessToken.trim(),
+      };
+      if (resolved.queryParametersAll.keys
+              .any((key) => key.toLowerCase() == 'api_key') ||
+          tokens.any(Uri.decodeFull(resolved.toString()).contains)) {
         throw const EmbyApiException('Emby 外部播放地址包含会话凭据');
       }
       return resolved;
     }
-    if (accessToken.trim().isEmpty) return resolved;
-    if (resolved.queryParameters.containsKey('api_key')) {
+    if (accessToken.trim().isEmpty) {
+      if (sessionTokens.isNotEmpty ||
+          resolved.queryParametersAll.keys
+              .any((key) => key.toLowerCase() == 'api_key')) {
+        throw const EmbyApiException('Emby 会话已失效，请重新登录');
+      }
       return resolved;
     }
 
-    final queryParameters = Map<String, String>.from(resolved.queryParameters)
-      ..['api_key'] = accessToken.trim();
-    return resolved.replace(queryParameters: queryParameters);
+    // Preserve unrelated query bytes, duplicates and ordering for signed streams.
+    final query = resolved.query.split('&').where((part) =>
+        part.isNotEmpty &&
+        Uri.decodeQueryComponent(part.split('=').first).toLowerCase() !=
+            'api_key');
+    return resolved.replace(
+        query: [
+      ...query,
+      'api_key=${Uri.encodeQueryComponent(accessToken.trim())}',
+    ].join('&'));
   }
 
   List<String> _resolvePeople(

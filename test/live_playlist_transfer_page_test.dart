@@ -18,6 +18,9 @@ import 'package:starflow/features/live_tv/domain/live_models.dart';
 import 'package:starflow/features/live_tv/presentation/live_sources_page.dart';
 import 'package:starflow/features/live_tv/presentation/live_widgets.dart';
 import 'package:starflow/features/settings/presentation/widgets/lan_transfer_qr_address_card.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_text_input_field.dart';
+import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
+import 'package:starflow/features/settings/data/text_input_transfer_service.dart';
 
 void main() {
   for (final size in [const Size(320, 640), const Size(1280, 720)]) {
@@ -118,11 +121,111 @@ void main() {
     await _editor(tester, service, television: false);
     expect(_icon('导入 M3U / TXT 文件'), findsOneWidget);
     expect(_icon('手机导入 M3U / TXT 文件'), findsNothing);
+    expect(_icon('手机扫码填写订阅地址'), findsNothing);
     expect(service.starts, 0);
+  });
+
+  for (final size in [const Size(320, 640), const Size(1280, 720)]) {
+    testWidgets('TV URL scan fills only the draft until saved at $size',
+        (tester) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final service = _Service();
+      final repository = await _editor(tester, service);
+      _field(tester, '名称').text = 'My subscription';
+      _field(tester, 'XMLTV / XMLTV.gz 节目单地址').text =
+          'https://example.test/epg.xml';
+      await _open(tester, url: true);
+      expect(service.text.label, 'M3U / TXT 订阅地址');
+      expect(find.text('手机扫码输入'), findsOneWidget);
+      expect(find.text('等待手机输入'), findsOneWidget);
+      expect(find.byType(QrImageView), findsOneWidget);
+      expect(FocusManager.instance.primaryFocus?.debugLabel,
+          'text-transfer-close');
+      service.text.session.errorsController.add('请重试');
+      await tester.pumpAndSettle();
+      expect(find.text('请重试'), findsOneWidget);
+      service.text.session.result
+          .complete('https://example.test/list?token=abc');
+      await tester.pumpAndSettle();
+      expect(service.text.session.closes, 1);
+      expect(_field(tester, 'M3U / TXT 订阅地址').text, isEmpty);
+      await _press(tester, '保存');
+      expect(_field(tester, 'M3U / TXT 订阅地址').text,
+          'https://example.test/list?token=abc');
+      expect(_field(tester, '名称').text, 'My subscription');
+      expect(_field(tester, 'XMLTV / XMLTV.gz 节目单地址').text,
+          'https://example.test/epg.xml');
+      expect((await repository.load()).sources, isEmpty);
+      expect(repository.refreshes, 0);
+      await _press(tester, '保存');
+      expect((await repository.load()).sources.single.url,
+          'https://example.test/list?token=abc');
+      expect(repository.refreshes, 1);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  for (final exit in ['back', 'background', 'close']) {
+    testWidgets('URL scan $exit ignores a late result', (tester) async {
+      final service = _Service();
+      final repository = await _editor(tester, service);
+      _field(tester, 'M3U / TXT 订阅地址').text = 'https://old.test/list';
+      await _open(tester, url: true);
+      if (exit == 'back') {
+        await tester.binding.handlePopRoute();
+      } else if (exit == 'background') {
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      } else {
+        await _press(tester, '关闭服务');
+      }
+      await tester.pumpAndSettle();
+      expect(service.text.session.closes, 1);
+      service.text.session.result.complete('https://late.test/list');
+      if (exit == 'background') {
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        tester.binding
+            .handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      }
+      await tester.pumpAndSettle();
+      expect(_field(tester, 'M3U / TXT 订阅地址').text, 'https://old.test/list');
+      expect((await repository.load()).sources, isEmpty);
+      expect(find.byType(QrImageView), findsNothing);
+    });
+  }
+
+  testWidgets('URL scan replaces a file draft without saving it',
+      (tester) async {
+    final service = _Service();
+    final repository = await _editor(tester, service);
+    await _open(tester);
+    service.session.result.complete(_upload);
+    await tester.pumpAndSettle();
+    expect(_icon('取消文件导入'), findsOneWidget);
+    await _open(tester, url: true);
+    service.text.session.result.complete('https://example.test/list');
+    await tester.pumpAndSettle();
+    await _press(tester, '保存');
+    expect(_icon('取消文件导入'), findsNothing);
+    expect(_field(tester, '名称').text, 'channels.txt');
+    expect((await repository.load()).sources, isEmpty);
+    await _press(tester, '保存');
+    expect((await repository.load()).sources.single.url,
+        'https://example.test/list');
+    expect((await repository.load()).channels, isEmpty);
   });
 }
 
-Future<LiveRepository> _editor(WidgetTester tester, _Service service,
+TextEditingController _field(WidgetTester tester, String label) => tester
+    .widget<SettingsTextInputField>(find.byWidgetPredicate(
+        (w) => w is SettingsTextInputField && w.labelText == label))
+    .controller;
+
+Future<_Repository> _editor(WidgetTester tester, _Service service,
     {bool television = true}) async {
   final repository = _Repository();
   addTearDown(() async {
@@ -130,11 +233,13 @@ Future<LiveRepository> _editor(WidgetTester tester, _Service service,
     await tester.pumpAndSettle();
     repository.dispose();
     await service.session.errorsController.close();
+    await service.text.session.errorsController.close();
   });
   await tester.pumpWidget(ProviderScope(overrides: [
     isTelevisionProvider.overrideWith((_) => television),
     liveRepositoryProvider.overrideWithValue(repository),
     livePlaylistTransferServiceProvider.overrideWithValue(service),
+    textInputTransferServiceProvider.overrideWithValue(service.text),
   ], child: const MaterialApp(home: LiveSourcesPage())));
   await tester.pumpAndSettle();
   tester.widget<LiveIconButton>(_icon('添加订阅')).onPressed!();
@@ -142,7 +247,17 @@ Future<LiveRepository> _editor(WidgetTester tester, _Service service,
   return repository;
 }
 
-Future<void> _open(WidgetTester tester) async {
+Future<void> _open(WidgetTester tester, {bool url = false}) async {
+  if (url) {
+    final tile = find.byWidgetPredicate(
+        (w) => w is SettingsSelectionTile && w.title == 'M3U / TXT 订阅地址');
+    await tester.ensureVisible(tile);
+    tester.widget<SettingsSelectionTile>(tile).onPressed!();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('手机扫码输入'));
+    await tester.pumpAndSettle();
+    return;
+  }
   final finder = _icon('手机导入 M3U / TXT 文件');
   await tester.ensureVisible(finder);
   tester.widget<LiveIconButton>(finder).onPressed!();
@@ -152,8 +267,12 @@ Future<void> _open(WidgetTester tester) async {
 Future<void> _press(WidgetTester tester, String label) async {
   final finder =
       find.byWidgetPredicate((w) => w is StarflowButton && w.label == label);
-  await tester.ensureVisible(finder);
-  tester.widget<StarflowButton>(finder).onPressed!();
+  if (finder.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(finder, 250,
+        scrollable: find.byType(Scrollable).last);
+  }
+  await tester.ensureVisible(finder.last);
+  tester.widget<StarflowButton>(finder.last).onPressed!();
   await tester.pumpAndSettle();
 }
 
@@ -165,28 +284,63 @@ final _upload = LivePlaylistUpload(
     bytes: Uint8List.fromList(utf8.encode('News,https://example.test/live')));
 
 class _Service implements LivePlaylistTransferService {
-  final session = _Session();
+  final text = _TextService();
+  var session = _Session();
   Completer<LivePlaylistTransferSession>? starting;
   Object? failure;
   int starts = 0;
+  LivePlaylistTransferMode? mode;
   @override
-  Future<LivePlaylistTransferSession> start() async {
+  Future<LivePlaylistTransferSession> start({
+    LivePlaylistTransferMode mode = LivePlaylistTransferMode.file,
+    Uint8List? backupBytes,
+  }) async {
+    this.mode = mode;
     starts++;
     if (failure != null) throw failure!;
     return await (starting?.future ?? Future.value(session));
   }
 }
 
-class _Session implements LivePlaylistTransferSession {
+class _TextService implements TextInputTransferService {
+  final session = _TextSession();
+  String? label;
+  @override
+  Future<TextInputTransferSession> start(
+      {required String label,
+      bool multiline = false,
+      bool obscureText = false}) async {
+    this.label = label;
+    return session;
+  }
+}
+
+class _TextSession implements TextInputTransferSession {
   final errorsController = StreamController<String>.broadcast();
-  final result = Completer<LivePlaylistUpload?>();
+  final result = Completer<String?>();
   int closes = 0;
   @override
   List<String> get urls => ['http://192.168.1.8:8123/?token=example-session'];
   @override
   Stream<String> get errors => errorsController.stream;
   @override
-  Future<LivePlaylistUpload?> get received => result.future;
+  Future<String?> get received => result.future;
+  @override
+  Future<void> close() async {
+    closes++;
+  }
+}
+
+class _Session implements LivePlaylistTransferSession {
+  final errorsController = StreamController<String>.broadcast();
+  final result = Completer<LivePlaylistTransferResult?>();
+  int closes = 0;
+  @override
+  List<String> get urls => ['http://192.168.1.8:8123/?token=example-session'];
+  @override
+  Stream<String> get errors => errorsController.stream;
+  @override
+  Future<LivePlaylistTransferResult?> get received => result.future;
   @override
   Future<void> close() async {
     closes++;
@@ -200,6 +354,7 @@ class _Repository extends LiveRepository {
             client: MockClient((_) async => http.Response('', 404)));
 
   LiveSnapshot snapshot = const LiveSnapshot();
+  int refreshes = 0;
   final _snapshots = StreamController<LiveSnapshot>.broadcast();
 
   @override
@@ -215,9 +370,15 @@ class _Repository extends LiveRepository {
   Future<void> saveSource(LiveSource source, {Uint8List? imported}) async {
     snapshot = LiveSnapshot(
         sources: [source],
-        channels:
-            parseLivePlaylist(decodeLiveText(imported!), source.id).channels);
+        channels: imported == null
+            ? const []
+            : parseLivePlaylist(decodeLiveText(imported), source.id).channels);
     _snapshots.add(snapshot);
+  }
+
+  @override
+  Future<void> refresh(String sourceId) async {
+    refreshes++;
   }
 
   @override

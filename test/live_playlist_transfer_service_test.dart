@@ -1,9 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:charset/charset.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/live_tv/data/live_playlist_parser.dart';
+import 'package:starflow/features/live_tv/data/live_backup.dart';
 import 'package:starflow/features/live_tv/data/live_playlist_transfer_service.dart';
 import 'package:starflow/features/live_tv/data/live_playlist_transfer_service_io.dart';
 
@@ -11,10 +13,12 @@ void main() {
   Future<LivePlaylistTransferSession> start({
     Duration uploadTimeout = const Duration(seconds: 30),
     Duration sessionTimeout = const Duration(minutes: 10),
+    LivePlaylistTransferMode mode = LivePlaylistTransferMode.file,
+    Uint8List? backupBytes,
   }) async {
     final session = await IoLivePlaylistTransferService(
             uploadTimeout: uploadTimeout, sessionTimeout: sessionTimeout)
-        .start();
+        .start(mode: mode, backupBytes: backupBytes);
     addTearDown(session.close);
     return session;
   }
@@ -69,8 +73,8 @@ void main() {
         bytes: bytes);
     expect(response.$1, HttpStatus.ok);
     expect(response.$2, contains('请在电视确认保存'));
-    final upload = await session.received;
-    expect(upload!.name, '频道表.TXT');
+    final upload = (await session.received)! as LivePlaylistUpload;
+    expect(upload.name, '频道表.TXT');
     expect(upload.bytes, bytes);
     expect(
         parseLivePlaylist(decodeLiveText(upload.bytes), 's')
@@ -113,7 +117,7 @@ void main() {
         HttpStatus.unsupportedMediaType);
     expect((await _request(client(), _upload(root), bytes: _valid)).$1,
         HttpStatus.ok);
-    expect((await session.received)!.bytes, _valid);
+    expect(((await session.received)! as LivePlaylistUpload).bytes, _valid);
     expect(errors, hasLength(6));
     expect(errors.join(), isNot(contains('password')));
   });
@@ -185,6 +189,95 @@ void main() {
     await session.close();
     expect(await session.received, isNull);
   });
+
+  test('backup export is token scoped, byte exact, one shot and has no upload',
+      () async {
+    final bytes =
+        LiveBackup({for (final store in liveBackupStores) store: {}}).encode();
+    final session = await start(
+        mode: LivePlaylistTransferMode.backupExport, backupBytes: bytes);
+    final root = _root(session);
+    final page = await _request(client(), root, method: 'GET');
+    expect(page.$2, contains('下载直播备份'));
+    expect(page.$2, isNot(contains('type="file"')));
+    final url = root.replace(path: '/download');
+    expect((await _request(client(), url.replace(query: ''), method: 'GET')).$1,
+        403);
+    expect(
+        (await _request(client(), url,
+                method: 'GET', origin: 'https://other.test'))
+            .$1,
+        403);
+    expect(
+        (await _request(client(), _upload(root, 'backup.json'), bytes: bytes))
+            .$1,
+        404);
+    final response = await (await client().getUrl(url)).close();
+    expect(response.statusCode, 200);
+    expect(response.headers.value('cache-control'), 'no-store');
+    expect(response.headers.value('content-disposition'),
+        contains('attachment; filename="starflow-live-tv-'));
+    expect(await response.fold<List<int>>([], (a, b) => a..addAll(b)), bytes);
+    expect(await session.received, isA<LiveBackupDownloaded>());
+    expect((await _request(client(), url, method: 'GET')).$1, 410);
+    await session.close();
+    await expectLater(client().getUrl(root), throwsA(isA<SocketException>()));
+  });
+
+  test('backup export rejects invalid snapshots before opening a port',
+      () async {
+    await expectLater(start(mode: LivePlaylistTransferMode.backupExport),
+        throwsFormatException);
+    await expectLater(
+        start(
+            mode: LivePlaylistTransferMode.backupExport,
+            backupBytes: Uint8List.fromList(utf8.encode('{}'))),
+        throwsFormatException);
+  });
+
+  test('backup import validates JSON and returns a draft, not a restore action',
+      () async {
+    final session = await start(mode: LivePlaylistTransferMode.backupImport);
+    final root = _root(session);
+    final page = await _request(client(), root, method: 'GET');
+    expect(page.$2, contains('accept=".json"'));
+    expect(page.$2, contains('32 MiB'));
+    expect(
+        (await _request(client(), root.replace(path: '/download'),
+                method: 'GET'))
+            .$1,
+        404);
+    for (final payload in [
+      '{"schemaVersion":2}',
+      '{"password":"secret"}',
+      'News,https://a.test/live'
+    ]) {
+      final response = await _request(client(), _upload(root, 'backup.json'),
+          bytes: utf8.encode(payload));
+      expect(response.$1, 400);
+      expect(response.$2, '直播备份格式、版本或内容无效');
+    }
+    final bytes =
+        LiveBackup({for (final store in liveBackupStores) store: {}}).encode();
+    final response =
+        await _request(client(), _upload(root, 'backup.json'), bytes: bytes);
+    expect(response.$1, 200);
+    expect(response.$2, contains('尚未恢复'));
+    expect(((await session.received) as LivePlaylistUpload).bytes, bytes);
+  });
+
+  for (final declared in [true, false]) {
+    test('backup upload enforces 32 MiB (declared: $declared)', () async {
+      final session = await start(mode: LivePlaylistTransferMode.backupImport);
+      final response = await _request(
+          client(), _upload(_root(session), 'backup.json'),
+          bytes: Uint8List(liveBackupMaxBytes + 1), declaredLength: declared);
+      expect(response.$1, 413);
+      expect(response.$2, '直播备份超过 32 MiB');
+      await session.close();
+      expect(await session.received, isNull);
+    });
+  }
 }
 
 final _valid = utf8.encode('News,https://example.test/live\n');

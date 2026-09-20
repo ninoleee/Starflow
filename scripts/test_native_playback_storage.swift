@@ -30,6 +30,19 @@ enum NativePlaybackStorageTest {
     precondition(deferred.entries.count == 2 && deferred.currentIndex == 1)
     precondition(deferred.moveToPrevious()?.currentEntry?.request == nil)
     precondition(NativeEpisodeQueue.fromJsonString(deferred.toJsonString())?.entries.count == 2)
+    let transportEntry = NativeEpisodeQueueEntry(json: [
+      "target": ["streamUrl": "https://nas.test/movie.mp4", "headers": ["Authorization": "Basic synthetic"]],
+      "playbackItemKey": "original-item", "seriesKey": "original-series",
+      "transportUrl": "http://127.0.0.1:1234/playback-relay/random/media",
+      "transportHeaders": [String: String](),
+    ])!
+    precondition(transportEntry.request?.url.host == "127.0.0.1")
+    precondition(transportEntry.request?.headers.isEmpty == true)
+    precondition(transportEntry.request?.playbackItemKey == "original-item")
+    precondition(!transportEntry.playbackTargetJson.contains("127.0.0.1"))
+    let originalEntry = NativeEpisodeQueueEntry(json: transportEntry.toJsonObject())!
+    precondition(originalEntry.request?.url.host == "nas.test")
+    precondition(originalEntry.request?.headers["Authorization"] == "Basic synthetic")
     precondition(NativeSubtitleTrackFingerprint(json: [:]) == nil)
     let preference = NativeSubtitleSessionPreference.single(
       NativeSubtitleTrackFingerprint(label: "English", language: "en", isForced: true))

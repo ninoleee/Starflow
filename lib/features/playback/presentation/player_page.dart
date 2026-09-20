@@ -58,6 +58,8 @@ import 'package:starflow/features/playback/application/playback_startup_coordina
 import 'package:starflow/features/playback/application/playback_startup_executor.dart';
 import 'package:starflow/features/playback/application/playback_startup_routing.dart';
 import 'package:starflow/features/playback/application/playback_target_resolver.dart';
+import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
+import 'package:starflow/features/playback/application/playback_stream_relay_service.dart';
 import 'package:starflow/features/playback/application/subtitle_content_processing.dart';
 import 'package:starflow/features/playback/application/subtitle_render_policy.dart';
 import 'package:starflow/features/playback/application/mpv_subtitle_render_binding.dart';
@@ -164,6 +166,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   Player? _player;
   VideoController? _videoController;
   MpvPlaybackLifecycle _mpvLifecycle = MpvPlaybackLifecycle();
+  final _mpvRelays = <Player, PlaybackStreamRelayService>{};
   bool _mpvBitmapSubtitle = false;
   PlaybackTarget? _resolvedTarget;
   PlaybackEpisodeQueue? _episodeQueue;
@@ -623,6 +626,18 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     required String reason,
   }) async {
     final shutdown = _playerShutdownQueue.then((_) async {
+      // Abort this owner's transport before libmpv stop/dispose can wait on it.
+      // A replacement player has a separate relay and is not affected.
+      try {
+        await _mpvRelays.remove(player)?.close();
+      } catch (error, stackTrace) {
+        _traceWindowsMpv(
+          'windows-mpv.shutdown.relay-error',
+          fields: {'reason': reason},
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
       try {
         await player.pause();
       } catch (error, stackTrace) {

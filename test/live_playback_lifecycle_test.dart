@@ -90,6 +90,7 @@ void main() {
     await tester.pump(const Duration(seconds: 15));
     expect(c.status, 'retrying');
     expect(c.retries, 1);
+    expect(c.failure, LivePlaybackFailure.openTimeout);
     old.emit('frame');
     expect(remembered, isEmpty);
     await tester.pump(const Duration(seconds: 2));
@@ -171,6 +172,7 @@ void main() {
       expect(engine.opens, hasLength(attempt + 2));
     }
     expect(c.status, 'failed');
+    expect(c.failure, LivePlaybackFailure.engineError);
     await tester.pump(const Duration(minutes: 5));
     expect(engine.urls, [
       'https://example.test/a',
@@ -182,6 +184,7 @@ void main() {
     await _debounce(tester);
     expect(c.retries, 0);
     expect(engine.opens, hasLength(5));
+    expect(c.failure, isNull);
   });
 
   _test('ready and buffering chatter cannot extend the progress watchdog',
@@ -198,6 +201,7 @@ void main() {
     expect(c.retries, 0);
     await tester.pump(const Duration(seconds: 1));
     expect(c.status, 'retrying');
+    expect(c.failure, LivePlaybackFailure.progressTimeout);
     expect(c.retries, 1);
     expect(engine.activePlayers, 0);
   });

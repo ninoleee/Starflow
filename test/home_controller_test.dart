@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/discovery/data/discovery_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
@@ -228,6 +229,11 @@ void main() {
     ) async {
       await tester.pumpWidget(
         ProviderScope(
+          overrides: [
+            appSettingsProvider.overrideWithValue(
+              SeedData.defaultSettings.copyWith(homeModules: const []),
+            ),
+          ],
           child: MaterialApp(
             home: Consumer(
               builder: (context, ref, child) {

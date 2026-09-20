@@ -1153,7 +1153,9 @@ extension _PlayerPageStateControls on _PlayerPageState {
     List<SubtitleTrack> tracks,
     SubtitleTrack current,
   ) async {
-    _manualTrackRevision++;
+    final revision = ++_manualTrackRevision;
+    bool isCurrent() =>
+        mounted && identical(_player, player) && revision == _manualTrackRevision;
     final target = _resolvedTarget ?? widget.target;
     if (target.isFntvTranscoding) {
       final selected = await showPlaybackMenuDialog<String>(
@@ -1170,7 +1172,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
                       onPressed: () => Navigator.pop(context, stream.id),
                       child: Text(_formatServerSubtitleStreamLabel(stream))),
               ]));
-      if (selected != null && mounted) {
+      if (selected != null && isCurrent()) {
         await _switchFntvPlayback(
             player, target.copyWith(preferredSubtitleStreamId: selected));
       }
@@ -1225,7 +1227,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
         );
       },
     );
-    if (selection == null) {
+    if (selection == null || !isCurrent()) {
       return;
     }
 
@@ -1258,12 +1260,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
         ),
         failureMessage: '加载飞牛字幕失败',
       );
-      if (applied) {
-        if (mounted) {
-          setState(() {
-            _resolvedTarget = selectedTarget;
-          });
-        }
+      if (applied && isCurrent()) {
+        setState(() {
+          _resolvedTarget = selectedTarget;
+        });
         await _persistMpvSeriesSubtitlePreference(target, null);
       }
       return;
@@ -1421,7 +1421,9 @@ extension _PlayerPageStateControls on _PlayerPageState {
       return;
     }
     await _setMpvSubtitleProperty(player, 'secondary-sid', 'no');
-    if (!mounted) {
+    if (!mounted ||
+        !identical(_player, player) ||
+        !_startupTrackWorkIsCurrent) {
       return;
     }
     setState(() {

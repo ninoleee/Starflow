@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/app/lifecycle/app_runtime_recovery_boundary.dart';
 import 'package:starflow/app/router/app_router.dart';
 import 'package:starflow/app/theme/app_theme.dart';
+import 'package:starflow/core/widgets/mobile_text_input_dismissal.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/application/playback_runtime_priority_binding.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -34,7 +35,9 @@ class StarflowApp extends ConsumerWidget {
           actions: <Type, Action<Intent>>{
             DirectionalFocusIntent: _tvSafeDirectionalFocusAction,
           },
-          child: child ?? const SizedBox.shrink(),
+          child: MobileTextInputDismissal(
+            child: child ?? const SizedBox.shrink(),
+          ),
         ),
       ),
     );

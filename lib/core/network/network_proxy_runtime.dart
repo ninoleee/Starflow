@@ -1,6 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:starflow/core/network/network_proxy_config.dart';
 
-class NetworkProxyRuntime {
+class NetworkProxyRuntime extends ChangeNotifier {
   NetworkProxyConfig _config = const NetworkProxyConfig();
   int _revision = 0;
 
@@ -14,6 +15,7 @@ class NetworkProxyRuntime {
     }
     _config = normalized;
     _revision += 1;
+    notifyListeners();
   }
 
   String findProxy(Uri uri) => _config.proxyDirectiveFor(uri);

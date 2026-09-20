@@ -479,7 +479,7 @@ class _HomePageState extends ConsumerState<HomePage>
   bool get _isHomeRouteVisible {
     final route = ModalRoute.of(context);
     return isPageVisible &&
-        TickerMode.valuesOf(context).enabled &&
+        TickerMode.of(context) &&
         (route?.isCurrent ?? true);
   }
 

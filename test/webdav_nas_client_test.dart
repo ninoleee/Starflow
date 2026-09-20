@@ -1657,11 +1657,11 @@ void main() {
           id: 'nas-delete',
           name: 'Delete NAS',
           kind: MediaSourceKind.nas,
-          endpoint: 'https://nas.example.com/dav/',
+          endpoint: 'https://nas.example.com/library/',
           enabled: true,
         ),
         resourcePath: 'https://nas.example.com/library/Movies/Delete%20Me.mkv',
-        sectionId: 'https://nas.example.com/dav/Movies/',
+        sectionId: 'https://nas.example.com/library/Movies/',
       );
 
       expect(

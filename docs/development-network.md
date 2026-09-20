@@ -7,6 +7,10 @@
 ### 2026-09-20 N01-N04 与配置 LAN 加固
 
 - Emby PlaybackInfo 和已缓存播放目标统一按 scheme、host、有效 port 判断 origin；外域（含协议相对地址、同主机换协议/端口）不注入会话 token，拒绝 userInfo 和回显源 token 的外域 URL。播放器目标不再携带 `X-Emby-Token / X-Emby-Authorization` 或回显源 token 的 headers；同源媒体使用 URL `api_key`，流专用 headers 独立保留。原生播放器不经过 Dart 请求层，此策略避免原生自动重定向转发自定义 Emby 会话头；原生 HLS 子请求、服务端主动把 token 放进重定向 Location 等仍需按内核/服务器单独验收。
+- `PlaybackTargetResolver` 的旧 Emby/NAS 直链不再绕过来源客户端。Emby 同源 `api_key` 更新为当前会话，外域含历史 `api_key` 的 URL 拒绝；历史 Emby Authorization 和已知旧 Token 的回显头也清理。NAS 直链按当前来源 endpoint 完整 origin/目录重建认证，不复用历史 Basic/Cookie；来源已移除或类型变化时拒绝解析。
+- Android 点播使用 `NativePlaybackHttpDataSource` 和共享逐跳传输，媒体、HLS 清单/密钥/分片、网络字幕都相对初始媒体 origin 校验，外域不继承来源 headers，HTTPS 降级和 URL userInfo 拒绝。保留 Range、gzip、传输监听和 HTTP 状态错误分类；这不使服务器在 Location 中主动回显的 query 凭据自动安全。
+- MPV 与 iOS 原生点播的 NAS/Quark 敏感请求头经实例专属 loopback relay 转发，凭据和 Cookie 按完整 origin 隔离，拒绝 HTTPS 降级并限制重定向。仅引擎使用随机本机地址；历史、续播、源会话和切集目标保留原始身份。关闭或取消中止代理请求；iOS 初始播放与切集都接入，Android 使用自身安全 data source。普通 User-Agent/Referer 不强制代理。支持标准 HLS 点播/动态清单：白名单解析清单标签和带引号的属性，将嵌套清单、媒体/初始化分片、AES-128 identity 密钥及 WebVTT 子请求改写为本会话已登记的地址；外域子请求不继承原始认证。相对地址按每次重定向后的清单 URL 解析，保留签名查询参数。单清单最多 1 MiB、嵌套深度最多 4、会话最多 20,000 个资源；客户端不能指定任意上游 URL。
+- HLS 动态清单要求正整数 TARGETDURATION 与至少一个完整分片，刷新响应禁止缓存；注册表在整份清单校验通过后更新，失败刷新不撤销已有地址。非清单资源离开窗口两分钟后可回收，过期地址不重新分配；回退到更早的历史窗口需要重新加载清单，仍受资源上限保护。LL-HLS 的 PART、PRELOAD-HINT、RENDITION-REPORT、PART-INF、SERVER-CONTROL 不下发引擎，按完整分片兼容播放，**不是低延迟模式**。不发送 `_HLS_*` 刷新参数，不接受 SKIP 增量响应或仅有部分分片的清单；未知标签/属性、变量、DRM、DASH、其他播放列表/远程光盘拒绝，不宣称完整 HLS 协议支持。无认证清单与 Android HLS 不受此限制。代理对渐进式媒体做有界前缀验证，会新增一次小 Range 请求；扩展名不明确的 HLS 会在探测后重新读取完整清单，既有“无启动预检”只适用于不经该安全代理的路径。
 - Emby JSON 使用 20s 总期限、32 MiB 上限。WebDAV PROPFIND 为 30s / 32 MiB，NFO 为 20s / 4 MiB，STRM 文本为 20s / 1 MiB，DELETE 回复为 30s / 1 MiB。目录响应 href 只接受请求目录内且处于配置 endpoint 目录内的同源资源，拒绝编码路径逃逸；NFO/STRM/删除也在发请求前检查 endpoint 范围，父级侧车探测不越过 endpoint。合法外域 STRM 媒体不继承 NAS Basic 凭据。
 - `sendBoundedRequest` 保留 `cancel: Future<void>?`；取消中止当前 AbortableRequest、取消正文订阅，不关闭共享 client。期限覆盖响应头、逐跳重定向与正文；累计字节超过上限立即拒绝。带认证的请求逐跳检查同源，WebDAV 额外检查目录，最多五次跳转，不能依赖底层自动剥离自定义头。Web 开发代理没有禁用上游重定向的契约，因此拒绝需要限制重定向的请求，必须使用能满足 CORS 的直接传输。
 - `StarflowHttpClient.get/head/post/put/patch/delete` 是缓冲 API：默认 20s 完整请求期限、32 MiB 正文上限；HEAD 的资源 Content-Length 不算实际正文大小。`send()` 保持流式，不给视频正文套 API 大小/总时长限制；带认证的原始流式请求关闭自动重定向，由调用方处理 3xx。NetworkRequestGuard 的 GET 同样使用可中止 bounded 读取，通用 `run` 的任意业务 Future 仍不能自动取消。
@@ -17,12 +21,23 @@
 
 ### 直播订阅与媒体流（2026-09-20）
 
-- `live_tv/data/live_repository.dart` 使用 `createStarflowTransportClient`，沿用 IO 运行期代理；刻意不包装会记录 URL path 的 `StarflowHttpClient`，避免 IPTV 路径中的账号凭据被记入日志。只记录来源 ID、成功/失败，不记录地址、响应正文和底层异常文本。
+- 原生直播首页的连通检测由 `live_channel_probe.dart` 独占 HTTP 客户端，使用 `createStarflowTransportClient` 沿用 Dart 运行期代理；不是播放器预检。每次进入／返回等待订阅更新检查结束与列表就绪，自动补测可见的未测／过期频道；空列表延后。只检测视口相交频道的首选线路，不请求离屏缓存行或未访问分组；滚动／切组按新范围继续，恢复调度不清空有效缓存。两路并发、每路 6 秒包含跳转及首包等待，最多三次重定向。GET 携带 `Range: bytes=0-1023`，首个非空块即终止，不保存正文；服务端忽略 Range 或预读时流量可超过 1 KiB，不宣称严格字节上限。
+- 自动与手动检测共用 `liveMediaHeaders` 的默认 `Starflow` User-Agent 和对应线路 headers。同源跳转保留 headers，跨源只保留 User-Agent／Range，剥离 Cookie、Authorization、Referer、Origin 及其他自定义头；拒绝非 HTTP(S)、userinfo、HTTPS 降级及过多跳转。每跳显式处理，不借自动跳转转发凭据。不包装 URL 日志客户端，也不记录原始 URL、正文或异常文本；仅向界面返回固定状态、时间及 HTTP 码。
+- 新进入视口的线路稳定可见 200ms 才准入，TV 焦点优先，不抢占在途请求；离屏／筛选变化立即取消旧范围。分组下拉展开暂停、关闭继续。快照按线路身份协调，元数据不停止整轮；URL／headers／首选线路变化替换对应任务，删除／隐藏／停用取消。成功缓存 5 分钟，连续失败按 45／90／180／300 秒退避，成功或线路／网络变化重置。仅一个调度定时器处理当前可见项的准入和到期；停留同屏可重新检测，刷新保留旧结果，离屏不刷新，停止／离页不保留检测定时器。
+- `connectivity_plus 6.1.5` 在首页存活期间被动消费系统连接类型事件，不发可达性 HTTP／DNS 探测；类型集合去重，网络和代理 runtime 配置变化使缓存失效并取消旧请求。离线暂停准入，在线对可见项等待 200ms；不重开手动暂停或离页会话。正常路由返回复用缓存，后台或监听异常后返回保守失效；系统、代理和生命周期监听随页面销毁解除。同类型 Wi-Fi 切换可能无事件，不能视为完整网络身份检测。插件 Android minSdk 19，应用仍保留 API 23，不变更 TV 发布规则。
+- 取消信号中止 HTTP 请求，关闭独立客户端并等待响应流清理，旧清理完成前不释放两路并发名额。离页／后台停止任务，返回自动补测；手动停止本次停留不自动恢复，筛选／网络事件不解除暂停，手动恢复或下次返回才继续。开播前等待清理。`live.probe` 本地诊断记录清理完成／失败耗时和取消标记，超过 1 秒额外告警，无 URL／请求头／原始异常。6 秒请求期限不包含无限底层清理等待，超时报警不视为已释放。结果仅页内内存，无后台扫描、解码或 HLS 子请求；失败退避是下一轮可见项检测，不是单次 HTTP 请求内重试，播放器实际媒体网速采样仍独立。
+
+- MPV 媒体默认 User-Agent 为 `Starflow`，订阅显式值大小写不敏感地优先；同时设置 libmpv 的 `user-agent` 与 Media headers，避免 HLS 子连接回退为 Lavf 标识。只作用于媒体，不改变订阅下载。FFmpeg 6 HLS 允许 HTTP 非媒体后缀；保留扩展名保护、协议白名单限 `http,https,tcp,tls,crypto`，不允许 file/data/UDP。HLS 分片最多追加一次重试并关闭持久连接复用，仍受原启动/进度期限和频道恢复预算约束；不对 403 反复更换标识重试。Exo 沿用既有 `Starflow` 默认值、逐跳同源请求头策略。
+- `live_tv/data/live_repository.dart` 使用 `createStarflowTransportClient`，沿用 IO 运行期代理；刻意不包装会记录 URL path 的 `StarflowHttpClient`，避免 IPTV 路径中的账号凭据被记入日志。记录来源 ID、成功/失败；失败另保留频道列表/节目单阶段、固定错误类别和可用的 HTTP 状态，不记录地址、响应正文和底层异常文本。
 - M3U/TXT 和 XMLTV 下载均为 30s 总期限、8 MiB 正文上限；XMLTV.gz 解压写入限 32 MiB，并检查 CRC/长度。解析在非 Web compute isolate 执行，保留过去一天到未来七天节目，最多 100000 条。单表最多 10000 频道、单频道 64 线路、全表 50000 线路，超限拒绝而不截断旧缓存；媒体 HLS 清单不能当频道目录导入。
 - 进入直播页按来源 6/12/24/48/168 小时间隔检查，默认 24h；同一来源刷新合并，自动失败检查冷却五分钟，仅下次进入或人工刷新触发，不安排重试定时器。离开直播后不再开始后续来源刷新，已开始请求有期限并允许更新缓存；后台不启动下一来源。
+- 选台首页与播放器频道列表的当前节目复用本地 `liveNowNextProvider` 批量查询，页面／列表打开或恢复时及活动期间每分钟失效重读，不触发 EPG HTTP 下载，也不按频道行单独请求；节目单远端更新仍由原订阅期限和手动刷新负责。
 - 订阅/EPG/台标不继承媒体播放请求头。M3U 的 `http-user-agent / http-referrer` 与 URL 管道后的 User-Agent/Referer/Origin 仅用于对应媒体线路。首版不支持订阅登录表单、DRM 或运营商 UDP 组播。
-- TV 文件扫码使用 `live_playlist_transfer_service_io.dart` 的临时 IPv4 HTTP 服务和随机端口，不经过云端/代理，不复用配置 JSON 上传接口。每会话 144-bit 随机 token，Host/Origin 校验、no-store/no-referrer、页面无外部资源；仅一个上传在途、一次成功接收，文件原始字节最多 8 MiB、接收总期限 30s，后台 isolate 校验频道表。关闭弹窗、进入后台或十分钟过期会废弃未完成上传并关闭端口，成功只进入编辑页等待保存。HTTP 非加密，二维码含访问凭证，只在可信局域网使用；不记录 token、地址、文件正文或原始异常。该入口不是直播备份/恢复，也不会覆盖应用设置。
+- TV 文件扫码使用 `live_playlist_transfer_service_io.dart` 的临时 IPv4 HTTP 服务和随机端口，不经过云端/代理，不复用配置 JSON 上传接口。每会话 144-bit 随机 token，Host/Origin 校验、no-store/no-referrer、页面无外部资源；仅一个上传在途、一次成功接收，文件原始字节最多 8 MiB、接收总期限 30s，后台 isolate 校验频道表。关闭弹窗、进入后台或十分钟过期会废弃未完成上传并关闭端口，成功只进入编辑页等待保存。HTTP 非加密，二维码含访问凭证，只在可信局域网使用；不记录 token、地址、文件正文或原始异常。频道文件模式不能恢复直播备份，也不会覆盖应用设置。
+- TV 共用文本输入由 `text_input_transfer_service_io.dart` 提供临时 IPv4 HTTP 服务，仅开放会话页面和 `POST /input?token=...`，与直播文件/备份端点独立。144-bit 随机 token、Host/Origin 校验、no-store/no-referrer、CSP 和无外部资源；UTF-8 `text/plain` 正文声明及分块累计均限制 64 KiB，30s 接收期限、十分钟会话期限、一次成功接收。保留空文本/空白/换行，输入格式由 TV 组件应用，业务校验仍在保存时执行。关闭、后台、过期中止未完成接收；只回填输入弹窗，不调用仓库或自动提交。手机页只接收转义后的字段标题及密码/多行类型，不获取已有值，不读取剪贴板、不请求文本中的 URL，成功后清空手机字段；不记录正文、token 或原始异常。仍为可信 LAN 上的明文 HTTP，密码遮罩不等于加密。
 - MPV 开流读取应用代理，Exo 直播使用独立 `LiveTvHttpDataSource / LiveTvHttpTransport`（HttpURLConnection），不继承 Dart 代理。媒体网络支持和自定义请求头在 Web 受 CORS/浏览器能力限制，不使用开发代理宣称全平台可播。直播 Exo HTTP 连接/读取各 10s，应用层最多三次恢复，共用频道级预算。
+- 直播右上角网速仅采集现有媒体读取：MPV 本地 `cache-speed` 属性；Exo 每个 open 独立 `LiveTvNetworkSpeed` 汇总 DataSource 的网络字节回调，复用每秒进度任务采样，经带 generation 校验的 `networkSpeed` 通道读取。无额外 HTTP／Range 测速，控制层隐藏且非加载时停止 Flutter 轮询；停止／换台释放旧采样器，不混入订阅、节目单或台标下载。
+- 2026-09-20 Exo 错误诊断补齐：原生异常链最多检查 10 层，只上行固定错误类别、Media3 数字错误码和 HTTP 状态；兼容独立直播 transport 的状态异常，开流同步异常和异步内核错误共用摘要。Flutter 白名单解析后随原有失败日志导出，并拒绝旧代次。此变更不增加预探测、请求、重试次数，不调整 User-Agent、跨源 headers、TLS 校验、代理或流格式回退；MPV 仍只有通用内核错误分类。
 
 补充按当前源码核对的限制：
 
@@ -30,9 +45,9 @@
 - M3U `#EXTVLCOPT` 与媒体 URL 管道选项解析到 `LiveLine.headers`，仅用于当前媒体线路，不能描述成任意请求头编辑能力。订阅、EPG、台标与播放连接分开；重定向、HLS 子清单/分片的 headers 行为需用真实来源按内核验证，不因 MethodChannel 参数测试通过就宣称鉴权全链路已验收。
 - `live_logo_provider.dart` 使用独立 `AsyncWorkPool(4)`，每张台标响应头+正文 15s、2 MiB 上限，排队等待另计；provider 释放取消未完成请求并关闭该请求 client。沿用传输代理，不经记录 path 的 HTTP 包装层，不继承媒体 headers，不使用影视海报的持久化图片缓存。真实台标网络、重定向与设备解码尚未测。
 - 原生 MPV 使用 engine 创建时捕获的代理配置，换台继续用该快照；保存代理设置不会即时重配已存在的直播 engine。新建 engine 时才重新读取设置。Exo 使用标准 Media3 source factory 和独立 HTTP data source：清单、密钥、分片与每次重定向都按最初媒体地址的精确 origin 检查，仅同源携带来源 headers；拒绝 HTTPS 降级、URL userInfo 和超限重定向。无扩展名且容器识别失败时只尝试一次 HLS 回退，不预探测。不走点播 SmartStrm 预检、飞牛 resolver、转码或播放地址刷新；直播自动恢复只重开当前/备用线路，不自动刷新订阅以换取过期 token。
-- 开流 15s 计时、进展监测 18s 与底层连接/读取期限是不同层次。15s 触发失败但不强制中止媒体网络，不用 `Future.timeout` 放走旧 open 所有权；串行 stop/dispose 和下一次 open 必须等旧 open settle。`LiveEngine` 无取消接口，底层永久挂起仍需等待，不能承诺 15s 后网络已断开或换台必定完成。18s 只由 progress/frame 续期。三次 2/4/6s 退避限制应用层恢复，不是最多三个 HTTP 请求，HLS 会持续读取子清单/分片，内核也有自己的加载行为。原生开流回执不等于第一帧。
+- 开流 15s、进展监测 18s 与底层连接/读取期限是不同层次。生产 `CancellableLiveEngine` 在超时/换台/退出时绕过 open 队列请求卸载，收到原生取消确认后才允许串行 stop/dispose/下一次 open；没有取消能力的适配器仍等待旧 open settle。取消确认本身挂起时不继续重开，不能承诺 15s 后网络必定断开。18s 只由 progress/frame 续期，音频焦点暂停/抑制停止检测。三次 2/4/6s 退避限制应用层恢复，不是最多三个 HTTP 请求，HLS 仍持续读取子清单/分片。原生开流回执不等于第一帧。
 - 自动更新是页面激活时检查，不是后台服务；节目列表每分钟刷新的是本地查询/时间显示。保存带 URL 或 EPG 的来源后和人工更新会调用刷新入口，仓库跳过已停用来源，同一来源同版本的请求合并。来源版本阻止旧结果回填，但编辑/停用/删除不保证在途请求立即断开。
-- IO 的 `starflow-db/live_tv.db` / Web 的 `starflow-live-tv` 保存订阅、EPG、多线路/headers、整理偏好及直播内核，不属于 `AppSettings` 导出、文件/Web/TV 配置传输、WebDAV 手动配置备份或影视收藏自动同步。没有额外远端直播同步、专属备份/恢复或加密存储；不能把配置同步成功当成直播数据已备份。
+- IO 的 `starflow-db/live_tv.db` / Web 的 `starflow-live-tv` 保存订阅、EPG、多线路/headers、整理偏好及直播内核，不属于 `AppSettings` 导出、文件/Web/TV 配置传输、WebDAV 手动配置备份或影视收藏自动同步。非 TV 保留本地文件流程；TV 复用扫码服务的隔离模式：`backupImport` 仅接受 `POST /upload` 的直播 JSON（声明/累计上限 32 MiB、接收 30s），校验后等待电视确认；`backupExport` 只提供带令牌的 `GET /download`，发送已校验快照并禁止上传。继承随机 token、Host/Origin 校验、单次传输、十分钟会话与后台/关闭清理，不新增远端同步。备份及数据库未加密，不能把普通配置同步成功当成直播数据已备份。
 
 2026-09-20 合并后的主机验证为 132 项 Flutter、17 项直播 JVM，通过范围见 [主机记录](performance.md#2026-09-20-直播前置验证快照)；真实源/真机未测，已确认 `adb devices` 为空。JVM 本地 HTTP 服务测试不代替真实 CDN/鉴权源。MPV/Exo 同源对照的代理、鉴权、断流及生命周期验收见 [设备清单](performance-device.md#直播双内核对比验收2026-09-20)。
 
@@ -102,7 +117,7 @@ TV 图片在释放加载并发许可后仍保留同一个队列包装层和已�
 - 进入播放器时会更早切到“播放优先”模式；从网络侧看，首页 Hero 补数、详情页自动补全和隐藏页图片加载会更快被压住
 - `MPV` 的远程流调优和 `ISO` 设备源判断已经收口到本地策略层；重型视频不再自动切换播放器或降级质量预设
 - Android（含 TV）与 iOS 的内置 `MPV` 构建会下载 media-kit 上游 full 原生库并校验 SHA-256，以补齐 `MLP / TrueHD` 解码器；这是构建期依赖下载，运行期播放不新增网络请求
-- 内置 MPV 在完成地址解析后直接打开 HTTP / HTTPS 远程媒体，不再发送独立的启动 Range 预检或测速请求；重定向、授权、临时链接、HTTP 状态和 Range 读取由实际播放器连接处理，不再存在额外的 `4s` 预检拦截。正式打开超时与有限重试预算不变，`playback.startup / playback.mpv` 在本地记录启动及失败重试决定，不向远端上报
+- 内置 MPV 在完成地址解析后打开 HTTP / HTTPS 远程媒体，不发送旧式独立启动测速请求；带 NAS/Quark 敏感凭据的安全代理路径例外，会先读取有界媒体前缀，详见网络边界速查。其余地址的重定向、临时链接、HTTP 状态和 Range 读取由实际播放器连接处理，不再存在旧的 `4s` 预检拦截。正式打开超时与有限重试预算不变，`playback.startup / playback.mpv` 在本地记录启动及失败重试决定，不向远端上报
 - “没有 MPV 启动预检”不等于地址解析零请求。WebDAV 当前选中的 STRM 仍可能通过 `HEAD / Range` 读取源视频大小，SmartStrm 与服务端播放信息解析也各有既有请求；不会为整个版本列表批量预开媒体
 - Android ExoPlayer 启动 `/smartstrm_fid/` 时会用一次 `Range: bytes=0-63` 请求区分标准 MP4 文件头与 HLS 清单，最多等待约 `1.5s`；判断不出时不阻塞原格式启动。`/smartstrm/` 与 `/smartstrm_*/` 地址遇到 Media3 容器解析错误 `3003` 时，仍会保留当前进度、显式改按 HLS 并自动重试一次；普通 MP4、内置 MPV 和外部播放器不进入该探测或兜底
 - Android Exo 的 HTTP 请求头以播放目标的 `headers` 为准，服务端返回的 `User-Agent` 不再被客户端固定值覆盖；飞牛直连 115 CDN 的 `403` 因此按目标 UA 重试。progressive TS 仅在目标明确标注 `pcm_bluray` 或 ES 带有效 HDMV 注册描述符、且描述符未截断或冲突时，将 `0x80` 路由到本地 Blu-ray LPCM reader，将单声道、双声道、5.1/7.1（布局 1/3/9/11）保位深转换为 PCM16/PCM24。其他情况保留 Media3 默认解析；不根据扩展名或普通 PCM 标签猜测，也不新增网络探测来补齐缺失证据。LPCM 转换不增加网络请求，内置 MPV 路径不变。
@@ -448,6 +463,13 @@ flutter doctor -v
 
 Android 应用使用 JDK 17。TV 交付仍使用 [README 发布预设](../README.md)，不要把此辅助脚本末尾打印的裸 `flutter build apk --release` 当成交付流程。
 
+### Flutter SDK 一致性
+
+- 项目 `.fvmrc` 锁定 Flutter `3.38.10`（Dart `3.10.9`），编辑器使用 `.vscode/settings.json` 的 `.fvm/flutter_sdk`。依赖解析、组件测试、分析及 TV 发布须使用同一 SDK，不只发布时才切换。
+- 2026-09-20 本机修复：将锁定 SDK 复制到 `~/.local/share/flutter/3.38.10`，项目 `.fvm/flutter_sdk` 指向该长期目录；`~/.zshenv` 的 `flutter` / `dart` 函数在 Starflow 及其子目录转发到项目 SDK，离开项目仍使用原 PATH 默认版本。已有终端需重新打开或执行 `source ~/.zshenv`。这些个人路径不作为其他开发机配置要求；其他机器可用 FVM 安装 `.fvmrc` 指定版本。
+- SDK 切换后用 `.fvm/flutter_sdk/bin/flutter pub get` 重建依赖索引，由 Flutter 同步 `android/local.properties`。不要手工改 `.dart_tool/package_config.json`，也不要在同一工作目录并发运行不同 SDK 的 `pub get`、测试或构建。显式绝对路径会绕过终端函数，应同样选择项目 SDK。
+- `SemanticsHitTestBehavior` 缺失或 `hitTestTransform` 参数不匹配通常表示框架源码与引擎混用，不应修改 Flutter 源码来消除报错。检查 `flutter --version`、`dart --version`、依赖索引中的 `flutterRoot` 与 `android/local.properties` 的 `flutter.sdk` 是否同源，再重新解析依赖和回归。
+
 ## 6. 实用建议
 
 - Android 构建优先先确认 `android/local.properties` 里的 `sdk.dir` 和 `flutter.sdk`
@@ -457,10 +479,11 @@ Android 应用使用 JDK 17。TV 交付仍使用 [README 发布预设](../README
 - 切回官方源需清理已有镜像环境变量，`-UseOfficialSource` 本身不清理
 - TV 安装包默认用 `.\scripts\build_tv_apk.ps1` 生成，并直接输出到桌面
 - `build_tv_apk.ps1` 与 `build_tv_apk_to_icloud.sh` 内部固定使用 `flutter build apk --release --target-platform android-arm,android-arm64 --android-skip-build-dependency-validation`，单个 APK 仅包含 ARM 32 位与 ARM64，不再构建或打包 `x86_64`，继续保留 `Android 6.0 / API 23` 兼容目标
+- 两脚本统一选取 `STARFLOW_FLUTTER_SDK` / 项目 FVM / PATH 中的 Flutter 和同目录 Dart，预检校验锁定 framework/engine、签名私钥可读和静态检查工具。配置 JSON 预检不回显正文，原有 bootstrap 在构建结束或失败时恢复；输入配置先建立独立快照。APK 交付检查包名、内部版本/版本码、双 ABI、配置字节、固定签名及 v1/v2、原生库标记/强符号；静态检查不替代 API23 真机启动。
 - `build_tv_apk.ps1` 只会在显式传入 `-SettingsJsonPath` 时临时嵌入配置 JSON
 - 当前 TV 显示版本号只保留标准三段式 `主版本.月份.序号`
 - 当前 Release APK 启用了 `v1 + v2` 签名，兼容老一些的电视安装器
-- 如果 TV 端覆盖安装失败，先检查旧版 `com.example.starflow` 的签名；当前 release 配置仍使用本机 debug keystore。优先沿用原签名，必须卸载时先导出重要配置和数据，因为卸载会删除本机应用数据
+- Release 通过不入库的 `android/key.properties` 显式配置签名，不再回退自动生成的 debug key；发布工具核对 `config/android_release.json` 中固定指纹。历史安装身份为 Android Debug 证书，需恢复同一把旧 key 才能覆盖升级，并未迁移为新证书。必须卸载时先分别导出应用配置和直播备份，因为卸载会删除本机数据。
 - 无 PowerShell 时使用 `ICLOUD_INSTALLER_DIR="$HOME/Desktop" ./scripts/build_tv_apk_to_icloud.sh`，保持 TV 默认交付到桌面；不设此变量时该 Bash 脚本输出到 iCloud Drive 的 `Installers`
 - iOS 预设 `scripts/build_ipa_to_icloud.sh` 默认输出到 iCloud Drive 的 `Installers`，固定构建未签名 IPA；未签名包不能直接通过常规 iOS 安装流程安装。TV 与 iOS 只在显式选择相同输出目录时放在一起
 - 四个 TV / iOS / Windows 发布预设均调用 `tool/release_version.dart`，可在显式固定批次时传入 `STARFLOW_RELEASE_VERSION=主版本.月份.序号`；省略时继续按月递增。该本地工具读取 `config/release_version.json` 并修改 pubspec，不联网，PowerShell 也需 PATH 中有 Dart

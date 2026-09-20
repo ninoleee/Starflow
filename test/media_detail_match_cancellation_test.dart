@@ -73,8 +73,14 @@ void main() {
       Future<void> startMatch() async {
         final button = find.ancestor(
             of: find.byIcon(Icons.link_rounded),
-            matching: find.byType(TextButton));
-        await tester.ensureVisible(button);
+            matching: find.byWidgetPredicate((widget) => widget is TextButton));
+        await tester.scrollUntilVisible(
+          button,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(button.hitTestable(), findsOneWidget);
         await tester.tap(button);
         await tester.pump();
       }
@@ -195,10 +201,15 @@ void main() {
     await tester.pump();
     final matchButton = find.ancestor(
       of: find.byIcon(Icons.link_rounded),
-      matching: find.byType(TextButton),
+      matching: find.byWidgetPredicate((widget) => widget is TextButton),
     );
-    await tester.ensureVisible(matchButton);
+    await tester.scrollUntilVisible(
+      matchButton,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.pumpAndSettle();
+    expect(matchButton.hitTestable(), findsOneWidget);
     await tester.tap(matchButton);
     await tester.pump();
 

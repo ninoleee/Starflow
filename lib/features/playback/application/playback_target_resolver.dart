@@ -28,7 +28,13 @@ class PlaybackTargetResolver {
     }
     try {
       preparedTarget = await _prepareDirectTargetIfNeeded(preparedTarget);
-      if (!preparedTarget.needsResolution) {
+      // Cached source URLs still need the client's origin/session-header policy.
+      // Direct-URL branches do not fetch metadata or require a new login.
+      final embyDirect = preparedTarget.sourceKind == MediaSourceKind.emby &&
+          preparedTarget.streamUrl.trim().isNotEmpty;
+      final nasDirect = preparedTarget.sourceKind == MediaSourceKind.nas &&
+          preparedTarget.streamUrl.trim().isNotEmpty;
+      if (!preparedTarget.needsResolution && !embyDirect && !nasDirect) {
         return preparedTarget;
       }
 
@@ -38,12 +44,12 @@ class PlaybackTargetResolver {
                 (item) => item?.id == preparedTarget.sourceId,
                 orElse: () => null,
               );
-      if (source == null) {
+      if (source == null || source.kind != preparedTarget.sourceKind) {
         throw const _TargetResolutionException('媒体源不存在或已被移除');
       }
 
       if (source.kind.isMediaServer) {
-        if (!source.hasActiveSession) {
+        if (!embyDirect && !source.hasActiveSession) {
           throw _TargetResolutionException('${source.kind.label} 会话已失效，请重新登录');
         }
         return read(mediaServerClientProvider(source.kind))

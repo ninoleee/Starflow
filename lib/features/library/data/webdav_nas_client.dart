@@ -539,7 +539,11 @@ class WebDavNasClient {
     final shouldResolveStrm = _looksLikeStrmReference(candidateUrl) ||
         (candidateUrl.isEmpty && _looksLikeStrmReference(candidateAddress));
     if (!shouldResolveStrm) {
-      return target;
+      // History can predate origin checks or a source endpoint/password change.
+      // Rebuild headers from the configured source, never the cached target.
+      return target.copyWith(
+        headers: _headersForResolvedStream(source, candidateUrl),
+      );
     }
 
     final strmUri = _resolvePlaybackTargetUri(

@@ -116,7 +116,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!TickerMode.valuesOf(context).enabled && !_imageLoaded) {
+    if (!TickerMode.of(context) && !_imageLoaded) {
       _cancelImageRequest();
       _resolvedSvgBytesFuture = null;
       _resolvedRasterProviderFuture = null;
@@ -190,7 +190,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
 
   @override
   Widget build(BuildContext context) {
-    if (!TickerMode.valuesOf(context).enabled && !_imageLoaded) {
+    if (!TickerMode.of(context) && !_imageLoaded) {
       return _buildLoading(context);
     }
     final throttleRasterLoads = widget.throttleOnTelevision &&
@@ -330,7 +330,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   }) {
     final loadIdentity = _buildRasterLoadIdentity(candidate);
     _ensureTvRasterLoadIdentity(loadIdentity);
-    if (!TickerMode.valuesOf(context).enabled && !_tvRasterLoadSettled) {
+    if (!TickerMode.of(context) && !_tvRasterLoadSettled) {
       return _buildLoading(context);
     }
     // Preserve the wrapper after settlement so rebuilds retain the decoded image.

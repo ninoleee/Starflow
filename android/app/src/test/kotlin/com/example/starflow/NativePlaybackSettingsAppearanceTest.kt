@@ -118,6 +118,41 @@ class NativePlaybackSettingsAppearanceTest {
         isNamespaceAware = true
     }.newDocumentBuilder().parse(File("src/main/res/$path"))
 
+    @Test
+    fun `episode tools live above the list without a footer`() {
+        val picker = File("src/main/kotlin/com/example/starflow/NativePlaybackEpisodePicker.kt").readText()
+        assertTrue(picker.contains("if (!television) header.addView(tool(R.drawable.native_player_back_24, \"返回\") { dismiss() })"))
+        assertTrue(!picker.contains("locateButton"))
+        assertTrue(!picker.contains("定位当前集"))
+        assertTrue(picker.contains("addView(rangeButton, LinearLayout.LayoutParams(dp(112), ViewGroup.LayoutParams.MATCH_PARENT))"))
+        assertTrue(picker.contains("rangeButton.visibility = if (queue.entries.size > PAGE_SIZE) View.VISIBLE else View.GONE"))
+        assertTrue(!picker.contains("footer"))
+        assertTrue(!picker.contains("\"上一段\""))
+        assertTrue(!picker.contains("\"下一段\""))
+        assertTrue(picker.contains("next in queue.entries.indices && next != index -> move(next)"))
+        assertTrue(picker.contains("KeyEvent.KEYCODE_DPAD_UP -> { gridButton.requestFocus(); true }"))
+        assertTrue(picker.contains("this === gridButton && rangeButton.isShown && rangeButton.isEnabled"))
+    }
+
+    @Test
+    fun `episode states use Flutter accent while focus stays white`() {
+        val sources = File("src/main/kotlin/com/example/starflow")
+        val picker = File(sources, "NativePlaybackEpisodePicker.kt").readText()
+        val main = File(sources, "MainActivity.kt").readText()
+        val launcher = File("../../lib/features/playback/data/native_playback_launcher_io.dart").readText()
+        assertTrue(launcher.contains("'episodeAccentColor':"))
+        assertTrue(launcher.contains("_ref.read(appSettingsProvider).appAccent.primary.toARGB32()"))
+        assertTrue(main.contains("call.argument<Number>(\"episodeAccentColor\")?.toInt()"))
+        assertTrue(main.contains("NativePlaybackActivity.EXTRA_EPISODE_ACCENT_COLOR,"))
+        assertTrue(picker.contains("activity.intent.getIntExtra("))
+        assertTrue(picker.contains("NativePlaybackActivity.EXTRA_EPISODE_ACCENT_COLOR, 0xFF2DD4BF.toInt()"))
+        assertTrue(picker.contains("(accent and 0x00FFFFFF) or (23 shl 24)"))
+        assertTrue(picker.contains("progressTintList = ColorStateList.valueOf(accent)"))
+        assertTrue(picker.contains("imageTintList = ColorStateList.valueOf(if (playing) accent else muted)"))
+        assertTrue(picker.contains("setTextColor(if (playing) accent else muted)"))
+        assertTrue(picker.contains("if (focus) setStroke(dp(2), Color.WHITE)"))
+    }
+
     companion object {
         private const val ANDROID_NS = "http://schemas.android.com/apk/res/android"
     }

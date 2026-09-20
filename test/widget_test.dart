@@ -5,14 +5,13 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/utils/seed_data.dart';
@@ -27,6 +26,7 @@ import 'package:starflow/features/home/presentation/home_page.dart';
 import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
+import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -41,6 +41,21 @@ Future<void> _pumpDetailPageStartup(WidgetTester tester) async {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('starflow/platform'),
+            (call) async {
+      if (call.method == 'readPlaybackMemory') return null;
+      throw MissingPluginException('Unexpected platform call: ${call.method}');
+    });
+  });
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('starflow/platform'), null);
+  });
+
   testWidgets('renders Starflow shell', (WidgetTester tester) async {
     await tester.pumpWidget(const ProviderScope(child: StarflowApp()));
 
@@ -127,42 +142,23 @@ void main() {
           localStorageCacheRepositoryProvider
               .overrideWithValue(cacheRepository),
           doubanApiClientProvider.overrideWithValue(
-            DoubanApiClient(MockClient((request) async => http.Response(
-                  jsonEncode({
-                    'rating': {'value': 8.8, 'count': 1000},
-                  }),
-                  200,
-                  headers: const {'content-type': 'application/json'},
-                ))),
+            _FakeDoubanApiClient(
+              const DoubanSubjectRatingStats(value: 8.8, ratingCount: 1000),
+            ),
           ),
           wmdbMetadataClientProvider.overrideWithValue(
-            WmdbMetadataClient(
-              MockClient((request) async {
-                return http.Response(
-                  jsonEncode({
-                    'data': [
-                      {
-                        'type': 'movie',
-                        'year': '2024',
-                        'doubanRating': '8.8',
-                        'doubanId': '123456',
-                        'data': [
-                          {
-                            'lang': 'Cn',
-                            'name': '示例电影',
-                            'poster':
-                                'https://img.wmdb.tv/movie/poster/example.jpg',
-                            'genre': '剧情',
-                            'description': '自动刷新后拿到的简介。',
-                          },
-                        ],
-                      },
-                    ],
-                  }),
-                  200,
-                  headers: const {'content-type': 'application/json'},
-                );
-              }),
+            _FakeWmdbMetadataClient(
+              const MetadataMatchResult(
+                provider: MetadataMatchProvider.wmdb,
+                mediaType: MetadataMediaType.movie,
+                title: '示例电影',
+                year: 2024,
+                ratingLabels: ['豆瓣 8.8'],
+                doubanId: '123456',
+                posterUrl: 'https://img.wmdb.tv/movie/poster/example.jpg',
+                genres: ['剧情'],
+                overview: '自动刷新后拿到的简介。',
+              ),
             ),
           ),
         ],
@@ -195,6 +191,7 @@ void main() {
       cacheRepository.lastSavedState?.target.posterUrl,
       'https://img.wmdb.tv/movie/poster/example.jpg',
     );
+    expect(cacheRepository.lastSavedState?.target.ratingCount, 1000);
   });
 
   testWidgets('scraped overview detail does not auto refresh metadata on open',
@@ -220,34 +217,20 @@ void main() {
           ),
           localStorageCacheRepositoryProvider
               .overrideWithValue(cacheRepository),
+          doubanApiClientProvider.overrideWithValue(_FakeDoubanApiClient(null)),
           wmdbMetadataClientProvider.overrideWithValue(
-            WmdbMetadataClient(
-              MockClient((request) async {
-                return http.Response(
-                  jsonEncode({
-                    'data': [
-                      {
-                        'type': 'movie',
-                        'year': '2024',
-                        'doubanRating': '8.8',
-                        'doubanId': '123456',
-                        'data': [
-                          {
-                            'lang': 'Cn',
-                            'name': '示例电影',
-                            'poster':
-                                'https://img.wmdb.tv/movie/poster/example.jpg',
-                            'genre': '剧情',
-                            'description': '不应再次自动更新。',
-                          },
-                        ],
-                      },
-                    ],
-                  }),
-                  200,
-                  headers: const {'content-type': 'application/json'},
-                );
-              }),
+            _FakeWmdbMetadataClient(
+              const MetadataMatchResult(
+                provider: MetadataMatchProvider.wmdb,
+                mediaType: MetadataMediaType.movie,
+                title: '示例电影',
+                year: 2024,
+                ratingLabels: ['豆瓣 8.8'],
+                doubanId: '123456',
+                posterUrl: 'https://img.wmdb.tv/movie/poster/example.jpg',
+                genres: ['剧情'],
+                overview: '不应再次自动更新。',
+              ),
             ),
           ),
         ],
@@ -304,33 +287,20 @@ void main() {
           ),
           localStorageCacheRepositoryProvider
               .overrideWithValue(cacheRepository),
+          doubanApiClientProvider.overrideWithValue(_FakeDoubanApiClient(null)),
           wmdbMetadataClientProvider.overrideWithValue(
-            WmdbMetadataClient(
-              MockClient((request) async {
-                return http.Response(
-                  jsonEncode({
-                    'data': [
-                      {
-                        'type': 'tv',
-                        'year': '2024',
-                        'doubanRating': '8.6',
-                        'doubanId': '654321',
-                        'data': [
-                          {
-                            'lang': 'Cn',
-                            'name': '测试剧',
-                            'poster': 'https://img.wmdb.tv/tv/poster/test.jpg',
-                            'genre': '剧情',
-                            'description': '不会被单集详情页自动写入缓存。',
-                          },
-                        ],
-                      },
-                    ],
-                  }),
-                  200,
-                  headers: const {'content-type': 'application/json'},
-                );
-              }),
+            _FakeWmdbMetadataClient(
+              const MetadataMatchResult(
+                provider: MetadataMatchProvider.wmdb,
+                mediaType: MetadataMediaType.series,
+                title: '测试剧',
+                year: 2024,
+                ratingLabels: ['豆瓣 8.6'],
+                doubanId: '654321',
+                posterUrl: 'https://img.wmdb.tv/tv/poster/test.jpg',
+                genres: ['剧情'],
+                overview: '不会被单集详情页自动写入缓存。',
+              ),
             ),
           ),
         ],
@@ -910,6 +880,43 @@ void main() {
     expect(find.text('测试第 1 集'), findsOneWidget);
     expect(find.text('测试第 200 集'), findsNothing);
   });
+}
+
+class _FakeDoubanApiClient extends DoubanApiClient {
+  _FakeDoubanApiClient(this.stats)
+      : super(MockClient((request) async {
+          throw TestFailure('Unexpected Douban HTTP request: ${request.url}');
+        }));
+
+  final DoubanSubjectRatingStats? stats;
+
+  @override
+  Future<DoubanSubjectRatingStats?> fetchSubjectRatingStats({
+    required String doubanId,
+    String cookie = '',
+  }) async => stats;
+}
+
+class _FakeWmdbMetadataClient extends WmdbMetadataClient {
+  _FakeWmdbMetadataClient(this.result)
+      : super(MockClient((request) async {
+          throw TestFailure('Unexpected WMDB HTTP request: ${request.url}');
+        }));
+
+  final MetadataMatchResult result;
+
+  @override
+  Future<MetadataMatchResult?> matchTitle({
+    required String query,
+    int year = 0,
+    bool preferSeries = false,
+    List<String> actors = const [],
+  }) async => result;
+
+  @override
+  Future<MetadataMatchResult?> matchByDoubanId({
+    required String doubanId,
+  }) async => result;
 }
 
 class _FakeMediaRepository implements MediaRepository {

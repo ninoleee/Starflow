@@ -179,7 +179,10 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
                       scrollDirection: Axis.horizontal,
                       itemCount:
                           section.items.length + (openViewAll == null ? 0 : 1),
-                      findItemIndexCallback: (key) => posterIndicesByKey[key],
+                      findChildIndexCallback: (key) {
+                        final index = posterIndicesByKey[key];
+                        return index == null ? null : index * 2;
+                      },
                       separatorBuilder: (context, index) =>
                           const SizedBox(width: 10),
                       itemBuilder: (context, index) {
@@ -1005,7 +1008,10 @@ class _HomeCarouselState extends ConsumerState<_HomeCarousel> {
           clipBehavior: Clip.none,
           scrollDirection: Axis.horizontal,
           itemCount: items.length,
-          findItemIndexCallback: (key) => itemIndicesByKey[key],
+          findChildIndexCallback: (key) {
+            final index = itemIndicesByKey[key];
+            return index == null ? null : index * 2;
+          },
           separatorBuilder: (context, index) => const SizedBox(width: 10),
           itemBuilder: (context, index) {
             final item = items[index];
