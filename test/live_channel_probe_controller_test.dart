@@ -136,6 +136,31 @@ void main() {
     });
   });
 
+  test('hidden groups are excluded from automatic probes', () {
+    fakeAsync((time) {
+      final probe = _Probe();
+      final controller = LiveChannelProbeController(probe);
+      final grouped = LiveSnapshot(
+          sources: snapshot.sources,
+          channels: channels,
+          groupPreferences: const {
+            'Sports': LiveGroupPreference(hidden: true),
+          });
+      final sports = LiveChannel(
+          id: 'sports',
+          sourceId: 's',
+          name: 'Sports',
+          group: 'Sports',
+          lines: const [LiveLine('https://example.test/sports')]);
+      controller.start([channels.first, sports], grouped);
+      time.elapse(const Duration(milliseconds: 200));
+      expect(probe.urls, ['https://example.test/0']);
+      expect(controller.total, 1);
+      controller.dispose();
+      time.flushMicrotasks();
+    });
+  });
+
   test(
       'network invalidation clears cache, waits offline, and never restarts stopped work',
       () {

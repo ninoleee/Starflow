@@ -76,6 +76,7 @@ class LiveChannelProbeController extends ChangeNotifier {
     for (final channel in channels) {
       if (channel.lines.isEmpty ||
           snapshot.preference(channel).hidden ||
+          snapshot.groupHidden(snapshot.group(channel)) ||
           !snapshot.sources.any(
               (source) => source.id == channel.sourceId && source.enabled)) {
         continue;
@@ -174,6 +175,7 @@ class LiveChannelProbeController extends ChangeNotifier {
       return c == null ||
           !enabled.contains(c.sourceId) ||
           snapshot.preference(c).hidden ||
+          snapshot.groupHidden(snapshot.group(c)) ||
           entry(c, snapshot.preference(c).line) == null;
     });
     _checkedAt.removeWhere((id, _) => !_entries.containsKey(id));

@@ -468,6 +468,7 @@ class PlaybackMemoryRepository {
     String resourceId = '',
     required String resourcePath,
     bool treatAsScope = false,
+    bool resourceIsSeries = false,
   }) =>
       _mutate(() async {
         final normalizedSourceId = sourceId.trim();
@@ -487,18 +488,29 @@ class PlaybackMemoryRepository {
         }
 
         var changed = false;
-        final removedSeriesKeys = <String>{};
+        final removedSeriesKeys = <String>{
+          if (resourceIsSeries && normalizedResourceId.isNotEmpty)
+            buildSeriesKeyForMetadata(
+              sourceId: normalizedSourceId,
+              itemId: normalizedResourceId,
+              title: '',
+              year: 0,
+            ),
+        };
         final nextItems = <String, PlaybackProgressEntry>{};
         for (final entry in snapshot.items.entries) {
-          if (_playbackTargetMatchesDeletedResource(
+          final seriesKey = entry.value.seriesKey.trim();
+          final matchesDeletedTarget = _playbackTargetMatchesDeletedResource(
             entry.value.target,
             sourceId: normalizedSourceId,
             resourceId: normalizedResourceId,
             resourcePath: normalizedResourcePath,
             treatAsScope: treatAsScope,
-          )) {
+          );
+          final matchesRemovedSeriesKey =
+              seriesKey.isNotEmpty && removedSeriesKeys.contains(seriesKey);
+          if (matchesDeletedTarget || matchesRemovedSeriesKey) {
             changed = true;
-            final seriesKey = entry.value.seriesKey.trim();
             if (seriesKey.isNotEmpty) {
               removedSeriesKeys.add(seriesKey);
             }
@@ -835,6 +847,10 @@ bool _playbackTargetMatchesDeletedResource(
   final normalizedResourceId = resourceId.trim();
   if (normalizedResourceId.isNotEmpty &&
       target.itemId.trim() == normalizedResourceId) {
+    return true;
+  }
+  if (normalizedResourceId.isNotEmpty &&
+      target.seriesId.trim() == normalizedResourceId) {
     return true;
   }
 

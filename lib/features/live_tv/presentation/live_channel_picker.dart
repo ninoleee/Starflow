@@ -47,10 +47,7 @@ class LiveChannelPickerState extends State<LiveChannelPicker> {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final visible = widget.snapshot.visible();
-    final groups = [
-      '',
-      ...visible.map(widget.snapshot.group).where((g) => g.isNotEmpty).toSet()
-    ];
+    final groups = ['', ...widget.snapshot.groups()];
     if (!groups.contains(_group)) _group = '';
     final channels = visible
         .where((c) => _group.isEmpty || widget.snapshot.group(c) == _group)

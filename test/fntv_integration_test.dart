@@ -17,6 +17,8 @@ import 'package:starflow/features/storage/data/local_storage_cache_repository.da
 import 'package:starflow/features/library/data/media_repository.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/application/playback_target_resolver.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
+import 'package:starflow/features/playback/domain/playback_memory_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/application/media_source_cache_lifecycle.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
@@ -141,6 +143,237 @@ void main() {
         throwsA(isA<FntvApiException>()));
     expect((await repository.fetchLibrary(sourceId: _source.id)).single.id,
         'movie');
+  });
+
+  test('successful FNTV refresh clears removed resources and local relations',
+      () async {
+    var includeDeletedResources = true;
+    var failLocalRefresh = false;
+    final client = FntvApiClient(MockClient((request) async {
+      if (request.url.path.endsWith('/item/refresh')) {
+        return _ok(true);
+      }
+      if (request.url.path.endsWith('/mediadb/list')) {
+        return _ok([
+          {'guid': 'movies', 'title': 'Movies', 'category': 'Movie'}
+        ]);
+      }
+      expect(request.url.path, '/v/api/v1/item/list');
+      if (failLocalRefresh) {
+        return http.Response('', 503);
+      }
+      final rows = <Map<String, dynamic>>[
+        {
+          'guid': 'kept-movie',
+          'title': '保留的电影',
+          'type': 'Movie',
+          'ancestor_guid': 'movies',
+        },
+        if (includeDeletedResources)
+          {
+            'guid': 'deleted-movie',
+            'title': '删除的电影',
+            'type': 'Movie',
+            'ancestor_guid': 'movies',
+          },
+        if (includeDeletedResources)
+          {
+            'guid': 'deleted-series',
+            'title': '删除的剧集',
+            'type': 'TV',
+            'ancestor_guid': 'movies',
+          },
+      ];
+      return _ok({'total': rows.length, 'list': rows});
+    }));
+    final container = ProviderContainer(overrides: [
+      appSettingsProvider.overrideWithValue(
+          SeedData.defaultSettings.copyWith(mediaSources: [_source])),
+      fntvApiClientProvider.overrideWithValue(client),
+      playbackMemoryRepositoryProvider.overrideWithValue(
+        PlaybackMemoryRepository(
+          sharedPreferences: await SharedPreferences.getInstance(),
+        ),
+      ),
+    ]);
+    addTearDown(container.dispose);
+    final repository = container.read(mediaRepositoryProvider);
+    final detailCache = container.read(localStorageCacheRepositoryProvider);
+    final playbackMemory = container.read(playbackMemoryRepositoryProvider);
+
+    await repository.refreshSource(sourceId: _source.id);
+
+    const deletedMovie = MediaDetailTarget(
+      title: '删除的电影',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'fntv',
+      sourceKind: MediaSourceKind.fntv,
+      itemId: 'deleted-movie',
+      itemType: 'movie',
+    );
+    const keptMovie = MediaDetailTarget(
+      title: '保留的电影',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'fntv',
+      sourceKind: MediaSourceKind.fntv,
+      itemId: 'kept-movie',
+      itemType: 'movie',
+    );
+    const deletedEpisodePlayback = PlaybackTarget(
+      title: '删除的剧集第一集',
+      sourceId: 'fntv',
+      streamUrl: '',
+      sourceName: 'FNTV',
+      sourceKind: MediaSourceKind.fntv,
+      itemId: 'deleted-episode',
+      itemType: 'episode',
+      seriesId: 'deleted-series',
+      seriesTitle: '删除的剧集',
+    );
+    const deletedEpisode = MediaDetailTarget(
+      title: '删除的剧集第一集',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'fntv',
+      sourceKind: MediaSourceKind.fntv,
+      itemId: 'deleted-episode',
+      itemType: 'episode',
+      playbackTarget: deletedEpisodePlayback,
+    );
+    await detailCache.saveDetailTarget(
+      seedTarget: deletedMovie,
+      resolvedTarget: deletedMovie,
+      libraryMatchChoices: [deletedMovie],
+    );
+    await detailCache.saveDetailTarget(
+      seedTarget: keptMovie,
+      resolvedTarget: keptMovie,
+      libraryMatchChoices: [keptMovie],
+    );
+    await detailCache.saveDetailTarget(
+      seedTarget: deletedEpisode,
+      resolvedTarget: deletedEpisode,
+      libraryMatchChoices: [deletedEpisode],
+    );
+    await playbackMemory.saveProgress(
+      target: const PlaybackTarget(
+        title: '删除的电影',
+        sourceId: 'fntv',
+        streamUrl: '',
+        sourceName: 'FNTV',
+        sourceKind: MediaSourceKind.fntv,
+        itemId: 'deleted-movie',
+        itemType: 'movie',
+      ),
+      position: const Duration(minutes: 5),
+      duration: const Duration(hours: 2),
+    );
+    await playbackMemory.saveProgress(
+      target: const PlaybackTarget(
+        title: '保留的电影',
+        sourceId: 'fntv',
+        streamUrl: '',
+        sourceName: 'FNTV',
+        sourceKind: MediaSourceKind.fntv,
+        itemId: 'kept-movie',
+        itemType: 'movie',
+      ),
+      position: const Duration(minutes: 6),
+      duration: const Duration(hours: 2),
+    );
+    await playbackMemory.saveProgress(
+      target: deletedEpisodePlayback,
+      position: const Duration(minutes: 7),
+      duration: const Duration(minutes: 45),
+    );
+    await playbackMemory.saveSkipPreference(
+      SeriesSkipPreference(
+        seriesKey: buildSeriesKeyForTarget(deletedEpisodePlayback),
+        updatedAt: DateTime.utc(2026, 9, 22),
+        seriesTitle: '删除的剧集',
+        enabled: true,
+        introDuration: const Duration(seconds: 90),
+      ),
+    );
+
+    failLocalRefresh = true;
+    includeDeletedResources = false;
+    await expectLater(
+      repository.refreshSource(sourceId: _source.id),
+      throwsA(isA<FntvApiException>()),
+    );
+    expect(
+      (await repository.fetchLibrary(sourceId: _source.id))
+          .map((item) => item.id)
+          .toSet(),
+      {'kept-movie', 'deleted-movie', 'deleted-series'},
+    );
+    expect(
+      (await detailCache.loadDetailState(deletedMovie))?.target.itemId,
+      'deleted-movie',
+    );
+    expect(
+      await playbackMemory.loadEntryForTarget(const PlaybackTarget(
+        title: '删除的电影',
+        sourceId: 'fntv',
+        streamUrl: '',
+        sourceName: 'FNTV',
+        sourceKind: MediaSourceKind.fntv,
+        itemId: 'deleted-movie',
+        itemType: 'movie',
+      )),
+      isNotNull,
+    );
+
+    failLocalRefresh = false;
+    await repository.refreshSource(sourceId: _source.id);
+
+    expect(
+      (await repository.fetchLibrary(sourceId: _source.id))
+          .map((item) => item.id)
+          .toSet(),
+      {'kept-movie'},
+    );
+    expect(
+      (await detailCache.loadDetailState(deletedMovie))?.target.itemId ?? '',
+      isNot('deleted-movie'),
+    );
+    expect(
+      (await detailCache.loadDetailState(deletedEpisode))?.target.itemId ?? '',
+      isNot('deleted-episode'),
+    );
+    expect(
+      await playbackMemory.loadEntryForTarget(const PlaybackTarget(
+        title: '删除的电影',
+        sourceId: 'fntv',
+        streamUrl: '',
+        sourceName: 'FNTV',
+        sourceKind: MediaSourceKind.fntv,
+        itemId: 'deleted-movie',
+        itemType: 'movie',
+      )),
+      isNull,
+    );
+    expect(await playbackMemory.loadEntryForTarget(deletedEpisodePlayback),
+        isNull);
+    expect(await playbackMemory.loadSkipPreference(deletedEpisodePlayback),
+        isNull);
+    expect(
+      await playbackMemory.loadEntryForTarget(const PlaybackTarget(
+        title: '保留的电影',
+        sourceId: 'fntv',
+        streamUrl: '',
+        sourceName: 'FNTV',
+        sourceKind: MediaSourceKind.fntv,
+        itemId: 'kept-movie',
+        itemType: 'movie',
+      )),
+      isNotNull,
+    );
+    expect((await detailCache.loadDetailState(keptMovie))?.target.itemId,
+        'kept-movie');
   });
 
   test('failed server refresh request does not block local library refresh',

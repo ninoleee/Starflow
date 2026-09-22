@@ -12,6 +12,7 @@ import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -383,8 +384,24 @@ class AppMediaQueryService {
   }
 
   Future<void> _refreshEmbySourceCacheInternal(MediaSourceConfig source) async {
-    await _requestMediaServerLibraryRefresh(source);
     final cacheRepository = ref.read(localStorageCacheRepositoryProvider);
+    CachedEmbyLibrarySnapshot? previousSnapshot;
+    if (source.kind == MediaSourceKind.fntv) {
+      try {
+        previousSnapshot = await cacheRepository.loadEmbyLibrarySnapshot(
+          source.id,
+        );
+      } catch (error, stackTrace) {
+        appLogWarning(
+          'library.refresh',
+          'Previous FNTV library snapshot could not be loaded; stale local state will be retained',
+          fields: <String, Object?>{'sourceId': source.id},
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+    await _requestMediaServerLibraryRefresh(source);
     final refreshedAt = DateTime.now();
     var collections = const <MediaCollection>[];
     var fallbackItems = const <MediaItem>[];
@@ -442,21 +459,143 @@ class AppMediaQueryService {
     } finally {
       _embyLibraryMatchIndexes.remove(source.id.trim());
       if (completed || source.kind != MediaSourceKind.fntv) {
+        final cachedFallbackItems = fallbackItems
+            .map(_stripArtworkForEmbyCache)
+            .toList(growable: false);
+        final cachedItemsBySection = itemsBySection.map(
+          (key, value) => MapEntry(
+            key,
+            value.map(_stripArtworkForEmbyCache).toList(growable: false),
+          ),
+        );
         await cacheRepository.saveEmbyLibrarySnapshot(
           sourceId: source.id,
           refreshedAt: refreshedAt,
           collections: collections,
-          fallbackItems: fallbackItems
-              .map(_stripArtworkForEmbyCache)
-              .toList(growable: false),
-          itemsBySection: itemsBySection.map(
-            (key, value) => MapEntry(
-              key,
-              value.map(_stripArtworkForEmbyCache).toList(growable: false),
+          fallbackItems: cachedFallbackItems,
+          itemsBySection: cachedItemsBySection,
+        );
+        if (source.kind == MediaSourceKind.fntv &&
+            completed &&
+            previousSnapshot != null) {
+          await _clearRemovedFntvResources(
+            source: source,
+            previousSnapshot: previousSnapshot,
+            nextSnapshot: CachedEmbyLibrarySnapshot(
+              refreshedAt: refreshedAt,
+              collections: collections,
+              fallbackItems: cachedFallbackItems,
+              itemsBySection: cachedItemsBySection,
             ),
-          ),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _clearRemovedFntvResources({
+    required MediaSourceConfig source,
+    required CachedEmbyLibrarySnapshot previousSnapshot,
+    required CachedEmbyLibrarySnapshot nextSnapshot,
+  }) async {
+    final normalizedSourceId = source.id.trim();
+    if (normalizedSourceId.isEmpty) {
+      return;
+    }
+
+    final previousItemsById = <String, MediaItem>{};
+    for (final item in _allCachedEmbyItems(previousSnapshot)) {
+      if (item.sourceId.trim() != normalizedSourceId) {
+        continue;
+      }
+      final itemId = item.id.trim();
+      if (itemId.isNotEmpty) {
+        previousItemsById[itemId] = item;
+      }
+    }
+    if (previousItemsById.isEmpty) {
+      return;
+    }
+
+    final nextItemIds = <String>{};
+    for (final item in _allCachedEmbyItems(nextSnapshot)) {
+      if (item.sourceId.trim() == normalizedSourceId &&
+          item.id.trim().isNotEmpty) {
+        nextItemIds.add(item.id.trim());
+      }
+    }
+    final removedItems = previousItemsById.values
+        .where((item) => !nextItemIds.contains(item.id.trim()))
+        .toList(growable: false);
+    if (removedItems.isEmpty) {
+      return;
+    }
+
+    final detailCache = ref.read(localStorageCacheRepositoryProvider);
+    final playbackMemory = ref.read(playbackMemoryRepositoryProvider);
+    var detailCleanupFailures = 0;
+    var playbackCleanupFailures = 0;
+    for (final item in removedItems) {
+      final resourceId = item.id.trim();
+      final resourcePath = item.actualAddress.trim();
+      try {
+        await detailCache.clearDetailCacheForResource(
+          sourceId: normalizedSourceId,
+          resourceId: resourceId,
+          resourcePath: resourcePath,
+        );
+      } catch (error, stackTrace) {
+        detailCleanupFailures++;
+        appLogWarning(
+          'library.refresh',
+          'Removed FNTV detail cache cleanup failed',
+          fields: <String, Object?>{
+            'sourceId': normalizedSourceId,
+            'resourceId': resourceId,
+          },
+          error: error,
+          stackTrace: stackTrace,
         );
       }
+      try {
+        await playbackMemory.clearEntriesForResource(
+          sourceId: normalizedSourceId,
+          resourceId: resourceId,
+          resourcePath: resourcePath,
+          resourceIsSeries: item.itemType.trim().toLowerCase() == 'series',
+        );
+      } catch (error, stackTrace) {
+        playbackCleanupFailures++;
+        appLogWarning(
+          'library.refresh',
+          'Removed FNTV playback memory cleanup failed',
+          fields: <String, Object?>{
+            'sourceId': normalizedSourceId,
+            'resourceId': resourceId,
+          },
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
+    }
+    appLogInfo(
+      'library.refresh',
+      'Removed stale FNTV local resource state',
+      fields: <String, Object?>{
+        'sourceId': normalizedSourceId,
+        'removedCount': removedItems.length,
+        'detailCleanupFailures': detailCleanupFailures,
+        'playbackCleanupFailures': playbackCleanupFailures,
+      },
+    );
+  }
+
+  Iterable<MediaItem> _allCachedEmbyItems(
+    CachedEmbyLibrarySnapshot snapshot,
+  ) sync* {
+    yield* snapshot.fallbackItems;
+    for (final items in snapshot.itemsBySection.values) {
+      yield* items;
     }
   }
 

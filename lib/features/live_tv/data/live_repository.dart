@@ -105,6 +105,8 @@ class LiveRepository {
           for (final e in await _prefs.find(txn))
             e.key: LivePreference.fromJson(e.value)
         },
+        groupPreferences: decodeLiveGroupPreferences(
+            await _meta.record('groupPreferences').get(txn)),
         lastChannel: await _meta.record('lastChannel').get(txn) ?? '',
         engine: await _meta.record('engine').get(txn) ?? 'mpv'));
   }
@@ -180,6 +182,42 @@ class LiveRepository {
               if (mode == LiveBackupImportMode.replace ||
                   accepted.contains(owner)) {
                 await store.record(entry.key).put(txn, entry.value);
+              }
+            }
+          }
+          if (mode == LiveBackupImportMode.merge) {
+            final incoming = backup.stores['meta']!['groupPreferences'];
+            if (incoming is String) {
+              final acceptedGroups = <String>{};
+              for (final entry in backup.stores['channels']!.entries) {
+                final channel = Map<String, dynamic>.from(entry.value as Map);
+                if (!accepted.contains(channel['sourceId'])) continue;
+                final rawPreference = backup.stores['preferences']![entry.key];
+                final preference = rawPreference is Map
+                    ? LivePreference.fromJson(
+                        Map<String, dynamic>.from(rawPreference))
+                    : const LivePreference();
+                final group = preference.group.isEmpty
+                    ? channel['group'] as String? ?? ''
+                    : preference.group;
+                if (group.isNotEmpty) acceptedGroups.add(group);
+              }
+              final current = decodeLiveGroupPreferences(
+                  await _meta.record('groupPreferences').get(txn));
+              final imported = parseLiveGroupPreferences(incoming);
+              var changed = false;
+              for (final entry in imported.entries) {
+                if (current.containsKey(entry.key) ||
+                    !acceptedGroups.contains(entry.key)) {
+                  continue;
+                }
+                current[entry.key] = entry.value;
+                changed = true;
+              }
+              if (changed) {
+                await _meta
+                    .record('groupPreferences')
+                    .put(txn, encodeLiveGroupPreferences(current));
               }
             }
           }
@@ -312,6 +350,38 @@ class LiveRepository {
   Future<void> setEngine(String engine) => _write((db) async {
         await _meta.record('engine').put(db, engine == 'exo' ? 'exo' : 'mpv');
       });
+  Future<void> setGroupHidden(String group, bool hidden) =>
+      _write((db) => db.transaction((txn) async {
+            if (group.isEmpty) return;
+            final preferences = decodeLiveGroupPreferences(
+                await _meta.record('groupPreferences').get(txn));
+            preferences[group] =
+                (preferences[group] ?? const LiveGroupPreference())
+                    .patch({'hidden': hidden});
+            await _meta
+                .record('groupPreferences')
+                .put(txn, encodeLiveGroupPreferences(preferences));
+          }));
+  Future<void> moveGroup(String group, int delta) =>
+      _write((db) => db.transaction((txn) async {
+            if (group.isEmpty) return;
+            final snapshot = await loadOutsideTransaction(txn);
+            final groups = snapshot.groups(includeHidden: true);
+            final index = groups.indexOf(group);
+            if (index < 0) return;
+            final target = (index + delta).clamp(0, groups.length - 1);
+            if (target == index) return;
+            groups.insert(target, groups.removeAt(index));
+            final preferences = {...snapshot.groupPreferences};
+            for (var i = 0; i < groups.length; i++) {
+              preferences[groups[i]] =
+                  (preferences[groups[i]] ?? const LiveGroupPreference())
+                      .patch({'order': i});
+            }
+            await _meta
+                .record('groupPreferences')
+                .put(txn, encodeLiveGroupPreferences(preferences));
+          }));
   Future<void> move(String id, int delta) =>
       _write((db) => db.transaction((txn) async {
             final snap = await loadOutsideTransaction(txn);
@@ -343,7 +413,9 @@ class LiveRepository {
           preferences: {
             for (final e in await _prefs.find(db))
               e.key: LivePreference.fromJson(e.value)
-          });
+          },
+          groupPreferences: decodeLiveGroupPreferences(
+              await _meta.record('groupPreferences').get(db)));
   Future<void> _replaceChannels(
       DatabaseClient db, String sourceId, List<LiveChannel> channels) async {
     final previous = await _channels.find(db,

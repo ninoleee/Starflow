@@ -144,7 +144,9 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
         _probes.running ||
         _sourceRefresh != null ||
         !isPageVisible ||
-        !channels.any((c) => !snapshot.preference(c).hidden)) {
+        !channels.any((c) =>
+            !snapshot.preference(c).hidden &&
+            !snapshot.groupHidden(snapshot.group(c)))) {
       return;
     }
     // Viewport callbacks run after layout, with the current visible rows.
@@ -193,6 +195,52 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
     } catch (_) {
       if (mounted) liveMessage(context, '保存失败');
     }
+  }
+
+  void _setGroupHidden(String group, LiveSnapshot snapshot) {
+    final hidden = snapshot.groupPreference(group).hidden;
+    _save(ref.read(liveRepositoryProvider).setGroupHidden(group, !hidden));
+  }
+
+  void _moveGroup(String group, int delta) {
+    _save(ref.read(liveRepositoryProvider).moveGroup(group, delta));
+  }
+
+  Widget _groupLabel(String group, LiveSnapshot snapshot,
+      {bool selected = false}) {
+    final hidden = snapshot.groupPreference(group).hidden;
+    return Tooltip(
+        message: group,
+        child: LiveSelectionLabel(
+            label: hidden ? '$group · 已隐藏' : group, selected: selected));
+  }
+
+  Widget _groupActions(String group, LiveSnapshot snapshot) {
+    final hidden = snapshot.groupPreference(group).hidden;
+    return Wrap(children: [
+      LiveIconButton(
+          icon: hidden ? Icons.visibility : Icons.visibility_off_outlined,
+          label: hidden ? '显示分组' : '隐藏分组',
+          onPressed: () => _setGroupHidden(group, snapshot)),
+      LiveIconButton(
+          icon: Icons.arrow_upward,
+          label: '分组上移',
+          onPressed: () => _moveGroup(group, -1)),
+      LiveIconButton(
+          icon: Icons.arrow_downward,
+          label: '分组下移',
+          onPressed: () => _moveGroup(group, 1)),
+    ]);
+  }
+
+  Widget _organizeGroupTile(String group, LiveSnapshot snapshot) {
+    return SizedBox(
+        width: 184,
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          SizedBox(height: 40, child: _groupLabel(group, snapshot)),
+          _groupActions(group, snapshot),
+        ]));
   }
 
   Future<void> _edit(LiveChannel c, LiveSnapshot s) async {
@@ -272,12 +320,7 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                 data: (s) {
                   final now = DateTime.now();
                   final channels = s.visible(includeHidden: _organize);
-                  final groups = channels
-                      .map(s.group)
-                      .where((g) => g.isNotEmpty)
-                      .toSet()
-                      .toList()
-                    ..sort();
+                  final groups = s.groups(includeHidden: _organize);
                   final activeGroup = groups.contains(_group) ? _group : '';
                   final query = _search.text.trim().toLowerCase();
                   final filtered = channels
@@ -288,7 +331,9 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                       .toList();
                   final last = channels
                       .where((c) =>
-                          c.id == s.lastChannel && !s.preference(c).hidden)
+                          c.id == s.lastChannel &&
+                          !s.preference(c).hidden &&
+                          !s.groupHidden(s.group(c)))
                       .firstOrNull;
                   return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -352,6 +397,23 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                                                 ],
                                                 onChanged: (v) =>
                                                     _selectGroup(v ?? ''))),
+                                      if (!landscape &&
+                                          _organize &&
+                                          groups.isNotEmpty)
+                                        SizedBox(
+                                            height: 88,
+                                            width: constraints.maxWidth,
+                                            child: ListView.separated(
+                                                key: const ValueKey(
+                                                    'live-home-organize-groups'),
+                                                scrollDirection:
+                                                    Axis.horizontal,
+                                                itemCount: groups.length,
+                                                separatorBuilder: (_, __) =>
+                                                    const SizedBox(width: 8),
+                                                itemBuilder: (_, i) =>
+                                                    _organizeGroupTile(
+                                                        groups[i], s))),
                                       Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
@@ -449,106 +511,113 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                         const Divider(),
                         Expanded(
                             child: LayoutBuilder(
-                                builder: (context, constraints) => Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          if (landscape) ...[
-                                            SizedBox(
-                                                width:
-                                                    (constraints.maxWidth * .24)
+                                builder:
+                                    (context, constraints) => Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              if (landscape) ...[
+                                                SizedBox(
+                                                    width: (constraints
+                                                                .maxWidth *
+                                                            .24)
                                                         .clamp(152.0, 240.0),
-                                                child: ListView(
-                                                    key: const PageStorageKey(
-                                                        'live-home-groups'),
-                                                    primary: false,
-                                                    padding: EdgeInsets.zero,
-                                                    children: [
-                                                      for (final group in [
-                                                        '',
-                                                        ...groups
-                                                      ])
-                                                        TvFocusableAction(
-                                                            key: ValueKey(
-                                                                'live-home-group:$group'),
-                                                            focusId:
-                                                                'live-home-group:$group',
-                                                            onPressed: () =>
-                                                                _selectGroup(
-                                                                    group),
-                                                            child: ColoredBox(
-                                                                color: group ==
-                                                                        activeGroup
-                                                                    ? AppActionColors.of(Theme.of(context))
-                                                                        .primary
-                                                                        .withValues(
-                                                                            alpha:
-                                                                                .09)
-                                                                    : Colors
-                                                                        .transparent,
-                                                                child: Padding(
-                                                                    padding: const EdgeInsets.symmetric(
-                                                                        horizontal:
-                                                                            12,
-                                                                        vertical:
-                                                                            16),
-                                                                    child: Tooltip(message: group.isEmpty ? '全部分组' : group, child: LiveSelectionLabel(label: group.isEmpty ? '全部分组' : group, selected: group == activeGroup))))),
-                                                    ])),
-                                            const VerticalDivider(width: 17),
-                                          ],
-                                          Expanded(
-                                              child: LiveProbeViewport(
-                                                  onChanged: (visible) {
-                                                    if (!isPageVisible ||
-                                                        _openingPlayer) {
-                                                      return;
-                                                    }
-                                                    _visibleChannels = visible;
-                                                    _probes.updateVisible(
-                                                        visible, s);
-                                                    _scheduleAutomaticProbes(
-                                                        visible, s);
-                                                  },
-                                                  child: filtered.isEmpty
-                                                      ? Center(
-                                                          child: Text(s.sources
-                                                                  .isEmpty
-                                                              ? '尚未添加直播订阅'
-                                                              : '没有符合条件的频道'))
-                                                      : ListView.builder(
-                                                          key: const PageStorageKey(
-                                                              'live-home-channels'),
-                                                          itemCount:
-                                                              filtered.length,
-                                                          itemBuilder:
-                                                              (ctx, i) {
-                                                            final c =
-                                                                    filtered[i],
-                                                                p = s
-                                                                    .preference(
-                                                                        c);
-                                                            final schedule =
-                                                                nowNext['${c.sourceId}|${s.epgId(c)}'] ??
-                                                                    [];
-                                                            final current = schedule
-                                                                .where((p) =>
-                                                                    p.contains(
-                                                                        now))
-                                                                .firstOrNull;
-                                                            final next = schedule
-                                                                .where((p) => p
-                                                                    .start
-                                                                    .isAfter(
-                                                                        now))
-                                                                .firstOrNull;
-                                                            return LiveProbeViewportItem(
-                                                                key: ValueKey(
-                                                                    c.id),
-                                                                channel: c,
-                                                                child: Column(
-                                                                    children: [
-                                                                      Row(
-                                                                          children: [
+                                                    child: ListView(
+                                                        key: const PageStorageKey(
+                                                            'live-home-groups'),
+                                                        primary: false,
+                                                        padding:
+                                                            EdgeInsets.zero,
+                                                        children: [
+                                                          for (final group in [
+                                                            '',
+                                                            ...groups
+                                                          ])
+                                                            Column(
+                                                                crossAxisAlignment:
+                                                                    CrossAxisAlignment
+                                                                        .stretch,
+                                                                children: [
+                                                                  TvFocusableAction(
+                                                                      key: ValueKey(
+                                                                          'live-home-group:$group'),
+                                                                      focusId:
+                                                                          'live-home-group:$group',
+                                                                      onPressed: () =>
+                                                                          _selectGroup(
+                                                                              group),
+                                                                      child: ColoredBox(
+                                                                          color: group == activeGroup
+                                                                              ? AppActionColors.of(Theme.of(context)).primary.withValues(alpha: .09)
+                                                                              : Colors.transparent,
+                                                                          child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16), child: _groupLabel(group.isEmpty ? '全部分组' : group, s, selected: group == activeGroup)))),
+                                                                  if (_organize &&
+                                                                      group
+                                                                          .isNotEmpty)
+                                                                    _groupActions(
+                                                                        group,
+                                                                        s),
+                                                                ]),
+                                                        ])),
+                                                const VerticalDivider(
+                                                    width: 17),
+                                              ],
+                                              Expanded(
+                                                  child: LiveProbeViewport(
+                                                      onChanged: (visible) {
+                                                        if (!isPageVisible ||
+                                                            _openingPlayer) {
+                                                          return;
+                                                        }
+                                                        _visibleChannels =
+                                                            visible;
+                                                        _probes.updateVisible(
+                                                            visible, s);
+                                                        _scheduleAutomaticProbes(
+                                                            visible, s);
+                                                      },
+                                                      child: filtered.isEmpty
+                                                          ? Center(
+                                                              child: Text(s
+                                                                      .sources
+                                                                      .isEmpty
+                                                                  ? '尚未添加直播订阅'
+                                                                  : '没有符合条件的频道'))
+                                                          : ListView.builder(
+                                                              key: const PageStorageKey(
+                                                                  'live-home-channels'),
+                                                              itemCount:
+                                                                  filtered
+                                                                      .length,
+                                                              itemBuilder:
+                                                                  (ctx, i) {
+                                                                final c =
+                                                                        filtered[
+                                                                            i],
+                                                                    p = s
+                                                                        .preference(
+                                                                            c);
+                                                                final schedule =
+                                                                    nowNext['${c.sourceId}|${s.epgId(c)}'] ??
+                                                                        [];
+                                                                final current = schedule
+                                                                    .where((p) =>
+                                                                        p.contains(
+                                                                            now))
+                                                                    .firstOrNull;
+                                                                final next = schedule
+                                                                    .where((p) => p
+                                                                        .start
+                                                                        .isAfter(
+                                                                            now))
+                                                                    .firstOrNull;
+                                                                return LiveProbeViewportItem(
+                                                                    key: ValueKey(
+                                                                        c.id),
+                                                                    channel: c,
+                                                                    child: Column(
+                                                                        children: [
+                                                                          Row(children: [
                                                                             Expanded(
                                                                                 child: TvFocusableAction(
                                                                                     focusId: 'live:${c.id}',
@@ -579,17 +648,16 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                                                                                 label: p.favorite ? '取消收藏' : '收藏频道',
                                                                                 onPressed: () => _save(ref.read(liveRepositoryProvider).preference(c.id, {'favorite': !p.favorite}))),
                                                                           ]),
-                                                                      if (_organize)
-                                                                        Wrap(
-                                                                            children: [
+                                                                          if (_organize)
+                                                                            Wrap(children: [
                                                                               LiveIconButton(icon: Icons.edit_outlined, label: '名称、台标与节目单映射', onPressed: () => _edit(c, s)),
                                                                               LiveIconButton(icon: p.hidden ? Icons.visibility : Icons.visibility_off_outlined, label: p.hidden ? '显示频道' : '隐藏频道', onPressed: () => _save(ref.read(liveRepositoryProvider).preference(c.id, {'hidden': !p.hidden}))),
                                                                               LiveIconButton(icon: Icons.arrow_upward, label: '上移', onPressed: () => _save(ref.read(liveRepositoryProvider).move(c.id, -1))),
                                                                               LiveIconButton(icon: Icons.arrow_downward, label: '下移', onPressed: () => _save(ref.read(liveRepositoryProvider).move(c.id, 1))),
                                                                             ]),
-                                                                    ]));
-                                                          }))),
-                                        ]))),
+                                                                        ]));
+                                                              }))),
+                                            ]))),
                       ]);
                 }),
           )),

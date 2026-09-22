@@ -122,6 +122,62 @@ class LivePreference {
       LivePreference.fromJson({...toJson(), ...values});
 }
 
+class LiveGroupPreference {
+  const LiveGroupPreference({this.hidden = false, this.order = -1});
+
+  final bool hidden;
+  final int order;
+
+  Map<String, dynamic> toJson() => {'hidden': hidden, 'order': order};
+
+  factory LiveGroupPreference.fromJson(Map<String, dynamic> json) {
+    final rawOrder = json['order'];
+    if (rawOrder != null && rawOrder is! int) {
+      throw const FormatException('直播分组排序无效');
+    }
+    return LiveGroupPreference(
+        hidden: json['hidden'] == true, order: rawOrder as int? ?? -1);
+  }
+
+  LiveGroupPreference patch(Map<String, dynamic> values) =>
+      LiveGroupPreference.fromJson({...toJson(), ...values});
+}
+
+String encodeLiveGroupPreferences(
+        Map<String, LiveGroupPreference> preferences) =>
+    jsonEncode({
+      for (final entry in preferences.entries) entry.key: entry.value.toJson()
+    });
+
+Map<String, LiveGroupPreference> parseLiveGroupPreferences(String? encoded) {
+  if (encoded == null || encoded.isEmpty) return {};
+  final decoded = jsonDecode(encoded);
+  if (decoded is! Map) throw const FormatException('直播分组偏好无效');
+  final result = <String, LiveGroupPreference>{};
+  for (final entry in decoded.entries) {
+    if (entry.key is! String ||
+        (entry.key as String).isEmpty ||
+        entry.value is! Map) {
+      throw const FormatException('直播分组偏好无效');
+    }
+    final preference = LiveGroupPreference.fromJson(
+        Map<String, dynamic>.from(entry.value as Map));
+    if (preference.order < -1) {
+      throw const FormatException('直播分组排序无效');
+    }
+    result[entry.key as String] = preference;
+  }
+  return result;
+}
+
+Map<String, LiveGroupPreference> decodeLiveGroupPreferences(String? encoded) {
+  try {
+    return parseLiveGroupPreferences(encoded);
+  } catch (_) {
+    return {};
+  }
+}
+
 class LiveProgramme {
   const LiveProgramme(
       {required this.channel,
@@ -153,14 +209,19 @@ class LiveSnapshot {
       {this.sources = const [],
       this.channels = const [],
       this.preferences = const {},
+      this.groupPreferences = const {},
       this.lastChannel = '',
       this.engine = 'mpv'});
   final List<LiveSource> sources;
   final List<LiveChannel> channels;
   final Map<String, LivePreference> preferences;
+  final Map<String, LiveGroupPreference> groupPreferences;
   final String lastChannel, engine;
   LivePreference preference(LiveChannel c) =>
       preferences[c.id] ?? const LivePreference();
+  LiveGroupPreference groupPreference(String group) =>
+      groupPreferences[group] ?? const LiveGroupPreference();
+  bool groupHidden(String group) => groupPreference(group).hidden;
   String name(LiveChannel c) =>
       preference(c).name.isEmpty ? c.name : preference(c).name;
   String group(LiveChannel c) =>
@@ -178,7 +239,8 @@ class LiveSnapshot {
         .where((c) =>
             enabled.contains(c.sourceId) &&
             c.lines.isNotEmpty &&
-            (includeHidden || !preference(c).hidden))
+            (includeHidden ||
+                (!preference(c).hidden && !groupHidden(group(c)))))
         .toList();
     result.sort((a, b) {
       final aOrdered = preference(a).order >= 0;
@@ -188,5 +250,33 @@ class LiveSnapshot {
       return order != 0 ? order : indices[a.id]!.compareTo(indices[b.id]!);
     });
     return result;
+  }
+
+  List<String> groups({bool includeHidden = false}) {
+    final enabled = sources.where((s) => s.enabled).map((s) => s.id).toSet();
+    final result = <String>{};
+    for (final channel in channels) {
+      if (!enabled.contains(channel.sourceId) || channel.lines.isEmpty) {
+        continue;
+      }
+      final groupName = group(channel);
+      if (groupName.isEmpty ||
+          (!includeHidden &&
+              (preference(channel).hidden || groupHidden(groupName)))) {
+        continue;
+      }
+      result.add(groupName);
+    }
+    final groups = result.toList();
+    groups.sort((a, b) {
+      final aPreference = groupPreference(a);
+      final bPreference = groupPreference(b);
+      final aOrdered = aPreference.order >= 0;
+      final bOrdered = bPreference.order >= 0;
+      if (aOrdered != bOrdered) return aOrdered ? -1 : 1;
+      final order = aPreference.order.compareTo(bPreference.order);
+      return order != 0 ? order : a.compareTo(b);
+    });
+    return groups;
   }
 }

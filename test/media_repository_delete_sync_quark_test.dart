@@ -1210,6 +1210,7 @@ class _RecordingPlaybackMemoryRepository extends PlaybackMemoryRepository {
     String resourceId = '',
     required String resourcePath,
     bool treatAsScope = false,
+    bool resourceIsSeries = false,
   }) async {
     clearedResources.add(
       _ClearedResourceRequest(

@@ -111,7 +111,7 @@ AppMediaRepository -> AppMediaQueryService -> MediaServerClient / 本地索引
                    -> WebDAV 删除确认 -> 可选网盘同步删除 -> 本地失效
 ```
 
-- Emby / 飞牛使用媒体服务器缓存分片；根列表读取最多 400 条 summary，分区只读目标 shard，完整匹配最多两路解码。
+- Emby / 飞牛使用媒体服务器缓存分片；根列表读取最多 400 条 summary，分区只读目标 shard，完整匹配最多两路解码。飞牛刷新成功后按前后快照的条目 ID 差集清理详情关联、匹配候选、续播记录和剧集播放偏好；刷新失败继续保留旧快照。
 - NAS 索引由 `nas_media_indexer.dart` 及 `refresh_flow / storage_access / indexing / grouping / refresh_support` 的 `part` 文件共同实现；这些不是彼此独立的服务。
 - `nas_media_index_store_impl_io.dart` 使用 Sembast；Web 有单独实现。当前 schema 是 `webdav-v15`，支持分区过滤与 upsert / patch，不再只做整库覆盖。
 - `webdav_nas_client.dart` 的 structure / sidecar / background 文件也是同一 Dart library。普通页面优先读索引，不实时扫全目录。
@@ -161,7 +161,7 @@ SearchPage -> SearchRequest -> SearchSession -> SearchRepository
 | `application/live_playback_controller.dart` | `LiveEngine` 的 MPV/Exo 适配、单实例串行所有权、换台合并、失效事件、有限重连及全局清理注册 |
 | `application/live_mpv_options.dart` | MPV 直播默认请求标识、订阅覆盖优先级、网络协议白名单及 FFmpeg 6 HLS 分片参数；不改变点播配置 |
 | `application/live_playback_error.dart` | Android `LiveTvPlaybackError.kt` 摘要的白名单解析、固定错误类别和失败文案；控制器按 generation 读取，不保留原始异常或媒体地址 |
-| `presentation/live_tv_page.dart` | 频道列表、搜索/收藏/分组、映射/隐藏/排序、主页面活动状态和本地 now/next 更新 |
+| `presentation/live_tv_page.dart` | 频道列表、搜索/收藏/分组、频道与分组映射/隐藏/排序、主页面活动状态和本地 now/next 更新 |
 | `presentation/live_sources_page.dart` | 来源编辑、文件导入草稿、保存后刷新、启停、更新及删除确认；TV 手机扫码，其他平台本地选文件 |
 | `data/live_playlist_transfer_service{,_io,_stub}.dart` | 单次 LAN 文件/备份接收及备份下载、类型化结果、随机令牌/来源校验；频道文件 8 MiB / 备份 32 MiB / 接收 30s 边界及会话关闭；不写仓库 |
 | `presentation/live_playlist_transfer_dialog.dart` | 复用 `LanTransferQrAddressCard`，拥有 TV 扫码弹窗、后台/退出清理和迟到会话隔离 |

@@ -1631,6 +1631,9 @@ bool _detailTargetMatchesDeletedResource(
     if ((target.playbackTarget?.itemId.trim() ?? '') == normalizedResourceId) {
       return true;
     }
+    if ((target.playbackTarget?.seriesId.trim() ?? '') == normalizedResourceId) {
+      return true;
+    }
   }
 
   if (normalizedResourcePath.isEmpty) {

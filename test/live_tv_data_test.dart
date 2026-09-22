@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:sembast/sembast_memory.dart';
+import 'package:starflow/features/live_tv/data/live_backup.dart';
 import 'package:starflow/features/live_tv/data/live_epg_parser.dart';
 import 'package:starflow/features/live_tv/data/live_playlist_parser.dart';
 import 'package:starflow/features/live_tv/data/live_repository.dart';
@@ -190,6 +191,72 @@ https://a.test/live|User-Agent=new&Referer=https%3A%2F%2Fa.test
   });
 
   group('repository retention and ordering', () {
+    test('group hidden state and order survive refresh and backup restore',
+        () async {
+      const local = LiveSource(id: 'grouped', name: 'Grouped');
+      const listing = '''#EXTM3U
+#EXTINF:-1 group-title="News",News 1
+https://a.test/news-1
+#EXTINF:-1 group-title="News",News 2
+https://a.test/news-2
+#EXTINF:-1 group-title="Sports",Sports 1
+https://a.test/sports-1
+''';
+      final r = repositoryWith(MockClient((_) async => http.Response('', 404)));
+      await r.saveSource(local, imported: bytes(listing));
+      await r.setGroupHidden('News', true);
+      await r.moveGroup('Sports', -1);
+
+      var snapshot = await r.load();
+      expect(snapshot.groups(), ['Sports']);
+      expect(snapshot.groups(includeHidden: true), ['Sports', 'News']);
+      expect(snapshot.visible().map((c) => c.name), ['Sports 1']);
+
+      await r.saveSource(local, imported: bytes(listing));
+      snapshot = await r.load();
+      expect(snapshot.groupPreference('News').hidden, isTrue);
+      expect(snapshot.groups(includeHidden: true), ['Sports', 'News']);
+
+      final restored =
+          repositoryWith(MockClient((_) async => http.Response('', 404)));
+      await restored.importBackup(
+          await r.exportBackup(), LiveBackupImportMode.replace);
+      snapshot = await restored.load();
+      expect(snapshot.groupPreference('News').hidden, isTrue);
+      expect(snapshot.groups(includeHidden: true), ['Sports', 'News']);
+      expect(snapshot.visible().map((c) => c.name), ['Sports 1']);
+    });
+
+    test('merge restores only new group preferences', () async {
+      const incomingSource =
+          LiveSource(id: 'incoming-grouped', name: 'Incoming Grouped');
+      const listing = '''#EXTM3U
+#EXTINF:-1 group-title="News",News
+https://a.test/news
+#EXTINF:-1 group-title="Sports",Sports
+https://a.test/sports
+''';
+      final incoming =
+          repositoryWith(MockClient((_) async => http.Response('', 404)));
+      await incoming.saveSource(incomingSource, imported: bytes(listing));
+      await incoming.setGroupHidden('News', true);
+      await incoming.setGroupHidden('Sports', true);
+      final backup = await incoming.exportBackup();
+
+      const existingSource =
+          LiveSource(id: 'existing-grouped', name: 'Existing Grouped');
+      final existing =
+          repositoryWith(MockClient((_) async => http.Response('', 404)));
+      await existing.saveSource(existingSource, imported: bytes('''#EXTM3U
+#EXTINF:-1 group-title="News",Existing News
+https://b.test/news
+'''));
+      await existing.setGroupHidden('News', false);
+      await existing.importBackup(backup, LiveBackupImportMode.merge);
+      expect((await existing.load()).groupPreference('News').hidden, isFalse);
+      expect((await existing.load()).groupPreference('Sports').hidden, isTrue);
+    });
+
     test('missing channels retain prefs until their source is removed',
         () async {
       final r = repositoryWith(MockClient((_) async => http.Response('', 500)));

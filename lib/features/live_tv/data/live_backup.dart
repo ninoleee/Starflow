@@ -114,9 +114,19 @@ class LiveBackup {
         url(j['logo'] as String);
       }
       final meta = stores['meta']!;
-      check(meta.keys.every((k) => k == 'engine' || k == 'lastChannel'));
+      check(meta.keys.every((k) =>
+          k == 'engine' || k == 'lastChannel' || k == 'groupPreferences'));
       check(meta['engine'] == null ||
           const {'mpv', 'exo'}.contains(meta['engine']));
+      final groupPreferences = meta['groupPreferences'];
+      if (groupPreferences != null) {
+        check(groupPreferences is String);
+        final parsed = parseLiveGroupPreferences(groupPreferences as String);
+        check(parsed.length <= 10000);
+        for (final group in parsed.keys) {
+          check(group.isNotEmpty && parsed[group]!.order >= -1);
+        }
+      }
       final last = meta['lastChannel'];
       check(last == null ||
           last == '' ||
