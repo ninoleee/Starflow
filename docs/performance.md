@@ -25,6 +25,24 @@
 
 ## 当前验证记录
 
+### 2026-09-21 直播 5 秒等待策略
+
+- 调整直播单线路开流与无进展 watchdog 为 5 秒；自动恢复仍最多 3 次，按 2／4／6 秒退避并轮换多线路，恢复期间显示当前目标线路，单线路显示重新连接。开流 deadline 先于 progress watchdog 注册，避免同时到期时把阻塞中的开流误报为进度超时。
+- 使用固定 Flutter 3.38.10／Dart 3.10.9，`.fvm/flutter_sdk/bin/flutter test --no-pub --concurrency=1 --reporter expanded test/live_playback_lifecycle_test.dart test/live_exo_bridge_test.dart test/live_tv_page_test.dart`：修正计时器顺序和页面测试进度事件后，3 文件共 44 项主机测试通过；`.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/application/live_playback_controller.dart lib/features/live_tv/presentation/live_player_page.dart test/live_playback_lifecycle_test.dart test/live_tv_page_test.dart` 无问题。
+- 本次验证覆盖超时后的旧事件隔离、取消与线路提示、5 秒无进展恢复及重复会话布局；未运行发布预设、未构建 APK，也没有真实直播源或真机播放测量。用户日志中的部分频道首次首帧超过 5 秒，因此该策略会主动切换这些慢启动线路。
+
+### 2026-09-20 直播选台移焦与滚动顺序
+
+- 固定 Flutter 3.38.10／Dart 3.10.9，`.fvm/flutter_sdk/bin/flutter test --no-pub --reporter expanded test/live_channel_picker_test.dart test/live_tv_page_test.dart test/live_current_programme_test.dart`：3 文件共 29 项主机测试通过。选台专项单独运行 9 项通过，与合并集合重叠，不累加。
+- 新增 100 频道场景在按键后、`pump` 前检查目标已获得焦点；下一帧检查目标行完整可见。覆盖可见行不滚动、下边缘最小滚动、反向移动／上边缘，以及同一绘制帧前连续长按重复事件推进。现有跨列、切组、打开定位、返回、触摸和节目单回归通过。
+- `.fvm/flutter_sdk/bin/dart analyze lib/features/live_tv/presentation/live_channel_picker.dart test/live_channel_picker_test.dart` 无问题。以上验证焦点状态和布局时序，未进行真机逐帧录像、像素残影或遥控器验收；未构建 APK 或递增版本。
+
+### 2026-09-20 直播首页工具按钮移位
+
+- 固定 Flutter 3.38.10／Dart 3.10.9，执行 `.fvm/flutter_sdk/bin/flutter test --no-pub --reporter expanded --dart-define=LIVE_TV_REVIEW=true test/live_home_layout_test.dart test/live_tv_page_test.dart test/live_channel_probe_page_test.dart`，3 文件共 64 项主机测试通过。布局断言覆盖 320／390／768 竖屏与 640／844／1280 横屏、TV／非 TV，检查检测／订阅／整理均在收藏右侧同一行且不越界；原有分组、旋转、检测和页面交互回归通过。
+- 页面布局测试补充检测与网络状态 provider 替身，解决首次回归中真实 connectivity 插件未注册导致的 5 项失败；未改变生产网络监听。页面及两个布局测试文件定向静态分析无问题。
+- 检查 `build/live-tv-review/library-390.png` 与 `library-640.png`，确认标题栏不再显示三按钮、竖屏随收藏整体换行、横屏保持两列，无内容重叠。测试字体仍有既有收藏／历史标签缺字；使用合成数据，未做真机验收、构建 APK 或递增版本。
+
 ### 2026-09-20 直播可见频道自动补测
 
 - 固定 Flutter 3.38.10／Dart 3.10.9，以下 10 文件最终共 **124 项主机测试通过**，定向静态分析无问题。不是完整测试套件或真机验收。没有运行发布预设、递增版本或更新此前 iCloud 安装包。
@@ -291,7 +309,7 @@ dart analyze lib/features/live_tv lib/app/router/app_routes.dart lib/app/router/
 
 本轮未运行发布预设、未递增发布版本或交付 APK；保留既有文档及其他任务改动。真实订阅鉴权/重定向、台标、长播、断流、低内存设备及物理遥控器尚无本轮验收数据。Gradle 仍提示已有弃用特性，不据此宣称 Gradle 9 兼容。
 
-修复前播放任务边界快照：当时 15s 开流等待只计时并触发失败，`LiveEngine` 没有取消接口，旧 open 未 settle 仍阻塞串行清理。后续生产适配器已加入取消确认协议，当前行为见 [直播文档](live-tv.md)。这里的 19 项生命周期及 6 项通道测试不作为新取消协议或 15s 强制中止媒体网络的验证证据。
+修复前播放任务边界快照：当时 15s 开流等待只计时并触发失败，`LiveEngine` 没有取消接口，旧 open 未 settle 仍阻塞串行清理。后续生产适配器已加入取消确认协议，当前已调整为 5s 开流／无进展等待，行为见 [直播文档](live-tv.md)。这里的 19 项生命周期及 6 项通道测试不作为新取消协议或 5s 强制中止媒体网络的验证证据。
 
 数据任务收尾边界：10000 频道/每频道 64 线路/全表 50000 线路上限；generation 刷新合并和删除/禁用/同 ID 重建后的旧结果失效；EPG 失败保留节目与台标；手动排序后新频道追加；来源日志 ID 哈希、偏好来源归属。38 项是该次合成数据/仓库回归，不是大规模真实订阅、设备内存或网络吞吐测量。
 

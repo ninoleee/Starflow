@@ -95,7 +95,7 @@ void main() {
       sourceId: source.id,
       records: await store.loadSourceRecords(source.id),
       state: state.copyWith(
-        scopeKey: state.scopeKey.replaceFirst('webdav-v14', 'webdav-v13'),
+        scopeKey: state.scopeKey.replaceFirst('webdav-v15', 'webdav-v14'),
       ),
     );
     await oldIndexer.dispose();
@@ -111,7 +111,7 @@ void main() {
         await indexer.loadChildren(source, parentId: seasons.single.id);
     expect(episodes.map((item) => item.episodeNumber), [1, 2]);
     expect((await store.loadSourceState(source.id))?.scopeKey,
-        contains('webdav-v14'));
+        contains('webdav-v15'));
   });
 
   test('NasMediaIndexer reads an indexed root through a nested section',
@@ -2996,7 +2996,7 @@ void main() {
     );
     final indexedAt = DateTime.utc(2026, 4, 5, 12);
     final scopeKey =
-        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v14';
+        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v15';
     final record = NasMediaIndexRecord(
       id: NasMediaIndexRecord.buildRecordId(
         sourceId: source.id,

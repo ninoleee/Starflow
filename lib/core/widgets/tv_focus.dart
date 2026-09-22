@@ -6,6 +6,9 @@ import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/core/widgets/tv_remote_input.dart';
+
+export 'package:starflow/core/widgets/tv_remote_input.dart';
 
 enum TvButtonVariant {
   filled,
@@ -29,36 +32,7 @@ enum StarflowButtonVariant {
 
 const double kTvButtonFocusScale = 1.035;
 
-/// Consumes held command keys without letting repeats reach ancestor shortcuts.
-/// Directional navigation and numeric adjustment shortcuts opt in separately.
-Map<ShortcutActivator, Intent> tvPressOnlyShortcuts(
-  Map<SingleActivator, Intent> shortcuts,
-) {
-  return <ShortcutActivator, Intent>{
-    for (final entry in shortcuts.entries) ...{
-      _TvKeyRepeatActivator(entry.key): const DoNothingIntent(),
-      entry.key: entry.value,
-    },
-  };
-}
-
-class _TvKeyRepeatActivator implements ShortcutActivator {
-  const _TvKeyRepeatActivator(this.activator);
-
-  final SingleActivator activator;
-
-  @override
-  Iterable<LogicalKeyboardKey> get triggers => activator.triggers;
-
-  @override
-  bool accepts(KeyEvent event, HardwareKeyboard state) =>
-      event is KeyRepeatEvent && activator.accepts(event, state);
-
-  @override
-  String debugDescribeKeys() => '${activator.debugDescribeKeys()} (repeat)';
-}
-
-final _tvActionShortcuts = tvPressOnlyShortcuts(const {
+const _tvActionShortcuts = {
   SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
   SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
   SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
@@ -66,7 +40,7 @@ final _tvActionShortcuts = tvPressOnlyShortcuts(const {
   SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
   SingleActivator(LogicalKeyboardKey.contextMenu): TvContextMenuIntent(),
   SingleActivator(LogicalKeyboardKey.gameButtonY): TvContextMenuIntent(),
-});
+};
 
 final _lightweightTvFocusSettingsProvider = Provider<bool>((ref) {
   return ref.watch(appSettingsProvider.select(
@@ -840,46 +814,42 @@ class _TvFocusableActionState extends ConsumerState<TvFocusableAction> {
 
     return ExcludeFocus(
       excluding: !enabled && !widget.focusableWhenDisabled,
-      child: FocusableActionDetector(
-        focusNode: _effectiveFocusNode,
-        autofocus: widget.autofocus,
-        enabled: enabled || widget.focusableWhenDisabled,
-        onFocusChange: (value) {
-          if (_isFocused != value) {
-            setState(() {
-              _isFocused = value;
-            });
-          }
-          if (value) {
-            widget.onFocused?.call();
-          }
+      child: TvRemoteShortcuts(
+        shortcuts: {
+          for (final entry in _tvActionShortcuts.entries)
+            if (contextAction != null || entry.value is ActivateIntent)
+              entry.key: entry.value,
         },
-        shortcuts: contextAction != null
-            ? _tvActionShortcuts
-            : tvPressOnlyShortcuts(const {
-                SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
-                SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-                SingleActivator(LogicalKeyboardKey.numpadEnter):
-                    ActivateIntent(),
-                SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-                SingleActivator(LogicalKeyboardKey.gameButtonA):
-                    ActivateIntent(),
-              }),
-        actions: _buildTelevisionActions(context),
-        child: _buildFocusVisualFrame(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: enabled
-                ? () {
-                    _effectiveFocusNode.requestFocus();
-                    widget.onPressed?.call();
-                  }
-                : null,
-            onSecondaryTap: enabled ? contextAction : null,
-            onLongPress: enabled ? contextAction : null,
-            child: widget.child,
+        child: FocusableActionDetector(
+          focusNode: _effectiveFocusNode,
+          autofocus: widget.autofocus,
+          enabled: enabled || widget.focusableWhenDisabled,
+          onFocusChange: (value) {
+            if (_isFocused != value) {
+              setState(() {
+                _isFocused = value;
+              });
+            }
+            if (value) {
+              widget.onFocused?.call();
+            }
+          },
+          actions: _buildTelevisionActions(context),
+          child: _buildFocusVisualFrame(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: enabled
+                  ? () {
+                      _effectiveFocusNode.requestFocus();
+                      widget.onPressed?.call();
+                    }
+                  : null,
+              onSecondaryTap: enabled ? contextAction : null,
+              onLongPress: enabled ? contextAction : null,
+              child: widget.child,
+            ),
+            lightweightTvFocusEnabled: lightweightTvFocusEnabled,
           ),
-          lightweightTvFocusEnabled: lightweightTvFocusEnabled,
         ),
       ),
     );
@@ -1717,8 +1687,8 @@ Widget wrapTelevisionDialogBackHandling({
     Navigator.of(dialogContext).pop();
   }
 
-  return Shortcuts(
-    shortcuts: tvPressOnlyShortcuts(shortcuts),
+  return TvRemoteShortcuts(
+    shortcuts: shortcuts,
     child: Actions(
       actions: <Type, Action<Intent>>{
         DismissIntent: CallbackAction<DismissIntent>(

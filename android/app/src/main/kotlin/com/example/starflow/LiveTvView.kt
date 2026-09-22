@@ -9,6 +9,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.MimeTypes
 import androidx.media3.datasource.DataSource
@@ -16,6 +17,7 @@ import androidx.media3.exoplayer.source.UnrecognizedInputFormatException
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import io.flutter.plugin.common.BinaryMessenger
@@ -44,6 +46,7 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private var progress: Runnable? = null
     private var networkSpeed: LiveTvNetworkSpeed? = null
+    private var diagnostics: LiveTvDiagnostics? = null
     private val lifecycleObserver = LifecycleEventObserver { _, event ->
         when (event) {
             Lifecycle.Event.ON_STOP -> releasePlayer()
@@ -159,15 +162,22 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
     private fun open(context: Context, url: String, headers: Map<*, *>, nextGeneration: Long) {
         val token = session.open(nextGeneration)
         val policy = LiveTvHttpPolicy(url, headers)
-        val fallback = LiveTvHlsFallbackPolicy(url)
+        val fallback = LiveTvHlsFallbackPolicy()
         val speed = LiveTvNetworkSpeed { android.os.SystemClock.elapsedRealtime() }
         networkSpeed = speed
         val http = DataSource.Factory { LiveTvHttpDataSource(policy).apply { addTransferListener(speed) } }
         val control = DefaultLoadControl.Builder().setBufferDurationsMs(3000, 12000, 1000, 2000)
             .setTargetBufferBytes(32 * 1024 * 1024).setPrioritizeTimeOverSizeThresholds(false).build()
-        val current = ExoPlayer.Builder(context).setLoadControl(control)
+        val renderers = DefaultRenderersFactory(context)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableDecoderFallback(true)
+        val current = ExoPlayer.Builder(context, renderers).setLoadControl(control)
             .setMediaSourceFactory(DefaultMediaSourceFactory(http)).build()
         player = current
+        val telemetry = LiveTvDiagnostics(nextGeneration,
+            isActive = { !disposed && player === current && session.accepts(token) })
+        diagnostics = telemetry
+        current.addAnalyticsListener(telemetry)
         current.volume = volume
         current.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(), true)
         current.setHandleAudioBecomingNoisy(true)
@@ -182,6 +192,8 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
                 }
             }
             override fun onPlaybackStateChanged(state: Int) {
+                if (disposed || player !== current || !session.accepts(token)) return
+                telemetry.state(current, state)
                 when (state) {
                     Player.STATE_READY -> emit("ready")
                     Player.STATE_BUFFERING -> emit("buffering")
@@ -189,6 +201,7 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
                 }
             }
             override fun onRenderedFirstFrame() = emit("frame")
+            override fun onTracksChanged(tracks: Tracks) = telemetry.tracks(tracks)
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 emit(LiveTvPausePolicy.state(playWhenReady, current.playbackSuppressionReason, reason))
             }
@@ -200,6 +213,7 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
                 val unrecognized = error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED &&
                     generateSequence<Throwable>(error) { it.cause }.take(10).any { it is UnrecognizedInputFormatException }
                 if (fallback.tryFallback(unrecognized)) {
+                    telemetry.hlsFallback()
                     session.resetProgress()
                     emit("buffering")
                     try {
@@ -250,7 +264,7 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
 
     private fun mediaItem(url: String, hls: Boolean = false): MediaItem = MediaItem.Builder().setUri(url)
         .setMimeType(if (hls) MimeTypes.APPLICATION_M3U8 else null)
-        .setLiveConfiguration(MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(3000).build()).build()
+        .build()
 
     private fun fit() {
         val (x, y) = LiveTvVideoPolicy.scale(texture.width, texture.height, ratio)
@@ -259,6 +273,8 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
         texture.setTransform(matrix)
     }
     private fun releasePlayer() {
+        diagnostics?.close()
+        diagnostics = null
         session.invalidate()
         progress?.let(handler::removeCallbacks)
         progress = null

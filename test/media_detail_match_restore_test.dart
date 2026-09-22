@@ -49,7 +49,8 @@ void main() {
 
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(const MethodChannel('starflow/platform'), null);
+        .setMockMethodCallHandler(
+            const MethodChannel('starflow/platform'), null);
   });
 
   testWidgets('failed enrichment refresh retains resolved actions and series',
@@ -57,13 +58,20 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1200, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     const seed = MediaDetailTarget(
-      title: 'Series', posterUrl: '', overview: '',
+      title: 'Series',
+      posterUrl: '',
+      overview: '',
     );
     final resolved = seed.copyWith(
-      sourceId: 'emby', itemId: 'series', itemType: 'series',
+      sourceId: 'emby',
+      itemId: 'series',
+      itemType: 'series',
       playbackTarget: const PlaybackTarget(
-        title: 'Episode', sourceId: 'emby', itemId: 'episode',
-        streamUrl: 'https://example.com/episode', sourceName: 'Emby',
+        title: 'Episode',
+        sourceId: 'emby',
+        itemId: 'episode',
+        streamUrl: 'https://example.com/episode',
+        sourceName: 'Emby',
         sourceKind: MediaSourceKind.emby,
       ),
     );
@@ -72,9 +80,12 @@ void main() {
       overrides: [
         isTelevisionProvider.overrideWith((ref) => true),
         appSettingsProvider.overrideWithValue(AppSettings.fromJson({
-          'mediaSources': const [], 'searchProviders': const [],
-          'homeModules': const [], 'tmdbMetadataMatchEnabled': false,
-          'wmdbMetadataMatchEnabled': false, 'imdbRatingMatchEnabled': false,
+          'mediaSources': const [],
+          'searchProviders': const [],
+          'homeModules': const [],
+          'tmdbMetadataMatchEnabled': false,
+          'wmdbMetadataMatchEnabled': false,
+          'imdbRatingMatchEnabled': false,
           'detailAutoLibraryMatchEnabled': false,
         })),
         localStorageCacheRepositoryProvider.overrideWithValue(
@@ -84,10 +95,15 @@ void main() {
           if (fail) throw StateError('metadata offline');
           return resolved;
         }),
-        detailSeriesBrowserProvider.overrideWith((ref, request) async =>
-          const DetailSeriesBrowserState(groups: [DetailEpisodeGroup(
-            id: 'all', title: 'Episodes', seasonNumber: null, episodes: [],
-          )])),
+        detailSeriesBrowserProvider.overrideWith(
+            (ref, request) async => const DetailSeriesBrowserState(groups: [
+                  DetailEpisodeGroup(
+                    id: 'all',
+                    title: 'Episodes',
+                    seasonNumber: null,
+                    episodes: [],
+                  )
+                ])),
       ],
       child: const MaterialApp(home: MediaDetailPage(target: seed)),
     ));
@@ -164,6 +180,87 @@ void main() {
     expect(tester.getTopLeft(find.text('剧集')), position);
     expect(tester.widget(find.byType(DetailHeroSection)), same(hero));
     expect(tester.getSize(find.byType(DetailEpisodeBrowser)).height, 292);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('FNTV series opens on FNTV with NAS-only cached choices',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 1800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const entry = MediaDetailTarget(
+      title: 'Series',
+      posterUrl: '',
+      overview: '',
+      itemType: 'series',
+      sourceId: 'fntv',
+      sourceKind: MediaSourceKind.fntv,
+      sourceName: 'FNTV',
+      itemId: 'fntv-series',
+    );
+    final nas = entry.copyWith(
+      sourceId: 'nas',
+      sourceKind: MediaSourceKind.nas,
+      sourceName: 'NAS',
+      itemId: 'webdav-series|one',
+    );
+    final nasOther = nas.copyWith(itemId: 'webdav-series|two');
+    final cache = _FakeRestoreCacheRepository(
+      warmCache: true,
+      cachedState: CachedDetailState(
+        target: nas,
+        libraryMatchChoices: [nas, nasOther],
+      ),
+    );
+    addTearDown(cache.dispose);
+    final browsedSources = <String>[];
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        isTelevisionProvider.overrideWith((ref) => false),
+        appSettingsProvider.overrideWithValue(AppSettings.fromJson({
+          'mediaSources': const [],
+          'searchProviders': const [],
+          'homeModules': const [],
+          'tmdbMetadataMatchEnabled': false,
+          'wmdbMetadataMatchEnabled': false,
+          'imdbRatingMatchEnabled': false,
+          'detailAutoLibraryMatchEnabled': false,
+        })),
+        localStorageCacheRepositoryProvider.overrideWithValue(cache),
+        enrichedDetailTargetProvider.overrideWith((ref, target) => target),
+        detailSeriesBrowserProvider.overrideWith((ref, request) {
+          browsedSources.add(request.sourceId);
+          return const DetailSeriesBrowserState(groups: []);
+        }),
+      ],
+      child: const MaterialApp(home: MediaDetailPage(target: entry)),
+    ));
+
+    expect(
+        tester
+            .widget<DetailHeroSection>(find.byType(DetailHeroSection))
+            .target
+            .sourceId,
+        'fntv');
+    await tester.pumpAndSettle();
+    expect(browsedSources, isNotEmpty);
+    expect(browsedSources, everyElement('fntv'));
+    final dropdownFinder = find.byType(DropdownButton<int>);
+    final dropdown = tester.widget<DropdownButton<int>>(dropdownFinder);
+    expect(dropdown.value, 0);
+    expect((dropdown.items!.first.child as Text).data, 'FNTV');
+
+    await tester.ensureVisible(dropdownFinder);
+    await tester.tap(dropdownFinder);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('NAS').last);
+    await tester.pumpAndSettle();
+    expect(
+        tester
+            .widget<DetailHeroSection>(find.byType(DetailHeroSection))
+            .target
+            .sourceId,
+        'nas');
+    expect(browsedSources.last, 'nas');
     expect(tester.takeException(), isNull);
   });
 
@@ -1956,10 +2053,19 @@ void main() {
 }
 
 class _FakeRestoreCacheRepository extends LocalStorageCacheRepository {
-  _FakeRestoreCacheRepository({required this.cachedState})
+  _FakeRestoreCacheRepository(
+      {required this.cachedState, this.warmCache = false})
       : super(preferences: _MemoryPreferencesStore());
 
   final CachedDetailState? cachedState;
+  final bool warmCache;
+
+  @override
+  CachedDetailState? peekDetailState(
+    MediaDetailTarget seedTarget, {
+    bool allowStructuralMismatch = false,
+  }) =>
+      warmCache ? cachedState : null;
 
   @override
   Future<CachedDetailState?> loadDetailState(

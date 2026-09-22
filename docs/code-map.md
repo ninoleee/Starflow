@@ -52,6 +52,7 @@
 | `core/scheduling/queue_wait_diagnostics.dart` | 队列等待诊断，不自行执行网络请求 |
 | `core/state/riverpod_retry.dart` | provider 重试策略 |
 | `core/widgets/` | TV 焦点、图片并发门、海报、对话框、横向翻页、Logo 等共享 UI |
+| `core/widgets/tv_remote_input.dart` | TV 命令键按下/重复/松开配对、单次执行与失焦取消；`TvRemoteShortcuts` 供应用入口、按钮、海报、弹窗和播放器复用，回归见 `test/core/widgets/tv_remote_input_test.dart` |
 | `core/widgets/mobile_text_input_dismissal.dart` | 应用入口统一挂载的手机输入框外点击收键盘规则；回归见 `test/core/widgets/mobile_text_input_dismissal_test.dart` |
 | `core/utils/` | 文本、评分、图片 headers、默认 seed；旧静默 trace helper 已删除，结构化日志与错误记录保持活跃 |
 
@@ -81,6 +82,10 @@
 
 ### 首页与详情
 
+2026-09-22 补充返回键回归：`test/core/widgets/app_network_image_test.dart` 使用 `GoRouter` 的首页、可返回详情路由及实际 `DetailImageGallery` 弹出预览，覆盖返回/确定键按下、重复、松开、系统返回、退出预览后的剧照焦点恢复，以及再次系统返回退出详情。预览保留焦点直到消费松开事件才关闭；此前仅校验按下消费的测试不足以覆盖 Android BACK 松开重派发。这是主机 widget 验证，不代表 TV 真机验收。
+
+剧照横排由 `details/presentation/widgets/detail_shared_widgets.dart` 持有已成功解码的图片源，剧照使用仅内存的 `networkOnly` 策略，不写入磁盘；`detail_image_preview.dart` 负责全屏双指缩放、双击切换 2.5 倍缩放、放大后拖动、未放大时下滑关闭、点击图片外空白退出、失败重试与系统返回退出。预览不再放置右上角缩放/关闭按钮，双指缩放围绕实际两指中心，TV 由不可见焦点宿主接收返回键，返回或确定只关闭预览并回到详情页，失败重试按钮仍可参与焦点移动。`AppNetworkImage.onImageReady` 只交付成功解码帧对应的未缩放 provider，预览独立限制解码尺寸；关闭预览只驱逐预览尺寸，详情剧照组件销毁或切换图片集时驱逐源图、804×452 缩略图和 2048px 预览尺寸，不清空全局 `ImageCache`。2026-09-22 验证范围为主机 widget 回归（临时链接二次请求失败、双指缩放、双击缩放、下滑关闭、点击图片外空白、关闭后缩略图保留、TV 返回/确定回到详情页与焦点宿主），不代表 Android / iOS 真机验收。
+
 ```text
 HomePage -> HomePageController -> HomeFeedRepository -> 来源 / 豆瓣 seed
                                                    -> 批量详情缓存装饰
@@ -108,7 +113,7 @@ AppMediaRepository -> AppMediaQueryService -> MediaServerClient / 本地索引
 
 - Emby / 飞牛使用媒体服务器缓存分片；根列表读取最多 400 条 summary，分区只读目标 shard，完整匹配最多两路解码。
 - NAS 索引由 `nas_media_indexer.dart` 及 `refresh_flow / storage_access / indexing / grouping / refresh_support` 的 `part` 文件共同实现；这些不是彼此独立的服务。
-- `nas_media_index_store_impl_io.dart` 使用 Sembast；Web 有单独实现。当前 schema 是 `webdav-v14`，支持分区过滤与 upsert / patch，不再只做整库覆盖。
+- `nas_media_index_store_impl_io.dart` 使用 Sembast；Web 有单独实现。当前 schema 是 `webdav-v15`，支持分区过滤与 upsert / patch，不再只做整库覆盖。
 - `webdav_nas_client.dart` 的 structure / sidecar / background 文件也是同一 Dart library。普通页面优先读索引，不实时扫全目录。
 - `resource_path_identity.dart` 与 `media_source_identity.dart` 分别处理资源路径和来源身份；不要因元数据身份相同复用不同资源的直链或鉴权头。
 - `library/data/nfo_metadata.dart` 共享 WebDAV / 夸克 XML 字段解析，`details/domain/cached_artwork.dart` 共享图片 URL 与 headers 配对合并；`library/presentation/library_resource_deletion.dart` 复用两级媒体库页面的删除确认。
@@ -211,7 +216,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 
 ### Android
 
-直播专用 `LiveTvView.kt` 由 `MainActivity.configureFlutterEngine` 注册，视图类型 `starflow/live_tv`、实例通道 `starflow/live_tv/<viewId>`。Flutter 使用 `open / cancelOpen / stop / volume / audioTracks / audio / networkSpeed`；原生另有 `pause / play` 分支，但直播 UI 没有暂停/时移入口。状态携带换台 generation，TextureView 非焦点；不进入点播 NativePlaybackActivity，也不继承其自定义 FFmpeg/TS/双字幕/音频输出策略。能力边界见 [直播电视](live-tv.md)。
+直播专用 `LiveTvView.kt` 由 `MainActivity.configureFlutterEngine` 注册，视图类型 `starflow/live_tv`、实例通道 `starflow/live_tv/<viewId>`。Flutter 使用 `open / cancelOpen / stop / volume / audioTracks / audio / networkSpeed`；原生另有 `pause / play` 分支，但直播 UI 没有暂停/时移入口。状态携带换台 generation，TextureView 非焦点；标准 renderers 注册随包 FFmpeg 音频扩展并启用 decoder fallback，不进入点播 NativePlaybackActivity，也不继承其 TS/双字幕/自定义音频输出策略。`LiveTvDiagnostics.kt` 负责单实例音轨与输出、缓冲／流结束、掉帧／欠载的脱敏原生日志，不改变通道协议。能力边界见 [直播电视](live-tv.md)。
 
 主要目录：`android/app/src/main/kotlin/com/example/starflow/`。
 

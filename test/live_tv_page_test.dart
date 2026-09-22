@@ -17,6 +17,8 @@ import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/live_tv/data/live_repository.dart';
+import 'package:starflow/features/live_tv/data/live_channel_probe.dart';
+import 'package:starflow/features/live_tv/data/live_probe_network.dart';
 import 'package:starflow/features/live_tv/domain/live_models.dart';
 import 'package:starflow/features/live_tv/presentation/live_tv_page.dart';
 import 'package:starflow/features/live_tv/presentation/live_logo.dart';
@@ -162,7 +164,9 @@ void main() {
       expect(tester.getTopRight(find.byType(LiveNetworkSpeedLabel)).dx,
           closeTo(size.width - 12, 1));
       await _capture(tester, capture, 'player-${size.width.toInt()}');
-      await tester.pump(const Duration(seconds: 6));
+      await tester.pump(const Duration(seconds: 4));
+      engine.emit('progress');
+      await tester.pump(const Duration(seconds: 2));
       expect(find.byType(LiveNetworkSpeedLabel), findsNothing);
       engine.emit('buffering');
       await tester.pump();
@@ -313,6 +317,8 @@ void main() {
       final now = DateTime.now();
       await tester.pumpWidget(ProviderScope(
           overrides: [
+            liveChannelProbeProvider.overrideWithValue(_LayoutProbe()),
+            liveProbeNetworkProvider.overrideWithValue(const Stream.empty()),
             liveRepositoryProvider.overrideWithValue(repository),
             liveSnapshotProvider.overrideWith((_) => Stream.value(snapshot)),
             liveNowNextProvider.overrideWith((_) async => {
@@ -995,6 +1001,15 @@ Future<void> _capture(WidgetTester tester, GlobalKey key, String name) async {
       image.dispose();
     }
   });
+}
+
+class _LayoutProbe extends LiveChannelProbe {
+  @override
+  Future<LiveProbeResult> probe(LiveLine line,
+          {required Future<void> cancel}) async =>
+      LiveProbeResult(LiveProbeStatus.responded,
+          checkedAt: DateTime.now(),
+          latency: const Duration(milliseconds: 100));
 }
 
 class _PageEngine implements CancellableLiveEngine, LiveNetworkSpeedSource {

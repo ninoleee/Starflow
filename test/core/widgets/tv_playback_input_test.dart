@@ -42,8 +42,8 @@ void main() {
                     final ValueChanged<bool>? onChanged =
                         active ? (_) => activations++ : null;
                     return switch (control) {
-                      'button' => StarflowButton(
-                          label: 'Tool', onPressed: onPressed),
+                      'button' =>
+                        StarflowButton(label: 'Tool', onPressed: onPressed),
                       'adaptive' => TvAdaptiveButton(
                           label: 'Tool',
                           icon: Icons.settings,
@@ -99,12 +99,12 @@ void main() {
       var activated = 0;
       var menus = 0;
       var commands = 0;
-      await tester.pumpWidget(_host(Shortcuts(
-        shortcuts: tvPressOnlyShortcuts(const {
+      await tester.pumpWidget(_host(TvRemoteShortcuts(
+        shortcuts: const {
           ...playbackMediaShortcuts,
           SingleActivator(LogicalKeyboardKey.contextMenu): _MenuIntent(),
           SingleActivator(LogicalKeyboardKey.gameButtonY): _MenuIntent(),
-        }),
+        },
         child: Actions(
             actions: {
               PlaybackPlayIntent:

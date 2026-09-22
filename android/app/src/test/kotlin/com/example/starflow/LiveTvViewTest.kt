@@ -11,7 +11,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.Player
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import io.flutter.plugin.common.BinaryMessenger
@@ -34,6 +38,7 @@ class LiveTvViewTest {
         val lifecycle: Lifecycle,
         val speeds: List<LiveTvNetworkSpeed>,
         val polls: MutableList<Runnable>,
+        val renderers: List<DefaultRenderersFactory>,
     ) {
         fun call(method: String, args: Map<String, Any> = emptyMap()): MethodChannel.Result {
             val result = mock(MethodChannel.Result::class.java)
@@ -41,8 +46,8 @@ class LiveTvViewTest {
             return result
         }
 
-        fun open(generation: Long, volume: Float = 1f) {
-            verify(call("open", mapOf("url" to "https://example.test/live", "generation" to generation,
+        fun open(generation: Long, volume: Float = 1f, url: String = "https://example.test/live") {
+            verify(call("open", mapOf("url" to url, "generation" to generation,
                 "volume" to volume))).success(null)
         }
     }
@@ -66,6 +71,8 @@ class LiveTvViewTest {
             resources.add(mockConstruction(TextureView::class.java))
             resources.add(mockConstruction(Matrix::class.java))
             resources.add(mockConstruction(DefaultMediaSourceFactory::class.java))
+            val renderers = mockConstruction(DefaultRenderersFactory::class.java,
+                withSettings().defaultAnswer(RETURNS_SELF)).also(resources::add)
             resources.add(mockConstruction(DefaultLoadControl.Builder::class.java,
                 withSettings().defaultAnswer(RETURNS_SELF)) { builder, _ ->
                 val control = mock(DefaultLoadControl::class.java)
@@ -74,7 +81,8 @@ class LiveTvViewTest {
             val players = mutableListOf<ExoPlayer>()
             val listeners = mutableListOf<Player.Listener>()
             resources.add(mockConstruction(ExoPlayer.Builder::class.java,
-                withSettings().defaultAnswer(RETURNS_SELF)) { builder, _ ->
+                withSettings().defaultAnswer(RETURNS_SELF)) { builder, construction ->
+                assertSame(renderers.constructed().last(), construction.arguments()[1])
                 val player = mock(ExoPlayer::class.java)
                 players.add(player)
                 `when`(builder.build()).thenReturn(player)
@@ -92,7 +100,7 @@ class LiveTvViewTest {
             var failure: Throwable? = null
             try {
                 test(Fixture(view, channels.constructed().single(), calls!!, players, listeners, lifecycle,
-                    speeds.constructed(), polls))
+                    speeds.constructed(), polls, renderers.constructed()))
             } catch (error: Throwable) {
                 failure = error
                 throw error
@@ -104,6 +112,35 @@ class LiveTvViewTest {
                 }
             }
         } finally { resources.asReversed().forEach { it.close() } }
+    }
+
+    @Test fun enablesAudioExtensionsAndDecoderFallbackWithoutForcingLiveOffset() = withView { f ->
+        f.open(1)
+        verify(f.renderers.single()).setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        verify(f.renderers.single()).setEnableDecoderFallback(true)
+        verify(f.players.single()).addAnalyticsListener(any())
+        val item = org.mockito.ArgumentCaptor.forClass(MediaItem::class.java)
+        verify(f.players.single()).setMediaItem(item.capture() ?: MediaItem.EMPTY)
+        assertEquals(C.TIME_UNSET, item.value.liveConfiguration.targetOffsetMs)
+    }
+
+    @Test fun scriptAndMisleadingSuffixesCanRetryHlsOnceWithoutReallocatingPlayer() = withView { f ->
+        for ((index, suffix) in listOf("live.php", "live.ts", "live", "live.m3u8").withIndex()) {
+            f.open(index.toLong(), url = "https://example.test/$suffix?token=private")
+            val current = f.players.last()
+            val listener = f.listeners.last()
+            val error = PlaybackException("private",
+                androidx.media3.exoplayer.source.UnrecognizedInputFormatException("private", mock(Uri::class.java), emptyList()),
+                PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED)
+            listener.onPlayerError(error)
+            val items = org.mockito.ArgumentCaptor.forClass(MediaItem::class.java)
+            verify(current, times(2)).setMediaItem(items.capture() ?: MediaItem.EMPTY)
+            assertEquals(MimeTypes.APPLICATION_M3U8, items.allValues.last().localConfiguration!!.mimeType)
+            verify(current, times(2)).prepare()
+            listener.onPlayerError(error)
+            verify(current, times(2)).prepare()
+            assertEquals(index + 1, f.players.size)
+        }
     }
 
     @Test fun networkSpeedIsScopedToTheActiveGeneration() = withView { f ->

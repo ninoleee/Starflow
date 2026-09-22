@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
+import 'package:starflow/core/widgets/tv_remote_input.dart';
 
 class MediaPosterTile extends ConsumerStatefulWidget {
   const MediaPosterTile({
@@ -344,8 +345,8 @@ class _TelevisionPosterAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Shortcuts(
-      shortcuts: const <ShortcutActivator, Intent>{
+    return TvRemoteShortcuts(
+      shortcuts: const <SingleActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
         SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
         SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),

@@ -883,9 +883,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
           unawaited(_handleDesktopBack(reason: 'route-back'));
         }
       },
-      child: Shortcuts(
+      child: TvRemoteShortcuts(
         shortcuts: isTelevision
-            ? tvPressOnlyShortcuts(const {
+            ? const {
                 SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
                 SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
                 SingleActivator(LogicalKeyboardKey.backspace): DismissIntent(),
@@ -905,8 +905,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                     _OpenPlaybackOptionsIntent(),
                 SingleActivator(LogicalKeyboardKey.gameButtonY):
                     _OpenPlaybackOptionsIntent(),
-              })
-            : const <ShortcutActivator, Intent>{},
+              }
+            : const <SingleActivator, Intent>{},
         child: Actions(
           actions: <Type, Action<Intent>>{
             PlaybackPlayIntent: CallbackAction<PlaybackPlayIntent>(

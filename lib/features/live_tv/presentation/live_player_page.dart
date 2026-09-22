@@ -42,7 +42,7 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
   bool _list = false, _controls = true, _guide = false;
   bool _settings = false;
   bool _switching = false, _exiting = false;
-  PhysicalKeyboardKey? _exitBackKey;
+  final _remoteKeys = TvRemoteKeyHandler();
   LocalHistoryEntry? _overlayEntry;
   bool get _hasOverlay => _list || _guide || _settings;
   bool _foreground = true;
@@ -294,24 +294,20 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
-      if (event is KeyDownEvent) {
-        _exitBackKey = null;
+    if (_remoteKeys.owns(event)) {
+      return _remoteKeys.handle(event, onPressed: () {});
+    }
+    if (tvBackKeys.contains(key)) {
+      return _remoteKeys.handle(event, onPressed: () {
         if (_hasOverlay) {
           _closeOverlay();
         } else {
-          // Keep this route focused until it has consumed the release.
-          _exitBackKey = event.physicalKey;
+          Navigator.of(context).maybePop();
         }
-      } else if (event is KeyUpEvent && _exitBackKey == event.physicalKey) {
-        _exitBackKey = null;
-        Navigator.of(context).maybePop();
-      }
-      // Android must not redispatch the release as a second system back.
-      return KeyEventResult.handled;
+      });
     }
-    if (event is KeyUpEvent) return KeyEventResult.ignored;
     if (!_focus.hasPrimaryFocus) {
+      if (event is KeyUpEvent) return KeyEventResult.ignored;
       final direction = switch (key) {
         LogicalKeyboardKey.arrowUp => TraversalDirection.up,
         LogicalKeyboardKey.arrowDown => TraversalDirection.down,
@@ -341,11 +337,25 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
       }
       return KeyEventResult.ignored;
     }
-    if (key == LogicalKeyboardKey.contextMenu) {
-      if (event is KeyDownEvent) _openSettings();
-      return KeyEventResult.handled;
+    if (key == LogicalKeyboardKey.contextMenu ||
+        key == LogicalKeyboardKey.gameButtonY) {
+      return _remoteKeys.handle(event, onPressed: _openSettings);
     }
     if (_hasOverlay) return KeyEventResult.ignored;
+    if (tvConfirmKeys.contains(key)) {
+      return _remoteKeys.handle(event, onPressed: () {
+        _openOverlay(guide: false);
+        _hide?.cancel();
+      });
+    }
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight) {
+      return _remoteKeys.handle(event, onPressed: () {
+        _openOverlay(guide: key == LogicalKeyboardKey.arrowRight);
+        _hide?.cancel();
+      });
+    }
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
     if (key == LogicalKeyboardKey.arrowUp ||
         key == LogicalKeyboardKey.channelUp) {
       _step(-1);
@@ -356,30 +366,13 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
       _step(1);
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.enter ||
-        key == LogicalKeyboardKey.select ||
-        key == LogicalKeyboardKey.space) {
-      if (event is KeyDownEvent) {
-        _openOverlay(guide: false);
-      }
-      _hide?.cancel();
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.arrowLeft ||
-        key == LogicalKeyboardKey.arrowRight) {
-      if (event is KeyDownEvent) {
-        _openOverlay(guide: key == LogicalKeyboardKey.arrowRight);
-      }
-      _hide?.cancel();
-      return KeyEventResult.handled;
-    }
     return KeyEventResult.ignored;
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
-    if (!_foreground) _exitBackKey = null;
+    if (!_foreground) _remoteKeys.reset();
     if (_exiting) return;
     if (state == AppLifecycleState.resumed) {
       if (_list) ref.invalidate(liveNowNextProvider);
@@ -397,6 +390,7 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
 
   @override
   void dispose() {
+    _remoteKeys.dispose();
     _exiting = true;
     ++_session;
     ++_attachment;
@@ -509,7 +503,18 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                                   (controller.engine as MpvLiveEngine).video!,
                               controls: NoVideoControls),
                         if (loading)
-                          const Center(child: CircularProgressIndicator()),
+                          Center(
+                              child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                const CircularProgressIndicator(),
+                                if (controller?.status == 'retrying')
+                                  Padding(
+                                      padding: const EdgeInsets.only(top: 12),
+                                      child: Text(controller!.recoveryLabel,
+                                          style: const TextStyle(
+                                              color: Colors.white70))),
+                              ])),
                         if (controller?.status == 'failed' ||
                             controller?.status == 'paused')
                           Center(

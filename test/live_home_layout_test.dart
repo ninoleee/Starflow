@@ -11,6 +11,7 @@ import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/app/theme/app_theme.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/live_tv/data/live_channel_probe.dart';
+import 'package:starflow/features/live_tv/data/live_probe_network.dart';
 import 'package:starflow/features/live_tv/data/live_repository.dart';
 import 'package:starflow/features/live_tv/domain/live_models.dart';
 import 'package:starflow/features/live_tv/presentation/live_tv_page.dart';
@@ -49,6 +50,7 @@ Finder _group(String group) => find.byKey(ValueKey('live-home-group:$group'));
 void main() {
   for (final tv in [false, true]) {
     for (final size in [
+      const Size(320, 640),
       const Size(390, 844),
       const Size(768, 1024),
       const Size(640, 360),
@@ -58,6 +60,22 @@ void main() {
       testWidgets('home follows orientation at $size TV=$tv', (tester) async {
         _setSize(tester, size);
         await _mount(tester, tv: tv);
+        final favorites = tester.getRect(find.byType(FilterChip));
+        final actions = find.byWidgetPredicate((w) =>
+            w is LiveIconButton &&
+            (w.icon == Icons.speed ||
+                w.icon == Icons.stop ||
+                w.label == '直播订阅' ||
+                w.label == '整理频道'));
+        expect(actions, findsNWidgets(3));
+        var previousRight = favorites.right;
+        for (final action in actions.evaluate()) {
+          final bounds = tester.getRect(find.byWidget(action.widget));
+          expect(bounds.left, greaterThanOrEqualTo(previousRight));
+          expect(bounds.center.dy, closeTo(favorites.center.dy, .01));
+          expect(bounds.right, lessThanOrEqualTo(size.width));
+          previousRight = bounds.right;
+        }
         if (size.width > size.height) {
           expect(_groups, findsOneWidget);
           expect(tester.getRect(_groups).right,
@@ -137,11 +155,7 @@ void main() {
                 .selected,
             isTrue);
       } else {
-        expect(
-            tester
-                .widget<DropdownButton<String>>(
-                    _groupDropdown)
-                .value,
+        expect(tester.widget<DropdownButton<String>>(_groupDropdown).value,
             'Sports');
       }
       expect(tester.takeException(), isNull);
@@ -261,6 +275,7 @@ Future<void> _mount(WidgetTester tester,
             .overrideWith((_) => snapshots ?? Stream.value(snapshot)),
         liveNowNextProvider.overrideWith((_) async => {}),
         liveChannelProbeProvider.overrideWithValue(_Probe()),
+        liveProbeNetworkProvider.overrideWithValue(const Stream.empty()),
         isTelevisionProvider.overrideWith((_) => tv),
       ],
       child: MaterialApp(

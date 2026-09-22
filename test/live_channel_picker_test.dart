@@ -9,6 +9,72 @@ import 'package:starflow/features/live_tv/presentation/live_channel_picker.dart'
 import 'package:starflow/features/live_tv/presentation/live_logo.dart';
 
 void main() {
+  testWidgets(
+      'direction keys transfer focus before painting and scroll only at edges',
+      (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(560, 384);
+    addTearDown(tester.view.reset);
+    final channels = List.generate(
+        100,
+        (i) => LiveChannel(
+            id: '$i',
+            sourceId: 's',
+            name: 'Channel $i',
+            lines: [LiveLine('https://example.test/$i')]));
+    final selections = <String>[];
+    await tester.pumpWidget(ProviderScope(
+        overrides: [isTelevisionProvider.overrideWith((_) => true)],
+        child: MaterialApp(
+            home: Scaffold(
+                body: LiveChannelPicker(
+                    snapshot: LiveSnapshot(
+                        sources: const [LiveSource(id: 's', name: 'Source')],
+                        channels: channels),
+                    currentChannel: channels[50],
+                    onSelected: (c) => selections.add(c.id))))));
+    await tester.pumpAndSettle();
+    final list = find.byType(ListView).last;
+    final position = tester
+        .state<ScrollableState>(
+            find.descendant(of: list, matching: find.byType(Scrollable)))
+        .position;
+    final initialOffset = position.pixels;
+
+    Future<void> move(LogicalKeyboardKey key, int index, double offset) async {
+      await tester.sendKeyEvent(key);
+      // Check before pumping: no post-frame focus handoff is needed.
+      expect(FocusManager.instance.primaryFocus?.debugLabel,
+          'live-overlay:$index');
+      expect(position.pixels, offset);
+      await tester.pump();
+      final viewport = tester.getRect(list);
+      final row = tester.getRect(find.ancestor(
+          of: find.text('Channel $index'), matching: find.byType(ListTile)));
+      expect(row.top, greaterThanOrEqualTo(viewport.top));
+      expect(row.bottom, lessThanOrEqualTo(viewport.bottom));
+    }
+
+    await move(LogicalKeyboardKey.arrowDown, 51, initialOffset);
+    await move(LogicalKeyboardKey.arrowDown, 52, initialOffset);
+    await move(LogicalKeyboardKey.arrowDown, 53, 54 * 64 - 384);
+    await move(LogicalKeyboardKey.arrowUp, 52, 54 * 64 - 384);
+    for (var i = 51; i >= 47; i--) {
+      await move(LogicalKeyboardKey.arrowUp, i, i < 48 ? i * 64.0 : 48 * 64.0);
+    }
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowDown);
+    for (var i = 0; i < 5; i++) {
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowDown);
+    }
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'live-overlay:53');
+    await tester.pump();
+    expect(position.pixels, 54 * 64 - 384);
+    expect(selections, isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   for (final width in [320.0, 390.0, 560.0]) {
     testWidgets('channel rows fit without loading logos at $width',
         (tester) async {
@@ -32,12 +98,15 @@ void main() {
           sourceId: 's',
           name: 'No logo',
           lines: [LiveLine('https://example.test/missing')]);
-      const snapshot = LiveSnapshot(
-          sources: [LiveSource(id: 's', name: 'Source')],
-          channels: [current, other, missing],
-          preferences: {
-            'current': LivePreference(logo: 'https://example.test/override.png')
-          });
+      const snapshot = LiveSnapshot(sources: [
+        LiveSource(id: 's', name: 'Source')
+      ], channels: [
+        current,
+        other,
+        missing
+      ], preferences: {
+        'current': LivePreference(logo: 'https://example.test/override.png')
+      });
       final requests = <String>[];
       final selections = <String>[];
       await tester.pumpWidget(ProviderScope(
@@ -63,8 +132,8 @@ void main() {
       for (final channel in snapshot.channels) {
         final tile = find.ancestor(
             of: find.text(channel.name), matching: find.byType(ListTile));
-        final icon = find.descendant(
-            of: tile, matching: find.byIcon(Icons.live_tv));
+        final icon =
+            find.descendant(of: tile, matching: find.byIcon(Icons.live_tv));
         final title = find.text(channel.name);
         final trailing = find.byWidget(tester.widget<ListTile>(tile).trailing!);
         expect(tester.getSize(icon), const Size(20, 20));

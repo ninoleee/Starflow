@@ -193,5 +193,27 @@ void main() {
         isTrue,
       );
     });
+
+    test('gallery images use in-memory-only image caching', () {
+      const target = MediaDetailTarget(
+        title: '剧集',
+        posterUrl: 'https://example.com/poster.jpg',
+        overview: '',
+        backdropUrl: 'https://example.com/backdrop.jpg',
+        bannerUrl: 'https://example.com/banner.jpg',
+        extraBackdropUrls: ['https://example.com/still.jpg'],
+      );
+
+      final images = buildDetailGalleryImages(target);
+
+      expect(images, hasLength(3));
+      expect(
+        images.every(
+          (image) =>
+              image.cachePolicy == AppNetworkImageCachePolicy.networkOnly,
+        ),
+        isTrue,
+      );
+    });
   });
 }

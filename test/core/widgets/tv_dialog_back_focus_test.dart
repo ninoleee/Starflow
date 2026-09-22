@@ -52,17 +52,27 @@ void main() {
         await tester.binding.handlePopRoute();
       } else {
         await tester.sendKeyDownEvent(LogicalKeyboardKey.escape);
+        await tester.sendKeyRepeatEvent(LogicalKeyboardKey.escape);
+        await tester.pumpAndSettle();
+        expect(input.hasPrimaryFocus, isTrue);
+        expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.escape), isTrue);
       }
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsOneWidget);
       expect(confirm.hasPrimaryFocus, isTrue);
       expect(missingAction.hasPrimaryFocus, isFalse);
       if (!useSystemBack) {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.escape);
         await tester.sendKeyRepeatEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
         expect(find.byType(AlertDialog), findsOneWidget);
         expect(confirm.hasPrimaryFocus, isTrue);
+        // Cancel the pending close by moving focus away before release.
+        input.requestFocus();
+        await tester.pump();
         await tester.sendKeyUpEvent(LogicalKeyboardKey.escape);
+        confirm.requestFocus();
+        await tester.pump();
       }
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       await tester.pumpAndSettle();

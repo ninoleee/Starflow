@@ -214,12 +214,33 @@ class _PickerColumnState extends State<_PickerColumn> {
   void focusItem(int index) {
     if (widget.ids.isEmpty) return;
     focusedIndex = index.clamp(0, widget.ids.length - 1);
+    final request = ++_request;
+    final node = _node(focusedIndex);
+    final attached = node.context != null;
+    if (attached) {
+      // Transfer focus before the next paint, including cached edge rows.
+      node.requestFocus();
+    } else {
+      for (final previous in _nodes.values) {
+        if (previous.hasFocus) previous.unfocus();
+      }
+    }
     final scroll = _scroll;
     if (scroll != null && scroll.hasClients) {
-      scroll.jumpTo(_offset(focusedIndex, scroll.position.viewportDimension));
+      final position = scroll.position;
+      final top = focusedIndex * _extent;
+      final bottom = top + _extent;
+      final offset = top < position.pixels
+          ? top
+          : bottom > position.pixels + position.viewportDimension
+              ? bottom - position.viewportDimension
+              : position.pixels;
+      final target =
+          offset.clamp(position.minScrollExtent, position.maxScrollExtent);
+      if (target != position.pixels) scroll.jumpTo(target);
     }
-    final request = ++_request;
-    // Lazy rows must be laid out after scrolling before receiving focus.
+    if (attached) return;
+    // Only unbuilt rows need a layout pass before receiving focus.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && request == _request) {
         final node = _node(focusedIndex);
@@ -253,13 +274,13 @@ class _PickerColumnState extends State<_PickerColumn> {
               if (event is KeyUpEvent) return KeyEventResult.ignored;
               switch (event.logicalKey) {
                 case LogicalKeyboardKey.arrowUp:
-                  if (index == 0) {
+                  if (focusedIndex == 0) {
                     widget.onAbove?.call();
                   } else {
-                    focusItem(index - 1);
+                    focusItem(focusedIndex - 1);
                   }
                 case LogicalKeyboardKey.arrowDown:
-                  focusItem(math.min(index + 1, widget.ids.length - 1));
+                  focusItem(math.min(focusedIndex + 1, widget.ids.length - 1));
                 case LogicalKeyboardKey.arrowLeft:
                   widget.onLeft?.call();
                 case LogicalKeyboardKey.arrowRight:

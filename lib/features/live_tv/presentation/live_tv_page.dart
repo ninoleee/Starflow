@@ -293,54 +293,21 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                   return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Row(children: [
-                          if (widget.showBackButton)
-                            LiveIconButton(
-                                icon: Icons.arrow_back,
-                                label: '返回',
-                                onPressed: () =>
-                                    Navigator.of(context).maybePop()),
-                          Expanded(
-                              child: Text('直播',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .headlineSmall)),
-                          if (!kIsWeb)
-                            ListenableBuilder(
-                                listenable: _probes,
-                                builder: (_, __) => LiveIconButton(
-                                    icon: _probes.running
-                                        ? Icons.stop
-                                        : Icons.speed,
-                                    label: _probes.running
-                                        ? '停止检测 ${_probes.completed}/${_probes.total}'
-                                        : '检测可见频道',
-                                    onPressed: _probes.running
-                                        ? () {
-                                            _probesPaused = true;
-                                            unawaited(_probes.stop());
-                                          }
-                                        : filtered.isEmpty
-                                            ? null
-                                            : () => _startProbes(
-                                                _visibleChannels, s))),
-                          LiveIconButton(
-                              icon: Icons.tune,
-                              label: '直播订阅',
-                              autofocus: true,
-                              onPressed: () => Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                      builder: (_) =>
-                                          const LiveSourcesPage()))),
-                          LiveIconButton(
-                              icon:
-                                  _organize ? Icons.done : Icons.edit_outlined,
-                              label: _organize ? '完成整理' : '整理频道',
-                              onPressed: () {
-                                _clearProbeViewport();
-                                setState(() => _organize = !_organize);
-                              }),
-                        ]),
+                        SizedBox(
+                            height: 48,
+                            child: Row(children: [
+                              if (widget.showBackButton)
+                                LiveIconButton(
+                                    icon: Icons.arrow_back,
+                                    label: '返回',
+                                    onPressed: () =>
+                                        Navigator.of(context).maybePop()),
+                              Expanded(
+                                  child: Text('直播',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .headlineSmall)),
+                            ])),
                         SettingsTextInputField(
                             controller: _search, labelText: '搜索频道'),
                         const SizedBox(height: 8),
@@ -385,13 +352,64 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                                                 ],
                                                 onChanged: (v) =>
                                                     _selectGroup(v ?? ''))),
-                                      FilterChip(
-                                          label: const Text('收藏'),
-                                          selected: _favorites,
-                                          onSelected: (v) {
-                                            _clearProbeViewport();
-                                            setState(() => _favorites = v);
-                                          }),
+                                      Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            FilterChip(
+                                                label: const Text('收藏'),
+                                                selected: _favorites,
+                                                onSelected: (v) {
+                                                  _clearProbeViewport();
+                                                  setState(
+                                                      () => _favorites = v);
+                                                }),
+                                            const SizedBox(width: 12),
+                                            if (!kIsWeb)
+                                              ListenableBuilder(
+                                                  listenable: _probes,
+                                                  builder: (_, __) =>
+                                                      LiveIconButton(
+                                                          icon: _probes.running
+                                                              ? Icons.stop
+                                                              : Icons.speed,
+                                                          label: _probes.running
+                                                              ? '停止检测 ${_probes.completed}/${_probes.total}'
+                                                              : '检测可见频道',
+                                                          onPressed: _probes
+                                                                  .running
+                                                              ? () {
+                                                                  _probesPaused =
+                                                                      true;
+                                                                  unawaited(_probes
+                                                                      .stop());
+                                                                }
+                                                              : filtered.isEmpty
+                                                                  ? null
+                                                                  : () => _startProbes(
+                                                                      _visibleChannels,
+                                                                      s))),
+                                            LiveIconButton(
+                                                icon: Icons.tune,
+                                                label: '直播订阅',
+                                                autofocus: true,
+                                                onPressed: () => Navigator.of(
+                                                        context)
+                                                    .push(MaterialPageRoute<
+                                                            void>(
+                                                        builder: (_) =>
+                                                            const LiveSourcesPage()))),
+                                            LiveIconButton(
+                                                icon: _organize
+                                                    ? Icons.done
+                                                    : Icons.edit_outlined,
+                                                label:
+                                                    _organize ? '完成整理' : '整理频道',
+                                                onPressed: () {
+                                                  _clearProbeViewport();
+                                                  setState(() =>
+                                                      _organize = !_organize);
+                                                }),
+                                          ]),
                                       if (last != null)
                                         TextButton.icon(
                                             icon: const Icon(Icons.history),

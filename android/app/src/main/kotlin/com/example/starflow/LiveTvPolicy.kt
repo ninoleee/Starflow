@@ -18,14 +18,11 @@ internal object LiveTvVideoPolicy {
     }
 }
 
-internal class LiveTvHlsFallbackPolicy(url: String) {
-    private val extensionless = LiveTvHttpPolicy.parse(url).path.orEmpty().substringAfterLast('/').let {
-        it.isEmpty() || !it.contains('.')
-    }
+internal class LiveTvHlsFallbackPolicy {
     private var attempted = false
 
     fun tryFallback(unrecognizedContainer: Boolean): Boolean {
-        if (!extensionless || attempted || !unrecognizedContainer) return false
+        if (attempted || !unrecognizedContainer) return false
         attempted = true
         return true
     }

@@ -467,6 +467,65 @@ void main() {
     );
   });
 
+  test('keeps root episode and quality-folder variants in season one', () {
+    final items = <ExternalScanPendingItem>[
+      for (var episode = 1; episode <= 21; episode++)
+        _pendingItem(
+          id: 'lanxiang-s01e$episode',
+          address:
+              '/movies/strm/quark/兰香如故/S01E${episode.toString().padLeft(2, '0')}.2026.2160p.WEB-DL.strm',
+          directories: const ['strm', 'quark', '兰香如故'],
+        ),
+      _pendingItem(
+        id: 'lanxiang-22-mp4',
+        address: '/movies/strm/quark/兰香如故/22.(mp4).strm',
+        directories: const ['strm', 'quark', '兰香如故'],
+      ),
+      _pendingItem(
+        id: 'lanxiang-22-mkv',
+        address: '/movies/strm/quark/兰香如故/22.(mkv).strm',
+        directories: const ['strm', 'quark', '兰香如故'],
+      ),
+    ];
+    const wrappers = ['4K HDR 高码率', '4K DV杜比视界', '4K SDR'];
+    for (var wrapperIndex = 0; wrapperIndex < wrappers.length; wrapperIndex++) {
+      final wrapper = wrappers[wrapperIndex];
+      for (final episode in [1, 7, 22]) {
+        items.add(
+          _pendingItem(
+            id: 'lanxiang-wrapper-$wrapperIndex-$episode',
+            address:
+                '/movies/strm/quark/兰香如故/$wrapper/${episode.toString().padLeft(2, '0')}.(mkv).strm',
+            directories: ['strm', 'quark', '兰香如故', wrapper],
+          ),
+        );
+      }
+    }
+
+    final resolved = applyExternalDirectoryStructureInference(
+      items,
+      source: source,
+    );
+
+    expect(resolved, hasLength(32));
+    expect(
+      resolved.map((item) => item.metadataSeed.itemType),
+      everyElement('episode'),
+    );
+    expect(
+      resolved.map((item) => item.metadataSeed.seasonNumber),
+      everyElement(1),
+    );
+    final episode22 = resolved.where(
+      (item) => item.actualAddress.contains('/22.'),
+    );
+    expect(episode22, hasLength(5));
+    expect(
+      episode22.map((item) => item.metadataSeed.episodeNumber),
+      everyElement(22),
+    );
+  });
+
   test('uses the outer movie folder for one nested release wrapper', () {
     final resolved = applyExternalDirectoryStructureInference(
       [

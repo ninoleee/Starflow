@@ -51,11 +51,42 @@ class NativePlaybackRemoteControllerTest {
     }
 
     @Test
+    fun backAndMenuCommandsWaitForReleaseAndConsumeRepeats() {
+        `when`(host.playerView.isControllerFullyVisible).thenReturn(true)
+        assertTrue(send(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_DOWN))
+        assertTrue(send(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_DOWN, repeat = 2))
+        verify(host.controllerView, never()).hideController()
+        assertTrue(send(KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_UP))
+        verify(host.controllerView).hideController()
+
+        assertTrue(send(KeyEvent.KEYCODE_MENU, KeyEvent.ACTION_DOWN))
+        assertTrue(send(KeyEvent.KEYCODE_MENU, KeyEvent.ACTION_DOWN, repeat = 2))
+        verify(host.settings, never()).openPlaybackSettingsDialog()
+        assertTrue(send(KeyEvent.KEYCODE_MENU, KeyEvent.ACTION_UP))
+        verify(host.settings).openPlaybackSettingsDialog()
+    }
+
+    @Test
+    fun pendingMenuIsCanceledByFocusLossOrInputReset() {
+        assertTrue(send(KeyEvent.KEYCODE_MENU, KeyEvent.ACTION_DOWN))
+        `when`(host.activity.hasWindowFocus()).thenReturn(false)
+        assertTrue(send(KeyEvent.KEYCODE_MENU, KeyEvent.ACTION_UP))
+        verify(host.settings, never()).openPlaybackSettingsDialog()
+        `when`(host.activity.hasWindowFocus()).thenReturn(true)
+        assertTrue(send(KeyEvent.KEYCODE_MENU, KeyEvent.ACTION_DOWN))
+        controller.resetInputState()
+        assertFalse(send(KeyEvent.KEYCODE_MENU, KeyEvent.ACTION_UP))
+        verify(host.settings, never()).openPlaybackSettingsDialog()
+    }
+
+    @Test
     fun visibleControllerDownOpensEpisodePickerWithoutAMenuKey() {
         `when`(host.playerView.isControllerFullyVisible).thenReturn(true)
         `when`(host.episodes.openEpisodeSelectionDialog()).thenReturn(true)
         assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN))
         assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN, repeat = 1))
+        verify(host.episodes, never()).openEpisodeSelectionDialog()
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_UP))
         verify(host.episodes).openEpisodeSelectionDialog()
         verify(host.settings, never()).openPlaybackSettingsDialog()
         verify(host.session, never()).togglePlayback()
@@ -66,6 +97,7 @@ class NativePlaybackRemoteControllerTest {
         `when`(host.playerView.isControllerFullyVisible).thenReturn(true)
         `when`(host.episodes.openEpisodeSelectionDialog()).thenReturn(false)
         assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN))
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_UP))
         verify(host.settings).openPlaybackSettingsDialog()
     }
 
@@ -74,10 +106,12 @@ class NativePlaybackRemoteControllerTest {
         `when`(host.playerView.isControllerFullyVisible).thenReturn(false)
         `when`(host.episodes.openEpisodeSelectionDialog()).thenReturn(true)
         assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN))
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_UP))
         verify(host.episodes).openEpisodeSelectionDialog()
         verify(host.settings, never()).openPlaybackSettingsDialog()
         `when`(host.episodes.openEpisodeSelectionDialog()).thenReturn(false)
         assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN, downTime = 200L))
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_UP, downTime = 200L))
         verify(host.settings).openPlaybackSettingsDialog()
     }
 
@@ -98,9 +132,11 @@ class NativePlaybackRemoteControllerTest {
     @Test
     fun upThenDownReachesSettingsWithoutPausingPlayback() {
         assertTrue(send(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.ACTION_DOWN))
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_UP, KeyEvent.ACTION_UP))
         verify(host.controllerView).showControllerForRemoteFocus(ControllerFocusTarget.PRIMARY)
         `when`(host.playerView.isControllerFullyVisible).thenReturn(true)
         assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_DOWN, downTime = 200L))
+        assertTrue(send(KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.ACTION_UP, downTime = 200L))
         verify(host.settings).openPlaybackSettingsDialog()
         verify(host.session, never()).togglePlayback()
     }

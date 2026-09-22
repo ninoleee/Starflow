@@ -4,6 +4,7 @@ import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/details/presentation/widgets/detail_image_preview.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 
 class DetailBlock extends StatelessWidget {
@@ -613,7 +614,7 @@ DetailBackdropImageSources buildDetailBackdropImageSourcesForMediaItem(
   );
 }
 
-class DetailImageGallery extends StatelessWidget {
+class DetailImageGallery extends StatefulWidget {
   const DetailImageGallery({
     super.key,
     required this.images,
@@ -624,40 +625,70 @@ class DetailImageGallery extends StatelessWidget {
   final String focusIdPrefix;
 
   @override
+  State<DetailImageGallery> createState() => _DetailImageGalleryState();
+}
+
+class _DetailImageGalleryState extends State<DetailImageGallery> {
+  final Map<String, ImageProvider<Object>> _providers =
+      <String, ImageProvider<Object>>{};
+
+  String _imageIdentity(DetailImageAsset image) {
+    final headers = image.headers.entries.toList(growable: false)
+      ..sort((left, right) => left.key.compareTo(right.key));
+    final buffer = StringBuffer(image.url.trim());
+    for (final entry in headers) {
+      buffer
+        ..write('\n')
+        ..write(entry.key.trim().toLowerCase())
+        ..write(':')
+        ..write(entry.value.trim());
+    }
+    buffer
+      ..write('\ncache-policy:')
+      ..write(image.cachePolicy.name);
+    return buffer.toString();
+  }
+
+  @override
+  void didUpdateWidget(covariant DetailImageGallery oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final activeIdentities = widget.images.map(_imageIdentity).toSet();
+    final removedProviders = <ImageProvider<Object>>[];
+    _providers.removeWhere((identity, provider) {
+      if (activeIdentities.contains(identity)) {
+        return false;
+      }
+      removedProviders.add(provider);
+      return true;
+    });
+    for (final provider in removedProviders) {
+      evictDetailImageMemory(provider);
+    }
+  }
+
+  @override
+  void dispose() {
+    final providers = _providers.values.toSet();
+    _providers.clear();
+    for (final provider in providers) {
+      evictDetailImageMemory(provider);
+    }
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     Future<void> openPreview(DetailImageAsset image) {
       return showDialog<void>(
         context: context,
-        builder: (dialogContext) {
-          return Dialog(
-            backgroundColor: Colors.transparent,
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 28,
-              vertical: 24,
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(AppRadii.lg),
-              child: AspectRatio(
-                aspectRatio: 16 / 9,
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(
-                    color: AppColors.neutral1,
-                  ),
-                  child: AppNetworkImage(
-                    image.url,
-                    headers: image.headers,
-                    cachePolicy: image.cachePolicy,
-                    fit: BoxFit.contain,
-                    throttleOnTelevision: false,
-                    errorBuilder: (context, error, stackTrace) {
-                      return const ColoredBox(color: AppColors.neutral3);
-                    },
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
+        builder: (_) => DetailImagePreview(
+          image: AppNetworkImageSource(
+            url: image.url,
+            headers: image.headers,
+            cachePolicy: image.cachePolicy,
+          ),
+          initialProvider: _providers[_imageIdentity(image)],
+        ),
       );
     }
 
@@ -670,13 +701,14 @@ class DetailImageGallery extends StatelessWidget {
           physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.symmetric(vertical: 10),
           clipBehavior: Clip.none,
-          itemCount: images.length,
+          itemCount: widget.images.length,
           separatorBuilder: (context, index) => const SizedBox(width: 14),
           itemBuilder: (context, index) {
-            final image = images[index];
+            final image = widget.images[index];
+            final imageIdentity = _imageIdentity(image);
             return TvFocusableAction(
               onPressed: () => openPreview(image),
-              focusId: '$focusIdPrefix:$index',
+              focusId: '${widget.focusIdPrefix}:$index',
               borderRadius: BorderRadius.circular(AppRadii.md),
               visualStyle: TvFocusVisualStyle.subtle,
               focusScale: kTvButtonFocusScale,
@@ -686,16 +718,15 @@ class DetailImageGallery extends StatelessWidget {
                   aspectRatio: 16 / 9,
                   child: SizedBox(
                     width: 268,
-                    child: AppNetworkImage(
-                      image.url,
-                      headers: image.headers,
-                      cachePolicy: image.cachePolicy,
-                      cacheWidth: 804,
-                      cacheHeight: 452,
-                      fit: BoxFit.cover,
-                      throttleOnTelevision: false,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const ColoredBox(color: AppColors.neutral3);
+                    child: _DetailGalleryThumbnail(
+                      key: ValueKey(imageIdentity),
+                      image: image,
+                      initialProvider: _providers[imageIdentity],
+                      onImageReady: (provider) {
+                        if (!mounted) {
+                          return;
+                        }
+                        _providers[imageIdentity] = provider;
                       },
                     ),
                   ),
@@ -734,18 +765,12 @@ List<DetailImageAsset> buildDetailGalleryImages(MediaDetailTarget target) {
   add(
     target.backdropUrl,
     target.backdropHeaders,
-    shouldBypassPersistentCacheForDetailBackdrop(
-      itemType: target.itemType,
-      backdropUrl: target.backdropUrl,
-      bannerUrl: target.bannerUrl,
-    )
-        ? AppNetworkImageCachePolicy.networkOnly
-        : AppNetworkImageCachePolicy.persistent,
+    AppNetworkImageCachePolicy.networkOnly,
   );
   add(
     target.bannerUrl,
     target.bannerHeaders,
-    AppNetworkImageCachePolicy.persistent,
+    AppNetworkImageCachePolicy.networkOnly,
   );
   for (final url in target.extraBackdropUrls) {
     add(
@@ -755,4 +780,79 @@ List<DetailImageAsset> buildDetailGalleryImages(MediaDetailTarget target) {
     );
   }
   return images;
+}
+
+class _DetailGalleryThumbnail extends StatefulWidget {
+  const _DetailGalleryThumbnail({
+    super.key,
+    required this.image,
+    required this.initialProvider,
+    required this.onImageReady,
+  });
+
+  final DetailImageAsset image;
+  final ImageProvider<Object>? initialProvider;
+  final ValueChanged<ImageProvider<Object>> onImageReady;
+
+  @override
+  State<_DetailGalleryThumbnail> createState() =>
+      _DetailGalleryThumbnailState();
+}
+
+class _DetailGalleryThumbnailState extends State<_DetailGalleryThumbnail> {
+  ImageProvider<Object>? _provider;
+
+  @override
+  void initState() {
+    super.initState();
+    _provider = widget.initialProvider;
+  }
+
+  Widget _buildImage(ImageProvider<Object> provider) {
+    return Image(
+      image: ResizeImage(
+        provider,
+        width: detailGalleryImageDecodeWidth,
+        height: detailGalleryImageDecodeHeight,
+      ),
+      fit: BoxFit.cover,
+      filterQuality: FilterQuality.low,
+      gaplessPlayback: true,
+      errorBuilder: (context, error, stackTrace) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && identical(_provider, provider)) {
+            setState(() => _provider = null);
+          }
+        });
+        return const ColoredBox(color: AppColors.neutral3);
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = _provider;
+    if (provider != null) {
+      return _buildImage(provider);
+    }
+    return AppNetworkImage(
+      widget.image.url,
+      headers: widget.image.headers,
+      cachePolicy: widget.image.cachePolicy,
+      cacheWidth: detailGalleryImageDecodeWidth,
+      cacheHeight: detailGalleryImageDecodeHeight,
+      fit: BoxFit.cover,
+      throttleOnTelevision: false,
+      onImageReady: (provider) {
+        if (!mounted) {
+          return;
+        }
+        widget.onImageReady(provider);
+        _provider = provider;
+      },
+      errorBuilder: (context, error, stackTrace) {
+        return const ColoredBox(color: AppColors.neutral3);
+      },
+    );
+  }
 }

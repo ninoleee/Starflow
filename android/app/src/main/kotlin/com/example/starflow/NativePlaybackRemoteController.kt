@@ -50,13 +50,26 @@ internal class NativePlaybackRemoteController(
     private var lastSeekAtMs = 0L
     private var pendingSeekRunnable: Runnable? = null
     private val handledPlaybackKeys = mutableMapOf<Pair<Int, Int>, Long>()
+    private val pendingCommands = mutableMapOf<Pair<Int, Int>, Long>()
 
     fun resetInputState() {
         handledPlaybackKeys.clear()
+        pendingCommands.clear()
         resetTvSeekHold()
     }
 
     fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val commandKey = event.deviceId to event.keyCode
+        val pending = pendingCommands[commandKey]
+        if (pending != null && pending == event.downTime) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                pendingCommands.remove(commandKey)
+                if (!event.isCanceled && host.activity.hasWindowFocus() && ownsCommand(event)) {
+                    dispatchCommandKey(event)
+                }
+            }
+            return true
+        }
         if (host.isTelevisionDevice && isTvSeekKeyCode(event.keyCode)) {
             return handleTvDirectionalSeek(event)
         }
@@ -69,6 +82,28 @@ internal class NativePlaybackRemoteController(
         }
         resetTvSeekHold()
 
+        if (ownsCommand(event)) {
+            if (event.repeatCount == 0 && !event.isCanceled) {
+                pendingCommands[commandKey] = event.downTime
+            }
+            return true
+        }
+        return dispatchCommandKey(event)
+    }
+
+    private fun ownsCommand(event: KeyEvent): Boolean {
+        if (!host.isTelevisionDevice || host.externalSubtitles.subtitleSearchActive ||
+            host.settings.isOverlayDialogVisible() || exitConfirmationDialog?.isShowing == true
+        ) return false
+        return event.keyCode in intArrayOf(
+            KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE,
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO, KeyEvent.KEYCODE_SETTINGS,
+            KeyEvent.KEYCODE_CAPTIONS, KeyEvent.KEYCODE_SEARCH,
+        ) && (event.keyCode != KeyEvent.KEYCODE_DPAD_UP || !host.playerView.isControllerFullyVisible)
+    }
+
+    private fun dispatchCommandKey(event: KeyEvent): Boolean {
         when (event.keyCode) {
             KeyEvent.KEYCODE_BACK,
             KeyEvent.KEYCODE_ESCAPE -> {

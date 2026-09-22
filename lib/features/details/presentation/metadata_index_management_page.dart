@@ -154,8 +154,7 @@ class _MetadataIndexManagementPageState
       }
       final route = ModalRoute.of(context);
       final routeIsCurrent = route == null || route.isCurrent;
-      final pageIsActive =
-          routeIsCurrent && TickerMode.of(context);
+      final pageIsActive = routeIsCurrent && TickerMode.of(context);
       if (!pageIsActive ||
           _autoRefreshFocusNode.context == null ||
           !_autoRefreshFocusNode.canRequestFocus) {
@@ -312,8 +311,8 @@ class _MetadataIndexManagementPageState
     if (!enabled) {
       return wrapped;
     }
-    return Shortcuts(
-      shortcuts: const <ShortcutActivator, Intent>{
+    return TvRemoteShortcuts(
+      shortcuts: const <SingleActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
         SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
       },

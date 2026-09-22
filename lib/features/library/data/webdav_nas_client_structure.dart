@@ -110,6 +110,7 @@ class _ExternalScanStructureModule {
     }
 
     final movieVersionResourceIds = _resolveMovieVersionResourceIds(
+      filesByDirectory: filesByDirectory,
       childItemsByDirectory: childItemsByDirectory,
       recognitionByResource: recognitionByResource,
     );
@@ -126,6 +127,7 @@ class _ExternalScanStructureModule {
   }
 
   Set<String> _resolveMovieVersionResourceIds({
+    required Map<String, List<_PendingWebDavScannedItem>> filesByDirectory,
     required Map<String, Map<String, List<_PendingWebDavScannedItem>>>
         childItemsByDirectory,
     required Map<String, NasMediaRecognition> recognitionByResource,
@@ -135,6 +137,20 @@ class _ExternalScanStructureModule {
       final parentSegments = _segmentsFromKey(parentEntry.key);
       final parentDepth = parentSegments.length;
       final parentTitle = parentSegments.isEmpty ? '' : parentSegments.last;
+      final directItems = filesByDirectory[parentEntry.key] ?? const [];
+      // A title directory with explicit episodic files at its root owns its
+      // quality subdirectories.  Do not classify those subdirectories as
+      // movie versions; numeric files below them are alternate episode
+      // resources (for example 4K HDR / DV / SDR copies of one season).
+      final hasDirectSeriesEvidence = directItems.any(
+        (item) => _hasExplicitSeriesEvidence(
+          item,
+          recognition: recognitionByResource[item.resourceId],
+        ),
+      );
+      if (hasDirectSeriesEvidence) {
+        continue;
+      }
       final movieVersionGroups = parentEntry.value.entries.where((entry) {
         if (!NasMediaRecognizer.matchesMovieVersionFolderLabel(entry.key) &&
             !NasMediaPathPolicy.looksLikeNestedMovieReleaseFolder(
@@ -537,6 +553,8 @@ class _ExternalScanStructureModule {
   }) {
     final seed = item.metadataSeed;
     final explicitSeasonNumber = seed.seasonNumber ?? recognition?.seasonNumber;
+    final explicitEpisodeNumber =
+        seed.episodeNumber ?? recognition?.episodeNumber;
     final rootDepth = _segmentsFromKey(seriesRootKey).length;
     final isRootDirectFile = item.relativeDirectories.length == rootDepth;
     final childDirectoryName =
@@ -575,7 +593,7 @@ class _ExternalScanStructureModule {
         : effectiveIsRootDirectFile
             ? collapseChildDirectoryToRoot
                 ? 1
-                : plan.rootItemsAsSpecials
+                : plan.rootItemsAsSpecials && explicitEpisodeNumber == null
                     ? 0
                     : 1
             : hintedSeasonNumber;
@@ -586,9 +604,11 @@ class _ExternalScanStructureModule {
         : effectiveIsRootDirectFile
             ? (collapseChildDirectoryToRoot
                 ? _implicitSeasonGroupKey
-                : plan.rootItemsAsSpecials
-                    ? _directSeasonGroupKey
-                    : _implicitSeasonGroupKey)
+                : explicitEpisodeNumber != null
+                    ? _buildExplicitSeasonGroupKey(1)
+                    : plan.rootItemsAsSpecials
+                        ? _directSeasonGroupKey
+                        : _implicitSeasonGroupKey)
             : hintedSeasonNumber != null
                 ? _buildExplicitSeasonGroupKey(hintedSeasonNumber)
                 : effectiveChildDirectoryName;

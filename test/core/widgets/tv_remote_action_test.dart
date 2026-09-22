@@ -83,11 +83,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.sendKeyDownEvent(key);
       await tester.sendKeyRepeatEvent(key);
+      expect(firstCalls, 0);
       second.requestFocus();
       await tester.pump();
       await tester.sendKeyRepeatEvent(key);
       await tester.sendKeyUpEvent(key);
-      expect(firstCalls, 1);
+      expect(firstCalls, 0, reason: 'Focus changes cancel a held command');
       expect(secondCalls, 0);
       await tester.sendKeyEvent(key);
       expect(secondCalls, 1);

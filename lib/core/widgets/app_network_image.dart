@@ -62,6 +62,7 @@ class AppNetworkImage extends ConsumerStatefulWidget {
     this.fallbackSources = const [],
     this.cachePolicy = AppNetworkImageCachePolicy.persistent,
     this.throttleOnTelevision = true,
+    this.onImageReady,
   });
 
   final String url;
@@ -79,6 +80,9 @@ class AppNetworkImage extends ConsumerStatefulWidget {
   final List<AppNetworkImageSource> fallbackSources;
   final AppNetworkImageCachePolicy cachePolicy;
   final bool throttleOnTelevision;
+
+  /// Receives the unresized provider after a raster frame has decoded.
+  final ValueChanged<ImageProvider<Object>>? onImageReady;
 
   @override
   ConsumerState<AppNetworkImage> createState() => _AppNetworkImageState();
@@ -455,6 +459,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         if (wasSynchronouslyLoaded || frame != null) {
           onLoadSettled?.call();
           _markImageLoadSucceeded();
+          widget.onImageReady?.call(provider);
           return child;
         }
         return _buildLoading(context);

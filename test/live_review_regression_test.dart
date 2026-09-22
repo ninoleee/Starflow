@@ -287,7 +287,7 @@ void main() {
     c.select(channel);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 180));
-    await tester.pump(const Duration(seconds: 15));
+    await tester.pump(livePlaybackTimeout);
     expect(engine.cancellations, 1);
     expect(c.status, 'retrying');
     expect(engine.active, 0);

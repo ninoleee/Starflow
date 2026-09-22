@@ -87,10 +87,11 @@ void main() {
     c.select(_channel('a'));
     await _debounce(tester);
     final old = engine.opens.single;
-    await tester.pump(const Duration(seconds: 15));
+    await tester.pump(livePlaybackTimeout);
     expect(c.status, 'retrying');
     expect(c.retries, 1);
     expect(c.failure, LivePlaybackFailure.openTimeout);
+    expect(c.recoveryLabel, '正在切换到线路 2');
     old.emit('frame');
     expect(remembered, isEmpty);
     await tester.pump(const Duration(seconds: 2));
@@ -193,7 +194,7 @@ void main() {
     final c = _controller(engine);
     c.select(_channel('a'));
     await _debounce(tester);
-    for (var second = 0; second < 17; second++) {
+    for (var second = 0; second < 4; second++) {
       engine.opens.single.emit('ready');
       engine.opens.single.emit('buffering');
       await tester.pump(const Duration(seconds: 1));
@@ -212,11 +213,11 @@ void main() {
     final c = _controller(engine);
     c.select(_channel('a'));
     await _debounce(tester);
-    await tester.pump(const Duration(seconds: 17));
+    await tester.pump(const Duration(seconds: 4));
     engine.opens.single.emit('progress');
-    await tester.pump(const Duration(seconds: 17));
+    await tester.pump(const Duration(seconds: 4));
     engine.opens.single.emit('frame');
-    await tester.pump(const Duration(seconds: 17));
+    await tester.pump(const Duration(seconds: 4));
     engine.opens.single.emit('ready');
     expect(c.retries, 0);
     await tester.pump(const Duration(seconds: 1));
@@ -442,7 +443,7 @@ void main() {
     final c = _controller(engine);
     c.select(_channel('a'));
     await _debounce(tester);
-    await tester.pump(const Duration(seconds: 15));
+    await tester.pump(livePlaybackTimeout);
     opening.completeError(StateError('late timeout rejection'));
     await tester.pump();
     expect(c.retries, 1);

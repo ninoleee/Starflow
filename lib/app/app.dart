@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
+import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/app/lifecycle/app_runtime_recovery_boundary.dart';
 import 'package:starflow/app/router/app_router.dart';
 import 'package:starflow/app/theme/app_theme.dart';
@@ -23,6 +25,7 @@ class StarflowApp extends ConsumerWidget {
       appSettingsProvider.select((settings) => settings.appAccent),
     );
     final theme = AppTheme.dark(accent: accent);
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     return AppRuntimeRecoveryBoundary(
       child: MaterialApp.router(
         title: 'Starflow',
@@ -35,8 +38,34 @@ class StarflowApp extends ConsumerWidget {
           actions: <Type, Action<Intent>>{
             DirectionalFocusIntent: _tvSafeDirectionalFocusAction,
           },
-          child: MobileTextInputDismissal(
-            child: child ?? const SizedBox.shrink(),
+          child: TvRemoteShortcuts(
+            shortcuts: isTelevision
+                ? const {
+                    SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
+                    SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
+                    SingleActivator(LogicalKeyboardKey.select):
+                        ActivateIntent(),
+                    SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+                    SingleActivator(LogicalKeyboardKey.numpadEnter):
+                        ActivateIntent(),
+                    SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+                    SingleActivator(LogicalKeyboardKey.gameButtonA):
+                        ActivateIntent(),
+                  }
+                : const {},
+            child: Actions(
+              actions: {
+                if (isTelevision)
+                  DismissIntent: CallbackAction<DismissIntent>(onInvoke: (_) {
+                    final focused = FocusManager.instance.primaryFocus?.context;
+                    if (focused != null) Navigator.maybeOf(focused)?.maybePop();
+                    return null;
+                  }),
+              },
+              child: MobileTextInputDismissal(
+                child: child ?? const SizedBox.shrink(),
+              ),
+            ),
           ),
         ),
       ),

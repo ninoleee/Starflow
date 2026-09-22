@@ -10,6 +10,8 @@ import '../domain/live_models.dart';
 import 'live_mpv_options.dart';
 import 'live_playback_error.dart';
 
+const livePlaybackTimeout = Duration(seconds: 5);
+
 abstract class LiveEngine {
   Future<void> open(
       LiveLine line, int generation, void Function(int, String) onState);
@@ -336,6 +338,13 @@ class LivePlaybackController extends ChangeNotifier {
   LivePlaybackFailure? failure;
   LivePlaybackErrorDetails? errorDetails;
   String? get failureLabel => errorDetails?.label ?? failure?.label;
+  String get recoveryLabel {
+    final current = channel;
+    if (current == null || current.lines.length <= 1) return '正在重新连接';
+    final next = (line + 1) % current.lines.length;
+    return '正在切换到线路 ${next + 1}';
+  }
+
   bool _closed = false, _remembered = false, muted;
   bool _paused = false;
   String pauseReason = '';
@@ -428,12 +437,12 @@ class LivePlaybackController extends ChangeNotifier {
             'attempt': retries + 1,
             'platform': defaultTargetPlatform.name,
           });
-          _armDeadline(token);
           // The engine cancellation path bypasses this queue, but ownership
           // stays here until native unloading has acknowledged cancellation.
-          final deadline = Timer(const Duration(seconds: 15),
+          final deadline = Timer(livePlaybackTimeout,
               () => _fail(token, LivePlaybackFailure.openTimeout));
           _openDeadline = deadline;
+          _armDeadline(token);
           try {
             await Future.any([
               engine.open(selectedLine, token, (eventToken, state) {
@@ -459,7 +468,7 @@ class LivePlaybackController extends ChangeNotifier {
 
   void _armDeadline(int token) {
     _deadline?.cancel();
-    _deadline = Timer(const Duration(seconds: 18),
+    _deadline = Timer(livePlaybackTimeout,
         () => _fail(token, LivePlaybackFailure.progressTimeout));
   }
 

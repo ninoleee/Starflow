@@ -373,7 +373,12 @@ MediaDetailTarget? resolvePreferredEntryLibraryChoice({
   MediaDetailTarget? currentTarget,
 }) {
   if (pageSeedTarget.isSeries) {
-    return null;
+    // A library series is already a browsable resource, even without a
+    // playable episode. Keep its identity when another source owns the cache.
+    return pageSeedTarget.sourceId.trim().isNotEmpty &&
+            pageSeedTarget.itemId.trim().isNotEmpty
+        ? pageSeedTarget
+        : null;
   }
   for (final candidate in [currentTarget, pageSeedTarget]) {
     if (candidate == null) {

@@ -1385,7 +1385,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         pageSeedTarget: widget.target,
         allowedSources: allowedSources,
       );
-      final skipPreferredSourceSearch = resolvePreferredEntryLibraryChoice(
+      final skipPreferredSourceSearch = !widget.target.isSeries &&
+          resolvePreferredEntryLibraryChoice(
                 pageSeedTarget: widget.target,
                 currentTarget: currentTarget,
               ) !=

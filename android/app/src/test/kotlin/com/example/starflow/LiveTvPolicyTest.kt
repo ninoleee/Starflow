@@ -145,15 +145,11 @@ class LiveTvPolicyTest {
     }
 
     @Test
-    fun `extensionless HLS fallback is one shot and only on unrecognized container`() {
-        for (url in listOf("https://source.test/live?token=secret.m3u8", "https://source.test/live/")) {
-            val policy = LiveTvHlsFallbackPolicy(url)
-            assertFalse(policy.tryFallback(false)) // TS, HTTP and decoder failures keep their original path.
-            assertTrue(policy.tryFallback(true))
-            assertFalse(policy.tryFallback(true))
-        }
-        for (path in listOf("live.ts", "live.mp4", "live.m3u8", "live.mpd")) {
-            assertFalse(LiveTvHlsFallbackPolicy("https://source.test/$path").tryFallback(true))
-        }
+    fun `HLS fallback is one shot and only on unrecognized container`() {
+        val policy = LiveTvHlsFallbackPolicy()
+        assertFalse(policy.tryFallback(false)) // HTTP and decoder failures keep their original path.
+        assertTrue(policy.tryFallback(true))
+        assertFalse(policy.tryFallback(true))
+        assertTrue(LiveTvHlsFallbackPolicy().tryFallback(true))
     }
 }
