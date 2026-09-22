@@ -374,6 +374,28 @@ class TmdbMetadataClient {
     );
   }
 
+  Uri _buildCompanySearchUri(String name) {
+    return Uri.https('api.themoviedb.org', '/3/search/company', {
+      'query': name,
+      'language': 'zh-CN',
+      'page': '1',
+    });
+  }
+
+  Uri _buildCompanyCreditsUri(
+    int companyId, {
+    required bool isSeries,
+  }) {
+    return Uri.https(
+      'api.themoviedb.org',
+      '/3/company/$companyId/${isSeries ? 'tv' : 'movie'}',
+      {
+        'language': 'zh-CN',
+        'page': '1',
+      },
+    );
+  }
+
   Map<String, String> _buildHeaders(String token) {
     return {
       'Accept': 'application/json',
@@ -470,6 +492,54 @@ class TmdbMetadataClient {
       if (score > bestScore) {
         bestScore = score;
         best = item;
+      }
+    }
+
+    return best;
+  }
+
+  Map<String, dynamic>? _pickBestCompanyMatch(
+    List<Map<String, dynamic>> results, {
+    required String name,
+    required String logoUrl,
+  }) {
+    if (results.isEmpty) {
+      return null;
+    }
+
+    final normalizedName = name.trim().toLowerCase();
+    final logoSegment = _extractImagePathSegment(logoUrl);
+    Map<String, dynamic>? best;
+    var bestScore = double.negativeInfinity;
+
+    for (final item in results) {
+      final companyName = '${item['name'] ?? ''}'.trim();
+      if (companyName.isEmpty) {
+        continue;
+      }
+
+      var score = 0.0;
+      final normalizedCompanyName = companyName.toLowerCase();
+      if (normalizedCompanyName == normalizedName) {
+        score += 120;
+      } else if (normalizedCompanyName.contains(normalizedName) ||
+          normalizedName.contains(normalizedCompanyName)) {
+        score += 48;
+      }
+
+      final resultLogoSegment = _extractImagePathSegment(
+        '${item['logo_path'] ?? ''}',
+      );
+      if (logoSegment.isNotEmpty &&
+          resultLogoSegment.isNotEmpty &&
+          logoSegment == resultLogoSegment) {
+        score += 90;
+      }
+
+      score += ((item['popularity'] as num?)?.toDouble() ?? 0) / 100;
+      if (score > bestScore) {
+        best = item;
+        bestScore = score;
       }
     }
 
@@ -758,6 +828,106 @@ class TmdbMetadataClient {
     );
   }
 
+  Future<List<TmdbPersonCredit>> fetchCompanyCredits({
+    required String name,
+    required String logoUrl,
+    required String readAccessToken,
+    int limit = 60,
+  }) async {
+    final trimmedName = name.trim();
+    final cleanedToken = readAccessToken.trim();
+    if (trimmedName.isEmpty || cleanedToken.isEmpty || limit <= 0) {
+      return const [];
+    }
+
+    final searchResponse = await _networkGuard.get(
+      _client,
+      _buildCompanySearchUri(trimmedName),
+      headers: _buildHeaders(cleanedToken),
+    );
+    if (searchResponse.statusCode != 200) {
+      throw TmdbMetadataException(
+        'TMDB 公司搜索失败：HTTP ${searchResponse.statusCode}',
+      );
+    }
+
+    final decodedSearch = jsonDecode(
+      utf8.decode(searchResponse.bodyBytes, allowMalformed: true),
+    );
+    if (decodedSearch is! Map<String, dynamic>) {
+      return const [];
+    }
+
+    final companyResults =
+        (decodedSearch['results'] as List<dynamic>? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(growable: false);
+    final company = _pickBestCompanyMatch(
+      companyResults,
+      name: trimmedName,
+      logoUrl: logoUrl,
+    );
+    if (company == null) {
+      return const [];
+    }
+
+    final companyId = (company['id'] as num?)?.toInt() ?? 0;
+    if (companyId <= 0) {
+      return const [];
+    }
+
+    final responses = await Future.wait([
+      _networkGuard.get(
+        _client,
+        _buildCompanyCreditsUri(companyId, isSeries: false),
+        headers: _buildHeaders(cleanedToken),
+      ),
+      _networkGuard.get(
+        _client,
+        _buildCompanyCreditsUri(companyId, isSeries: true),
+        headers: _buildHeaders(cleanedToken),
+      ),
+    ]);
+    final movieResponse = responses[0];
+    final tvResponse = responses[1];
+    if (movieResponse.statusCode != 200) {
+      throw TmdbMetadataException(
+        'TMDB 公司电影作品失败：HTTP ${movieResponse.statusCode}',
+      );
+    }
+    if (tvResponse.statusCode != 200) {
+      throw TmdbMetadataException(
+        'TMDB 公司剧集作品失败：HTTP ${tvResponse.statusCode}',
+      );
+    }
+
+    final decodedMovies = jsonDecode(
+      utf8.decode(movieResponse.bodyBytes, allowMalformed: true),
+    );
+    final decodedTvShows = jsonDecode(
+      utf8.decode(tvResponse.bodyBytes, allowMalformed: true),
+    );
+    final movieItems = decodedMovies is Map<String, dynamic>
+        ? (decodedMovies['results'] as List<dynamic>? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(growable: false)
+        : const <Map<String, dynamic>>[];
+    final tvItems = decodedTvShows is Map<String, dynamic>
+        ? (decodedTvShows['results'] as List<dynamic>? ?? const [])
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(growable: false)
+        : const <Map<String, dynamic>>[];
+
+    return _mapCompanyCredits(
+      movieItems: movieItems,
+      tvItems: tvItems,
+      limit: limit,
+    );
+  }
+
   static List<TmdbPersonProfile> _resolveActorProfiles(Object? raw) {
     return _resolvePersonProfiles(raw, limit: 8);
   }
@@ -839,6 +1009,90 @@ class TmdbMetadataClient {
         ),
       );
     }
+
+    credits.sort((left, right) {
+      final popularityCompare = right.popularity.compareTo(left.popularity);
+      if (popularityCompare != 0) {
+        return popularityCompare;
+      }
+      final yearCompare = right.year.compareTo(left.year);
+      if (yearCompare != 0) {
+        return yearCompare;
+      }
+      return left.title.compareTo(right.title);
+    });
+
+    if (credits.length <= limit) {
+      return credits;
+    }
+    return credits.take(limit).toList(growable: false);
+  }
+
+  List<TmdbPersonCredit> _mapCompanyCredits({
+    required List<Map<String, dynamic>> movieItems,
+    required List<Map<String, dynamic>> tvItems,
+    required int limit,
+  }) {
+    final seen = <String>{};
+    final credits = <TmdbPersonCredit>[];
+
+    void addItems(
+      List<Map<String, dynamic>> items, {
+      required bool isSeries,
+    }) {
+      final mediaType = isSeries ? 'tv' : 'movie';
+      for (final item in items) {
+        final id = (item['id'] as num?)?.toInt() ?? 0;
+        if (id <= 0) {
+          continue;
+        }
+        final title = '${item[isSeries ? 'name' : 'title'] ?? ''}'.trim();
+        if (title.isEmpty) {
+          continue;
+        }
+        if (!seen.add('$mediaType|$id')) {
+          continue;
+        }
+
+        final backdropUrl = _resolveImageUrl(
+          '${item['backdrop_path'] ?? ''}',
+          size: 'w1280',
+        );
+        credits.add(
+          TmdbPersonCredit(
+            tmdbId: id,
+            isSeries: isSeries,
+            title: title,
+            originalTitle:
+                '${item[isSeries ? 'original_name' : 'original_title'] ?? ''}'
+                    .trim(),
+            posterUrl: _resolveImageUrl(
+              '${item['poster_path'] ?? ''}',
+              size: 'w500',
+            ),
+            backdropUrl: backdropUrl,
+            bannerUrl: backdropUrl,
+            overview: '${item['overview'] ?? ''}'.trim(),
+            year: _extractYear(
+              '${item[isSeries ? 'first_air_date' : 'release_date'] ?? ''}',
+            ),
+            genres: _resolvePersonCreditGenres(
+              item,
+              mediaType: mediaType,
+            ),
+            ratingLabels: _resolveRatingLabels(
+              voteAverage: item['vote_average'],
+              voteCount: item['vote_count'],
+            ),
+            subtitle: isSeries ? '剧集' : '电影',
+            popularity: (item['popularity'] as num?)?.toDouble() ?? 0,
+          ),
+        );
+      }
+    }
+
+    addItems(movieItems, isSeries: false);
+    addItems(tvItems, isSeries: true);
 
     credits.sort((left, right) {
       final popularityCompare = right.popularity.compareTo(left.popularity);

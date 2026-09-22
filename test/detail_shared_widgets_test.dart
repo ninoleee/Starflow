@@ -95,6 +95,12 @@ void main() {
       expect(image.cacheWidth, 148);
       expect(image.cacheHeight, isNull);
       expect(image.fit, BoxFit.cover);
+      final focusAction = tester.widget<TvFocusableAction>(
+        find.byType(TvFocusableAction),
+      );
+      expect(focusAction.focusId, 'detail:actor:Keanu Reeves');
+      expect(focusAction.borderRadius, BorderRadius.circular(37));
+      expect(focusAction.focusScale, 1.06);
     });
 
     testWidgets('PlatformRail keeps company logos in one horizontal row',

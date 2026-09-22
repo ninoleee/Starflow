@@ -246,9 +246,6 @@ class _DoubanPagedGrid extends StatelessWidget {
                   subtitle: entry.year > 0 ? '${entry.year}' : '',
                   posterUrl: entry.posterUrl,
                   posterHeaders: const {},
-                  tvPosterFocusOutlineOnly: true,
-                  tvPosterFocusShowBorder: false,
-                  tvPosterFocusScale: 1.06,
                   imageBadgeText: resolvePreferredPosterRatingLabel(
                     [entry.ratingLabel],
                     preferDoubanOnly: true,

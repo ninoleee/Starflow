@@ -87,32 +87,33 @@ class PersonRail extends StatelessWidget {
         separatorBuilder: (context, index) => const SizedBox(width: 14),
         itemBuilder: (context, index) {
           final person = visiblePeople[index];
-          return TvFocusableAction(
-            onPressed: () => onPersonTap(person),
-            focusId: '$focusScopePrefix:${person.name}',
-            autofocus: false,
-            borderRadius: BorderRadius.circular(AppRadii.md),
-            child: SizedBox(
-              width: 86,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  _PersonAvatar(person: person),
-                  const SizedBox(height: 10),
-                  Text(
-                    person.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      height: 1.3,
-                    ),
+          return SizedBox(
+            width: 86,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                TvFocusableAction(
+                  onPressed: () => onPersonTap(person),
+                  focusId: '$focusScopePrefix:${person.name}',
+                  autofocus: false,
+                  borderRadius: BorderRadius.circular(37),
+                  focusScale: 1.06,
+                  child: _PersonAvatar(person: person),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  person.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    height: 1.3,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           );
         },

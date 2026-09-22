@@ -30,8 +30,8 @@ class MediaPosterTile extends ConsumerStatefulWidget {
     this.autofocus = false,
     this.tvPosterFocusOutlineOnly = true,
     this.tvPosterFocusShowBorder = true,
-    this.tvPosterFocusScale = 1.0,
-    this.tvPosterFocusBorderWidth = 2.4,
+    this.tvPosterFocusScale = 1.06,
+    this.tvPosterFocusBorderWidth = 1.6,
   });
 
   final String title;
@@ -225,7 +225,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
         child: posterFrame,
         builder: (context, isPosterFocused, child) {
           Widget currentChild = child!;
-          if (isPosterFocused && widget.tvPosterFocusShowBorder) {
+          if (widget.tvPosterFocusShowBorder) {
             currentChild = Stack(
               fit: StackFit.expand,
               children: [
@@ -235,7 +235,8 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(AppRadii.sm),
                       border: Border.all(
-                        color: Colors.white,
+                        color:
+                            isPosterFocused ? Colors.white : Colors.transparent,
                         width: widget.tvPosterFocusBorderWidth,
                       ),
                     ),

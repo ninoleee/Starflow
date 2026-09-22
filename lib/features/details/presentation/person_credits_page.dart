@@ -20,6 +20,7 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 enum PersonCreditsRole {
   director,
   actor,
+  company,
 }
 
 extension PersonCreditsRoleX on PersonCreditsRole {
@@ -29,15 +30,19 @@ extension PersonCreditsRoleX on PersonCreditsRole {
         return '导演作品';
       case PersonCreditsRole.actor:
         return '演员作品';
+      case PersonCreditsRole.company:
+        return '公司作品';
     }
   }
 
-  TmdbPersonCreditsRole get tmdbRole {
+  TmdbPersonCreditsRole? get tmdbRole {
     switch (this) {
       case PersonCreditsRole.director:
         return TmdbPersonCreditsRole.director;
       case PersonCreditsRole.actor:
         return TmdbPersonCreditsRole.actor;
+      case PersonCreditsRole.company:
+        return null;
     }
   }
 }
@@ -252,12 +257,19 @@ final _personCreditsPageProvider = FutureProvider.autoDispose
     );
   }
 
-  final credits = await ref.read(tmdbMetadataClientProvider).fetchPersonCredits(
-        name: target.person.name,
-        avatarUrl: target.person.avatarUrl,
-        role: target.role.tmdbRole,
-        readAccessToken: token,
-      );
+  final client = ref.read(tmdbMetadataClientProvider);
+  final credits = target.role == PersonCreditsRole.company
+      ? await client.fetchCompanyCredits(
+          name: target.person.name,
+          logoUrl: target.person.avatarUrl,
+          readAccessToken: token,
+        )
+      : await client.fetchPersonCredits(
+          name: target.person.name,
+          avatarUrl: target.person.avatarUrl,
+          role: target.role.tmdbRole!,
+          readAccessToken: token,
+        );
   if (credits.isEmpty) {
     return const _PersonCreditsPageResult(
       items: [],
@@ -597,7 +609,10 @@ class _PersonCreditsHeader extends StatelessWidget {
     final content = Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        _PersonAvatar(person: target.person, size: 72),
+        if (target.role == PersonCreditsRole.company)
+          _CompanyLogo(company: target.person, size: 72)
+        else
+          _PersonAvatar(person: target.person, size: 72),
         const SizedBox(width: 16),
         Expanded(
           child: Column(
@@ -633,6 +648,58 @@ class _PersonCreditsHeader extends StatelessWidget {
       autofocus: true,
       borderRadius: BorderRadius.circular(20),
       child: content,
+    );
+  }
+}
+
+class _CompanyLogo extends StatelessWidget {
+  const _CompanyLogo({
+    required this.company,
+    this.size = 72,
+  });
+
+  final MediaPersonProfile company;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final logoUrl = company.avatarUrl.trim();
+    return Container(
+      width: size,
+      height: size,
+      padding: const EdgeInsets.all(7),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFFFFFFF),
+            Color(0xFFECEFF4),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.82),
+        ),
+      ),
+      child: logoUrl.isEmpty
+          ? const Icon(
+              Icons.business_rounded,
+              color: Color(0xFF40506A),
+            )
+          : AppNetworkImage(
+              logoUrl,
+              cacheWidth: (size * 2).round(),
+              cacheHeight: (size * 2).round(),
+              fit: BoxFit.contain,
+              throttleOnTelevision: false,
+              errorBuilder: (context, error, stackTrace) {
+                return const Icon(
+                  Icons.business_rounded,
+                  color: Color(0xFF40506A),
+                );
+              },
+            ),
     );
   }
 }
@@ -736,9 +803,6 @@ class _PersonCreditsGrid extends StatelessWidget {
               focusId:
                   'person-credits:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
               autofocus: false,
-              tvPosterFocusOutlineOnly: true,
-              tvPosterFocusShowBorder: false,
-              tvPosterFocusScale: 1.06,
               title: item.title,
               subtitle: item.subtitle,
               imageBadgeText: item.ratingLabel,
