@@ -125,7 +125,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('series heading stays mounted across initial loading',
+  testWidgets('series browser stays mounted across initial loading',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -162,8 +162,7 @@ void main() {
     for (var frame = 0; frame < 10; frame++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    final heading = tester.element(find.text('剧集'));
-    final position = tester.getTopLeft(find.text('剧集'));
+    expect(find.text('剧集'), findsNothing);
     final hero = tester.widget(find.byType(DetailHeroSection));
     browser.complete(const DetailSeriesBrowserState(groups: [
       DetailEpisodeGroup(
@@ -176,8 +175,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.byType(DetailEpisodeBrowser), findsOneWidget);
-    expect(tester.element(find.text('剧集')), same(heading));
-    expect(tester.getTopLeft(find.text('剧集')), position);
+    expect(find.text('剧集'), findsNothing);
     expect(tester.widget(find.byType(DetailHeroSection)), same(hero));
     expect(tester.getSize(find.byType(DetailEpisodeBrowser)).height, 292);
     expect(tester.takeException(), isNull);
@@ -1372,7 +1370,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('剧集'), findsWidgets);
+    expect(find.text('剧集'), findsNothing);
     await tester.scrollUntilVisible(
       find.text('测试剧 第 1 集'),
       200,

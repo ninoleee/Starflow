@@ -15,9 +15,24 @@ if [[ ! -f "pubspec.yaml" ]]; then
   exit 1
 fi
 
-if ! command -v flutter >/dev/null 2>&1; then
-  echo "Error: flutter command not found in PATH."
-  exit 1
+if [[ -z "${STARFLOW_FLUTTER_SDK:-}" && -d "$PROJECT_ROOT/.fvm/flutter_sdk" ]]; then
+  STARFLOW_FLUTTER_SDK="$PROJECT_ROOT/.fvm/flutter_sdk"
+fi
+if [[ -n "${STARFLOW_FLUTTER_SDK:-}" ]]; then
+  FLUTTER="$STARFLOW_FLUTTER_SDK/bin/flutter"
+  DART="$STARFLOW_FLUTTER_SDK/bin/dart"
+  if [[ ! -x "$FLUTTER" || ! -x "$DART" ]]; then
+    echo "Error: Flutter SDK not found: $STARFLOW_FLUTTER_SDK" >&2
+    exit 1
+  fi
+  export STARFLOW_FLUTTER_SDK="$(cd "$(dirname "$FLUTTER")/.." && pwd)"
+  export PATH="$STARFLOW_FLUTTER_SDK/bin:$PATH"
+else
+  FLUTTER="$(command -v flutter)" || {
+    echo "Error: flutter command not found in PATH."
+    exit 1
+  }
+  DART="$(dirname "$FLUTTER")/dart"
 fi
 
 
@@ -28,22 +43,39 @@ if [[ -z "${APP_NAME:-}" ]]; then
   exit 1
 fi
 
-VERSION="$(dart "$PROJECT_ROOT/tool/release_version.dart" pubspec.yaml)"
+VERSION="$("$DART" "$PROJECT_ROOT/tool/release_version.dart" pubspec.yaml)"
 BUILD_NUMBER="$VERSION"
 BUILD_DATE="$(date +%Y-%m-%d)"
 OUTPUT_NAME="${APP_NAME}_v${VERSION}_unsigned.ipa"
 FAST_IPA_DIR="build/ios/ipa_fast"
+BUILD_ARGS=(
+  "$FLUTTER"
+  build
+  ios
+)
+if [[ "${STARFLOW_CLEAN_BUILD:-0}" != "1" &&
+      "${STARFLOW_FORCE_PUB_GET:-0}" != "1" &&
+      -f "$PROJECT_ROOT/.dart_tool/package_config.json" ]]; then
+  BUILD_ARGS+=(--no-pub)
+  echo "Skipping dependency resolution; use STARFLOW_FORCE_PUB_GET=1 after dependency changes."
+fi
 
 echo "Building unsigned IPA for $APP_NAME ($VERSION+$BUILD_NUMBER, $BUILD_DATE)..."
-echo "Cleaning cached Flutter and iOS Native Assets..."
-flutter clean
+if [[ "${STARFLOW_CLEAN_BUILD:-0}" == "1" ]]; then
+  echo "Cleaning cached Flutter and iOS Native Assets..."
+  "$FLUTTER" clean
+else
+  echo "Using incremental Flutter and iOS build caches."
+fi
 
-flutter build ios \
-  --release \
-  --no-codesign \
-  --build-name "$VERSION" \
-  --build-number "$BUILD_NUMBER" \
+BUILD_ARGS+=(
+  --release
+  --no-codesign
+  --build-name "$VERSION"
+  --build-number "$BUILD_NUMBER"
   --dart-define "STARFLOW_BUILD_DATE=$BUILD_DATE"
+)
+"${BUILD_ARGS[@]}"
 
 APP_BUNDLE="build/ios/iphoneos/Runner.app"
 if [[ ! -d "$APP_BUNDLE" ]]; then

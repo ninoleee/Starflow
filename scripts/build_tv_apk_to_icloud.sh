@@ -94,13 +94,32 @@ fi
 VERSION="$("$DART" "$PROJECT_ROOT/tool/release_version.dart" pubspec.yaml)"
 BUILD_DATE="$(date +%Y-%m-%d)"
 echo "Building TV APK for starflow ($VERSION, $BUILD_DATE)..."
+BUILD_ARGS=(
+  "$FLUTTER"
+  build
+  apk
+)
+if [[ "${STARFLOW_CLEAN_BUILD:-0}" != "1" &&
+      "${STARFLOW_FORCE_PUB_GET:-0}" != "1" &&
+      -f "$PROJECT_ROOT/.dart_tool/package_config.json" ]]; then
+  BUILD_ARGS+=(--no-pub)
+  echo "Skipping dependency resolution; use STARFLOW_FORCE_PUB_GET=1 after dependency changes."
+fi
+if [[ "${STARFLOW_CLEAN_BUILD:-0}" == "1" ]]; then
+  echo "Cleaning cached Flutter and Android build outputs..."
+  "$FLUTTER" clean
+else
+  echo "Using incremental Flutter and Android build caches."
+fi
 
-"$FLUTTER" build apk \
-  --release \
-  --target-platform android-arm,android-arm64 \
-  --android-skip-build-dependency-validation \
-  --build-name "$VERSION" \
+BUILD_ARGS+=(
+  --release
+  --target-platform android-arm,android-arm64
+  --android-skip-build-dependency-validation
+  --build-name "$VERSION"
   --dart-define "STARFLOW_BUILD_DATE=$BUILD_DATE"
+)
+"${BUILD_ARGS[@]}"
 
 SOURCE_APK="$PROJECT_ROOT/build/app/outputs/flutter-apk/app-release.apk"
 if [[ ! -f "$SOURCE_APK" ]]; then

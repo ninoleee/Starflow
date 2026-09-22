@@ -259,7 +259,8 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 | `config/release_version.json`、`tool/release_version.dart` | 四个发布脚本共用版本递增 / 显式批次值，Gradle 共用 Android 数字版本码策略；工具执行会写 pubspec，不作为只读检查 |
 | `scripts/build_tv_apk.ps1` | TV 发布权威预设：release、API 23、ARM 双 ABI、按月版本、规范命名、桌面输出、显式配置嵌入 |
 | `scripts/build_tv_apk_to_icloud.sh` | Bash 等价 TV 构建；普通交付用 `ICLOUD_INSTALLER_DIR="$HOME/Desktop"` |
-| `scripts/build_ipa_to_icloud.sh` | 清理后构建未签名 IPA，不能直接当已签名安装包；会改版本 |
+| `scripts/build_ipa_to_icloud.sh` | 默认增量构建未签名 IPA，`STARFLOW_CLEAN_BUILD=1` 时先清理；不能直接当已签名安装包，会改版本 |
+| `scripts/build_ios_then_tv_to_icloud.sh` | 串行执行 iOS IPA 和 Android TV APK 的 iCloud 构建；默认增量且跳过重复依赖解析，两端共用本次版本号，`STARFLOW_CLEAN_BUILD=1` 时清理，`STARFLOW_FORCE_PUB_GET=1` 时重新解析依赖，可选参数仅传给 TV 配置嵌入 |
 | `scripts/prepare_ios_device_build.sh / verify_ios_device_frameworks.sh` | 清理误缓存的模拟器 Native Assets、检查设备 framework |
 | `scripts/build_windows_installer.ps1`、`windows/installer/starflow_windows_installer.iss` | Flutter Windows 构建及 Inno Setup 安装器，会递增版本 |
 | `scripts/flutter_with_mirror.ps1`、`connect_mumu.ps1`、`complete_android_setup.sh` | 镜像、模拟器连接和旧 SDK 辅助；环境与限制见网络文档 |

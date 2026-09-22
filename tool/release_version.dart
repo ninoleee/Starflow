@@ -65,9 +65,12 @@ void main(List<String> args) {
     final current = ReleaseVersion.parse(matches.single[1]!);
     final fixed =
         Platform.environment['STARFLOW_RELEASE_VERSION']?.trim() ?? '';
+    final keepCurrent =
+        Platform.environment['STARFLOW_KEEP_RELEASE_VERSION'] == '1';
     final now = DateTime.now();
-    final version =
-        fixed.isEmpty ? current.next(now) : ReleaseVersion.parse(fixed);
+    final version = keepCurrent
+        ? current
+        : (fixed.isEmpty ? current.next(now) : ReleaseVersion.parse(fixed));
     final policy = jsonDecode(
         File.fromUri(Platform.script.resolve('../config/release_version.json'))
             .readAsStringSync()) as Map<String, dynamic>;

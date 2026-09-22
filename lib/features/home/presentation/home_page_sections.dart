@@ -162,57 +162,57 @@ class _HomeSectionSlotState extends ConsumerState<_HomeSectionSlot>
             )
           : section.items.isEmpty
               ? _SectionEmptyState(message: section.emptyMessage)
-              : SizedBox(
-                  height: railHeight + _kHomePosterRailFocusOverflowPadding,
-                  child: DesktopHorizontalPager(
-                    builder: (context, controller) => ListView.separated(
-                      controller: controller,
-                      primary: false,
-                      physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(
-                        12,
-                        _kHomePosterRailFocusOverflowPadding,
-                        12,
-                        0,
-                      ),
-                      clipBehavior: Clip.none,
-                      scrollDirection: Axis.horizontal,
-                      itemCount:
-                          section.items.length + (openViewAll == null ? 0 : 1),
-                      findChildIndexCallback: (key) {
-                        final index = posterIndicesByKey[key];
-                        return index == null ? null : index * 2;
-                      },
-                      separatorBuilder: (context, index) =>
-                          const SizedBox(width: 10),
-                      itemBuilder: (context, index) {
-                        if (index >= section.items.length) {
-                          return _HomeSectionViewAllTile(
+              : Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: SizedBox(
+                    height: railHeight + _kHomePosterRailFocusOverflowPadding,
+                    child: DesktopHorizontalPager(
+                      builder: (context, controller) => ListView.separated(
+                        controller: controller,
+                        primary: false,
+                        physics: const BouncingScrollPhysics(),
+                        padding: const EdgeInsets.only(
+                          top: _kHomePosterRailFocusOverflowPadding,
+                        ),
+                        clipBehavior: Clip.none,
+                        scrollDirection: Axis.horizontal,
+                        itemCount: section.items.length +
+                            (openViewAll == null ? 0 : 1),
+                        findChildIndexCallback: (key) {
+                          final index = posterIndicesByKey[key];
+                          return index == null ? null : index * 2;
+                        },
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(width: 10),
+                        itemBuilder: (context, index) {
+                          if (index >= section.items.length) {
+                            return _HomeSectionViewAllTile(
+                              key: posterItemKeys[index],
+                              focusNode: widget.focusNodeForContent(
+                                _homeSectionViewAllFocusKey(section),
+                              ),
+                              focusId: 'home:section:${section.id}:view-all',
+                              width: tileWidth,
+                              imageAspectRatio: tileAspectRatio,
+                              onTap: openViewAll!,
+                            );
+                          }
+                          final item = section.items[index];
+                          return _HomePosterTile(
                             key: posterItemKeys[index],
-                            focusNode: widget.focusNodeForContent(
-                              _homeSectionViewAllFocusKey(section),
-                            ),
-                            focusId: 'home:section:${section.id}:view-all',
+                            module: widget.module,
+                            item: item,
                             width: tileWidth,
                             imageAspectRatio: tileAspectRatio,
-                            onTap: openViewAll!,
+                            focusNode: widget.focusNodeForContent(
+                              _homeSectionItemFocusKey(section, item),
+                            ),
+                            focusId:
+                                'home:section:${section.id}:item:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
+                            autofocus: widget.autofocusFirstItem && index == 0,
                           );
-                        }
-                        final item = section.items[index];
-                        return _HomePosterTile(
-                          key: posterItemKeys[index],
-                          module: widget.module,
-                          item: item,
-                          width: tileWidth,
-                          imageAspectRatio: tileAspectRatio,
-                          focusNode: widget.focusNodeForContent(
-                            _homeSectionItemFocusKey(section, item),
-                          ),
-                          focusId:
-                              'home:section:${section.id}:item:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
-                          autofocus: widget.autofocusFirstItem && index == 0,
-                        );
-                      },
+                        },
+                      ),
                     ),
                   ),
                 ),
@@ -326,21 +326,22 @@ class _HomePosterTile extends StatelessWidget {
       imageTopRightBadgeShowDecoration: false,
       imageTopRightBadgeTextStyle:
           Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0,
-                fontSize: 19,
-                shadows: const [
-                  Shadow(color: Colors.black, blurRadius: 2),
-                  Shadow(
-                    color: Colors.black87,
-                    offset: Offset(0, 1),
-                    blurRadius: 4,
-                  ),
-                ],
-              ),
+        color: Colors.white,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0,
+        fontSize: 19,
+        shadows: const [
+          Shadow(color: Colors.black, blurRadius: 2),
+          Shadow(
+            color: Colors.black87,
+            offset: Offset(0, 1),
+            blurRadius: 4,
+          ),
+        ],
+      ),
       tvPosterFocusOutlineOnly: true,
-      tvPosterFocusShowBorder: false,
+      tvPosterFocusShowBorder: true,
+      tvPosterFocusBorderWidth: 1.6,
       tvPosterFocusScale: 1.06,
       focusNode: focusNode,
       focusId: focusId,

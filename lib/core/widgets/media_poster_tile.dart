@@ -31,6 +31,7 @@ class MediaPosterTile extends ConsumerStatefulWidget {
     this.tvPosterFocusOutlineOnly = true,
     this.tvPosterFocusShowBorder = true,
     this.tvPosterFocusScale = 1.0,
+    this.tvPosterFocusBorderWidth = 2.4,
   });
 
   final String title;
@@ -55,6 +56,7 @@ class MediaPosterTile extends ConsumerStatefulWidget {
   final bool tvPosterFocusOutlineOnly;
   final bool tvPosterFocusShowBorder;
   final double tvPosterFocusScale;
+  final double tvPosterFocusBorderWidth;
 
   @override
   ConsumerState<MediaPosterTile> createState() => _MediaPosterTileState();
@@ -234,7 +236,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
                       borderRadius: BorderRadius.circular(AppRadii.sm),
                       border: Border.all(
                         color: Colors.white,
-                        width: 2.4,
+                        width: widget.tvPosterFocusBorderWidth,
                       ),
                     ),
                   ),

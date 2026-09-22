@@ -339,7 +339,7 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         SizedBox(
-                            height: 48,
+                            height: 56,
                             child: Row(children: [
                               if (widget.showBackButton)
                                 LiveIconButton(
@@ -347,14 +347,15 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                                     label: '返回',
                                     onPressed: () =>
                                         Navigator.of(context).maybePop()),
+                              Text('直播',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineSmall),
+                              const SizedBox(width: 12),
                               Expanded(
-                                  child: Text('直播',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .headlineSmall)),
+                                  child: SettingsTextInputField(
+                                      controller: _search, labelText: '搜索频道')),
                             ])),
-                        SettingsTextInputField(
-                            controller: _search, labelText: '搜索频道'),
                         const SizedBox(height: 8),
                         LayoutBuilder(
                             builder: (context, constraints) => Wrap(

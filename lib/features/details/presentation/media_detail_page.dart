@@ -1861,58 +1861,62 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         (seriesAsync.value == null || seriesAsync.value!.groups.isEmpty)) {
       return const SizedBox.shrink();
     }
-    return DetailBlock(
-      title: '剧集',
-      child: seriesAsync.when(
-        skipLoadingOnReload: true,
-        data: (browser) {
-          if (browser == null || browser.groups.isEmpty) {
-            return const SizedBox.shrink();
-          }
-          return ValueListenableBuilder<String>(
-            valueListenable: _selectedSeasonIdNotifier,
-            builder: (context, selectedSeasonId, _) {
-              final selectedGroup = resolveSelectedEpisodeGroup(
-                groups: browser.groups,
-                selectedGroupId: selectedSeasonId.isEmpty ||
-                        _selectedSeasonRequest !=
-                            DetailSeriesBrowserRequest.fromTarget(target)
-                    ? browser.initialGroupId
-                    : selectedSeasonId,
-              );
-              return DetailEpisodeBrowser(
-                key: ValueKey(DetailSeriesBrowserRequest.fromTarget(target)),
-                seriesTarget: target,
-                groups: browser.groups,
-                lastPlayedTarget: browser.lastPlayedTarget,
-                selectedGroupId: selectedGroup.id,
-                onSeasonSelected: (groupId) {
-                  _selectedSeasonRequest =
-                      DetailSeriesBrowserRequest.fromTarget(target);
-                  if (_selectedSeasonIdNotifier.value == groupId) {
-                    return;
-                  }
-                  _selectedSeasonIdNotifier.value = groupId;
-                },
-              );
-            },
-          );
-        },
-        loading: () => const SizedBox(
-          height: 360,
-          child: Center(
-            child: CircularProgressIndicator(color: Colors.white),
-          ),
+    final content = seriesAsync.when(
+      skipLoadingOnReload: true,
+      data: (browser) {
+        if (browser == null || browser.groups.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return ValueListenableBuilder<String>(
+          valueListenable: _selectedSeasonIdNotifier,
+          builder: (context, selectedSeasonId, _) {
+            final selectedGroup = resolveSelectedEpisodeGroup(
+              groups: browser.groups,
+              selectedGroupId: selectedSeasonId.isEmpty ||
+                      _selectedSeasonRequest !=
+                          DetailSeriesBrowserRequest.fromTarget(target)
+                  ? browser.initialGroupId
+                  : selectedSeasonId,
+            );
+            return DetailEpisodeBrowser(
+              key: ValueKey(DetailSeriesBrowserRequest.fromTarget(target)),
+              seriesTarget: target,
+              groups: browser.groups,
+              lastPlayedTarget: browser.lastPlayedTarget,
+              selectedGroupId: selectedGroup.id,
+              onSeasonSelected: (groupId) {
+                _selectedSeasonRequest =
+                    DetailSeriesBrowserRequest.fromTarget(target);
+                if (_selectedSeasonIdNotifier.value == groupId) {
+                  return;
+                }
+                _selectedSeasonIdNotifier.value = groupId;
+              },
+            );
+          },
+        );
+      },
+      loading: () => const SizedBox(
+        height: 360,
+        child: Center(
+          child: CircularProgressIndicator(color: Colors.white),
         ),
-        error: (error, stackTrace) => Text(
-          '加载剧集失败：$error',
-          style: const TextStyle(
-            color: AppColors.foregroundMuted,
-            fontSize: 14,
-          ),
+      ),
+      error: (error, stackTrace) => Text(
+        '加载剧集失败：$error',
+        style: const TextStyle(
+          color: AppColors.foregroundMuted,
+          fontSize: 14,
         ),
       ),
     );
+    if (target.hasMatchedResource) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 26),
+        child: content,
+      );
+    }
+    return DetailBlock(title: '剧集', child: content);
   }
 
   Widget _buildResourceInfoBlock({
