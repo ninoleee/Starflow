@@ -137,6 +137,7 @@ void main() {
 
     testWidgets('PlatformRail company logos expose TV focus targets',
         (tester) async {
+      MediaPersonProfile? tappedCompany;
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -151,6 +152,9 @@ void main() {
                     avatarUrl: 'https://example.com/company-a.png',
                   ),
                 ],
+                onPlatformTap: (company) {
+                  tappedCompany = company;
+                },
               ),
             ),
           ),
@@ -162,6 +166,8 @@ void main() {
           .toList(growable: false);
       expect(focusableActions, hasLength(1));
       expect(focusableActions.single.focusId, 'detail:company:Company A');
+      focusableActions.single.onPressed!();
+      expect(tappedCompany?.name, 'Company A');
     });
 
     testWidgets('DetailImageGallery exposes a visible TV focus style',

@@ -207,9 +207,8 @@ class PlatformRail extends StatelessWidget {
         itemBuilder: (context, index) {
           final platform = visiblePlatforms[index];
           return TvFocusableAction(
-            onPressed: onPlatformTap == null
-                ? () {}
-                : () => onPlatformTap!(platform),
+            onPressed:
+                onPlatformTap == null ? () {} : () => onPlatformTap!(platform),
             focusId: 'detail:company:${platform.name}',
             visualStyle: TvFocusVisualStyle.prominent,
             focusScale: 1.03,
