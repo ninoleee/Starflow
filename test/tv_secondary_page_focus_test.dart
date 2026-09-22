@@ -142,6 +142,28 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('company credits page uses company work labels', (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        appSettingsProvider.overrideWithValue(AppSettings.fromJson({})),
+      ],
+      child: const MaterialApp(
+        home: PersonCreditsPage(
+          target: PersonCreditsPageTarget(
+            person: MediaPersonProfile(name: 'Company A'),
+            role: PersonCreditsRole.company,
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Company A'), findsOneWidget);
+    expect(find.text('公司作品'), findsOneWidget);
+    expect(find.byIcon(Icons.business_rounded), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('TV library pager retains focus when reaching the final page',
       (tester) async {
     final page = ValueNotifier(0);

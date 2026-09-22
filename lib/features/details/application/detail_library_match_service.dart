@@ -1101,6 +1101,7 @@ class DetailLibraryMatchService {
           (item) => MediaPersonProfile(
             name: item.name.trim(),
             avatarUrl: item.avatarUrl.trim(),
+            tmdbId: item.tmdbId,
           ),
         )
         .toList(growable: false);

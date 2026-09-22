@@ -41,7 +41,7 @@
 | `lib/main.dart` | 初始设置、代理、结构化日志、错误钩子、帧监测、启动标记、MediaKit 初始化及 ProviderScope；关闭 Riverpod 自动重试 |
 | `features/bootstrap/application/bootstrap_controller.dart` | 配置 / 缓存 / 首页启动编排与 10s 总截止时间；不覆盖此前初始化或同步阻塞 |
 | `features/bootstrap/application/startup_crash_recovery.dart` | 启动标记及异常启动恢复，不代替原生崩溃日志 |
-| `app/router/app_routes.dart`、`app_router.dart`、`app_navigator.dart` | 壳页和详情、人物、播放器、设置、搜索等附加路由 |
+| `app/router/app_routes.dart`、`app_router.dart`、`app_navigator.dart` | 壳页和详情、人物 / 公司、播放器、设置、搜索等附加路由 |
 | `app/router/app_navigation_shell.dart`、`app/shell_layout.dart` | home / search / favorites / library / settings / live-tv 六个壳路由，默认隐藏收藏，旧配置保留菜单选择 |
 | `app/lifecycle/app_runtime_recovery_boundary.dart` | 后台、前台、低内存和退出弹窗的调度准入租约 |
 | `core/navigation/` | `PageActivityMixin` 和 RetainedAsync 控制器，暂停工作但保留稳定页面结果 |

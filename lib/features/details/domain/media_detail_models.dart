@@ -25,15 +25,18 @@ class MediaPersonProfile {
   const MediaPersonProfile({
     required this.name,
     this.avatarUrl = '',
+    this.tmdbId = 0,
   });
 
   final String name;
   final String avatarUrl;
+  final int tmdbId;
 
   Map<String, dynamic> toJson() {
     return {
       'name': name,
       'avatarUrl': avatarUrl,
+      if (tmdbId > 0) 'tmdbId': tmdbId,
     };
   }
 
@@ -41,6 +44,7 @@ class MediaPersonProfile {
     return MediaPersonProfile(
       name: json['name'] as String? ?? '',
       avatarUrl: json['avatarUrl'] as String? ?? '',
+      tmdbId: (json['tmdbId'] as num?)?.toInt() ?? 0,
     );
   }
 }
@@ -69,15 +73,23 @@ List<MediaPersonProfile> mergeMediaPersonProfiles(
     }
   }
   return primary.map((profile) {
-    if (profile.avatarUrl.trim().isNotEmpty) {
-      return profile;
-    }
     final replacement = supplementalByName[profile.name.trim().toLowerCase()];
-    final avatarUrl = replacement?.avatarUrl.trim() ?? '';
-    if (avatarUrl.isEmpty) {
+    final tmdbId =
+        profile.tmdbId > 0 ? profile.tmdbId : replacement?.tmdbId ?? 0;
+    if (profile.avatarUrl.trim().isNotEmpty && profile.tmdbId == tmdbId) {
       return profile;
     }
-    return MediaPersonProfile(name: profile.name, avatarUrl: avatarUrl);
+    final avatarUrl = profile.avatarUrl.trim().isNotEmpty
+        ? profile.avatarUrl
+        : replacement?.avatarUrl.trim() ?? '';
+    if (avatarUrl.isEmpty && tmdbId <= 0) {
+      return profile;
+    }
+    return MediaPersonProfile(
+      name: profile.name,
+      avatarUrl: avatarUrl,
+      tmdbId: tmdbId,
+    );
   }).toList(growable: false);
 }
 

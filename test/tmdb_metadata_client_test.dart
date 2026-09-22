@@ -92,6 +92,7 @@ void main() {
                   ],
                   'production_companies': [
                     {
+                      'id': 174,
                       'name': 'Warner Bros.',
                       'logo_path': '/warner.png',
                     },
@@ -156,6 +157,7 @@ void main() {
       );
       expect(result.platforms, ['Warner Bros.']);
       expect(result.platformProfiles.first.name, 'Warner Bros.');
+      expect(result.platformProfiles.first.tmdbId, 174);
       expect(
         result.platformProfiles.first.avatarUrl,
         'https://image.tmdb.org/t/p/w300/warner.png',
@@ -599,36 +601,11 @@ void main() {
     });
 
     test('fetches movie and TV credits for a company', () async {
-      var companySearchRequests = 0;
       var movieCreditsRequests = 0;
       var tvCreditsRequests = 0;
       final client = TmdbMetadataClient(
         MockClient((request) async {
           expect(request.headers['Authorization'], 'Bearer tmdb-token');
-
-          if (request.url.path == '/3/search/company') {
-            companySearchRequests++;
-            expect(request.url.queryParameters['query'], 'DreamWorks Pictures');
-            return http.Response(
-              jsonEncode({
-                'results': [
-                  {
-                    'id': 521,
-                    'name': 'DreamWorks Fan Company',
-                    'logo_path': '/fan.png',
-                    'popularity': 1.0,
-                  },
-                  {
-                    'id': 33,
-                    'name': 'DreamWorks Pictures',
-                    'logo_path': '/dreamworks.png',
-                    'popularity': 25.0,
-                  },
-                ],
-              }),
-              200,
-            );
-          }
 
           if (request.url.path == '/3/company/33/movie') {
             movieCreditsRequests++;
@@ -691,12 +668,10 @@ void main() {
       );
 
       final credits = await client.fetchCompanyCredits(
-        name: 'DreamWorks Pictures',
-        logoUrl: 'https://image.tmdb.org/t/p/w300/dreamworks.png',
+        companyId: 33,
         readAccessToken: 'tmdb-token',
       );
 
-      expect(companySearchRequests, 1);
       expect(movieCreditsRequests, 1);
       expect(tvCreditsRequests, 1);
       expect(credits, hasLength(2));

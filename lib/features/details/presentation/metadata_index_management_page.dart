@@ -356,6 +356,7 @@ class _MetadataIndexManagementPageState
             (item) => MetadataPersonProfile(
               name: item.name,
               avatarUrl: item.avatarUrl,
+              tmdbId: item.tmdbId,
             ),
           )
           .toList(growable: false),
@@ -365,6 +366,7 @@ class _MetadataIndexManagementPageState
             (item) => MetadataPersonProfile(
               name: item.name,
               avatarUrl: item.avatarUrl,
+              tmdbId: item.tmdbId,
             ),
           )
           .toList(growable: false),
@@ -374,6 +376,7 @@ class _MetadataIndexManagementPageState
             (item) => MetadataPersonProfile(
               name: item.name,
               avatarUrl: item.avatarUrl,
+              tmdbId: item.tmdbId,
             ),
           )
           .toList(growable: false),
@@ -435,6 +438,7 @@ class _MetadataIndexManagementPageState
             (item) => MediaPersonProfile(
               name: item.name,
               avatarUrl: item.avatarUrl,
+              tmdbId: item.tmdbId,
             ),
           )
           .toList(growable: false);
@@ -443,6 +447,7 @@ class _MetadataIndexManagementPageState
             (item) => MediaPersonProfile(
               name: item.name,
               avatarUrl: item.avatarUrl,
+              tmdbId: item.tmdbId,
             ),
           )
           .toList(growable: false);
@@ -451,6 +456,7 @@ class _MetadataIndexManagementPageState
             (item) => MediaPersonProfile(
               name: item.name,
               avatarUrl: item.avatarUrl,
+              tmdbId: item.tmdbId,
             ),
           )
           .toList(growable: false);

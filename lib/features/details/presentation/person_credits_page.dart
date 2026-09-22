@@ -256,12 +256,17 @@ final _personCreditsPageProvider = FutureProvider.autoDispose
       message: '未配置 TMDB Read Access Token。',
     );
   }
+  if (target.role == PersonCreditsRole.company && target.person.tmdbId <= 0) {
+    return const _PersonCreditsPageResult(
+      items: [],
+      message: '缺少 TMDB 公司 ID，请更新影片信息后重试。',
+    );
+  }
 
   final client = ref.read(tmdbMetadataClientProvider);
   final credits = target.role == PersonCreditsRole.company
       ? await client.fetchCompanyCredits(
-          name: target.person.name,
-          logoUrl: target.person.avatarUrl,
+          companyId: target.person.tmdbId,
           readAccessToken: token,
         )
       : await client.fetchPersonCredits(

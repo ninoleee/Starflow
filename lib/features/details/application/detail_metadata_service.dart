@@ -224,6 +224,7 @@ Future<DetailMetadataResult> resolveDetailMetadata({
                   (item) => MetadataPersonProfile(
                     name: item.name,
                     avatarUrl: item.avatarUrl,
+                    tmdbId: item.tmdbId,
                   ),
                 )
                 .toList(growable: false),
@@ -233,6 +234,7 @@ Future<DetailMetadataResult> resolveDetailMetadata({
                   (item) => MetadataPersonProfile(
                     name: item.name,
                     avatarUrl: item.avatarUrl,
+                    tmdbId: item.tmdbId,
                   ),
                 )
                 .toList(growable: false),
@@ -242,6 +244,7 @@ Future<DetailMetadataResult> resolveDetailMetadata({
                   (item) => MetadataPersonProfile(
                     name: item.name,
                     avatarUrl: item.avatarUrl,
+                    tmdbId: item.tmdbId,
                   ),
                 )
                 .toList(growable: false),

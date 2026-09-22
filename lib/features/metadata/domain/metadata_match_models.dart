@@ -76,10 +76,12 @@ class MetadataPersonProfile {
   const MetadataPersonProfile({
     required this.name,
     this.avatarUrl = '',
+    this.tmdbId = 0,
   });
 
   final String name;
   final String avatarUrl;
+  final int tmdbId;
 }
 
 class MetadataMatchResult {

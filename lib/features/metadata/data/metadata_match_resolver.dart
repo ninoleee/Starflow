@@ -169,6 +169,7 @@ class MetadataMatchResolver {
             (item) => MetadataPersonProfile(
               name: item.name,
               avatarUrl: item.avatarUrl,
+              tmdbId: item.tmdbId,
             ),
           )
           .toList(),
@@ -178,6 +179,7 @@ class MetadataMatchResolver {
             (item) => MetadataPersonProfile(
               name: item.name,
               avatarUrl: item.avatarUrl,
+              tmdbId: item.tmdbId,
             ),
           )
           .toList(),
@@ -187,6 +189,7 @@ class MetadataMatchResolver {
             (item) => MetadataPersonProfile(
               name: item.name,
               avatarUrl: item.avatarUrl,
+              tmdbId: item.tmdbId,
             ),
           )
           .toList(),
