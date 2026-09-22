@@ -176,9 +176,14 @@ class _PersonAvatar extends StatelessWidget {
 }
 
 class PlatformRail extends StatelessWidget {
-  const PlatformRail({super.key, required this.platforms});
+  const PlatformRail({
+    super.key,
+    required this.platforms,
+    this.onPlatformTap,
+  });
 
   final List<MediaPersonProfile> platforms;
+  final ValueChanged<MediaPersonProfile>? onPlatformTap;
 
   @override
   Widget build(BuildContext context) {
@@ -202,7 +207,9 @@ class PlatformRail extends StatelessWidget {
         itemBuilder: (context, index) {
           final platform = visiblePlatforms[index];
           return TvFocusableAction(
-            onPressed: () {},
+            onPressed: onPlatformTap == null
+                ? () {}
+                : () => onPlatformTap!(platform),
             focusId: 'detail:company:${platform.name}',
             visualStyle: TvFocusVisualStyle.prominent,
             focusScale: 1.03,

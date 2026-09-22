@@ -597,5 +597,120 @@ void main() {
         'https://image.tmdb.org/t/p/w500/interstellar.jpg',
       );
     });
+
+    test('fetches movie and TV credits for a company', () async {
+      var companySearchRequests = 0;
+      var movieCreditsRequests = 0;
+      var tvCreditsRequests = 0;
+      final client = TmdbMetadataClient(
+        MockClient((request) async {
+          expect(request.headers['Authorization'], 'Bearer tmdb-token');
+
+          if (request.url.path == '/3/search/company') {
+            companySearchRequests++;
+            expect(request.url.queryParameters['query'], 'DreamWorks Pictures');
+            return http.Response(
+              jsonEncode({
+                'results': [
+                  {
+                    'id': 521,
+                    'name': 'DreamWorks Fan Company',
+                    'logo_path': '/fan.png',
+                    'popularity': 1.0,
+                  },
+                  {
+                    'id': 33,
+                    'name': 'DreamWorks Pictures',
+                    'logo_path': '/dreamworks.png',
+                    'popularity': 25.0,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.path == '/3/company/33/movie') {
+            movieCreditsRequests++;
+            return http.Response(
+              jsonEncode({
+                'results': [
+                  {
+                    'id': 603,
+                    'title': 'The Matrix',
+                    'original_title': 'The Matrix',
+                    'poster_path': '/matrix.jpg',
+                    'backdrop_path': '/matrix-bg.jpg',
+                    'overview': 'A hacker discovers the truth.',
+                    'release_date': '1999-03-30',
+                    'vote_average': 8.2,
+                    'vote_count': 26000,
+                    'genre_ids': [28, 878],
+                    'popularity': 50.0,
+                  },
+                  {
+                    'id': 603,
+                    'title': 'The Matrix',
+                    'original_title': 'The Matrix',
+                    'poster_path': '/duplicate.jpg',
+                    'release_date': '1999-03-30',
+                    'popularity': 10.0,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.path == '/3/company/33/tv') {
+            tvCreditsRequests++;
+            return http.Response(
+              jsonEncode({
+                'results': [
+                  {
+                    'id': 95396,
+                    'name': 'Severance',
+                    'original_name': 'Severance',
+                    'poster_path': '/severance.jpg',
+                    'backdrop_path': '/severance-bg.jpg',
+                    'overview': 'Work and life are separated.',
+                    'first_air_date': '2022-02-18',
+                    'vote_average': 8.4,
+                    'vote_count': 3100,
+                    'genre_ids': [18, 9648],
+                    'popularity': 80.0,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          throw UnsupportedError('Unexpected request: ${request.url}');
+        }),
+      );
+
+      final credits = await client.fetchCompanyCredits(
+        name: 'DreamWorks Pictures',
+        logoUrl: 'https://image.tmdb.org/t/p/w300/dreamworks.png',
+        readAccessToken: 'tmdb-token',
+      );
+
+      expect(companySearchRequests, 1);
+      expect(movieCreditsRequests, 1);
+      expect(tvCreditsRequests, 1);
+      expect(credits, hasLength(2));
+      expect(credits.first.title, 'Severance');
+      expect(credits.first.isSeries, isTrue);
+      expect(credits.first.subtitle, '剧集');
+      expect(credits.first.genres, ['剧情', '悬疑']);
+      expect(credits.first.ratingLabels, ['TMDB 8.4']);
+      expect(credits.last.title, 'The Matrix');
+      expect(credits.last.subtitle, '电影');
+      expect(
+        credits.last.posterUrl,
+        'https://image.tmdb.org/t/p/w500/matrix.jpg',
+      );
+    });
   });
 }

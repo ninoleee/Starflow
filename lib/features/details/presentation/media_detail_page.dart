@@ -2255,6 +2255,15 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   title: '公司',
                                   child: PlatformRail(
                                     platforms: target.resolvedPlatformProfiles,
+                                    onPlatformTap: (company) {
+                                      context.pushNamed(
+                                        'person-credits',
+                                        extra: PersonCreditsPageTarget(
+                                          person: company,
+                                          role: PersonCreditsRole.company,
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
                               appPageBottomSpacer(),
