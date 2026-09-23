@@ -43,10 +43,12 @@ class DetailStartPlaybackResolver {
         );
 
     final children = await loadChildren(seriesId);
-    final seasons = children.where(
-      (item) => item.itemType.trim().toLowerCase() == 'season',
+    final seasons = sortSeasonsForDetailBrowser(
+      children.where(
+        (item) => item.itemType.trim().toLowerCase() == 'season',
+      ),
     );
-    // Match the browser: keep the source's season order and sort its episodes.
+    // Match the browser: keep regular seasons in source order, specials last.
     final firstSeason = seasons.isEmpty ? null : seasons.first;
     final childrenInSeason =
         firstSeason == null ? children : await loadChildren(firstSeason.id);

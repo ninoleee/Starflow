@@ -138,7 +138,7 @@ class DetailCacheStore {
   })  : _preferences = preferences,
         _notifyDetailCacheChanged = notifyDetailCacheChanged;
 
-  static const _detailCacheKey = 'starflow.local_storage.detail_cache.v1';
+  static const _detailCacheKey = 'starflow.local_storage.detail_cache.v2';
   final PreferencesStore _preferences;
   final void Function(LocalStorageDetailCacheChangeEvent event)?
       _notifyDetailCacheChanged;
@@ -535,7 +535,6 @@ class DetailCacheStore {
     if (recordId == null) {
       final baseRecordId = requestLookupKeys.first;
       var newRecordId = baseRecordId;
-      // Legacy aliases may point at an incompatible episode stored under this ID.
       var suffix = 1;
       while (records.containsKey(newRecordId)) {
         newRecordId = '$baseRecordId|record:${suffix++}';
@@ -1631,7 +1630,8 @@ bool _detailTargetMatchesDeletedResource(
     if ((target.playbackTarget?.itemId.trim() ?? '') == normalizedResourceId) {
       return true;
     }
-    if ((target.playbackTarget?.seriesId.trim() ?? '') == normalizedResourceId) {
+    if ((target.playbackTarget?.seriesId.trim() ?? '') ==
+        normalizedResourceId) {
       return true;
     }
   }

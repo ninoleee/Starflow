@@ -234,13 +234,7 @@ void main() {
           titles: const ['Requested title'],
           year: 2026,
         );
-        if (targetType.isEmpty) {
-          expect(imdbCandidates, hasLength(1));
-          expect(imdbCandidates.single.matchReason, '按 IMDb ID 匹配');
-          expect(imdbCandidates.single.score, 1e9);
-        } else {
-          expect(imdbCandidates, isEmpty);
-        }
+        expect(imdbCandidates, isEmpty);
       });
     }
 

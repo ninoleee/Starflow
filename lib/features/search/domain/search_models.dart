@@ -505,7 +505,6 @@ String searchResultFavoriteKey(SearchResult result) {
     'fallback',
     result.providerId.trim().toLowerCase(),
     result.title.trim().toLowerCase(),
-    result.summary.trim().toLowerCase(),
   ].join('|');
 }
 

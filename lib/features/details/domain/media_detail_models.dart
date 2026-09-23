@@ -21,6 +21,19 @@ List<MediaItem> sortEpisodesForDetailBrowser(List<MediaItem> items) {
   return sorted;
 }
 
+List<MediaItem> sortSeasonsForDetailBrowser(Iterable<MediaItem> seasons) {
+  final regularSeasons = <MediaItem>[];
+  final specialSeasons = <MediaItem>[];
+  for (final season in seasons) {
+    if (season.seasonNumber == 0) {
+      specialSeasons.add(season);
+    } else {
+      regularSeasons.add(season);
+    }
+  }
+  return [...regularSeasons, ...specialSeasons];
+}
+
 class MediaPersonProfile {
   const MediaPersonProfile({
     required this.name,

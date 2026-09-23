@@ -216,6 +216,19 @@ void main() {
     expect(findLastPlayedEpisodeIndex(episodes, null), -1);
   });
 
+  test('moves special season tabs after regular seasons', () {
+    final seasons = [
+      item('specials', 'season', 0),
+      item('s2', 'season', 2),
+      item('s1', 'season', 1),
+    ];
+
+    expect(
+      sortSeasonsForDetailBrowser(seasons).map((season) => season.id),
+      ['s2', 's1', 'specials'],
+    );
+  });
+
   testWidgets('scrolls offscreen episode into view without stealing focus',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 900));

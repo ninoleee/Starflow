@@ -56,7 +56,9 @@ final detailSeriesBrowserProvider = FutureProvider.autoDispose
     ),
   ).wait;
 
-  final seasons = children.where(_isSeasonItem).toList(growable: false);
+  final seasons = sortSeasonsForDetailBrowser(
+    children.where(_isSeasonItem),
+  );
   if (seasons.isEmpty) {
     final episodes = children.where(_isEpisodeItem).toList(growable: false);
     if (episodes.isEmpty) {
@@ -367,6 +369,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
 
   @override
   Widget build(BuildContext context) {
+    final seasonTabHeight = StarflowChipButton.minimumHeight(context) + 7;
     final selectedGroup = resolveSelectedEpisodeGroup(
       groups: widget.groups,
       selectedGroupId: widget.selectedGroupId,
@@ -379,19 +382,21 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
       children: [
         if (widget.groups.length > 1) ...[
           SizedBox(
-            height: 52,
-            child: _DetailSeasonTabs(
-              groups: widget.groups,
-              selectedGroupId: selectedGroup.id,
-              onSelected: (groupId) {
-                _initialPositionApplied = true;
-                if (widget.selectedGroupId != groupId) {
-                  widget.onSeasonSelected(groupId);
-                }
-              },
+            height: seasonTabHeight,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 5, bottom: 2),
+              child: _DetailSeasonTabs(
+                groups: widget.groups,
+                selectedGroupId: selectedGroup.id,
+                onSelected: (groupId) {
+                  _initialPositionApplied = true;
+                  if (widget.selectedGroupId != groupId) {
+                    widget.onSeasonSelected(groupId);
+                  }
+                },
+              ),
             ),
           ),
-          const SizedBox(height: 16),
         ],
         SizedBox(
           height: 292,

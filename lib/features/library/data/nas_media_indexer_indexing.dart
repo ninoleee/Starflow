@@ -163,24 +163,14 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
         : recognition.itemType.trim();
     var seasonNumber = seed.seasonNumber ?? recognition.seasonNumber;
     var episodeNumber = seed.episodeNumber ?? recognition.episodeNumber;
-    final requiresMovieMetadataTypeCorrection =
-        _requiresMovieMetadataTypeCorrection(existingRecord) ||
-            _hasStaleSeriesMetadataForResolvedMovie(
-              source: source,
-              seed: seed,
-              existingRecord: existingRecord,
-            );
-    var doubanId = requiresMovieMetadataTypeCorrection
-        ? ''
-        : existingRecord?.item.doubanId.trim() ?? '';
+    var doubanId = existingRecord?.item.doubanId.trim() ?? '';
     var imdbId = seed.imdbId.trim().isNotEmpty
         ? seed.imdbId.trim()
-        : (!requiresMovieMetadataTypeCorrection &&
-                existingRecord?.item.imdbId.trim().isNotEmpty == true
+        : (existingRecord?.item.imdbId.trim().isNotEmpty == true
             ? existingRecord!.item.imdbId.trim()
             : recognition.imdbId.trim());
     var tmdbId = seed.tmdbId.trim();
-    if (tmdbId.isEmpty && !requiresMovieMetadataTypeCorrection) {
+    if (tmdbId.isEmpty) {
       tmdbId = existingRecord?.item.tmdbId.trim() ?? '';
     }
     final container = seed.container.trim();
@@ -226,13 +216,6 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     var imdbStatus = existingRecord?.imdbStatus ?? NasMetadataFetchStatus.never;
     var metadataFailureCount = existingRecord?.metadataFailureCount ?? 0;
     var metadataRetryAfter = existingRecord?.metadataRetryAfter;
-    if (requiresMovieMetadataTypeCorrection) {
-      wmdbStatus = NasMetadataFetchStatus.never;
-      tmdbStatus = NasMetadataFetchStatus.never;
-      imdbStatus = NasMetadataFetchStatus.never;
-      metadataFailureCount = 0;
-      metadataRetryAfter = null;
-    }
     var transientFailureOccurred = false;
 
     if (markSidecarAttempt) {
@@ -674,31 +657,6 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       manualMetadataLocked: manualMetadataLocked,
       item: item,
     );
-  }
-
-  bool _hasStaleSeriesMetadataForResolvedMovie({
-    required MediaSourceConfig source,
-    required WebDavMetadataSeed seed,
-    required NasMediaIndexRecord? existingRecord,
-  }) {
-    if (!source.webDavStructureInferenceEnabled ||
-        existingRecord == null ||
-        existingRecord.manualMetadataLocked ||
-        seed.itemType.trim().toLowerCase() != 'movie' ||
-        seed.seasonNumber != null ||
-        seed.episodeNumber != null) {
-      return false;
-    }
-    final existingItemType = existingRecord.item.itemType.trim().toLowerCase();
-    final existingRecognizedType =
-        existingRecord.recognizedItemType.trim().toLowerCase();
-    return existingItemType != 'movie' ||
-        existingRecognizedType != 'movie' ||
-        existingRecord.preferSeries ||
-        existingRecord.item.seasonNumber != null ||
-        existingRecord.item.episodeNumber != null ||
-        existingRecord.recognizedSeasonNumber != null ||
-        existingRecord.recognizedEpisodeNumber != null;
   }
 
   String _buildMetadataMatchQuery({

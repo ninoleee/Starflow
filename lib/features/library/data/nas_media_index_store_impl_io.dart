@@ -13,7 +13,7 @@ Future<Database> openNasMediaIndexDatabase() async {
     await directory.create(recursive: true);
   }
   return databaseFactoryIo.openDatabase(
-    p.join(directory.path, 'nas_metadata_index.db'),
-    version: 1,
+    p.join(directory.path, 'nas_metadata_index.v2.db'),
+    version: 2,
   );
 }

@@ -10,8 +10,7 @@ enum TmdbMediaType {
       };
 }
 
-/// Unknown legacy types can still match by title or other external IDs, but
-/// cannot establish an exact TMDB identity from a bare ID.
+/// TMDB identities require an explicit movie or TV item type.
 class TmdbMediaIdentity {
   const TmdbMediaIdentity({required this.mediaType, required this.id});
 

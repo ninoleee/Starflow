@@ -63,6 +63,16 @@ enum _PersonCreditsSortMode {
   tmdbRating,
 }
 
+TmdbCompanyCreditsSort _tmdbCompanyCreditsSort(
+  _PersonCreditsSortMode sortMode,
+) {
+  return switch (sortMode) {
+    _PersonCreditsSortMode.newest => TmdbCompanyCreditsSort.newest,
+    _PersonCreditsSortMode.oldest => TmdbCompanyCreditsSort.oldest,
+    _PersonCreditsSortMode.tmdbRating => TmdbCompanyCreditsSort.rating,
+  };
+}
+
 class PersonCreditsPage extends ConsumerStatefulWidget {
   const PersonCreditsPage({super.key, required this.target});
 
@@ -78,6 +88,7 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
   static const String _movieCategoryLabel = '电影';
   static const String _varietyCategoryLabel = '综艺';
   static const String _seriesCategoryLabel = '剧集';
+  static const int _localPageSize = 40;
 
   final ScrollController _scrollController = ScrollController();
   final FocusNode _headerFocusNode =
@@ -87,16 +98,21 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
   _PersonCreditsSortMode _sortMode = _PersonCreditsSortMode.newest;
   String _selectedPrimaryCategory = _allCategoryLabel;
   String _selectedMovieGenre = _allCategoryLabel;
+  int _companyPage = 1;
+  int _personPage = 1;
 
   @override
   void didUpdateWidget(covariant PersonCreditsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.target.role != widget.target.role ||
         oldWidget.target.person.name != widget.target.person.name ||
-        oldWidget.target.person.avatarUrl != widget.target.person.avatarUrl) {
+        oldWidget.target.person.avatarUrl != widget.target.person.avatarUrl ||
+        oldWidget.target.person.tmdbId != widget.target.person.tmdbId) {
       _sortMode = _PersonCreditsSortMode.newest;
       _selectedPrimaryCategory = _allCategoryLabel;
       _selectedMovieGenre = _allCategoryLabel;
+      _companyPage = 1;
+      _personPage = 1;
       _retainedResultAsync.clear();
     }
   }
@@ -115,8 +131,17 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
       scheduleTvFocusRecovery(context: context, focusNode: _headerFocusNode);
     }
     final target = widget.target;
-    final watchedResultAsync =
-        isPageVisible ? ref.watch(_personCreditsPageProvider(target)) : null;
+    final isCompany = target.role == PersonCreditsRole.company;
+    final pageRequest = _PersonCreditsPageRequest(
+      target: target,
+      page: isCompany ? _companyPage : 1,
+      sort: isCompany
+          ? _tmdbCompanyCreditsSort(_sortMode)
+          : TmdbCompanyCreditsSort.newest,
+    );
+    final watchedResultAsync = isPageVisible
+        ? ref.watch(_personCreditsPageProvider(pageRequest))
+        : null;
     final resultAsync = _retainedResultAsync.resolve(
       activeValue: watchedResultAsync,
       fallbackValue: const AsyncLoading<_PersonCreditsPageResult>(),
@@ -161,12 +186,31 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
                                         .contains(_selectedMovieGenre)
                                 ? _selectedMovieGenre
                                 : _allCategoryLabel;
-                        final visibleItems = _sortAndFilterPersonCredits(
+                        final filteredItems = _sortAndFilterPersonCredits(
                           items: result.items,
                           selectedPrimaryCategory: selectedPrimaryCategory,
                           selectedMovieGenre: selectedMovieGenre,
                           sortMode: _sortMode,
                         );
+                        final localTotalPages = math.max(
+                          1,
+                          (filteredItems.length / _localPageSize).ceil(),
+                        );
+                        final localPage = math.max(
+                          1,
+                          math.min(_personPage, localTotalPages),
+                        );
+                        final visibleItems = isCompany
+                            ? filteredItems
+                            : filteredItems
+                                .skip((localPage - 1) * _localPageSize)
+                                .take(_localPageSize)
+                                .toList(growable: false);
+                        final currentPage =
+                            isCompany ? result.currentPage : localPage;
+                        final totalPages =
+                            isCompany ? result.totalPages : localTotalPages;
+                        final showPager = totalPages > 1;
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -181,18 +225,34 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
                                 if (_sortMode == value) {
                                   return;
                                 }
+                                if (isCompany) {
+                                  _retainedResultAsync.clear();
+                                }
                                 setState(() {
                                   _sortMode = value;
+                                  if (isCompany) {
+                                    _companyPage = 1;
+                                  } else {
+                                    _personPage = 1;
+                                  }
                                 });
                               },
                               onPrimaryCategoryChanged: (value) {
                                 if (_selectedPrimaryCategory == value) {
                                   return;
                                 }
+                                if (isCompany && _companyPage != 1) {
+                                  _retainedResultAsync.clear();
+                                }
                                 setState(() {
                                   _selectedPrimaryCategory = value;
                                   if (value != _movieCategoryLabel) {
                                     _selectedMovieGenre = _allCategoryLabel;
+                                  }
+                                  if (isCompany) {
+                                    _companyPage = 1;
+                                  } else {
+                                    _personPage = 1;
                                   }
                                 });
                               },
@@ -200,15 +260,46 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
                                 if (_selectedMovieGenre == value) {
                                   return;
                                 }
+                                if (isCompany && _companyPage != 1) {
+                                  _retainedResultAsync.clear();
+                                }
                                 setState(() {
                                   _selectedMovieGenre = value;
+                                  if (isCompany) {
+                                    _companyPage = 1;
+                                  } else {
+                                    _personPage = 1;
+                                  }
                                 });
                               },
                             ),
+                            if (showPager) ...[
+                              _PersonCreditsPagerSummary(
+                                title: '${target.role.label}分页',
+                                currentPage: currentPage,
+                                totalPages: totalPages,
+                                isTelevision: isTelevision,
+                                focusPrefix: 'person-credits:pager:top',
+                                onPageChanged: _handleCreditsPageChanged,
+                              ),
+                              const SizedBox(height: 18),
+                            ],
                             if (visibleItems.isEmpty)
                               const _EmptyState(message: '当前筛选下没有结果')
                             else
                               _PersonCreditsGrid(items: visibleItems),
+                            if (showPager) ...[
+                              const SizedBox(height: 18),
+                              _PersonCreditsPagerSummary(
+                                title: '${target.role.label}分页',
+                                currentPage: currentPage,
+                                totalPages: totalPages,
+                                isTelevision: isTelevision,
+                                focusPrefix: 'person-credits:pager:bottom',
+                                onPageChanged: _handleCreditsPageChanged,
+                                compact: true,
+                              ),
+                            ],
                           ],
                         );
                       },
@@ -238,11 +329,41 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
       ),
     );
   }
+
+  void _handleCreditsPageChanged(int page) {
+    if (page < 1) {
+      return;
+    }
+    if (widget.target.role == PersonCreditsRole.company) {
+      if (page == _companyPage) {
+        return;
+      }
+      _retainedResultAsync.clear();
+      setState(() {
+        _companyPage = page;
+      });
+    } else {
+      if (page == _personPage) {
+        return;
+      }
+      setState(() {
+        _personPage = page;
+      });
+    }
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
 }
 
 final _personCreditsPageProvider = FutureProvider.autoDispose
-    .family<_PersonCreditsPageResult, PersonCreditsPageTarget>(
-        (ref, target) async {
+    .family<_PersonCreditsPageResult, _PersonCreditsPageRequest>(
+        (ref, request) async {
+  final target = request.target;
   final tmdbMetadataMatchEnabled = ref.read(
     appSettingsProvider.select((settings) => settings.tmdbMetadataMatchEnabled),
   );
@@ -264,38 +385,89 @@ final _personCreditsPageProvider = FutureProvider.autoDispose
   }
 
   final client = ref.read(tmdbMetadataClientProvider);
-  final credits = target.role == PersonCreditsRole.company
-      ? await client.fetchCompanyCredits(
-          companyId: target.person.tmdbId,
-          readAccessToken: token,
-        )
-      : await client.fetchPersonCredits(
-          name: target.person.name,
-          avatarUrl: target.person.avatarUrl,
-          role: target.role.tmdbRole!,
-          readAccessToken: token,
-        );
+  late final List<TmdbPersonCredit> credits;
+  var currentPage = 1;
+  var totalPages = 1;
+  if (target.role == PersonCreditsRole.company) {
+    final page = await client.fetchCompanyCreditsPage(
+      companyId: target.person.tmdbId,
+      readAccessToken: token,
+      page: request.page,
+      sort: request.sort,
+    );
+    credits = page.items;
+    currentPage = page.page;
+    totalPages = page.totalPages;
+  } else {
+    credits = await client.fetchPersonCredits(
+      name: target.person.name,
+      avatarUrl: target.person.avatarUrl,
+      role: target.role.tmdbRole!,
+      readAccessToken: token,
+    );
+  }
   if (credits.isEmpty) {
-    return const _PersonCreditsPageResult(
-      items: [],
+    return _PersonCreditsPageResult(
+      items: const [],
       message: '没有找到关联影片。',
+      currentPage: currentPage,
+      totalPages: totalPages,
     );
   }
 
   return _PersonCreditsPageResult(
     items: credits.map(_toPersonCreditCard).toList(growable: false),
     message: '',
+    currentPage: currentPage,
+    totalPages: totalPages,
   );
 });
+
+class _PersonCreditsPageRequest {
+  const _PersonCreditsPageRequest({
+    required this.target,
+    required this.page,
+    required this.sort,
+  });
+
+  final PersonCreditsPageTarget target;
+  final int page;
+  final TmdbCompanyCreditsSort sort;
+
+  @override
+  bool operator ==(Object other) {
+    return other is _PersonCreditsPageRequest &&
+        other.target.role == target.role &&
+        other.target.person.name == target.person.name &&
+        other.target.person.avatarUrl == target.person.avatarUrl &&
+        other.target.person.tmdbId == target.person.tmdbId &&
+        other.page == page &&
+        other.sort == sort;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        target.role,
+        target.person.name,
+        target.person.avatarUrl,
+        target.person.tmdbId,
+        page,
+        sort,
+      );
+}
 
 class _PersonCreditsPageResult {
   const _PersonCreditsPageResult({
     required this.items,
     required this.message,
+    this.currentPage = 1,
+    this.totalPages = 1,
   });
 
   final List<_PersonCreditCardData> items;
   final String message;
+  final int currentPage;
+  final int totalPages;
 }
 
 class _PersonCreditCardData {
@@ -832,6 +1004,127 @@ class _PersonCreditsGrid extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+class _PersonCreditsPagerSummary extends StatelessWidget {
+  const _PersonCreditsPagerSummary({
+    required this.title,
+    required this.currentPage,
+    required this.totalPages,
+    required this.isTelevision,
+    required this.focusPrefix,
+    required this.onPageChanged,
+    this.compact = false,
+  });
+
+  final String title;
+  final int currentPage;
+  final int totalPages;
+  final bool isTelevision;
+  final String focusPrefix;
+  final ValueChanged<int> onPageChanged;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final canGoPrevious = currentPage > 1;
+    final canGoNext = currentPage < totalPages;
+
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                compact ? '第 $currentPage / $totalPages 页' : title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (!compact)
+                Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                    '第 $currentPage / $totalPages 页',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF90A0BD),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        _PersonCreditsPagerButton(
+          icon: Icons.arrow_back_ios_new_rounded,
+          enabled: canGoPrevious,
+          isTelevision: isTelevision,
+          focusId: '$focusPrefix:previous',
+          onTap: () => onPageChanged(currentPage - 1),
+        ),
+        const SizedBox(width: 8),
+        _PersonCreditsPagerButton(
+          icon: Icons.arrow_forward_ios_rounded,
+          enabled: canGoNext,
+          isTelevision: isTelevision,
+          focusId: '$focusPrefix:next',
+          onTap: () => onPageChanged(currentPage + 1),
+        ),
+      ],
+    );
+  }
+}
+
+class _PersonCreditsPagerButton extends StatelessWidget {
+  const _PersonCreditsPagerButton({
+    required this.icon,
+    required this.enabled,
+    required this.isTelevision,
+    required this.focusId,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final bool enabled;
+  final bool isTelevision;
+  final String focusId;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final child = Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: enabled
+            ? Colors.white.withValues(alpha: 0.08)
+            : Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Icon(
+        icon,
+        size: 18,
+        color: enabled ? Colors.white : Colors.white.withValues(alpha: 0.26),
+      ),
+    );
+    if (isTelevision) {
+      return TvFocusableAction(
+        onPressed: enabled ? onTap : null,
+        focusableWhenDisabled: true,
+        focusId: focusId,
+        borderRadius: BorderRadius.circular(999),
+        child: child,
+      );
+    }
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: enabled ? onTap : null,
+      child: child,
     );
   }
 }

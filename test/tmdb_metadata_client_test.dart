@@ -607,8 +607,13 @@ void main() {
         MockClient((request) async {
           expect(request.headers['Authorization'], 'Bearer tmdb-token');
 
-          if (request.url.path == '/3/company/33/movie') {
+          if (request.url.path == '/3/discover/movie') {
             movieCreditsRequests++;
+            expect(request.url.queryParameters['with_companies'], '33');
+            expect(
+              request.url.queryParameters['sort_by'],
+              'primary_release_date.desc',
+            );
             return http.Response(
               jsonEncode({
                 'results': [
@@ -639,8 +644,13 @@ void main() {
             );
           }
 
-          if (request.url.path == '/3/company/33/tv') {
+          if (request.url.path == '/3/discover/tv') {
             tvCreditsRequests++;
+            expect(request.url.queryParameters['with_companies'], '33');
+            expect(
+              request.url.queryParameters['sort_by'],
+              'first_air_date.desc',
+            );
             return http.Response(
               jsonEncode({
                 'results': [
@@ -686,6 +696,74 @@ void main() {
         credits.last.posterUrl,
         'https://image.tmdb.org/t/p/w500/matrix.jpg',
       );
+    });
+
+    test('fetches the requested company credits page', () async {
+      final requestedPages = <String>[];
+      final client = TmdbMetadataClient(
+        MockClient((request) async {
+          if (request.url.path == '/3/discover/movie') {
+            requestedPages.add('movie:${request.url.queryParameters['page']}');
+            expect(
+              request.url.queryParameters['sort_by'],
+              'primary_release_date.asc',
+            );
+            return http.Response(
+              jsonEncode({
+                'page': 2,
+                'total_pages': 3,
+                'results': [
+                  {
+                    'id': 603,
+                    'title': 'The Matrix',
+                    'release_date': '1999-03-30',
+                    'popularity': 50.0,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          if (request.url.path == '/3/discover/tv') {
+            requestedPages.add('tv:${request.url.queryParameters['page']}');
+            expect(
+              request.url.queryParameters['sort_by'],
+              'first_air_date.asc',
+            );
+            return http.Response(
+              jsonEncode({
+                'page': 2,
+                'total_pages': 2,
+                'results': [
+                  {
+                    'id': 95396,
+                    'name': 'Severance',
+                    'first_air_date': '2022-02-18',
+                    'popularity': 80.0,
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+
+          throw UnsupportedError('Unexpected request: ${request.url}');
+        }),
+      );
+
+      final page = await client.fetchCompanyCreditsPage(
+        companyId: 33,
+        readAccessToken: 'tmdb-token',
+        page: 2,
+        sort: TmdbCompanyCreditsSort.oldest,
+      );
+
+      expect(requestedPages, containsAll(['movie:2', 'tv:2']));
+      expect(page.page, 2);
+      expect(page.totalPages, 3);
+      expect(page.hasNextPage, isTrue);
+      expect(page.items.map((item) => item.title), ['Severance', 'The Matrix']);
     });
   });
 }

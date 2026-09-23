@@ -54,7 +54,7 @@ void main() {
   });
 
   for (final type in TmdbMediaType.values) {
-    test('$type filters every external ID path but keeps unknown types', () {
+    test('$type filters every external ID path by explicit type', () {
       final items = [
         for (final itemType in ['movie', 'tv', ''])
           _item(itemType).copyWith(
@@ -75,7 +75,7 @@ void main() {
             tmdbMediaType: type, wikidataId: 'Q123'),
       ];
       for (final matches in paths) {
-        expect(matches.map((item) => item.itemType), [type.name, '']);
+        expect(matches.map((item) => item.itemType), [type.name]);
       }
       expect(
           listMediaItemsMatchingExternalIds(items,
@@ -86,12 +86,8 @@ void main() {
   }
 
   for (final type in ['', 'video', 'unknown']) {
-    test('legacy $type type falls back to titles, not a bare TMDB ID', () {
-      final legacy = _item(type, title: 'Probe');
-      final matches = service.buildManualMatchCandidates(
-          target: target, items: [legacy], titles: ['Probe'], year: 1999);
-      expect(matches.single.score, lessThan(1e9));
-      expect(matches.single.matchReason, isNot(contains('TMDB')));
+    test('$type item type cannot participate in typed TMDB matching', () {
+      final untyped = _item(type, title: 'Probe');
       expect(
           service.buildManualMatchCandidates(
               target: target,
@@ -99,12 +95,14 @@ void main() {
               titles: ['Probe'],
               year: 1999),
           isEmpty);
-      expect(matchMediaItemByExternalIds([legacy], tmdbId: '123'), isNull);
+      expect(matchMediaItemByExternalIds([untyped], tmdbId: '123'), isNull);
       expect(
-          matchMediaItemByExternalIds([legacy.copyWith(imdbId: 'tt123')],
-              tmdbId: '123', imdbId: 'tt123'),
-          isNotNull);
-      expect(MediaItem.fromJson(legacy.toJson()).itemType, type);
+          matchMediaItemByExternalIds([untyped.copyWith(imdbId: 'tt123')],
+              tmdbId: '123',
+              tmdbMediaType: TmdbMediaType.movie,
+              imdbId: 'tt123'),
+          isNull);
+      expect(MediaItem.fromJson(untyped.toJson()).itemType, type);
     });
   }
 
@@ -133,9 +131,7 @@ void main() {
     expect(matches.single.score, 1e9);
   });
 
-  test(
-      'online favorites use typed TMDB, unknown favorites retain title fallback',
-      () {
+  test('online favorites require a matching explicit media type', () {
     const updates = DetailOnlineResourceUpdateService();
     SearchResult favorite(String type, String title) => SearchResult(
           id: type,
@@ -159,9 +155,10 @@ void main() {
     final typed = updates.resolveFavoriteMatches(
         target: target, favorites: [favorite('movie', 'Unrelated')]);
     expect(typed.single.score, 400);
-    final legacy = updates.resolveFavoriteMatches(
-        target: target, favorites: [favorite('', 'Probe')]);
-    expect(legacy.single.score, lessThan(400));
+    expect(
+        updates.resolveFavoriteMatches(
+            target: target, favorites: [favorite('', 'Probe')]),
+        isEmpty);
   });
 }
 

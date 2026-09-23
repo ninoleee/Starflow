@@ -78,8 +78,7 @@ void main() {
             .posterHeaders,
         isEmpty);
   });
-  test('serialized writes, clear, failure recovery and old-key verification',
-      () async {
+  test('serialized writes, clear and failure recovery', () async {
     final store = _Store();
     final repository = PlaybackMemoryRepository(preferences: store);
     final progress = repository.saveProgress(
@@ -109,19 +108,6 @@ void main() {
         SeriesSkipPreference(seriesKey: 'new', updatedAt: DateTime.utc(2026)));
     repository.invalidateSnapshotCache();
     expect((await repository.loadSnapshot()).items, isEmpty);
-    final legacy = PlaybackProgressEntry(
-        key: 'path|nas|lossy', target: _target, updatedAt: DateTime.utc(2026));
-    final snapshot = PlaybackMemorySnapshot(items: {legacy.key: legacy});
-    expect(repository.entryForTargetFromSnapshot(snapshot, _target), isNotNull);
-    final forgedKey = PlaybackMemorySnapshot(items: {
-      buildPlaybackItemKey(_target): legacy.copyWith(
-          target: _target.copyWith(actualAddress: 'https://nas.test/AB.mkv')),
-    });
-    expect(repository.entryForTargetFromSnapshot(forgedKey, _target), isNull);
-    expect(
-        repository.entryForTargetFromSnapshot(snapshot,
-            _target.copyWith(actualAddress: 'https://nas.test/AB.mkv')),
-        isNull);
   });
   test('invalidated in-flight read cannot reinstall an old snapshot', () async {
     final store = _Store();

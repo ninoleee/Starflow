@@ -187,32 +187,6 @@ void main() {
   });
 
   test(
-      'legacy channel ID migrates one-to-one but never merges ambiguous shared EPG',
-      () async {
-    final r = repository();
-    await r.saveSource(source);
-    final db = await r.database;
-    final channels = stringMapStoreFactory.store('channels');
-    final old = {
-      ...parseLivePlaylist(playlist('Old'), 's').channels.single.toJson(),
-      'id': 'legacy'
-    }..remove('identity');
-    await channels.record('legacy').put(db, old);
-    await r.preference('legacy', {'favorite': true});
-    await r.remember('legacy', 0);
-    await r.saveSource(source, imported: bytes(playlist('New')));
-    final stableId = (await r.load()).channels.single.id;
-    expect(stableId, isNot('legacy'));
-    expect((await r.load()).preferences[stableId]!.favorite, isTrue);
-    expect((await r.load()).lastChannel, stableId);
-    await channels
-        .record('other')
-        .put(db, {...old, 'id': 'other', 'name': 'Other'});
-    await r.saveSource(source, imported: bytes(playlist('Newest')));
-    expect((await r.load()).channels.single.id, isNot('legacy'));
-  });
-
-  test(
       'versioned backup retains IDs, credentials, historical preferences and caches',
       () async {
     final r = repository();
@@ -370,19 +344,19 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 180));
     final old = c.generation;
-      for (final pause in ['paused:3', 'paused:2', 'suppressed:1']) {
-        engine.emit(pause);
-        engine.emit('buffering');
-        engine.emit('progress');
-        engine.emit('error');
-        engine.emit('ended');
-        await tester.pump(const Duration(minutes: 1));
-        expect(c.status, 'paused');
-        expect(c.pauseReason, pause);
-        expect(c.retries, 0);
-        engine.emit('resumed');
-        expect(c.pauseReason, isEmpty);
-      }
+    for (final pause in ['paused:3', 'paused:2', 'suppressed:1']) {
+      engine.emit(pause);
+      engine.emit('buffering');
+      engine.emit('progress');
+      engine.emit('error');
+      engine.emit('ended');
+      await tester.pump(const Duration(minutes: 1));
+      expect(c.status, 'paused');
+      expect(c.pauseReason, pause);
+      expect(c.retries, 0);
+      engine.emit('resumed');
+      expect(c.pauseReason, isEmpty);
+    }
     engine.emit('error');
     await tester.pump(const Duration(seconds: 2));
     await tester.pump(const Duration(milliseconds: 180));

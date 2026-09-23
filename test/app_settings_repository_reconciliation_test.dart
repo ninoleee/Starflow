@@ -25,7 +25,7 @@ void main() {
     );
 
     final persisted = jsonDecode(
-      (await preferences.getString('starflow.settings.v2'))!,
+      (await preferences.getString('starflow.settings.v3'))!,
     ) as Map<String, dynamic>;
     expect(
       (persisted['networkStorage'] as Map<String, dynamic>),

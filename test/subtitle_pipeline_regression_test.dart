@@ -228,10 +228,11 @@ void main() {
       await legacy.parent.create(recursive: true);
       await legacy.writeAsString(_srt);
       final second = repository();
-      expect((await second.inspectCacheSummary()).entryCount, 2);
+      expect((await second.inspectCacheSummary()).entryCount, 1);
       await second.clearCache();
       expect((await second.inspectCacheSummary()).entryCount, 0);
       expect(await File(download.subtitleFilePath!).exists(), isFalse);
+      expect(await legacy.exists(), isTrue);
     });
   }
 

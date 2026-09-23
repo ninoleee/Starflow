@@ -44,7 +44,8 @@ const _favorite = SearchResult(
     summary: '',
     resourceUrl: 'https://115.com/s/abc',
     password: 'abcd',
-    favoriteFolderName: 'Show');
+    favoriteFolderName: 'Show',
+    metadataMediaType: 'movie');
 
 http.Response _response(Object value) => http.Response.bytes(
       utf8.encode(jsonEncode(value)),

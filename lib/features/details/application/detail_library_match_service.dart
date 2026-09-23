@@ -465,7 +465,7 @@ class DetailLibraryMatchService {
         TmdbMediaType.fromItemType(metadataMatch?.mediaType.toItemType ?? '');
     items = items.where((item) {
       final itemType = TmdbMediaType.fromItemType(item.itemType);
-      return targetType == null || itemType == null || targetType == itemType;
+      return targetType != null && itemType != null && targetType == itemType;
     }).toList(growable: false);
     if (items.isEmpty) {
       return const <MediaItem>[];

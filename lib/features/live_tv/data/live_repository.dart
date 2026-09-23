@@ -120,18 +120,6 @@ class LiveRepository {
                 for (final row in await store.find(txn)) row.key: row.value
               };
             }
-            // Upgrade historical ownership in the exported snapshot, not the live DB.
-            for (final entry in stores['channels']!.entries) {
-              final source = (entry.value as Map)['sourceId'] as String;
-              stores['channelOwners']![entry.key] = source;
-              final preference = stores['preferences']![entry.key];
-              if (preference is Map) {
-                stores['preferences']![entry.key] = {
-                  ...preference,
-                  'sourceId': source
-                };
-              }
-            }
             return LiveBackup.decode(LiveBackup(stores).encode()).encode();
           }));
 
@@ -421,20 +409,7 @@ class LiveRepository {
     final previous = await _channels.find(db,
         finder: Finder(filter: Filter.equals('sourceId', sourceId)));
     final oldById = {for (final c in previous) c.key: c.value};
-    // Migrate legacy IDs when a unique upstream tvg-id survives a rename/regroup.
-    // Legacy rows lack identity; their epgId is usable only for an explicit
-    // incoming tvg-id and a one-to-one match. Never migrate by display name.
-    final oldIdentity = <String, List<String>>{};
-    final newIdentity = <String, int>{};
-    for (final c in previous) {
-      final key =
-          c.value['identity'] as String? ?? c.value['epgId'] as String? ?? '';
-      if (key.isNotEmpty) (oldIdentity[key] ??= []).add(c.key);
-    }
-    for (final c in channels) {
-      newIdentity.update(c.identity, (n) => n + 1, ifAbsent: () => 1);
-    }
-    // Retain ownership when an upstream channel disappears, including old DBs.
+    // Retain ownership when an upstream channel disappears.
     for (final c in previous) {
       await _owners.record(c.key).put(db, sourceId);
     }
@@ -447,28 +422,8 @@ class LiveRepository {
         finder: Finder(filter: Filter.equals('sourceId', sourceId)));
     for (var i = 0; i < channels.length; i++) {
       final incoming = channels[i];
-      final candidates = oldIdentity[incoming.identity] ?? [];
-      final previousId = oldById.containsKey(incoming.id)
-          ? incoming.id
-          : incoming.identity.isNotEmpty &&
-                  newIdentity[incoming.identity] == 1 &&
-                  candidates.length == 1
-              ? candidates.single
-              : incoming.id;
       final c = incoming;
-      if (previousId != c.id) {
-        final preference = await _prefs.record(previousId).get(db);
-        if (preference != null && !await _prefs.record(c.id).exists(db)) {
-          await _prefs
-              .record(c.id)
-              .put(db, {...preference, 'sourceId': sourceId});
-        }
-        if (await _meta.record('lastChannel').get(db) == previousId) {
-          await _meta.record('lastChannel').put(db, c.id);
-        }
-        await _prefs.record(previousId).delete(db);
-      }
-      final old = oldById[previousId];
+      final old = oldById[c.id];
       final cachedLogo = logos[c.epgId] ??
           (old != null && old['epgId'] == c.epgId ? old['logo'] : null) ??
           '';

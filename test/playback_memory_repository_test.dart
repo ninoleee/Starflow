@@ -64,7 +64,7 @@ void main() {
         expect(seriesEntry.progress, entry.progress);
       }
 
-      final json = jsonDecode(prefs.getString('starflow.playback.memory.v1')!)
+      final json = jsonDecode(prefs.getString('starflow.playback.memory.v2')!)
           as Map<String, dynamic>;
       expect(
         json.keys,
@@ -280,7 +280,7 @@ void main() {
       },
     );
     SharedPreferences.setMockInitialValues({
-      'flutter.starflow.playback.memory.v1': jsonEncode(snapshot.toJson()),
+      'flutter.starflow.playback.memory.v2': jsonEncode(snapshot.toJson()),
     });
     final preferences = await SharedPreferences.getInstance();
     final repository = PlaybackMemoryRepository(
@@ -690,7 +690,7 @@ void main() {
       },
     );
     await store.setString(
-      'starflow.playback.memory.v1',
+      'starflow.playback.memory.v2',
       jsonEncode(externalSnapshot.toJson()),
     );
 

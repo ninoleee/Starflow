@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:starflow/core/storage/bounded_memory_map.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,14 @@ import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/metadata/data/metadata_network_guard.dart';
+
+const int _maxCompanyCreditsPage = 500;
+
+enum TmdbCompanyCreditsSort {
+  newest,
+  oldest,
+  rating,
+}
 
 final tmdbMetadataClientProvider = Provider<TmdbMetadataClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
@@ -377,15 +386,35 @@ class TmdbMetadataClient {
   Uri _buildCompanyCreditsUri(
     int companyId, {
     required bool isSeries,
+    required int page,
+    required TmdbCompanyCreditsSort sort,
   }) {
     return Uri.https(
       'api.themoviedb.org',
-      '/3/company/$companyId/${isSeries ? 'tv' : 'movie'}',
+      isSeries ? '/3/discover/tv' : '/3/discover/movie',
       {
         'language': 'zh-CN',
-        'page': '1',
+        'page': '$page',
+        'sort_by': _companyCreditsSortValue(
+          isSeries: isSeries,
+          sort: sort,
+        ),
+        'with_companies': '$companyId',
       },
     );
+  }
+
+  static String _companyCreditsSortValue({
+    required bool isSeries,
+    required TmdbCompanyCreditsSort sort,
+  }) {
+    return switch (sort) {
+      TmdbCompanyCreditsSort.newest =>
+        isSeries ? 'first_air_date.desc' : 'primary_release_date.desc',
+      TmdbCompanyCreditsSort.oldest =>
+        isSeries ? 'first_air_date.asc' : 'primary_release_date.asc',
+      TmdbCompanyCreditsSort.rating => 'vote_average.desc',
+    };
   }
 
   Map<String, String> _buildHeaders(String token) {
@@ -772,25 +801,45 @@ class TmdbMetadataClient {
     );
   }
 
-  Future<List<TmdbPersonCredit>> fetchCompanyCredits({
+  Future<TmdbCompanyCreditsPage> fetchCompanyCreditsPage({
     required int companyId,
     required String readAccessToken,
+    int page = 1,
     int limit = 60,
+    TmdbCompanyCreditsSort sort = TmdbCompanyCreditsSort.newest,
   }) async {
+    final normalizedPage = math.min(
+      math.max(1, page),
+      _maxCompanyCreditsPage,
+    );
     final cleanedToken = readAccessToken.trim();
     if (companyId <= 0 || cleanedToken.isEmpty || limit <= 0) {
-      return const [];
+      return TmdbCompanyCreditsPage(
+        items: const [],
+        page: normalizedPage,
+        totalPages: normalizedPage,
+      );
     }
 
     final responses = await Future.wait([
       _networkGuard.get(
         _client,
-        _buildCompanyCreditsUri(companyId, isSeries: false),
+        _buildCompanyCreditsUri(
+          companyId,
+          isSeries: false,
+          page: normalizedPage,
+          sort: sort,
+        ),
         headers: _buildHeaders(cleanedToken),
       ),
       _networkGuard.get(
         _client,
-        _buildCompanyCreditsUri(companyId, isSeries: true),
+        _buildCompanyCreditsUri(
+          companyId,
+          isSeries: true,
+          page: normalizedPage,
+          sort: sort,
+        ),
         headers: _buildHeaders(cleanedToken),
       ),
     ]);
@@ -813,24 +862,63 @@ class TmdbMetadataClient {
     final decodedTvShows = jsonDecode(
       utf8.decode(tvResponse.bodyBytes, allowMalformed: true),
     );
-    final movieItems = decodedMovies is Map<String, dynamic>
-        ? (decodedMovies['results'] as List<dynamic>? ?? const [])
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList(growable: false)
-        : const <Map<String, dynamic>>[];
-    final tvItems = decodedTvShows is Map<String, dynamic>
-        ? (decodedTvShows['results'] as List<dynamic>? ?? const [])
-            .whereType<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList(growable: false)
-        : const <Map<String, dynamic>>[];
-
-    return _mapCompanyCredits(
-      movieItems: movieItems,
-      tvItems: tvItems,
-      limit: limit,
+    return TmdbCompanyCreditsPage(
+      items: _mapCompanyCredits(
+        movieItems: _extractDiscoverResults(decodedMovies),
+        tvItems: _extractDiscoverResults(decodedTvShows),
+        limit: limit,
+      ),
+      page: normalizedPage,
+      totalPages: math.min(
+        math.max(
+          _resolveCompanyCreditsTotalPages(
+            decodedMovies,
+            fallback: normalizedPage,
+          ),
+          _resolveCompanyCreditsTotalPages(
+            decodedTvShows,
+            fallback: normalizedPage,
+          ),
+        ),
+        _maxCompanyCreditsPage,
+      ),
     );
+  }
+
+  Future<List<TmdbPersonCredit>> fetchCompanyCredits({
+    required int companyId,
+    required String readAccessToken,
+    int limit = 60,
+    TmdbCompanyCreditsSort sort = TmdbCompanyCreditsSort.newest,
+  }) async {
+    final page = await fetchCompanyCreditsPage(
+      companyId: companyId,
+      readAccessToken: readAccessToken,
+      limit: limit,
+      sort: sort,
+    );
+    return page.items;
+  }
+
+  static List<Map<String, dynamic>> _extractDiscoverResults(Object? decoded) {
+    if (decoded is! Map<String, dynamic>) {
+      return const <Map<String, dynamic>>[];
+    }
+    return (decoded['results'] as List<dynamic>? ?? const [])
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
+  }
+
+  static int _resolveCompanyCreditsTotalPages(
+    Object? decoded, {
+    required int fallback,
+  }) {
+    if (decoded is! Map<String, dynamic>) {
+      return fallback;
+    }
+    final totalPages = (decoded['total_pages'] as num?)?.toInt() ?? 0;
+    return math.max(1, totalPages);
   }
 
   static List<TmdbPersonProfile> _resolveActorProfiles(Object? raw) {
@@ -1458,6 +1546,20 @@ class TmdbPersonCredit {
   final List<String> ratingLabels;
   final String subtitle;
   final double popularity;
+}
+
+class TmdbCompanyCreditsPage {
+  const TmdbCompanyCreditsPage({
+    required this.items,
+    required this.page,
+    required this.totalPages,
+  });
+
+  final List<TmdbPersonCredit> items;
+  final int page;
+  final int totalPages;
+
+  bool get hasNextPage => page < totalPages;
 }
 
 class TmdbMetadataException implements Exception {

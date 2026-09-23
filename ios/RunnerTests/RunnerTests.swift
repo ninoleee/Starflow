@@ -113,7 +113,7 @@ class RunnerTests: XCTestCase {
     store.savePlaybackEntry(targetJson: "{}", itemKey: "item", seriesKey: "series",
       positionMs: 30_000, durationMs: 100_000, updatedAt: "2026-09-20T00:00:00Z")
     XCTAssertEqual(store.loadResumePositionMs(itemKey: "item"), 30_000)
-    let key = "flutter.starflow.playback.memory.v1"
+    let key = "flutter.starflow.playback.memory.v2"
     defaults.set(#"{"items":{"item":{"positionMs":20000,"durationMs":100000,"progress":0.2,"completed":false}}}"#, forKey: key)
     XCTAssertEqual(store.loadResumePositionMs(itemKey: "item"), 20_000)
     defaults.removeObject(forKey: key)

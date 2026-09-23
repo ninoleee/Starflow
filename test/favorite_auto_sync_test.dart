@@ -79,8 +79,8 @@ class Server {
   final compactDevicePaths = <String>{};
   final putPaths = <String>[];
   final putBodies = <String>[];
-  FavoriteSyncDocument? get remote =>
-      remoteDocument == null && deviceFiles.isEmpty
+  FavoriteSyncDocument? get remote => remoteDocument == null &&
+          deviceFiles.isEmpty
       ? null
       : (remoteDocument ?? FavoriteSyncDocument()).mergeAll(deviceFiles.values);
   set remote(FavoriteSyncDocument? value) => remoteDocument = value;
@@ -143,7 +143,7 @@ void main() {
       'application settings adapter loads connection without startup sync',
       (tester) async {
     final store = MemoryStore();
-    store.values['starflow.settings.v2'] = jsonEncode(
+    store.values['starflow.settings.v3'] = jsonEncode(
       SeedData.defaultSettings
           .copyWith(
               webDavSync: const WebDavSyncConfig(

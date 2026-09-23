@@ -59,61 +59,6 @@ void main() {
     expect(episodes, hasLength(160));
   });
 
-  test(
-      'NasMediaIndexer rebuilds old episode-range grouping after schema change',
-      () async {
-    final store = _MemoryNasMediaIndexStore();
-    const source = MediaSourceConfig(
-      id: 'episode-range-migration',
-      name: 'NAS',
-      kind: MediaSourceKind.nas,
-      endpoint: 'https://nas.example.com/dav/',
-      enabled: true,
-      webDavStructureInferenceEnabled: true,
-    );
-    NasMediaIndexer buildIndexer({required bool corrected}) {
-      return _buildStructureGroupingTestIndexer(
-        store: store,
-        source: source,
-        client: _FakeWebDavNasClient(scannedItems: [
-          for (var episode = 1; episode <= 2; episode++)
-            _episodeItem(
-              id: 'episode-$episode',
-              path: 'Show/Season 1/0$episode.strm',
-              title: 'Show',
-              seasonNumber: 1,
-              episodeNumber: corrected ? episode : 1,
-            ),
-        ]),
-      );
-    }
-
-    final oldIndexer = buildIndexer(corrected: false);
-    await oldIndexer.refreshSource(source);
-    final state = (await store.loadSourceState(source.id))!;
-    await store.replaceSourceRecords(
-      sourceId: source.id,
-      records: await store.loadSourceRecords(source.id),
-      state: state.copyWith(
-        scopeKey: state.scopeKey.replaceFirst('webdav-v15', 'webdav-v14'),
-      ),
-    );
-    await oldIndexer.dispose();
-
-    final indexer = buildIndexer(corrected: true);
-    addTearDown(indexer.dispose);
-    expect(await indexer.loadLibrary(source), isEmpty);
-    expect(await indexer.tryAutoRebuildOnEmpty(source), isTrue);
-    final library = await indexer.loadLibrary(source);
-    final seasons =
-        await indexer.loadChildren(source, parentId: library.single.id);
-    final episodes =
-        await indexer.loadChildren(source, parentId: seasons.single.id);
-    expect(episodes.map((item) => item.episodeNumber), [1, 2]);
-    expect((await store.loadSourceState(source.id))?.scopeKey,
-        contains('webdav-v15'));
-  });
-
   test('NasMediaIndexer reads an indexed root through a nested section',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -3194,75 +3139,6 @@ void main() {
     await indexer.dispose();
   });
 
-  test(
-      'NasMediaIndexer repairs stale single-file webdav-series records on rebuild',
-      () async {
-    final store = _MemoryNasMediaIndexStore();
-    const source = MediaSourceConfig(
-      id: 'webdav-single-file-migration',
-      name: 'WebDAV Single File Migration',
-      kind: MediaSourceKind.nas,
-      endpoint: 'https://webdav.example.com/movies/',
-      enabled: true,
-      webDavStructureInferenceEnabled: true,
-    );
-    final settings = SeedData.defaultSettings.copyWith(
-      wmdbMetadataMatchEnabled: false,
-      tmdbMetadataMatchEnabled: false,
-      imdbRatingMatchEnabled: false,
-    );
-
-    NasMediaIndexer buildIndexer(String itemType) {
-      return NasMediaIndexer(
-        store: store,
-        webDavNasClient: _FakeWebDavNasClient(
-          scannedItems: [
-            _PendingTestItem(
-              id: 'lock-stock-migration',
-              path:
-                  'strm/quark/两杆大烟枪/Top026.两杆大烟枪.Lock.Stock.and.Two.Smoking.Barrels.1998.Bluray.1080p.x265.AAC.(mkv).strm',
-              title: '两杆大烟枪',
-              itemType: itemType,
-              seasonNumber: null,
-              episodeNumber: null,
-              hasSidecarMatch: false,
-            ),
-          ],
-        ),
-        wmdbMetadataClient: WmdbMetadataClient(
-          MockClient((request) async => http.Response('', 500)),
-        ),
-        tmdbMetadataClient: TmdbMetadataClient(
-          MockClient((request) async => http.Response('', 500)),
-        ),
-        imdbRatingClient: ImdbRatingClient(
-          MockClient((request) async => http.Response('', 500)),
-        ),
-        readSettings: () => settings,
-        progressController: WebDavScrapeProgressController(),
-      );
-    }
-
-    final staleIndexer = buildIndexer('series');
-    await staleIndexer.refreshSource(source);
-    expect((await staleIndexer.loadLibrary(source, limit: 20)).single.itemType,
-        'series');
-    await staleIndexer.dispose();
-
-    final repairedIndexer = buildIndexer('movie');
-    await repairedIndexer.refreshSource(source, forceFullRescan: true);
-    final repairedLibrary =
-        await repairedIndexer.loadLibrary(source, limit: 20);
-    expect(repairedLibrary, hasLength(1));
-    expect(repairedLibrary.single.itemType, 'movie');
-    expect(repairedLibrary.single.title, '两杆大烟枪');
-    final repairedRecord = (await store.loadSourceRecords(source.id)).single;
-    expect(repairedRecord.preferSeries, isFalse);
-    expect(repairedRecord.fingerprint,
-        contains('structure-classification-v2:movie'));
-    await repairedIndexer.dispose();
-  });
-
   test('NasMediaIndexer falls back to the first media directory title',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -3469,94 +3345,6 @@ void main() {
         'strm/quark/无耻混蛋/4K.高码.国英双语.双语特效字幕/BDMV/part-2.strm',
       ]),
     );
-  });
-
-  test(
-      'NasMediaIndexer repairs cached series records when version folders become movie variants on rebuild',
-      () async {
-    final store = _MemoryNasMediaIndexStore();
-    const source = MediaSourceConfig(
-      id: 'webdav-basterds-migration',
-      name: 'WebDAV Movies',
-      kind: MediaSourceKind.nas,
-      endpoint: 'https://nas.example.com/movies/',
-      enabled: true,
-      webDavStructureInferenceEnabled: false,
-    );
-    const paths = <String>[
-      'strm/quark/无耻混蛋/1080P.国英双语.双语特效字幕/无耻混蛋.2009.1080p.strm',
-      'strm/quark/无耻混蛋/4K.英语.外挂简繁特效/无耻混蛋.2009.english.strm',
-    ];
-    final settings = SeedData.defaultSettings.copyWith(
-      wmdbMetadataMatchEnabled: false,
-      tmdbMetadataMatchEnabled: false,
-      imdbRatingMatchEnabled: false,
-    );
-    NasMediaIndexer buildIndexer(List<_PendingTestItem> items) {
-      return NasMediaIndexer(
-        store: store,
-        webDavNasClient: _FakeWebDavNasClient(scannedItems: items),
-        wmdbMetadataClient: WmdbMetadataClient(
-          MockClient((request) async => http.Response('', 500)),
-        ),
-        tmdbMetadataClient: TmdbMetadataClient(
-          MockClient((request) async => http.Response('', 500)),
-        ),
-        imdbRatingClient: ImdbRatingClient(
-          MockClient((request) async => http.Response('', 500)),
-        ),
-        readSettings: () => settings,
-        progressController: WebDavScrapeProgressController(),
-      );
-    }
-
-    final oldIndexer = buildIndexer([
-      for (var index = 0; index < paths.length; index++)
-        _PendingTestItem(
-          id: 'basterds-migration-$index',
-          path: paths[index],
-          title: index == 0 ? '1080P.国英双语.双语特效字幕' : '4K.英语.外挂简繁特效',
-          itemType: 'series',
-          seasonNumber: 0,
-          episodeNumber: null,
-        ),
-    ]);
-    await oldIndexer.refreshSource(source);
-    expect(
-      (await store.loadSourceRecords(source.id))
-          .every((record) => record.item.itemType == 'series'),
-      isTrue,
-    );
-
-    final repairedIndexer = buildIndexer([
-      for (var index = 0; index < paths.length; index++)
-        _PendingTestItem(
-          id: 'basterds-migration-$index',
-          path: paths[index],
-          title: '无耻混蛋',
-          itemType: 'movie',
-          seasonNumber: null,
-          episodeNumber: null,
-          year: 2009,
-        ),
-    ]);
-    await repairedIndexer.refreshSource(source, forceFullRescan: true);
-
-    final repairedRecords = await store.loadSourceRecords(source.id);
-    expect(repairedRecords, hasLength(2));
-    expect(
-      repairedRecords.every(
-        (record) =>
-            record.item.itemType == 'movie' &&
-            record.item.title == '无耻混蛋' &&
-            record.item.seasonNumber == null &&
-            record.fingerprint.contains('movie-version-v1:'),
-      ),
-      isTrue,
-    );
-    final library = await repairedIndexer.loadLibrary(source, limit: 20);
-    expect(library, hasLength(1));
-    expect(library.single.title, '无耻混蛋');
   });
 
   test(
@@ -4362,58 +4150,9 @@ void main() {
     expect(records.single.item.doubanId, 'movie-2016');
     expect(records.single.preferSeries, isFalse);
     await indexer.dispose();
-
-    final legacyRecordJson = records.single.toJson()..['preferSeries'] = true;
-    final legacyItemJson = Map<String, dynamic>.from(
-      legacyRecordJson['item'] as Map,
-    )..['doubanId'] = 'tv-2017';
-    legacyRecordJson['item'] = legacyItemJson;
-    await store.replaceSourceRecords(
-      sourceId: source.id,
-      records: [NasMediaIndexRecord.fromJson(legacyRecordJson)],
-      state: (await store.loadSourceState(source.id))!,
-    );
-
-    final repairIndexer = NasMediaIndexer(
-      store: store,
-      webDavNasClient: client,
-      wmdbMetadataClient: wmdbClient,
-      tmdbMetadataClient: TmdbMetadataClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      imdbRatingClient: ImdbRatingClient(
-        MockClient((request) async => http.Response('', 500)),
-      ),
-      readSettings: () => settings,
-      progressController: WebDavScrapeProgressController(),
-    );
-    addTearDown(repairIndexer.dispose);
-
-    // Incremental refresh is append-only: legacy records are reused as-is.
-    await repairIndexer.refreshSource(source);
-    final incrementalRecords = await store.loadSourceRecords(source.id);
-    expect(incrementalRecords, hasLength(1));
-    expect(incrementalRecords.single.item.doubanId, 'tv-2017');
-    expect(incrementalRecords.single.preferSeries, isTrue);
-
-    // A full rebuild is the explicit repair path for existing records.
-    await repairIndexer.refreshSource(source, forceFullRescan: true);
-    await _waitUntil(() async {
-      final refreshed = await store.loadSourceRecords(source.id);
-      return refreshed.length == 1 &&
-          refreshed.single.item.doubanId == 'movie-2016' &&
-          !refreshed.single.preferSeries;
-    });
-
-    final correctedRecords = await store.loadSourceRecords(source.id);
-    expect(correctedRecords, hasLength(1));
-    expect(correctedRecords.single.item.doubanId, 'movie-2016');
-    expect(correctedRecords.single.preferSeries, isFalse);
     expect(
       wmdbRequestCount,
-      2,
-      reason:
-          'One initial lookup and one explicit rebuild lookup are expected.',
+      1,
     );
   });
 

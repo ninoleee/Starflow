@@ -7,17 +7,17 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
-  test('home module display style defaults safely and persists', () {
-    final legacy = HomeModuleConfig.fromJson(const {
-      'id': 'legacy-module',
-      'type': 'recentlyAdded',
-      'title': '旧模块',
-      'enabled': true,
-    });
-    expect(legacy.displayStyle, HomeModuleDisplayStyle.poster);
+  test('home module display style persists', () {
+    const module = HomeModuleConfig(
+      id: 'display-style-module',
+      type: HomeModuleType.recentlyAdded,
+      title: '模块',
+      enabled: true,
+    );
+    expect(module.displayStyle, HomeModuleDisplayStyle.poster);
 
     final restored = HomeModuleConfig.fromJson(
-      legacy.copyWith(displayStyle: HomeModuleDisplayStyle.landscape).toJson(),
+      module.copyWith(displayStyle: HomeModuleDisplayStyle.landscape).toJson(),
     );
     expect(restored.displayStyle, HomeModuleDisplayStyle.landscape);
     expect(restored.toJson()['displayStyle'], 'landscape');
@@ -123,7 +123,8 @@ void main() {
     );
   });
 
-  test('current settings schema rejects unversioned or mismatched JSON', () {
+  test('current settings schema rejects old, incomplete and extended JSON', () {
+    final current = SeedData.defaultSettings.toJson();
     expect(
       () => AppSettings.fromCurrentJson(const <String, dynamic>{}),
       throwsFormatException,
@@ -134,10 +135,29 @@ void main() {
       }),
       throwsFormatException,
     );
+    final missing = Map<String, dynamic>.from(current)..remove('networkProxy');
     expect(
-      AppSettings.fromCurrentJson(const <String, dynamic>{
-        'schemaVersion': kAppSettingsSchemaVersion,
-      }).toJson()['schemaVersion'],
+      () => AppSettings.fromCurrentJson(missing),
+      throwsFormatException,
+    );
+    final extended = Map<String, dynamic>.from(current)
+      ..['legacyPerformanceMode'] = true;
+    expect(
+      () => AppSettings.fromCurrentJson(extended),
+      throwsFormatException,
+    );
+    final nestedMissing = Map<String, dynamic>.from(current)
+      ..['homeModules'] = [
+        Map<String, dynamic>.from(
+          (current['homeModules'] as List<dynamic>).first as Map,
+        )..remove('displayStyle'),
+      ];
+    expect(
+      () => AppSettings.fromCurrentJson(nestedMissing),
+      throwsFormatException,
+    );
+    expect(
+      AppSettings.fromCurrentJson(current).toJson()['schemaVersion'],
       kAppSettingsSchemaVersion,
     );
   });
@@ -955,7 +975,8 @@ void main() {
   test('live menu defaults do not rewrite an existing menu selection', () {
     const defaultOrder = ['home', 'live-tv', 'search', 'library', 'settings'];
     expect(kDefaultNavigationDestinationIds, defaultOrder);
-    expect(AppSettings.fromJson(const {}).navigationDestinationIds, defaultOrder);
+    expect(
+        AppSettings.fromJson(const {}).navigationDestinationIds, defaultOrder);
     const legacyIds = [
       kNavigationDestinationHome,
       kNavigationDestinationSearch,
@@ -989,7 +1010,8 @@ void main() {
       ),
       ['settings', 'live-tv', 'home', 'search'],
     );
-    expect(normalizeNavigationDestinationIds(['unknown']), ['home', 'settings']);
+    expect(
+        normalizeNavigationDestinationIds(['unknown']), ['home', 'settings']);
     expect(normalizeNavigationDestinationIds(['settings']), ['settings']);
     expect(normalizeNavigationDestinationIds(['library', 'home']),
         ['library', 'home', 'settings']);

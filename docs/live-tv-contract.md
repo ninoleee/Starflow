@@ -8,7 +8,7 @@
 - `CancellableLiveEngine.cancelOpen()` 必须在本代原生媒体卸载后完成；controller 不等待旧 open Future 自行完成，但必须等待取消确认，再串行 stop/dispose/reopen。不得把 open 的 Future.timeout 当作取消确认。MPV 单命令 loadfile，原生非锁 stop；Exo generation-scoped cancelOpen。未响应的取消确认仍阻止重开，原生初始化/卸载卡死的绝对清理上限尚非已完成验收。
 - Exo pause/suppression reason 上行；暂停停止 watchdog/retry，resumed 才重新计时。页面保存静音，开流前应用到两种内核。controller generation 与 native token 双重隔离音轨选择。
 - `LiveSource.epgUrl` 为用户覆盖；`discoveredEpgUrl` 为订阅发现，`effectiveEpgUrl` 为实际地址。旧 epgUrl 无法无损推断来源，保留为覆盖；本地 playlist 不参与远端 EPG TTL。
-- 频道 `identity` 为显式 tvg-id。源内唯一时 v2 ID 不含名称/分组；重复身份不合并。旧记录一对一匹配时事务迁移偏好和 lastChannel；不按显示名称迁移。
+- 频道 `identity` 为显式 tvg-id。源内唯一时 v2 ID 不含名称/分组；重复身份不合并。切换频道表后只按当前 ID 关联偏好和 lastChannel。
 - `LiveBackup` v1 保存七个 store：sources、channels、preferences、channelOwners、epg、epgLogos、meta。导入保留原 ID，32 MiB 上限，未知版本/非法关系拒绝；merge 只加入新来源、同 ID 保留本地，replace 单事务替换。刷新 epoch 防迟到回填；凭据按明文备份处理，UI 二次确认。
 - UI 入口 `LiveSourcesPage -> LiveBackupDialog`，本地路径/文件选取，Web 文件下载；不修改共享配置 JSON/LAN/WebDAV 流程。TV 路径权限与跨设备搬运需实际设备核验。
 
@@ -23,7 +23,7 @@
 - 数据任务：`lib/features/live_tv/domain/`、`data/`、`application/live_tv_controller.dart` 及相应测试。
 - 播放任务：`application/live_tv_playback*`、`presentation/live_tv_player*` 及相应测试。
 - 界面任务：`presentation/live_tv_page.dart`、`presentation/live_tv_sources_page.dart` 和其他直播 UI widgets 及相应测试，不编辑直播播放器文件。
-- 集成任务：路由、主导航、设置入口、配置中的菜单常量及迁移、相关测试和最终文档，不编辑上述直播业务文件。
+- 集成任务：路由、主导航、设置入口、当前配置中的菜单常量、相关测试和最终文档，不编辑上述直播业务文件。
 - 主任务负责合并和跨边界验证；各子任务不修改其他任务工作区或主工作区。已有未提交修改必须保留。
 
 ## 固定数据接口
@@ -50,7 +50,7 @@
   - `setChannelHidden(String channelId, bool hidden)`。
   - `rememberChannel(String channelId)`、`rememberStream(String channelId, int index)`。
 - 控制器持久化修改串行，刷新网络不能阻塞收藏等本地操作；删除或编辑来源后迟到的刷新不得覆盖新来源。
-- 网络读取默认 20 秒总期限和 8 MiB 正文上限，解析最多 10000 个频道；更新失败或有效频道为零保留旧缓存。UI 可显式刷新，第一版不创建后台定时任务。
+- 网络读取默认 20 秒总期限和 8 MiB 正文上限，解析最多 10000 个频道；更新失败或有效频道为零保留已保存缓存。UI 可显式刷新，第一版不创建后台定时任务。
 - 使用现有代理传输与有界请求基础设施；日志不包含订阅或播放地址的路径、查询、凭据、原始异常正文。不要把敏感地址交给会原样记录路径的 HTTP 包装层。
 
 ## 固定页面接口
@@ -59,7 +59,7 @@
 - `LiveTvSourcesPage()`：来源管理独立页面，路径文件 `presentation/live_tv_sources_page.dart`。
 - `LiveTvPlayerPage({required String channelId})`：专属全屏播放器，路径文件 `presentation/live_tv_player_page.dart`。
 - 路由 `AppRoutes.liveTv` 为 `/live-tv`，`AppRoutes.liveTvSources` 为 `/live-tv/sources`，`AppRoutes.liveTvPlayer` 为 `/live-tv/player`；播放使用查询参数 `channel`。通过 `context.pushNamed(AppRoutes.liveTvPlayer.name, queryParameters: {'channel': channel.id})` 打开。
-- 主路由保留现有五个分支索引，直播追加为索引 5；可见菜单把直播放在设置前。默认菜单新增直播，旧默认配置一次迁移新增，用户自定义隐藏选择不能每次被强制重置。
+- 主路由保留现有五个分支索引，直播追加为索引 5；可见菜单把直播放在设置前。当前默认菜单包含直播。
 - 复用已有深色主题、Material 图标、TV 焦点和设置编辑组件。来源管理支持订阅 URL、本地文件/文本导入、名称、请求头、更新、启停、删除和结果反馈。订阅成功添加后显式执行首次刷新，刷新失败配置保留以便修正。
 
 ## 播放边界

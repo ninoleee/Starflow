@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:starflow/features/details/application/detail_page_actions.dart';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -13,21 +12,33 @@ void main() {
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('reimported FNTV series never restores the deleted series GUID', () async {
+  test('reimported FNTV series never restores the deleted series GUID',
+      () async {
     final repository = await _repository();
     const old = MediaDetailTarget(
-      title: '半泽直树', posterUrl: '', overview: '',
-      sourceId: 'fntv', sourceKind: MediaSourceKind.fntv,
-      itemId: 'deleted-guid', itemType: 'series', tmdbId: 'same-show',
+      title: '半泽直树',
+      posterUrl: '',
+      overview: '',
+      sourceId: 'fntv',
+      sourceKind: MediaSourceKind.fntv,
+      itemId: 'deleted-guid',
+      itemType: 'series',
+      tmdbId: 'same-show',
     );
     final fresh = old.copyWith(itemId: 'new-guid');
     await repository.saveDetailTarget(
-      seedTarget: old, resolvedTarget: old, libraryMatchChoices: [old],
+      seedTarget: old,
+      resolvedTarget: old,
+      libraryMatchChoices: [old],
     );
     expect(await repository.loadDetailTarget(fresh), isNull);
-    expect(await repository.loadDetailState(fresh, allowStructuralMismatch: true), isNull);
+    expect(
+        await repository.loadDetailState(fresh, allowStructuralMismatch: true),
+        isNull);
     await repository.saveDetailTarget(
-      seedTarget: fresh, resolvedTarget: fresh, libraryMatchChoices: [fresh],
+      seedTarget: fresh,
+      resolvedTarget: fresh,
+      libraryMatchChoices: [fresh],
     );
     final reloaded = await _repository();
     expect((await reloaded.loadDetailTarget(fresh))?.itemId, 'new-guid');
@@ -75,14 +86,13 @@ void main() {
     }
   });
 
-  test(
-      'legacy aliases pointing to a sibling directory cannot restore its target',
+  test('aliases pointing to a sibling directory cannot restore its target',
       () async {
     final repository = await _repository();
     final first = _target(itemType: 'series')
         .copyWith(itemId: 'webdav-series|structure:first');
     final second = first.copyWith(itemId: 'webdav-series|structure:first(1)');
-    // Reproduce the old merged record: first directory aliases, second target.
+    // The first directory cannot inherit the second directory's target.
     await repository.saveDetailTarget(
         seedTarget: first,
         resolvedTarget: second,
@@ -217,54 +227,6 @@ void main() {
               LocalStorageCacheRepository.buildLookupKeys(first).toSet()),
       isEmpty,
     );
-  });
-
-  test('rejects legacy cross-episode aliases and saves without stale choices',
-      () async {
-    final first = _target(season: 1, episode: 16);
-    final second = _target(season: 2, episode: 2);
-    final recordId = 'library|nas-main|${second.itemId}';
-    final keys = [
-      recordId,
-      'library|nas-main|${first.itemId}',
-      'tmdb|episode|shared-series',
-      'title|localperspective|episode',
-    ];
-    SharedPreferences.setMockInitialValues({
-      'starflow.local_storage.detail_cache.v1': jsonEncode({
-        'records': {
-          recordId: {
-            'id': recordId,
-            'lookupKeys': keys,
-            'updatedAt': DateTime.utc(2026, 9, 8).toIso8601String(),
-            'target': first.toJson(),
-            'libraryMatchChoices': [first.toJson()],
-            'selectedLibraryMatchIndex': 0,
-          },
-        },
-        'lookupKeys': {for (final key in keys) key: recordId},
-      }),
-    });
-    final repository = await _repository();
-    expect(await repository.loadDetailTarget(second), isNull);
-    expect(
-      await repository.loadDetailState(second, allowStructuralMismatch: true),
-      isNull,
-    );
-    expect((await repository.loadDetailTarget(first))?.itemId, first.itemId);
-
-    await repository.saveDetailTarget(
-        seedTarget: second, resolvedTarget: second);
-    final state = await repository.loadDetailState(second);
-    expect(state?.target.itemId, second.itemId);
-    expect(state?.libraryMatchChoices, isEmpty);
-    expect((await repository.loadDetailTarget(first))?.itemId, first.itemId);
-
-    await repository.saveDetailTarget(
-      seedTarget: first,
-      resolvedTarget: first.copyWith(overview: 'Updated first episode'),
-    );
-    expect((await repository.loadDetailTarget(second))?.itemId, second.itemId);
   });
 }
 

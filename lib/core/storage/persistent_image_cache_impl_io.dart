@@ -26,6 +26,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
 
   static const int _maxMemoryEntries = 256;
   static const int _maxMemoryBytes = 72 * 1024 * 1024;
+  static const int _metadataVersion = 2;
   static const Duration _diskEntryMaxAge = Duration(days: 30);
   static const Duration _networkRequestTimeout = Duration(seconds: 15);
 
@@ -310,15 +311,20 @@ class _IoPersistentImageCache implements PersistentImageCache {
     final file = await _cacheFile(cacheKey);
     final metadataFile = await _cacheMetadataFile(cacheKey);
     final metadata = await _loadMetadata(metadataFile);
-    final diskBytes = await _readDiskImage(file);
-    final isFresh = await _isDiskEntryFresh(metadata, file);
+    final hasCurrentMetadata = _hasCurrentMetadata(metadata);
+    if (!hasCurrentMetadata) {
+      await _deleteIfExists(metadataFile);
+      await _deleteIfExists(file);
+    }
+    final diskBytes = hasCurrentMetadata ? await _readDiskImage(file) : null;
+    final isFresh = hasCurrentMetadata && _isDiskEntryFresh(metadata);
 
     if (diskBytes != null && isFresh) {
       _remember(cacheKey, diskBytes);
       return diskBytes;
     }
 
-    final staleBytes = diskBytes;
+    final staleBytes = hasCurrentMetadata ? diskBytes : null;
 
     try {
       final bytes = await _fetchNetworkBytes(
@@ -364,8 +370,13 @@ class _IoPersistentImageCache implements PersistentImageCache {
     final file = await _cacheFile(cacheKey);
     final metadataFile = await _cacheMetadataFile(cacheKey);
     final metadata = await _loadMetadata(metadataFile);
-    final hasDiskEntry = await file.exists();
-    final isFresh = hasDiskEntry && await _isDiskEntryFresh(metadata, file);
+    final hasCurrentMetadata = _hasCurrentMetadata(metadata);
+    if (!hasCurrentMetadata) {
+      await _deleteIfExists(metadataFile);
+      await _deleteIfExists(file);
+    }
+    final hasDiskEntry = hasCurrentMetadata && await file.exists();
+    final isFresh = hasDiskEntry && _isDiskEntryFresh(metadata);
 
     if (isFresh) {
       return file;
@@ -515,6 +526,7 @@ class _IoPersistentImageCache implements PersistentImageCache {
 
   Map<String, dynamic> _buildMetadata() {
     return <String, dynamic>{
+      'version': _metadataVersion,
       'updatedAt': DateTime.now().toUtc().millisecondsSinceEpoch,
     };
   }
@@ -529,24 +541,22 @@ class _IoPersistentImageCache implements PersistentImageCache {
     );
   }
 
-  Future<bool> _isDiskEntryFresh(
-      Map<String, dynamic>? metadata, File file) async {
+  bool _isDiskEntryFresh(Map<String, dynamic>? metadata) {
     final now = DateTime.now().toUtc();
-    final updatedAt = await _resolveEntryUpdatedAt(metadata, file);
+    final updatedAt = _resolveEntryUpdatedAt(metadata);
     return now.difference(updatedAt) <= _diskEntryMaxAge;
   }
 
-  Future<DateTime> _resolveEntryUpdatedAt(
-      Map<String, dynamic>? metadata, File file) async {
-    final updatedAtMillis = (metadata?['updatedAt'] as num?)?.toInt() ?? 0;
-    if (updatedAtMillis > 0) {
-      return DateTime.fromMillisecondsSinceEpoch(
-        updatedAtMillis,
-        isUtc: true,
-      );
-    }
-    final stat = await file.stat();
-    return stat.modified.toUtc();
+  bool _hasCurrentMetadata(Map<String, dynamic>? metadata) {
+    return (metadata?['version'] as num?)?.toInt() == _metadataVersion &&
+        ((metadata?['updatedAt'] as num?)?.toInt() ?? 0) > 0;
+  }
+
+  DateTime _resolveEntryUpdatedAt(Map<String, dynamic>? metadata) {
+    return DateTime.fromMillisecondsSinceEpoch(
+      (metadata!['updatedAt'] as num).toInt(),
+      isUtc: true,
+    );
   }
 
   Future<void> _deleteIfExists(File file) async {

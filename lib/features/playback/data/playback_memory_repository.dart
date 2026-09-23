@@ -117,7 +117,7 @@ class PlaybackMemoryRepository {
                 : SharedPreferencesStore(sharedPreferences)),
         _notifyChanged = notifyChanged;
 
-  static const _storageKey = 'starflow.playback.memory.v1';
+  static const _storageKey = 'starflow.playback.memory.v2';
   static const recentEntryLimit = PlaybackPolicyValues.memoryRecentLimit;
 
   final PreferencesStore _preferences;
@@ -714,11 +714,6 @@ class PlaybackMemoryRepository {
         (!key.startsWith('path|') ||
             buildPlaybackItemKey(exact.target) == key)) {
       return exact;
-    }
-    // Legacy fallback keys discarded punctuation. Verify the stored target,
-    // never match the lossy key itself, so colliding files stay independent.
-    for (final entry in snapshot.items.values) {
-      if (buildPlaybackItemKey(entry.target) == key) return entry;
     }
     return null;
   }

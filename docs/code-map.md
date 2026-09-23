@@ -42,7 +42,7 @@
 | `features/bootstrap/application/bootstrap_controller.dart` | 配置 / 缓存 / 首页启动编排与 10s 总截止时间；不覆盖此前初始化或同步阻塞 |
 | `features/bootstrap/application/startup_crash_recovery.dart` | 启动标记及异常启动恢复，不代替原生崩溃日志 |
 | `app/router/app_routes.dart`、`app_router.dart`、`app_navigator.dart` | 壳页和详情、人物 / 公司、播放器、设置、搜索等附加路由 |
-| `app/router/app_navigation_shell.dart`、`app/shell_layout.dart` | home / search / favorites / library / settings / live-tv 六个壳路由，默认隐藏收藏，旧配置保留菜单选择 |
+| `app/router/app_navigation_shell.dart`、`app/shell_layout.dart` | home / search / favorites / library / settings / live-tv 六个壳路由，默认隐藏收藏，菜单选择来自当前设置 |
 | `app/lifecycle/app_runtime_recovery_boundary.dart` | 后台、前台、低内存和退出弹窗的调度准入租约 |
 | `core/navigation/` | `PageActivityMixin` 和 RetainedAsync 控制器，暂停工作但保留稳定页面结果 |
 | `core/network/` | 共享 HTTP、IO 代理、Web 转发、失败分类、超时与按主机熔断；详见网络文档 |
@@ -99,7 +99,7 @@ MediaDetailPage -> DetailPageController -> DetailTargetResolver
 
 `detail_library_match_coordinator.dart` 负责优先来源与后备来源两阶段读取、最多两路并发、逐批候选和取消检查；`detail_library_match_service.dart` 提供候选类型、评分与合并规则。页面不再维护另一套同构候选模型，焦点、弹窗和缓存恢复仍属于页面生命周期。
 
-2026-09-20 M01–M04 修复边界：最终版本展开在每次来源读取前后检查页面 session / 匹配 controller，返回后在页面候选、手动目标和缓存提交前再次校验；取消不撤销取消前已经展示的逐批候选。`library/domain/tmdb_media_identity.dart` 将 TMDB 身份限定为 movie / TV + ID，详情匹配与在线更新排除明确相反类型；未知旧类型保留标题及其他外部 ID 匹配，不以裸 TMDB ID 判定精确命中，也不迁移已有存储格式。TMDB 搜索去重保留同数字 ID 的电影和剧集，详情元数据转换保留媒体类型。
+2026-09-20 M01–M04 修复边界：最终版本展开在每次来源读取前后检查页面 session / 匹配 controller，返回后在页面候选、手动目标和缓存提交前再次校验；取消不撤销取消前已经展示的逐批候选。`library/domain/tmdb_media_identity.dart` 将 TMDB 身份限定为 movie / TV + ID，详情匹配与在线更新排除明确相反类型；未知类型不再参与类型化 TMDB、标题或其他外部 ID 匹配。TMDB 搜索去重保留同数字 ID 的电影和剧集，详情元数据转换保留媒体类型。
 
 TMDB / WMDB 标题和 ID 查询缓存以 generation 隔离清空前请求，finally 仅删除自身 future 的占位；旧请求仍可向原调用者返回，但不能回填清空后的缓存或移除新请求。仅缓存非空结果，null（包括 TMDB 详情 404）下次可重试；TMDB 详情鉴权、限流和服务错误抛异常，不再作为“没有匹配”持久复用。覆盖文件：`test/metadata_cache_race_test.dart`、`test/tmdb_media_identity_test.dart`、`test/media_detail_match_cancellation_test.dart`；这些是主机 MockClient / completer / widget 回归，不是设备或真实元数据服务测量。十方向审查报告仍是修复前快照。
 
@@ -149,7 +149,7 @@ SearchPage -> SearchRequest -> SearchSession -> SearchRepository
 | --- | --- |
 | `domain/live_models.dart` | `LiveSource / LiveChannel / LiveLine / LivePreference / LiveProgramme / LiveSnapshot`；来源内频道身份、偏好覆盖、可见列表与节目区间 |
 | `data/live_repository.dart` | Sembast store、串行事务、来源代次、同源刷新合并、到期检查、频道/EPG 分阶段提交与本地节目查询 |
-| `data/live_database.dart` 及 `live_database_io / web / stub.dart` | 条件导出；IO 应用支持目录 `starflow-db/live_tv.db`，Web `starflow-live-tv`，其他目标明确不支持 |
+| `data/live_database.dart` 及 `live_database_io / web / stub.dart` | 条件导出；IO 应用支持目录 `starflow-db/live_tv.v2.db`，Web `starflow-live-tv-v2`，其他目标明确不支持 |
 | `data/live_playlist_parser.dart / live_epg_parser.dart` | M3U/TXT、媒体 headers、XMLTV/时区及保留窗口；Gzip 有界解压由仓库入口执行 |
 | `data/live_logo_provider.dart` | 独立四路、15s/2 MiB 台标请求和取消，不是影视图片磁盘缓存 |
 | `presentation/live_logo.dart` | 频道首页的 64×40 台标；192×120 上限等比解码、完整显示及同尺寸失败占位；播放器选台菜单不加载台标 |
@@ -186,7 +186,7 @@ AppRoutes.liveTv (/live-tv) -> LiveTvPage -> LiveRepository -> 独立直播数�
 
 测试导航：`test/live_tv_test.dart` 为解析/仓库/控制器，`test/live_tv_data_test.dart` 为数据边界，`test/live_playback_lifecycle_test.dart` 为串行所有权/迟到事件/恢复预算，`test/live_tv_page_test.dart` 为布局/模拟遥控器，`test/live_exo_bridge_test.dart` 为 mock MethodChannel。路由、菜单配置和设置层级另见 `test/app/router/app_routes_test.dart`、`test/app_navigation_shell_tv_focus_test.dart`、`test/app_settings_test.dart`、`test/features/settings/presentation/settings_hierarchy_navigation_test.dart`。合并后这 9 文件共 132 项通过，最终统计见 [主机记录](performance.md#2026-09-20-直播前置验证快照)。Android 的 `LiveTvPolicyTest / LiveTvHttpTransportTest` 覆盖会话、画面比例、同源 headers、重定向与 HTTP 字节范围，共 17 项主机 JVM 测试。
 
-`test/live_tv_data_test.dart` 与 `live_tv_test.dart` 的历史集合 38 项通过，不作为当前最终总数。`live_review_regression_test.dart` 覆盖独立 EPG TTL、发现地址、身份迁移、备份和取消确认；`live_backup_page_test.dart` 覆盖文件与弹窗。`channelOwners / epgLogos` 记录历史归属和台标。`live_backup.dart` 定义版本化备份，文件 IO 与界面分别由 `live_backup_file_*`、`live_backup_dialog.dart` 承担。生产播放适配器通过 `CancellableLiveEngine` 在队列外请求取消，控制器等待卸载确认再串行清理；原生永久挂起仍不是已验证的限时清理场景，详见直播文档。
+`test/live_tv_data_test.dart` 与 `live_tv_test.dart` 的历史集合 38 项通过，不作为当前最终总数。`live_review_regression_test.dart` 覆盖独立 EPG TTL、发现地址、备份和取消确认；`live_backup_page_test.dart` 覆盖文件与弹窗。`channelOwners / epgLogos` 记录历史归属和台标。`live_backup.dart` 定义版本化备份，文件 IO 与界面分别由 `live_backup_file_*`、`live_backup_dialog.dart` 承担。生产播放适配器通过 `CancellableLiveEngine` 在队列外请求取消，控制器等待卸载确认再串行清理；原生永久挂起仍不是已验证的限时清理场景，详见直播文档。
 
 ### 播放与字幕
 

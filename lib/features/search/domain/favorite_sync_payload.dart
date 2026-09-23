@@ -55,10 +55,6 @@ Map<String, dynamic> _resultFields(SearchResult result) => {
       'tmdbId': result.tmdbId,
       'tvdbId': result.tvdbId,
       'wikidataId': result.wikidataId,
-      // Legacy linkless favorites include summary in their stable identity.
-      if (result.detailTarget == null &&
-          normalizeSearchResourceUrl(result.resourceUrl).isEmpty)
-        'summary': result.summary,
       'detailTarget': result.detailTarget == null
           ? null
           : _detailFields(result.detailTarget!),

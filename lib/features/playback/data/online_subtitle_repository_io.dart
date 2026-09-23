@@ -177,9 +177,6 @@ class AssrtSubtitleRepository implements OnlineSubtitleRepository {
     final root = await _temporaryDirectoryProvider();
     return [
       Directory(p.join(root.path, 'starflow', 'online_subtitles')),
-      Directory(p.join(root.path, 'starflow', 'validated_online_subtitles')),
-      // Legacy native shifted files. New native playback owns its own copies.
-      Directory(p.join(root.path, 'native_subtitles')),
     ];
   }
 

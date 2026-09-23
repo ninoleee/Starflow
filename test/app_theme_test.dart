@@ -75,7 +75,7 @@ void main() {
     }
   });
 
-  test('accent survives JSON, unrelated copies and legacy settings', () {
+  test('accent survives JSON and rejects old or unknown settings', () {
     for (final accent in AppAccent.values) {
       final settings = SeedData.defaultSettings.copyWith(appAccent: accent);
       expect(settings.toJson()['appAccent'], accent.name);
@@ -93,7 +93,10 @@ void main() {
       } else {
         json['appAccent'] = value;
       }
-      expect(AppSettings.fromJson(json).appAccent, AppAccent.teal);
+      expect(
+        () => AppSettings.fromCurrentJson(json),
+        throwsFormatException,
+      );
     }
   });
 

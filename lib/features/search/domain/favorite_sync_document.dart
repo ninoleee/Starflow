@@ -195,7 +195,7 @@ class FavoriteSyncDocument {
     final keys = entries.keys.toList()..sort();
     return jsonEncode({
       'format': 'starflow-favorites',
-      'version': 1,
+      'version': 2,
       'entries': [
         for (final key in keys) entries[key]!.toJson(forSync: forSync)
       ],
@@ -207,7 +207,7 @@ class FavoriteSyncDocument {
 
   factory FavoriteSyncDocument.fromJson(Map<String, dynamic> json) {
     if (json['format'] != 'starflow-favorites' ||
-        json['version'] != 1 ||
+        json['version'] != 2 ||
         json['entries'] is! List) {
       throw const FormatException('Invalid favorite sync document');
     }
@@ -223,5 +223,4 @@ class FavoriteSyncDocument {
     result.validateCapacity();
     return result;
   }
-
 }

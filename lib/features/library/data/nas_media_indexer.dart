@@ -928,14 +928,6 @@ class NasMediaIndexer {
     return true;
   }
 
-  bool _requiresMovieMetadataTypeCorrection(NasMediaIndexRecord? record) {
-    if (record == null || record.manualMetadataLocked) {
-      return false;
-    }
-    return record.item.itemType.trim().toLowerCase() == 'movie' &&
-        record.preferSeries;
-  }
-
   NasMetadataFetchStatus _metadataFailureStatus(Object error) {
     final message = error.toString().toLowerCase();
     final isPermanentClientFailure = RegExp(

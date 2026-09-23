@@ -15,7 +15,7 @@ import 'package:starflow/features/storage/data/local_storage_cache_repository.da
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  const settingsKey = 'starflow.settings.v2';
+  const settingsKey = 'starflow.settings.v3';
   const cookieKey = 'starflow.local-credentials.cloud115-cookie.v1';
   const manifestKey = 'starflow.local_storage.emby_library_cache.manifest.v2';
 
@@ -79,8 +79,7 @@ void main() {
         isFalse);
   });
 
-  test('corrupt legacy manifest can still clear old shards by prefix',
-      () async {
+  test('corrupt manifest can still clear recorded shards by prefix', () async {
     SharedPreferences.setMockInitialValues({
       manifestKey: '{invalid',
       'starflow.local_storage.emby_library_cache.shard.v2.b2xk.fallback': '[]',

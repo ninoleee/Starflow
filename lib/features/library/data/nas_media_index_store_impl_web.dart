@@ -4,5 +4,5 @@ Future<Database>? _database;
 
 Future<Database> openNasMediaIndexDatabase() async {
   return _database ??=
-      databaseFactoryWeb.openDatabase('starflow-nas-metadata-index');
+      databaseFactoryWeb.openDatabase('starflow-nas-metadata-index-v2');
 }

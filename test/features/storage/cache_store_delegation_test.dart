@@ -12,7 +12,7 @@ import 'package:starflow/features/storage/data/detail_cache_store.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 import 'package:starflow/features/storage/data/media_server_cache_store.dart';
 
-const _detailKey = 'starflow.local_storage.detail_cache.v1';
+const _detailKey = 'starflow.local_storage.detail_cache.v2';
 const _manifestKey = 'starflow.local_storage.emby_library_cache.manifest.v2';
 const _target = MediaDetailTarget(
   title: 'Cached movie',

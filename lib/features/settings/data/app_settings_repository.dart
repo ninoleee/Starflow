@@ -22,7 +22,7 @@ class LocalAppSettingsRepository implements AppSettingsRepository {
   LocalAppSettingsRepository({PreferencesStore? preferences})
       : _preferences = preferences ?? AppPreferencesStore();
 
-  static const _settingsKey = 'starflow.settings.v2';
+  static const _settingsKey = 'starflow.settings.v3';
   static const _cloud115CookieKey =
       'starflow.local-credentials.cloud115-cookie.v1';
   static const _bundledSettingsKey = 'assets/bootstrap/embedded_settings.json';

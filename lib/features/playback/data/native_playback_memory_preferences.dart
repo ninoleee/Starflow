@@ -11,7 +11,7 @@ class NativePlaybackMemoryPreferences extends SharedPreferencesStore {
       : _channel = channel ?? const MethodChannel('starflow/platform'),
         super.reloading();
 
-  static const storageKey = 'starflow.playback.memory.v1';
+  static const storageKey = 'starflow.playback.memory.v2';
   final MethodChannel _channel;
   String? _expected;
   bool _hasRead = false;

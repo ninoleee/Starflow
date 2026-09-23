@@ -172,8 +172,7 @@ void main() {
     }
   });
 
-  test('name settings serialize independently and legacy default is disabled',
-      () {
+  test('name settings serialize independently and default is disabled', () {
     final old =
         NetworkStorageConfig.fromJson({'quarkSanitizeSavedNamesEnabled': true});
     expect(old.cloud115SanitizeSavedNamesEnabled, isFalse);

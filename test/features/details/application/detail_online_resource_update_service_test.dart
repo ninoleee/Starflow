@@ -46,7 +46,8 @@ void main() {
         summary: '',
         resourceUrl: 'https://115.com/s/abc',
         password: 'abcd',
-        favoriteFolderName: 'Show');
+        favoriteFolderName: 'Show',
+        metadataMediaType: 'series');
 
     test(
         'mixed online matches are stable and exclude local or unsupported favorites',
@@ -160,6 +161,7 @@ void main() {
           summary: '',
           resourceUrl: 'https://pan.quark.cn/s/abc123',
           favoriteFolderName: '三体',
+          metadataMediaType: 'series',
         ),
         SearchResult(
           id: '2',
@@ -173,6 +175,7 @@ void main() {
           summary: '',
           resourceUrl: 'https://pan.quark.cn/s/def456',
           favoriteFolderName: '别的名字',
+          metadataMediaType: 'series',
         ),
       ];
 
@@ -211,6 +214,7 @@ void main() {
           resourceUrl: 'https://pan.quark.cn/s/title-only',
           favoriteFolderName: '9号秘事',
           tmdbId: '99999',
+          metadataMediaType: 'series',
         ),
         SearchResult(
           id: 'external-id',
@@ -226,6 +230,7 @@ void main() {
           favoriteFolderName: 'Inside No. 9',
           imdbId: 'tt2674806',
           tmdbId: '65707',
+          metadataMediaType: 'series',
         ),
       ];
 
@@ -263,6 +268,7 @@ void main() {
           resourceUrl: 'https://pan.quark.cn/s/movie-favorite',
           favoriteFolderName: '乘风破浪',
           tmdbId: '381902',
+          metadataMediaType: 'movie',
         ),
       ];
 
@@ -398,6 +404,7 @@ void main() {
           summary: '',
           resourceUrl: 'https://pan.quark.cn/s/abc123',
           favoriteFolderName: '三体',
+          metadataMediaType: 'series',
         ),
       ];
       final favoriteMatch = service.resolveFavoriteMatch(

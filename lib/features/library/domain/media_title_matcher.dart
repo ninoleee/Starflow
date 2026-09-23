@@ -89,9 +89,7 @@ List<MediaItem> listMediaItemsMatchingExternalIds(
   void collect(bool Function(MediaItem item) matcher) {
     for (final item in library) {
       final itemType = TmdbMediaType.fromItemType(item.itemType);
-      if (tmdbMediaType != null &&
-          itemType != null &&
-          tmdbMediaType != itemType) {
+      if (tmdbMediaType != null && itemType != tmdbMediaType) {
         continue;
       }
       if (matcher(item)) {

@@ -285,22 +285,6 @@ https://b.test/news
       expect(snapshot.preferences[otherId]!.favorite, true);
     });
 
-    test('legacy prefs acquire ownership before old channels disappear',
-        () async {
-      final r = repositoryWith(MockClient((_) async => http.Response('', 500)));
-      await r.saveSource(source, imported: bytes(playlist('A')));
-      final id = (await r.load()).channels.single.id;
-      final db = await r.database;
-      await StoreRef<String, String>('channelOwners').delete(db);
-      await stringMapStoreFactory
-          .store('preferences')
-          .record(id)
-          .put(db, {'favorite': true});
-      await r.saveSource(source, imported: bytes(playlist('B')));
-      await r.removeSource('s');
-      expect((await r.load()).preferences, isEmpty);
-    });
-
     test('custom order survives refresh; new channels append stably', () async {
       final r = repositoryWith(MockClient((_) async => http.Response('', 500)));
       await r.saveSource(source,

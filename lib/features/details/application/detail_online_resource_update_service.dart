@@ -115,8 +115,8 @@ class DetailOnlineResourceUpdateService {
       final targetType = TmdbMediaType.fromItemType(target.itemType);
       final favoriteType =
           TmdbMediaType.fromItemType(favorite.metadataMediaType);
-      if (targetType != null &&
-          favoriteType != null &&
+      if (targetType == null ||
+          favoriteType == null ||
           targetType != favoriteType) {
         continue;
       }

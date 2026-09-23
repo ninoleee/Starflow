@@ -370,8 +370,6 @@ extension PlaybackMpvQualityPresetX on PlaybackMpvQualityPreset {
   }
 
   static PlaybackMpvQualityPreset fromName(String _) {
-    // Older settings may still contain removed presets; collapse everything
-    // to the fixed runtime default to keep playback behavior predictable.
     return PlaybackMpvQualityPreset.performanceFirst;
   }
 }
@@ -1153,7 +1151,7 @@ const kDefaultNavigationDestinationIds = <String>[
   kNavigationDestinationSettings,
 ];
 
-const kAppSettingsSchemaVersion = 2;
+const kAppSettingsSchemaVersion = 3;
 
 List<String> normalizeNavigationDestinationIds(Iterable<String> values) {
   final selected = values
@@ -1894,7 +1892,189 @@ class AppSettings {
         '$kAppSettingsSchemaVersion，实际为 ${schemaVersion ?? '未提供'}。',
       );
     }
-    return AppSettings.fromJson(json);
+    final parsed = AppSettings.fromJson(json);
+    _validateCurrentSettingsShape(json, parsed.toJson());
+    _validateCurrentSettingsEnums(json);
+    return parsed;
+  }
+}
+
+void _validateCurrentSettingsEnums(Map<String, dynamic> json) {
+  _requireCurrentEnum(json['homeHeroDisplayMode'], HomeHeroDisplayMode.values,
+      'settings.homeHeroDisplayMode');
+  _requireCurrentEnum(
+      json['homeHeroStyle'], HomeHeroStyle.values, 'settings.homeHeroStyle');
+  _requireCurrentEnum(
+      json['appAccent'], AppAccent.values, 'settings.appAccent');
+  _requireCurrentEnum(json['metadataMatchPriority'],
+      MetadataMatchProvider.values, 'settings.metadataMatchPriority');
+  _requireCurrentEnum(json['playbackSubtitlePreference'],
+      PlaybackSubtitlePreference.values, 'settings.playbackSubtitlePreference');
+  _requireCurrentEnum(json['playbackDefaultSubtitle'],
+      PlaybackDefaultSubtitle.values, 'settings.playbackDefaultSubtitle');
+  _requireCurrentEnum(
+      json['playbackDualSubtitlePrimaryLanguage'],
+      PlaybackSubtitleLanguage.values,
+      'settings.playbackDualSubtitlePrimaryLanguage');
+  _requireCurrentEnum(
+      json['playbackDualSubtitleSecondaryLanguage'],
+      PlaybackSubtitleLanguage.values,
+      'settings.playbackDualSubtitleSecondaryLanguage');
+  _requireCurrentEnum(
+      json['playbackEngine'], PlaybackEngine.values, 'settings.playbackEngine');
+  _requireCurrentEnum(json['playbackDecodeMode'], PlaybackDecodeMode.values,
+      'settings.playbackDecodeMode');
+  _requireCurrentEnum(json['nativeAudioOutputMode'],
+      NativeAudioOutputMode.values, 'settings.nativeAudioOutputMode');
+  _requireCurrentEnum(json['playbackMpvQualityPreset'],
+      PlaybackMpvQualityPreset.values, 'settings.playbackMpvQualityPreset',
+      names: const ['performanceFirst']);
+
+  for (final entry in _settingsMapList(json['mediaSources']).indexed) {
+    _requireCurrentEnum(entry.$2['kind'], MediaSourceKind.values,
+        'settings.mediaSources[${entry.$1}].kind');
+  }
+  for (final entry in _settingsMapList(json['searchProviders']).indexed) {
+    _requireCurrentEnum(entry.$2['kind'], SearchProviderKind.values,
+        'settings.searchProviders[${entry.$1}].kind');
+  }
+  for (final entry in _settingsMapList(json['homeModules']).indexed) {
+    final module = entry.$2;
+    final path = 'settings.homeModules[${entry.$1}]';
+    _requireCurrentEnum(module['type'], HomeModuleType.values, '$path.type');
+    _requireCurrentEnum(module['doubanInterestStatus'],
+        DoubanInterestStatus.values, '$path.doubanInterestStatus',
+        names: DoubanInterestStatus.values.map((item) => item.value));
+    _requireCurrentEnum(module['doubanSuggestionType'],
+        DoubanSuggestionMediaType.values, '$path.doubanSuggestionType',
+        names: DoubanSuggestionMediaType.values.map((item) => item.value));
+    _requireCurrentEnum(module['displayStyle'], HomeModuleDisplayStyle.values,
+        '$path.displayStyle');
+  }
+  _requireCurrentEnumList(json['onlineSubtitleSources'],
+      OnlineSubtitleSource.values, 'settings.onlineSubtitleSources');
+  _requireCurrentEnumList(json['localLogRecordedLevels'], AppLogLevel.values,
+      'settings.localLogRecordedLevels');
+  _requireCurrentEnumList(json['localLogVisibleLevels'], AppLogLevel.values,
+      'settings.localLogVisibleLevels');
+}
+
+List<Map<String, dynamic>> _settingsMapList(Object? raw) {
+  if (raw is! List) return const <Map<String, dynamic>>[];
+  return raw
+      .whereType<Map>()
+      .map((item) => Map<String, dynamic>.from(item))
+      .toList(growable: false);
+}
+
+void _requireCurrentEnum<T extends Enum>(
+  Object? value,
+  Iterable<T> allowed,
+  String path, {
+  Iterable<String>? names,
+}) {
+  final accepted = (names ?? allowed.map((item) => item.name)).toSet();
+  if (value is! String || !accepted.contains(value)) {
+    throw FormatException('$path 不是当前值');
+  }
+}
+
+void _requireCurrentEnumList<T extends Enum>(
+  Object? raw,
+  Iterable<T> allowed,
+  String path,
+) {
+  if (raw is! List) {
+    throw FormatException('$path 必须是数组');
+  }
+  final accepted = allowed.map((item) => item.name).toSet();
+  for (final value in raw) {
+    if (value is! String || !accepted.contains(value)) {
+      throw FormatException('$path 包含非当前值');
+    }
+  }
+}
+
+void _validateCurrentSettingsShape(
+  Map<String, dynamic> actual,
+  Map<String, dynamic> expected,
+) {
+  final issues = <String>[];
+  _collectSettingsShapeIssues(actual, expected, 'settings', issues);
+  if (issues.isNotEmpty) {
+    throw FormatException('设置结构不是当前版本：${issues.first}');
+  }
+}
+
+void _collectSettingsShapeIssues(
+  Object? actual,
+  Object? expected,
+  String path,
+  List<String> issues,
+) {
+  if (expected is Map<String, dynamic>) {
+    if (actual is! Map) {
+      issues.add('$path 必须是对象');
+      return;
+    }
+    final actualMap = <String, Object?>{
+      for (final entry in actual.entries) '${entry.key}': entry.value,
+    };
+    for (final key in expected.keys) {
+      if (!actualMap.containsKey(key)) {
+        issues.add('$path.$key 缺失');
+      }
+    }
+    for (final key in actualMap.keys) {
+      if (!expected.containsKey(key)) {
+        issues.add('$path.$key 不属于当前设置');
+      }
+    }
+    for (final key in expected.keys) {
+      if (!actualMap.containsKey(key)) continue;
+      _collectSettingsShapeIssues(
+        actualMap[key],
+        expected[key],
+        '$path.$key',
+        issues,
+      );
+    }
+    return;
+  }
+
+  if (expected is List<dynamic>) {
+    if (actual is! List) {
+      issues.add('$path 必须是数组');
+      return;
+    }
+    if (expected.isEmpty) return;
+    for (var index = 0; index < actual.length; index++) {
+      final templateIndex =
+          index < expected.length ? index : expected.length - 1;
+      _collectSettingsShapeIssues(
+        actual[index],
+        expected[templateIndex],
+        '$path[$index]',
+        issues,
+      );
+    }
+    return;
+  }
+
+  if (expected == null) {
+    if (actual != null) issues.add('$path 必须为空');
+    return;
+  }
+  if (expected is bool) {
+    if (actual is! bool) issues.add('$path 必须是布尔值');
+    return;
+  }
+  if (expected is num) {
+    if (actual is! num) issues.add('$path 必须是数字');
+    return;
+  }
+  if (expected is String && actual is! String) {
+    issues.add('$path 必须是字符串');
   }
 }
 

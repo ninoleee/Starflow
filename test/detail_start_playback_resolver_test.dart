@@ -138,19 +138,20 @@ void main() {
     expect(repository.requests, ['library:nas:movies']);
   });
 
-  test('an S01E01 history target does not override the first listed season',
+  test('specials sort after regular seasons when resolving from the start',
       () async {
     final repository = _Repository({
       'series': [_item('specials', 'season', 0), _item('s1', 'season', 1)],
       'specials': [_item('special', 'episode', 0, 2)],
+      's1': [_item('s1e1', 'episode', 1, 1)],
     });
     final start = await DetailStartPlaybackResolver(repository).resolve(
       detail: _series.copyWith(
           playbackTarget: _history.copyWith(seasonNumber: 1, episodeNumber: 1)),
     );
-    expect(start.itemId, 'special');
-    expect(start.seasonNumber, 0);
-    expect(start.episodeNumber, 2);
+    expect(start.itemId, 's1e1');
+    expect(start.seasonNumber, 1);
+    expect(start.episodeNumber, 1);
     expect(start.allowResume, isFalse);
   });
 

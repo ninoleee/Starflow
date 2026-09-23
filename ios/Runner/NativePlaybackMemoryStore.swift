@@ -1,7 +1,7 @@
 import Foundation
 
 final class NativePlaybackMemoryStore {
-  private static let storageKey = "flutter.starflow.playback.memory.v1"
+  private static let storageKey = "flutter.starflow.playback.memory.v2"
   private static let recentEntryLimit = PlaybackPolicyValues.memoryRecentLimit
 
   private let userDefaults: UserDefaults

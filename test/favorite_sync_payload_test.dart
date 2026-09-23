@@ -192,12 +192,12 @@ void main() {
     expect(document.encode(), contains('image-only-secret'));
   });
 
-  test('detail and legacy linkless identities survive compact encoding', () {
+  test('detail and linkless identities survive compact encoding', () {
     final detail = richFavorite().copyWith(resourceUrl: '');
     final fallback = SearchResult.fromJson({
       ...detail.toJson(),
       'detailTarget': null,
-      'summary': 'Legacy identity without a link',
+      'summary': 'Linkless identity',
     });
     for (final result in [
       detail,
@@ -212,7 +212,7 @@ void main() {
           searchResultFavoriteKey(restored), searchResultFavoriteKey(result));
     }
     expect(favoriteSyncResultJson(detail), isNot(contains('summary')));
-    expect(favoriteSyncResultJson(fallback)['summary'], fallback.summary);
+    expect(favoriteSyncResultJson(fallback), isNot(contains('summary')));
   });
 
   test('compact playback retains deferred source and STRM resolution', () {

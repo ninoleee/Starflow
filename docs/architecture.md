@@ -86,7 +86,7 @@ Starflow 不是单一播放器，而是一个面向个人影音库的统一入�
 - `DetailLibraryMatchCoordinator` 拥有多来源匹配执行流程，复用 `DetailLibraryMatchService` 的候选模型、评分及合并规则。优先来源阶段结束后才进入后备来源；并发、结果上限和取消检查保持原契约。详情页保留缓存恢复、交互和结果提交。
 - `SearchRequest` 捕获来源选择与查询，`SearchSession` 拥有请求代次、搜索/验链排队、去重及批量发布的不可变视图状态；`SearchShareValidator` 适配两种分享协议。输入、TV 焦点、收藏入口和提示仍在 presentation 层。
 - `CloudSaveDispatcher` 统一搜索、收藏与详情的保存分发、分享凭据准备及错误结果映射；原有 Quark / 115 工作流保留协议差异、零新增行为和 STRM 后处理，页面复用反馈 session。未知 115 失败显示保存未确认，客户端已有的批次未确认提示原样保留，不自动重试。
-- 公共存储仓库保留调用兼容性；`DetailCacheStore` 持有详情数据、串行写链和 revision 通知，`MediaServerCacheStore` 持有媒体服务器分片、manifest、读复用与写队列。公共模型由旧仓库入口导出；持久化 key 与数据格式不变，不因文件拆分触发缓存迁移或远端刷新。
+- 公共存储仓库保留调用入口；`DetailCacheStore` 持有详情数据、串行写链和 revision 通知，`MediaServerCacheStore` 持有媒体服务器分片、manifest、读复用与写队列。详情缓存使用当前 v2 key，旧 key 不读取或迁移，也不因组件边界触发远端刷新。
 - 2026-09-20 缓存失败恢复补强：`MediaServerCacheStore` 在写分片前记录独立分片索引，清理时同时枚举严格分片 key 前缀，manifest 提交失败或损坏不会使分片失去清理入口；只清理媒体库缓存，不扫描或删除其他偏好。设置加载将 JSON 解析与凭据 IO 分离；读取或协调保存失败不再用默认配置覆盖有效设置，格式损坏的原文和独立凭据也保留供恢复。
 - `MpvPlaybackLifecycle` 持有实例订阅并组合 `MpvSubtitleSession`，detach 同步隔离旧所有者，清理 Future 随旧播放器传递；字幕 sid 注册迟到时仍由旧所有者移除。`PlaybackPlatformSessionOwner` 持有系统会话绑定、代次和发布快照。页面级自动恢复预算不移入单个实例，也不合并 Dart、Media3 与 AVPlayer 能力；现有 `part` 仍属于页面 library，不能称为全部运行逻辑已独立。
 - iOS `AppDelegate` 保留通道与宿主装配；`NativePlaybackModels / NativePlaybackMemoryStore / NativePlaybackViewController / SettingsDocumentExporter` 分别负责模型、存储、容器和文档导出。Swift 纯模型/存储测试不替代 AVPlayer 真机操作。
@@ -153,7 +153,7 @@ lib/
 - 设置
 - 直播
 
-可见菜单由 `navigationDestinationIds` 决定；新配置默认依次为首页、直播、搜索、媒体库、设置，不含收藏。旧配置保留已保存的菜单顺序，不强制插入直播，设置项始终保留。路由分支索引与可见菜单索引不可混用。
+可见菜单由 `navigationDestinationIds` 决定；默认依次为首页、直播、搜索、媒体库、设置，不含收藏。设置项始终保留。路由分支索引与可见菜单索引不可混用。
 
 2026-09-20 默认直播第二项调整：主机配置与导航回归 47 项通过，相关静态检查通过；包含 TV 从首页下移一次进入直播的焦点与自动隐藏检查，不代表真机验证。
 
@@ -186,11 +186,11 @@ lib/
 - 安全寻焦策略、页面边界和侧栏横向移动复用 `TvSafeDirectionalFocusAction` 的异常处理；未布局中断返回已处理，阻止页面边界将它当成正常寻焦到头。`wrapTelevisionDialogBackHandling` 在退出输入状态时优先聚焦已挂载且可请求的操作节点，避免只留下焦点域；未挂载按钮不会被选作返回目标
 - `TvDialogOption` 在 TV 复用轻量高亮与确认键映射，普通端仍为 `SimpleDialogOption`；播放器字幕/音轨/倍速/循环与配置路径选项由首项申请焦点。来源多选优先“全部”或首项，无选项时聚焦取消；字幕偏移、片头片尾和删除/覆盖确认框也有明确首焦点。夸克目录页由常驻“选择”按钮持有首焦点，不依赖异步子目录存在
 - `StarflowApp` 仅覆盖默认 `DirectionalFocusIntent` Action，补齐页面级策略覆盖不到的路由/Overlay 焦点：只捕获 `RenderBox was not laid out` 并忽略当次按键，不做下一帧重试、候选过滤或顺序改写；警告按 Action 实例做 `5s` 限频
-- App 外观由 `app/theme/app_colors.dart` 的固定近中性色阶与 `AppRadii`（12/18/28/999）控制；共享控件、首页和详情组件复用这些 token。`AppAccent` 是无 Flutter 依赖的设置枚举，`appAccent` 持久化为 bone/teal/indigo/coral/amber/rose/lime/violet，旧配置或未知值回退 teal。`StarflowApp` 只监听该字段重建主题；`ColorScheme` 保持中性，`AppActionColors` ThemeExtension 显式提供交互强调色：主行动、导航选中态、开关开启态、勾选/单选、筛选与排序选中项、线路选中标记、已收藏图标、进度/滑块和输入框聚焦描边。共享 `StarflowChipButton` 在聚焦时保留选中颜色，TV 外侧焦点框统一保持纯白；错误语义色、禁用弱化与中性背景不变。`surfaceTint` 固定透明，页面背景不绘制彩色光晕
+- App 外观由 `app/theme/app_colors.dart` 的固定近中性色阶与 `AppRadii`（12/18/28/999）控制；共享控件、首页和详情组件复用这些 token。`AppAccent` 是无 Flutter 依赖的设置枚举，`appAccent` 持久化为 bone/teal/indigo/coral/amber/rose/lime/violet，当前设置只接受这些值。`StarflowApp` 只监听该字段重建主题；`ColorScheme` 保持中性，`AppActionColors` ThemeExtension 显式提供交互强调色：主行动、导航选中态、开关开启态、勾选/单选、筛选与排序选中项、线路选中标记、已收藏图标、进度/滑块和输入框聚焦描边。共享 `StarflowChipButton` 在聚焦时保留选中颜色，TV 外侧焦点框统一保持纯白；错误语义色、禁用弱化与中性背景不变。`surfaceTint` 固定透明，页面背景不绘制彩色光晕
 - 详情 Hero 的“继续播放 / 从头播放”继续使用与普通操作按钮相同的 `secondary` 中性样式，不读取 `AppActionColors`；详情线路选择使用淡强调色底、边框与选中图标；当前播放剧集使用中性白色选中样式。详情上次播放剧集由 `findLastPlayedEpisodeIndex` 匹配，在卡片上半部图片区的 Stack 内居中显示中性历史图标和“Last Played”文字，配半透明黑底，下方简介统一最多三行；无匹配时不显示，不增加强调色边框，不改变卡片尺寸、滚动恢复或焦点行为。播放器显式绘制的已播放进度段同样读取 `AppActionColors`，缓冲段与未播放轨道保持中性
 - 首页在重新变为活动页以及 `hasPendingSections` 从 `true` 变为 `false` 时各安排一次下一帧检查；仅在主焦点为空、落在 `FocusScopeNode`、已卸载或不可请求时调用现有侧栏恢复入口，已有可操作焦点时不做任何处理
 - TV 菜单上下键按显示顺序在可见菜单项之间移动，首尾保持原位。搜索页异步结果只在主焦点为空、落在 `FocusScopeNode`、已卸载或不可请求时恢复到搜索输入框；收藏页优先恢复 `favorites:sync`，设置首页优先补到 `settings:header`。菜单或其他已挂载的可操作焦点不会被页面恢复逻辑抢占
-- 菜单显示顺序由 `AppSettings.navigationDestinationIds` 同时承载可见性与顺序；规范化保留首次出现顺序、过滤未知 ID，并在缺少设置入口时追加，不改变路由分支编号。`NavigationDestinationDialog` 维护本地排序/勾选草稿，保存时统一提交既有 SettingsController；普通端提供拖拽和移动按钮，TV 移动到边界后按钮保焦但禁止继续移动。`AppNavigationShell` 按已保存 ID 顺序映射固定分支，底栏和侧栏共用；旧配置无需 schema 迁移，不增加网络请求。
+- 菜单显示顺序由 `AppSettings.navigationDestinationIds` 同时承载可见性与顺序；规范化保留首次出现顺序、过滤未知 ID，并在缺少设置入口时追加，不改变路由分支编号。`NavigationDestinationDialog` 维护本地排序/勾选草稿，保存时统一提交既有 SettingsController；普通端提供拖拽和移动按钮，TV 移动到边界后按钮保焦但禁止继续移动。`AppNavigationShell` 按已保存 ID 顺序映射固定分支，底栏和侧栏共用；不增加网络请求。
 - 菜单排序验证（2026-09-20）：主机菜单/配置/路由/设置导航联合回归 82 项通过，其中弹窗专项 5 项覆盖普通端/TV 保存、取消、设置入口不可隐藏、TV 边界保焦与 320px 窄屏实际拖拽；相关源文件与测试静态检查通过。此记录不是 Android TV 真机测量，遥控器实机体验仍待验证。
 - TV 主壳处理返回键时先以 `UnfocusDisposition.scope` 清理当前焦点及作用域历史，再聚焦当前页面对应的侧栏入口；仅当该入口已经持有主焦点时，再次返回才进入退出确认
 - `AppNavigationShell._focusCurrentDestination` 显示菜单后在帧末聚焦当前分支对应的入口，并通过 `ensureVisualUpdate` 主动安排更新帧。常驻菜单显隐状态不变时也不会让聚焦回调滞留到下一次按键；自动隐藏模式仍先解除 `ExcludeFocus` 再请求焦点。回归测试在按左后、主动补帧前检查帧已调度，覆盖五个一级分支及两种菜单模式。
@@ -226,7 +226,7 @@ lib/
 - 首页独立持有 `LiveChannelProbeController`，每次可见且 `refreshDue` 结束、列表就绪后自动补测未测／过期频道，不依赖首次标记。`LiveProbeViewport` 检查行与视口相交、排除离屏缓存；controller 连续可见 200ms 准入、TV 焦点优先、两路并发，离屏取消并等待清理后复用名额。一个定时器合并准入和可见项最近到期，成功 TTL 5 分钟，连续失败 45／90／180／300 秒退避，成功／线路／网络变化重置；停止保留有效缓存但清除定时器和视口。刷新保留旧结果并显示图标。快照按 ID 与 URL／headers／首选线路协调，元数据保留匹配工作，隐藏／删除／停用移除对应任务。`live_probe_network.dart` 提供系统连接事件流，页面存活期间被动订阅；网络和代理变化使缓存失效但不重启已停止任务，正常路由返回复用缓存，后台或监听异常后返回保守失效。监听随销毁解除。分组菜单临时覆盖暂停；真正失活／后台停止任务，返回自动恢复；手动暂停本次停留不被筛选／网络解除，下次真正返回重置。标签／进度局部刷新。`LiveChannelProbe` 独占 HTTP 客户端和响应流，慢清理只报警、不伪造释放，开播等待清理；无数据库、后台检测、解码或 HLS 子请求，Web 隐藏入口。
 - TV 文件入口由 `LivePlaylistTransferDialog` 持有临时 `LivePlaylistTransferSession`，复用 `LanTransferQrAddressCard` 和 TV 对话框返回处理；返回/后台/销毁都会关闭会话，启动后迟到的 session 也会立即关闭。接收服务只校验并返回文件名与原始字节，不接触数据库或应用配置；`LiveSourcesPage` 收到后保留草稿，仍由保存动作交给 `LiveRepository`。非 TV 保留本地文件选择，Web 使用不启动 HTTP 服务的 stub。
 - `LivePlayerPage` 拥有画布/工具栏/频道/节目单的 Flutter 焦点、当前频道与内核切换、生命周期和播放优先状态。`LiveTvView` 的根视图与 TextureView 不接受焦点，Flutter 的 `AndroidView` 也被 `ExcludeFocus` 包装；原生不接管遥控器、EPG 或影视历史。音轨弹窗只向当前 engine 回写，频道及线路记忆在当前代次首次 progress/frame 时提交，而非 ready 时提交。
-- IO 库为应用支持目录 `starflow-db/live_tv.db`，Web 库为 `starflow-live-tv`。`sources / channels / preferences / channelOwners / epg / epgLogos / meta` 分离直播数据；直播内核、收藏、线路偏好和 JSON 编码的分组隐藏/顺序偏好不写入 `AppSettings`。只有菜单可见项属于应用配置。`LiveBackup` 负责独立版本化备份校验，仓库以单事务合并/替换七个 store，并使旧刷新 epoch 失效；替换恢复分组偏好，合并只补充新来源涉及且本机不存在的分组偏好，不覆盖已有整理。`LiveBackupDialog` 负责非 TV 文件选择/路径、TV 手机扫码、凭据提示和恢复确认。没有缓存容量管理或自动过期清扫入口。
+- IO 库为应用支持目录 `starflow-db/live_tv.v2.db`，Web 库为 `starflow-live-tv-v2`。`sources / channels / preferences / channelOwners / epg / epgLogos / meta` 分离直播数据；直播内核、收藏、线路偏好和 JSON 编码的分组隐藏/顺序偏好不写入 `AppSettings`。只有菜单可见项属于应用配置。`LiveBackup` 负责独立版本化备份校验，仓库以单事务合并/替换七个 store，并使旧刷新 epoch 失效；替换恢复分组偏好，合并只补充新来源涉及且本机不存在的分组偏好，不覆盖已有整理。`LiveBackupDialog` 负责非 TV 文件选择/路径、TV 手机扫码、凭据提示和恢复确认。没有缓存容量管理或自动过期清扫入口。
 - `live_logo_provider.dart` 拥有独立四路传输池、15s/2 MiB 单图边界和 provider 释放时取消；不接入影视海报磁盘缓存。订阅、EPG 和台标不携带媒体 headers，`LiveSource` 无自定义请求头字段；`LiveLine.headers` 仅来自播放列表的媒体选项。代理与正文边界以 [开发网络](development-network.md#直播订阅与媒体流2026-09-20) 为准。
 - `LivePlaylistTransferService` 以 `file / backupImport / backupExport` 模式启动单次 LAN 会话，返回 `LivePlaylistUpload / LiveBackupDownloaded` 类型结果，不访问仓库。导出模式只持有已校验的备份快照，导入模式只返回校验后的字节；`LiveBackupDialog` 确认后才调用仓库恢复。`LivePlaylistTransferDialog` 复用二维码、遥控器焦点和前后台清理，不扩展普通应用配置接口。
 - TV 文本扫码统一属于设置输入层：`SettingsTextInputField` 在输入弹窗右侧提供扫码按钮，`TextInputTransferDialog` 拥有二维码会话生命周期，`TextInputTransferService` 仅接收单次 UTF-8 文本，不依赖直播、配置仓库或业务 URL 校验。回填时执行单行及 `inputFormatters` 规则，弹窗保存才更新外层 controller 并触发 `onChanged`，取消不修改原值。直播订阅 URL 确认后可清除文件草稿，来源页保存后才刷新；名称/EPG 同样使用共用入口。独立搜索/播放器输入框不隐式迁移。
@@ -625,7 +625,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 对开启目录结构推断的剧集条目，`WMDB / TMDB` 先统一使用目录推导出的剧名匹配，同剧各集共享进行中或已缓存的系列结果，不再将每个单集文件名反复提交给在线搜索；可选的“剧集复用系列级图片”还会跳过单集 still 请求，并把匹配年份固定为系列目录年份（目录无年份时统一使用无年份键），避免单集上映年份拆散系列缓存
 - `MediaItem` 生成
 - 剧集父子关系聚合
-- 电影多版本聚合以影片根目录为边界：媒体库只生成一个代表卡片，底层索引保留每个真实资源（包括版本目录下的嵌套文件），详情页的“播放版本”再按可播放性、元数据完整度和画质排序展开。该结构规则使用条目级指纹；增量只处理新文件，旧误分类需通过重建索引或显式元数据操作修复，不通过整库 schema 失效迁移
+- 电影多版本聚合以影片根目录为边界：媒体库只生成一个代表卡片，底层索引保留每个真实资源（包括版本目录下的嵌套文件），详情页的“播放版本”再按可播放性、元数据完整度和画质排序展开。该结构规则使用条目级指纹；增量只处理新文件，NAS 索引数据库升级时旧索引不读取，由当前版本重新建立
 - 目录名里如果能识别出明确季号，例如 `Season 1`、`S02`、`SE08`、`第2季`、`Stranger.Things.S02.2160p.BluRay.REMUX`，会直接把这一层当作季目录
 - `SE08.06` 这类文件名会同时提供季号和集号；结构推断确定母目录为剧集根后，母目录名是唯一剧名，子目录/文件只提供季集与单集展示信息。标题中间的 `#19`、子目录开头的 `#004`，以及名称修正去掉井号后保留的三位补零编号 `004` 都可作为第 1 季集号，子目录不能另起剧名或独立季。母目录若已有 `S01E01` 或明确数字集号，`4K HDR / DV / SDR` 等子目录中的数字文件也沿用第 1 季，不会落入电影或特别篇。当前 schema 为 `webdav-v15`；相同 scope 指纹下的规则调整不自动重写旧记录，旧错误分组需显式重建
 - 对 `2.巴以 / 5.美国 / 9.韩国` 这类“数字 + 标题”的专题目录，会额外要求同级里存在多个同类兄弟目录，避免把普通数字目录误判成季
@@ -684,11 +684,11 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 
 115 删除由 `Cloud115SyncDeleteService` 独立预检和执行，接入媒体库 WebDAV 删除链。`syncDelete115Enabled / syncDelete115WebDavDirectories` 独立持久化，默认关闭。只匹配精确 sourceId 与 URI 路径段范围，逐层解析监听目录到保存目录的相对路径；STRM 可映射到唯一同名视频。不允许根目录、多个候选或跨网盘重叠，预检失败不会删除 WebDAV。WebDAV 成功后才调用 115 回收站接口，115 失败提示部分完成并保留本地索引。115 不复用夸克的模糊删除匹配或 403/405 回退，但来源编辑、删除和配置导入已通过公共来源路径规则协调两种监听目录，无法确认的引用移除后需重新选择。两种网盘的同步删除配置和目录管理均位于各自设置页；目录管理复用现有确认交互，115 使用自己的客户端。直接管理网盘不会清理 STRM 或触发生成任务。
 
-整剧条目的 `actualAddress` 使用公共 `NasMediaPathPolicy.resolveSeriesRoot` 提供的实际目录深度，从原始资源路径截取同一剧名根目录；保留大小写、编码和 `(1)` 后缀，不从展示标题反推路径。`NasMediaIndexer.buildSeriesItem` 要求组内根路径一致，不能因全部视频位于一季或一个子目录就把整剧地址缩到这一层。单季仍取该季资源共同目录，单集仍取文件 URI。更改发生在索引条目物化时，不清空或迁移已有文件记录，不改变剧集分组 ID，也不自动清理历史残留目录。
+整剧条目的 `actualAddress` 使用公共 `NasMediaPathPolicy.resolveSeriesRoot` 提供的实际目录深度，从原始资源路径截取同一剧名根目录；保留大小写、编码和 `(1)` 后缀，不从展示标题反推路径。`NasMediaIndexer.buildSeriesItem` 要求组内根路径一致，不能因全部视频位于一季或一个子目录就把整剧地址缩到这一层。单季仍取该季资源共同目录，单集仍取文件 URI。NAS 索引数据库升级时旧记录不读取，当前版本重新物化文件记录，不改变剧集分组 ID，也不自动清理历史残留目录。
 
 WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全部图片、字幕、NFO 等附属内容。`WebDavNasClient.deleteResource` 对文件和目录均直接读取父目录确认，不复用扫描缓存或排除关键词过滤，也不吞掉读取失败；目录 URI 比较忽略末尾斜杠。`Cloud115SyncDeleteService.execute` 在回收站接口返回成功后完整读取父目录，确认目标 ID 消失才报告成功，未确认不重发写操作。确认弹窗说明整目录及附属文件范围；回归测试在 `test/features/library/data/` 覆盖单季整剧、单季删除、单集删除、特殊字符、独立 `(1)` 路径及远端结果未确认。
 
-115 分享转存由 `Cloud115SaveClient` 与 `Cloud115SaveWorkflowService` 适配公共规则，不作为新的直连媒体源。网盘与转存配置保存 `cloud115SaveFolderId / cloud115SaveFolderPath / cloud115SmartStrmTaskName` 等非敏感选项；`cloud115Cookie` 只作为当前设备的本地凭据参与运行，不进入配置 JSON。旧配置默认根目录、未登录、无 115 STRM 任务。目录选择器通过可选加载回调复用现有 TV 焦点及面包屑交互。搜索及收藏结果按链接类型分流保存。115 转存有新增内容后先完成可选名称修正，再复用 `SmartStrmWebhookClient` 和公共 Webhook、延迟配置，使用独立 115 任务名及本次实际保存路径（根目录省略路径覆盖），最后调用媒体源刷新协调器安排后台刷新；115 任务名留空时不触发，也不回退到夸克 `smartStrmTaskName`。各自网盘设置页承载自己的任务名与测试按钮，测试使用该页当前草稿中的任务名和默认保存目录；公共 SmartStrm 页只包含 Webhook 和延迟。STRM 失败仍尝试刷新，后续失败保留保存成功状态，后台刷新失败单独提示。Webhook 应答仅表示触发已受理，不等待远端生成任务完成。不调用夸克同步删除；若 STRM 重命名导致相对路径与 115 不同，独立删除预检仍拒绝猜测映射。
+115 分享转存由 `Cloud115SaveClient` 与 `Cloud115SaveWorkflowService` 适配公共规则，不作为新的直连媒体源。网盘与转存配置保存 `cloud115SaveFolderId / cloud115SaveFolderPath / cloud115SmartStrmTaskName` 等非敏感选项；`cloud115Cookie` 只作为当前设备的本地凭据参与运行，不进入配置 JSON。默认根目录、未登录、无 115 STRM 任务。目录选择器通过可选加载回调复用现有 TV 焦点及面包屑交互。搜索及收藏结果按链接类型分流保存。115 转存有新增内容后先完成可选名称修正，再复用 `SmartStrmWebhookClient` 和公共 Webhook、延迟配置，使用独立 115 任务名及本次实际保存路径（根目录省略路径覆盖），最后调用媒体源刷新协调器安排后台刷新；115 任务名留空时不触发，也不回退到夸克 `smartStrmTaskName`。各自网盘设置页承载自己的任务名与测试按钮，测试使用该页当前草稿中的任务名和默认保存目录；公共 SmartStrm 页只包含 Webhook 和延迟。STRM 失败仍尝试刷新，后续失败保留保存成功状态，后台刷新失败单独提示。Webhook 应答仅表示触发已受理，不等待远端生成任务完成。不调用夸克同步删除；若 STRM 重命名导致相对路径与 115 不同，独立删除预检仍拒绝猜测映射。
 
 115 同步删除预检的 `resourcePath` 由 `WebDavNasClient.resolveResourceUri` 从实际删除入口解析，与 DELETE、STRM 读取及 sidecar 地址解析共用同一方法；不使用索引中仅供显示及缓存清理的 `record.resourcePath` 匹配绝对 URI。已入库文件保留原资源 URI，目录和分区相对路径按原 WebDAV 规则补齐域名及路径，不放宽跨域或根目录限制。`115.sync-delete` 记录配置跳过原因、来源范围数量、匹配深度、目标类型和接口确认，异常只记录类型、不写路径正文或凭据。
 
@@ -736,7 +736,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 豆瓣等在线 seed target 如果已经命中过本地资源，后续再次进入详情页时会继续优先采用缓存里的资源状态、来源和播放信息，而不是回退到 seed target 自带的“无 / 豆瓣”
 - 如果恢复到的缓存命中项是某个单集或具体文件，详情页仍会保留原来的剧集结构目标，继续显示季/集浏览区，而不是把整页退化成单文件详情
 - 如果本地详情缓存或手动索引结果里已经有更新后的标题，详情页会优先显示这份标题；媒体库与首页也会沿着同一条缓存合并链路复用它
-- `LocalStorageCacheRepository` 的 `season / episode` 内容查找键同时包含季号与集号（季条目仅季号），优先读取详情字段，缺失时读取播放目标字段；不完整的季集身份仅生成 `sourceId + itemId` 资源键。缓存读写均校验条目类型及季集身份，拒绝旧版跨季集别名；旧记录 ID 冲突时新建独立记录，不继承错误候选，也不删除其他条目的缓存。同集多版本选择与整剧入口的显式结构恢复仍保持原流程。
+- `LocalStorageCacheRepository` 的 `season / episode` 内容查找键同时包含季号与集号（季条目仅季号），优先读取详情字段，缺失时读取播放目标字段；不完整的季集身份仅生成 `sourceId + itemId` 资源键。缓存读写均校验条目类型及季集身份，记录 ID 冲突时新建独立记录，不继承错误候选，也不删除其他条目的缓存。同集多版本选择与整剧入口的显式结构恢复仍保持原流程。
 - 详情页与人物作品页已经收口到 `RetainedAsyncController`；页面 inactive、切回前台或播放期间页面让路时，会优先保留最近一次已解析结果
 - 详情页在 inactive 时会取消当前匹配 / 刷新会话，但不会再无条件失效成功缓存；重新回到页面时优先复用已有详情结果
 - 详情页失活时解除相应 provider 监听并取消当前工作，但已展示的剧集、剧照不因 `TickerMode` 关闭而卸载；播放器返回后复用季选择、滚动和已加载结果。剧照预览支持双指缩放、双击切换 2.5 倍缩放、放大后拖动，以及未放大时向下滑动关闭和点击图片外空白关闭；不放置右上角缩放/关闭按钮，双指缩放围绕实际两指中心，手机、桌面和 TV 通过系统返回键退出，TV 由不可见焦点宿主承接返回键，返回或确定只关闭预览并回到详情页，失败重试按钮仍可导航。剧照组件在路由销毁或目标身份变化时只驱逐自身源图、缩略图和预览尺寸的内存缓存，不调用全局 `ImageCache.clear()`，因此不会误伤海报、头像或 Hero 背景
@@ -752,7 +752,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 非 TV 使用标准详情 Hero；TV 固定使用精简详情 Hero
 - `TMDB` 已接入 `poster / backdrop / still / profile / logo` 等图片字段，并把 `TMDB x.x` 写入统一评分标签链路；详情不主动请求 IMDb。NAS 索引仅在配置 `imdbRatingMatchEnabled=true` 时调用独立 IMDb 客户端，默认关闭；上游 `WMDB / TMDB` 与既有索引的 IMDb 标签继续展示和保存
 - `MediaItem.ratingCount` 与 `MediaDetailTarget.ratingCount` 共用豆瓣评分人数。详情 Hero 使用 `buildRatingCountLabel` 显示 `☆31.6万`；`douban_rating_stats_service` 获取 `rating.count` 后，`MediaRepository.updateRatingCount` 会把人数写回 Emby / 飞牛分片缓存或 NAS / WebDAV / Quark 索引。索引建条目、系列 / 季 / 特殊集分组和增量刷新均保留该字段，因此媒体库入口再次打开详情时可直接恢复人数。
-- 人数不再作为独立预取条件：resolver 在缺豆瓣评分、豆瓣 ID 新匹配或强制刷新时同步获取评分与人数。`DoubanEntry` 保留列表响应的 `rating.count`；首页（含轮播）和媒体库批量缓存合并、可见页变化检测、资源匹配、剧集变体及清理失效资源关联时均保留人数；仅人数变化也归入 `LocalStorageDetailCacheChangedField.ratings`，沿评分缓存订阅更新入口。已有评分但无人数的旧缓存不自动补人数，可手动更新影片信息。
+- 人数不再作为独立预取条件：resolver 在缺豆瓣评分、豆瓣 ID 新匹配或强制刷新时同步获取评分与人数。`DoubanEntry` 保留列表响应的 `rating.count`；首页（含轮播）和媒体库批量缓存合并、可见页变化检测、资源匹配、剧集变体及清理失效资源关联时均保留人数；仅人数变化也归入 `LocalStorageDetailCacheChangedField.ratings`，沿评分缓存订阅更新入口。人数随当前详情缓存保存。
 - 详情页评分标签会按来源归一去重；`豆瓣 / IMDb / TMDB` 各最多保留一条，避免 seed target、详情缓存和后续在线补全合并后出现重复评分标签；评分人数不占用标签条目
 - 人物头像统一来自 `TMDB profile`，详情页公司 Logo 来自 `TMDB production_companies.logo_path`，不再把 `networks` 混作公司展示
 - 详情页公司 Logo 位于资源信息之后的页面底部，使用带柔和高对比度背景卡片的单行横向 `PlatformRail`，超出可视区域时可左右滑动，TV 端每个 Logo 都有独立焦点目标并带轻微放大提示，不再通过多行 `Wrap` 换行；点击 Logo 会直接使用详情数据里的 `TMDB` 公司 ID，并打开与人物作品页共用的电影 / 剧集作品浏览页
@@ -760,7 +760,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 演职员头像可跳转到人物关联影片页，公司 Logo 可跳转到同一作品浏览页的公司模式，`TV` 焦点动作只包裹圆形头像并采用圆形焦点框与 `1.06` 缩放，姓名在头像下方但不参与焦点区域。作品列表继续复用首页同款海报卡片；卡片右上角会优先显示题材/类型标签，左下角继续显示可用评分标签
 - 剧集详情里的单集卡片已拆成两个入口：图片区继续走播放，图片下方的简介区进入单集详情
 - 简介由 `core/utils/metadata_text.dart` 使用 HTML DOM 解析成纯正文与去重来源 URI，原始 `overview` 仍在 WMDB/TMDB 结果、MediaItem 和详情缓存中保存；显示清理不写回数据。正文保留段落，链接及其附带换行被移除；标签删除仅接受明确分隔的已知来源标签或短地址标签，不向前吞掉正文。安全来源限制为无用户凭据的有效 HTTP/HTTPS 地址。
-- `DetailOverviewSection` 独立管理六行折叠、展开/收起、空简介及“更多 → 视频来源”；复用详情选择弹窗与 TV 焦点组件，来源打开失败可恢复，关闭弹窗后回到更多按钮。剧集卡片使用三行摘要并保留现有集数/时长/文件名兜底，不增加卡片内外链按钮。首页 Hero 和元数据预览也在展示时清理简介。旧缓存若早已删除 URL，只能通过重新读取元数据恢复来源。
+- `DetailOverviewSection` 独立管理六行折叠、展开/收起、空简介及“更多 → 视频来源”；复用详情选择弹窗与 TV 焦点组件，来源打开失败可恢复，关闭弹窗后回到更多按钮。剧集卡片使用三行摘要并保留现有集数/时长/文件名兜底，不增加卡片内外链按钮。首页 Hero 和元数据预览也在展示时清理简介。缓存没有来源 URL 时只能通过重新读取元数据恢复来源。
 - `TV` 短简介保留正文焦点；展开控件固定在正文上方，长正文可获得独立焦点并上下滚动，到达边界后交回页面方向寻焦。正文确认键可收起并将焦点送回展开控件，避免长段落推动控件离屏后难以返回。
 - NAS / WebDAV 的系列与季层级会随来源索引缓存一次构建，并按分区直接查找；切季和重新进入详情页不再重复扫描、分组整个来源索引
 - 单集横排继续使用惰性列表；`TV` 单集图纳入全局四路图片加载门，卡片离开视口或页面失活时会取消尚未取得 permit 的任务；gate 直接追踪活动 permit，并为每个 permit 设置 `8s` 自恢复租约，避免隐藏组件漏释放后让全局图片队列永久停住
@@ -784,7 +784,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - 手动应用命中结果时会强制覆盖本地已存在的标题、简介、图片、人物、公司 Logo 和外部 ID，不再只补空字段
 - `TV` 模式下进入信息管理页后，会在路由首帧结束时主动请求首屏“自动更新”按钮焦点，不依赖离屏搜索按钮的 autofocus
 - 详情页“手动更新信息”同样会直接重新搜索，并把命中的在线结果覆盖到当前详情缓存
-- 人物 / 公司关联影片页支持按年份新到旧 / 旧到新排序，也支持按类别筛选；排序与筛选都基于已拿到的作品结果在本地完成
+- 人物 / 公司关联影片页支持按年份新到旧 / 旧到新排序，也支持按类别筛选，并统一提供上一页 / 下一页。公司作品页通过 `TMDB` 电影 / 剧集 Discover 的同一页码读取数据，以 `total_pages` 驱动分页，排序切换会回到第 1 页并更新服务端 `sort_by`；导演 / 演员作品页仍使用一次人物作品响应，在本地排序筛选后按每页 40 条切页
 
 详情页本地资源匹配当前还有这些约束：
 
@@ -966,7 +966,7 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 - 多字幕源搜索会并行执行；`OpenSubtitles` 登录态会做短时会话缓存，避免同一轮搜索里重复登录
 - 结构化搜索只获取元数据；OpenSubtitles 结果保存 `providerFileId`，点选时申请下载链接。手动编辑查询清除旧目标 ID、文件路径与季集条件，页面用 generation 丢弃旧请求和旧下载回调
 - `SubtitleValidationPipeline` 是仓库实际使用的下载管线：流式有界下载、后台 ZIP 选集/语言排序、CRC/格式检查、UTF-8 规范化。`subtitle_content_decoder.dart` 提供共享编码、格式与 ZIP 限制；`subtitle_render_policy.dart` 区分 MPV 文本和位图渲染。详细边界见 [字幕链路](subtitles.md)
-- 下载写入 `starflow/online_subtitles/download-*`，不做跨请求文件复用；仓库按根目录统计和清理全部会话及旧版目录，下载时清理超过 7 天的缓存。MPV 挂载文本数据，Android `NativePlaybackSubtitleFiles` 持有独立副本，正常退出后清理；不因清理下载缓存删除正在播放的文件
+- 下载写入 `starflow/online_subtitles/download-*`，不做跨请求文件复用；仓库按当前根目录统计和清理缓存，下载时清理超过 7 天的条目。MPV 挂载文本数据，Android `NativePlaybackSubtitleFiles` 持有独立副本，正常退出后清理；不因清理下载缓存删除正在播放的文件
 - 播放器页本身不再直接承载全部启动决策；目标解析、路由判定与执行分支已经拆到独立 application 文件，页面层主要负责装配、等待态和内置 `MPV` 运行期行为，便于 controller 级测试和后续替换策略
 - 播放器页 presentation 也已进一步拆开：`player_page.dart` 主要保留会话和流程编排，控制叠层、启动等待态、播放设置弹窗与平台会话子树分别沉到 `presentation/widgets` 与 `player_page_*.part.dart`
 
@@ -1086,7 +1086,7 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 - Android `NativePlaybackMemoryStore` 复用内容未变的已解析快照；每次读取仍核对 SharedPreferences 原始字符串，外部写入、清空和非法内容替换会失效。所有本地写入成功后回填缓存，失败时丢弃已变更对象，跳过偏好返回小对象副本，避免调用方污染快照；持久化键、20 条裁剪和 commit/apply 语义不变。
 - 系统媒体会话发布先用位置、时长、播放/缓冲状态和队列边界这些便宜字段判断是否需要发布，命中后才构建标题、副标题和封面候选；所有会改变这些元数据的路径都会带 `force` 触发一次同步
 - Android `PlaybackSystemSessionManager` 继续每次发布 PlaybackState，`PlaybackSystemSessionUpdatePolicy` 将标题/副标题/时长变化与通知按钮变化分开去重；仅位置、缓冲或速度变化不重建元数据和通知。图标每个管理器最多解码一次，将现有 `1024×1024` 资源以 `inSampleSize=4` 解码；停用/重新激活清空发布状态，通知权限不可用时不标记已发布，恢复后重发。策略与管理器分别有 JVM 回归测试，MPV 共用此 Android 系统媒体去重逻辑。
-- Android / iOS 播放记忆仓库使用带 `reload()` 的 shared preferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v1`；返回前台时递增播放历史 revision 使首页和详情页重新读取
+- Android / iOS 播放记忆仓库使用带 `reload()` 的 shared preferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v2`；返回前台时递增播放历史 revision 使首页和详情页重新读取
 - Android 原生播放器每 `10s` 记录一次位置、时长、缓冲位置、缓冲比例、播放态、首帧状态与视频尺寸；位置不连续事件单独记录旧/新位置和 Media3 原因码
 - Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 的 `native_network_speed` 不设置独立背景，直接使用所在顶栏的背景，保留原文字样式和间距。手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
 - 选集初始定位在首次绘制前完成：Flutter 在 `LayoutBuilder` 中按当前分段、行高和实际视口高度设置 `ScrollController.initialScrollOffset`，由当前集 autofocus 接收焦点，不再首帧后 jump；Android 预先构建条目，在一次性 `OnPreDrawListener` 中请求当前集焦点并 `scrollTo`，抑制初始焦点回调的平滑滚动。打开后的遥控器浏览继续沿用原有滚动行为。
@@ -1155,9 +1155,9 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 - 连接测试返回 `WebDavConnectionTestResult`，区分同步目录可访问与子目录待创建。仅当子目录 PROPFIND 返回 404 时再探测基础地址；基础地址 404 提示 WebDAV 接口地址无效，认证／重定向／服务端错误继续失败，不降级为“待创建”。测试不 MKCOL、不上传文件，也不承诺写权限。实际上传或收藏首次写入复用 `ensureDirectory`：每级 MKCOL 后以只读 PROPFIND 验证同源、匹配路径的成功 DAV collection 属性，创建成功状态及 405 均需验证，未确认目录则停止后续文件操作；不创建配置基础地址之外的父目录。协议层记录不含凭据和正文的 `sync.webdav` 响应日志，并在失败提示中区分目录创建、验证及文件读写阶段。
 - 下载先完整解析、校验所选数据，再经 `SettingsController.replaceAllSettings` 应用配置及其缓存清理逻辑，经 `SearchPreferencesRepository` 保存收藏。两个存储写入不是跨仓库事务，设备写入失败可能部分完成；错误会显示，用户可重新下载。搜索及收藏页重新激活时读取最新收藏。
 - 手动上传先读取远端，保留未勾选部分；ETag 可用时使用 `If-Match`，新文件使用 `If-None-Match: *`。手动模式服务器未提供 ETag 时无法保证多设备并发覆盖检测。配置仍只手动定向覆盖。
-- `FavoriteSyncDocument` 定义独立版本 1 收藏文档，各设备固定保存为 `starflow-favorites-<设备ID>.json`。条目以既有 `searchResultFavoriteKey` 标识，成员 generation 与关键元数据 revision 分离；合并先比较成员版本、相同版本删除优先，再比较元数据逻辑版本和随机 operation ID，最终相等时仅比较精简字段。显式重新收藏递增成员版本；海报和其他展示缓存补全保留 generation、revision、operation 与排序位置，只更新本机数据。`mergeAll` 对全部设备及本机记录合并后才验证总容量，避免中间结果尚未应用删除记录就误报超限。删除记录保留且暂不回收，活跃条目超 200 或总记录超 20000 则拒绝写入，不静默截断。
-- `favorite_sync_payload.dart` 以白名单定义同步结果：标题、链接／提取码、收藏文件夹、来源与媒体 ID，以及精简的 `MediaDetailTarget / PlaybackTarget` 导航标识、路径、季集、播放地址和实际播放鉴权头；容器、音视频编码、尺寸、码率及文件大小参与播放选择、缓冲预算或字幕匹配，因此保留。海报／背景／Logo／图片列表及图片鉴权、简介、评分、演职员和本机字幕路径等不在云端载荷中。空字段省略，字符串映射按键排序但保留显式空 header 值；无链接且无详情入口的旧收藏摘要是现有 key 的组成部分，不能省略。`encodeForSync` 用于上传、差异比较和读回验证；默认 `encode` 继续保存完整本地文档，版本 1 读取同时接受完整及精简字段，不更改手动 `starflow-sync.json` 备份格式。搜索／收藏条目隐藏空简介与空标签，精简条目无需伪造展示数据。
-- `SearchPreferencesRepository` 使用上述文档；列表和删除记录用同一个偏好键原子保存。写入队列串行处理单条增删、海报更新和远端合并；同步提交时再次读取最新本地记录，避免请求期间的修改丢失。合并后用 `withLocalPresentation` 为仍存活的条目保留本机展示缓存，关键字段仍采用获胜记录（含显式清空）；嵌套详情身份不匹配或播放地址变化时不复用对应旧缓存，删除条目不会恢复。新设备缺图复用既有 `SearchFavoriteMetadataService`，不为同步增加元数据请求。清空收藏也记录删除。格式损坏不回退空列表后上传，读取失败会阻止同步。
+- `FavoriteSyncDocument` 定义独立版本 2 收藏文档，各设备固定保存为 `starflow-favorites-<设备ID>.json`。条目以既有 `searchResultFavoriteKey` 标识，成员 generation 与关键元数据 revision 分离；合并先比较成员版本、相同版本删除优先，再比较元数据逻辑版本和随机 operation ID，最终相等时仅比较精简字段。显式重新收藏递增成员版本；海报和其他展示缓存补全保留 generation、revision、operation 与排序位置，只更新本机数据。`mergeAll` 对全部设备及本机记录合并后才验证总容量，避免中间结果尚未应用删除记录就误报超限。删除记录保留且暂不回收，活跃条目超 200 或总记录超 20000 则拒绝写入，不静默截断。
+- `favorite_sync_payload.dart` 以白名单定义同步结果：标题、链接／提取码、收藏文件夹、来源与媒体 ID，以及精简的 `MediaDetailTarget / PlaybackTarget` 导航标识、路径、季集、播放地址和实际播放鉴权头；容器、音视频编码、尺寸、码率及文件大小参与播放选择、缓冲预算或字幕匹配，因此保留。海报／背景／Logo／图片列表及图片鉴权、简介、评分、演职员和本机字幕路径等不在云端载荷中。空字段省略，字符串映射按键排序但保留显式空 header 值；无链接且无详情入口的收藏不保存简介。`encodeForSync` 用于上传、差异比较和读回验证；默认 `encode` 继续保存完整本地文档，不更改手动 `starflow-sync.json` 备份格式。搜索／收藏条目隐藏空简介与空标签，精简条目无需伪造展示数据。
+- `SearchPreferencesRepository` 使用上述文档；列表和删除记录用同一个偏好键原子保存。写入队列串行处理单条增删、海报更新和远端合并；同步提交时再次读取最新本地记录，避免请求期间的修改丢失。合并后用 `withLocalPresentation` 为仍存活的条目保留本机展示缓存，关键字段仍采用获胜记录（含显式清空）；嵌套详情身份不匹配或播放地址变化时不复用不匹配缓存，删除条目不会恢复。新设备缺图复用既有 `SearchFavoriteMetadataService`，不为同步增加元数据请求。清空收藏也记录删除。格式损坏不回退空列表后上传，读取失败会阻止同步。
 - 同一仓库通过 `loadFavoriteSyncDeviceId` 在写入队列中加载／生成 128 位随机设备 ID，以 `search.favoriteSyncDeviceId` 单独持久化；仅实际同步时使用，保存失败会停止同步。该 ID 不属于应用配置或收藏正文，导出／导入配置不复制设备身份，清空收藏也不重置；卸载／清除应用数据可能产生新 ID。此为安装身份，不是硬件识别或多进程锁，整份应用数据克隆及同一存储的并行客户端不具备独立写入身份。
 - `FavoriteAutoSync` 只依赖收藏仓库、同步连接偏好与 WebDAV 服务，绝不调用 `SettingsController`。由 `StarflowApp` 保持运行，启动只加载连接偏好和订阅事件，不发起同步。收藏页导航进入调用 `onFavoritesPageEntered`，服务内的运行期标记在首次进入时、异步等待之前置位，之后重进／页面重建／配置重载均不重置；首次未开启或失败也算已进入。新一次 App 运行才重新获得首次进入机会。仓库成功增删的 `favoriteMembershipChanges` 仍触发自动同步。`favoriteChanges` 仅供列表刷新，海报／元数据写入和远端合并不触发同步。没有计时器、延迟防抖、轮询或失败自动重试，连接设置保存只重载配置，恢复前台不触发同步。
 - 同步采用单飞任务，进入页面或手动重复调用复用在途任务；同步期间新发生的增删最多合并为一次立即后续同步。配置变更或离开前台后旧请求结果不再应用，已发出的请求可能完成。失败保留本地修改并等待新的有效事件或手动点击，不安排定时重试。
@@ -1231,7 +1231,7 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 - `AppSettingsPerformanceX` 只负责平台固定规则和少量有效值派生；独立子项不会因其它开关数量变化而自动联动
 - 设置反序列化只读取当前独立性能参数；旧高性能标记、旧 Hero 开关/模块别名和旧 IMDb 自动匹配字段不再转换
 - 搜索源只保存搜索服务字段；旧搜索源里的夸克、保存目录和 SmartStrm 字段不再读取，相关配置只以 `networkStorage` 当前结构为准
-- 本地、文件和局域网导入都要求设置 JSON 明确包含 `schemaVersion: 2`；本地键为 `starflow.settings.v2`，不匹配时直接拒绝导入或回到默认设置，不执行跨格式迁移
+- 本地、文件和局域网导入都要求设置 JSON 明确包含 `schemaVersion: 3` 和完整当前字段；本地键为 `starflow.settings.v3`，不匹配时直接拒绝导入或回到默认设置，不执行跨格式迁移
 - “自动更新卡片信息”默认可在普通端按需开关；`TV` 端固定关闭，设置页不显示重复开关
 
 设置编辑页在 TV 下还额外做了输入方式分流：
@@ -1261,7 +1261,7 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 - “媒体库索引”清理同时取消索引任务并失效 Sembast、持久化 WebDAV 目录快照、WebDAV 客户端内存缓存与 `NasMediaIndexer` 聚合缓存
 - 在支持文件访问的平台上导出配置到 JSON
 - 在支持文件访问的平台上从 JSON 导入并覆盖当前设置
-- 所有设置导入入口只接受当前 `schemaVersion: 2`，旧格式不会做字段映射或补迁移
+- 所有设置导入入口只接受当前 `schemaVersion: 3` 和完整当前字段，旧格式不会做字段映射或补迁移
 - Web 端会直接触发浏览器下载 JSON，并支持选择本地 JSON 立即导入覆盖
 - iOS / iPadOS 导出当前改走系统文件导出器，会直接弹出原生保存面板，可保存到“文件 / iCloud / 本机其他位置”
 - iOS / iPadOS 导入继续走系统文件选择器
@@ -1293,8 +1293,8 @@ Android TV 下的设置页还额外做了遥控器适配：
 用于保存：
 
 - 应用设置
-- 当前设置 payload 使用 `starflow.settings.v2`，并要求 `schemaVersion: 2`
-- 代理配置作为 `networkProxy` 子对象保存在同一 payload 中；旧配置缺少该对象时默认保持直连
+- 当前设置 payload 使用 `starflow.settings.v3`，并要求 `schemaVersion: 3`
+- 代理配置作为 `networkProxy` 子对象保存在同一 payload 中；缺少该对象时设置无效
 - Emby 本地库缓存的 `v2` manifest、来源 summary / fallback shard 与 section shards
 - 详情缓存
 - 详情缓存里的完整本地资源候选列表与当前选中候选；UI 会由它恢复来源选择及当前来源内的播放版本
@@ -1327,7 +1327,7 @@ Android TV 下的设置页还额外做了遥控器适配：
 用于保存：
 
 - 点选下载并验证后的在线字幕 `starflow/online_subtitles/download-*`；每次下载生成新目录，不复用旧链接
-- 旧版 `session-*`、`starflow/validated_online_subtitles` 与 `native_subtitles` 纳入统一统计和清理，不再生成旧式验证缓存
+- 字幕缓存统计、清理和保留期只覆盖当前 `starflow/online_subtitles/download-*`，旧式验证缓存不属于当前缓存
 
 ### Sembast
 
