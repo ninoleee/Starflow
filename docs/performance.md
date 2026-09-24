@@ -1,6 +1,6 @@
 # 主机性能与回归验证
 
-核对日期：2026-09-20。本文负责主机侧 smoke 计时、可重复运行方法及自动化回归证据。电视、手机和桌面实际界面的测量方法见 [真机性能验证](performance-device.md)，组件关系见 [架构说明](architecture.md)。下文历史代码优化只说明工作量与策略变化，不代表已经测得设备收益。
+本文负责主机侧 smoke 计时、可重复运行方法及自动化回归证据；验证日期以各节为准。2026-09-24 仅整理章节和归并直播记录，不重跑历史测试。电视、手机和桌面实际界面的测量方法见 [真机性能验证](performance-device.md)，组件关系见 [架构说明](architecture.md)。下文历史代码优化只说明工作量与策略变化，不代表已经测得设备收益。
 
 ## 2026-09-20 订阅保存按钮焦点配色
 
@@ -24,6 +24,53 @@
 默认每场景运行 5 次；`--scenario` 接受逗号分隔的场景 ID。每次保存原始 `runsMs`，p50 / p95 使用排序后的 nearest-rank（`ceil(n * p) - 1`）。只有 1 个样本时两者相等，5 个样本的 p95 实际就是最大值，不宜据此宣称稳定尾延迟。
 
 ## 当前验证记录
+
+### 2026-09-24 最近搜索标题同排
+
+- 固定 SDK 执行 `flutter test --no-pub test/features/search/presentation/search_page_source_tabs_test.dart test/features/search/presentation/search_page_text_scale_test.dart test/features/search/presentation/search_page_focus_test.dart --reporter expanded`，38 项通过；增加标题与关键词同排居中、彼此不重叠断言，覆盖手机 / 桌面 / TV、1 / 1.3 / 2 倍字体及横向滚动、TV 逐项导航和重新搜索。
+- 对搜索页与两份修改的测试执行 `flutter analyze --no-pub`，无问题；`git diff --check` 通过。仅为主机组件验证，未做真机验收或构建安装包。
+
+### 2026-09-24 搜索筛选分组布局
+
+- 使用固定 Flutter 3.38.10，`flutter test --no-pub test/features/search/presentation --reporter expanded` 共 85 项通过；新增多选项在 390px 手机、1280px 桌面 / TV、2 倍字体下的分组布局、横向滚动及清除组合筛选回归。初次布局改动导致异步插入类型时两个 TV 焦点用例失败，选项约束容器补充稳定 key 后整组重跑通过。
+- `flutter analyze --no-pub lib/features/search/presentation/search_page.dart lib/features/search/presentation/widgets/search_filter_row.dart test/features/search/presentation/search_page_resolution_test.dart` 无问题。使用 `STARFLOW_LAYOUT_SCREENSHOTS=build/search-filter-layout` 生成主机截图，并加载本机中文字体检查手机、TV 与大字体布局；测试数据不是实际服务结果，不等同于真机验收。未构建安装包或修改版本。
+
+### 2026-09-24 Exo 媒体 URL 转义兼容
+
+- 23:21 导出日志确认两次飞牛夸克 HLS 错误为 `Media HTTP request rejected: MALFORMED_URL`。WebDAV SmartStrm 的 Exo 首次首帧为 1580ms，续播首帧为 5557ms，另一条飞牛渐进式视频首帧为 2521ms；这是用户设备日志值，不是本机测量。两来源剧集文件路径的 MP4／MKV 标记不同，不能证明同文件；不再沿用此前 HTTPS 降级假设。
+- 使用 JDK 17、固定 Flutter 3.38.10 的 Gradle 集成，沿用下节相同命令与六类测试选择，实际编译 Kotlin 并完成 43 项 JVM 测试，0 失败／错误／跳过。新增覆盖资源路径和查询中的未转义字符、真实 `x-oss-process={...}` 格式、签名转义大小写／加号／重复参数保留、相对及跨源重定向、真实 loopback 请求路径及凭据隔离；控制字符、反斜线、无效转义、authority、降级拒绝保持有效。`git diff --check` 通过。
+- 使用当前 v3 配置重新调用飞牛接口后，失败主清单均返回 HTTP 200；分片 `x-oss-process=if_status_eq_404{hls/ts,from_<base64>}` 的原始花括号被 Java `URI` 拒绝，编码为 `%7B%7D` 后 CDN 返回 HTTP 200 / `video/MP2T`。因此根因已由真实配置与真实 CDN 响应确认，不再是推测。电视端完整播放仍待安装修复版本复测；没有构建 APK、递增版本或执行全仓测试。当前行为见 [开发网络](development-network.md#原生播放请求拒绝诊断2026-09-24)。
+
+### 2026-09-24 Exo 请求拒绝诊断
+
+- 在 `android/` 使用 JDK 17 和指向 `.fvm/flutter_sdk` 同一 Flutter 3.38.10 安装的 `local.properties`，执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --console=plain`，通过 `--tests` 限定 `*LiveTvPolicyTest`、`*LiveTvHttpTransportTest`、`*NativePlaybackHttpDataSourceTest`、`*NativePlaybackLoadErrorPolicyTest`、`*NativePlaybackErrorPolicyTest`、`*LiveTvPlaybackErrorTest`。6 类共 39 项通过，0 失败／错误／跳过；Kotlin 实际编译，跳过 Flutter 打包。
+- 新增固定拒绝原因、URL parser 异常脱敏、重定向拒绝不发出目标请求、本地媒体的无效远程子请求，以及包装后的策略异常不重试回归；原有同源鉴权、跨源剥离、Range、gzip、HTTP 状态和传输监听回归保持通过。`git diff --check` 通过。
+- 用户日志只能确认应用 HTTP 校验拦截，无法区分当时的具体拒绝原因；本机复查原清单返回 403，没有获得真实分片清单。此次为诊断及失败等待修复，不代表两部影片已能播放；需要新的失败日志或有效播放列表继续定位。未进行真机播放、全仓测试、APK 构建或版本递增。协议边界见 [开发网络](development-network.md#原生播放请求拒绝诊断2026-09-24)。
+
+### 2026-09-24 网络资源清晰度筛选
+
+- 使用 `.fvm/flutter_sdk` 固定 Flutter 3.38.10 / Dart 3.10.9，先执行 `flutter pub get`；`flutter test --no-pub test/search_result_resolution_test.dart test/search_models_test.dart test/search_repository_test.dart test/search_share_deduplication_test.dart test/features/search --reporter expanded` 共 224 项通过。
+- 新增清晰度别名、中文标题、合集多档位、未知画质、来源及 URL 排除测试，以及手机 390px、桌面 / TV 1280px、2 倍字体下的组合筛选、取消、空交集、异步批次、新搜索重置、本地与收藏隔离组件回归。早期新增收藏测试使用旧数组格式，已改用现有 `FavoriteSyncDocument` 并注入独立偏好仓库后重新通过。
+- 对清晰度模型、搜索页及两份新增测试执行 `flutter analyze --no-pub`，无问题。仅为主机单元 / 组件验证，未进行实际搜索服务、视频分辨率探测或 TV 真机验收，未构建安装包或递增版本。
+
+### 2026-09-24 STRM 源文件大小
+
+- 使用 `.fvm/flutter_sdk` 固定 Flutter 3.38.10，先执行 `flutter pub get`。`flutter test test/webdav_strm_file_size_test.dart test/webdav_nas_client_test.dart test/media_detail_enrichment_test.dart test/detail_resource_info_section_test.dart --reporter expanded`：4 文件共 77 项通过；补充 `flutter test --no-pub test/library_network_security_test.dart test/network_security_test.dart --reporter expanded`：2 文件共 27 项通过。
+- 新增回归覆盖探测失败清除包装文件大小、HEAD/GET 206 总长度、未知/无效 Content-Range、忽略 Range 的完整响应、播放列表/错误文档/压缩长度排除、同源及跨源重定向、跨源后不恢复 NAS 凭据、重定向次数上限、非 HTTP 地址拒绝及响应正文立即取消。
+- `flutter analyze --no-pub lib/features/library/data/webdav_nas_client.dart test/webdav_strm_file_size_test.dart` 无问题，`git diff --check` 通过。以上仅为主机模拟网络及现有本机 HTTP 安全回归，未使用用户实际异常资源、未做真机验证或全仓测试，未生成安装包或递增版本。网络规则见 [开发网络](development-network.md)。
+
+### 2026-09-24 全部媒体库作品聚合
+
+- 使用 `.fvm/flutter_sdk` 固定 Flutter 3.38.10 / Dart 3.10.9，先执行 `flutter pub get`，再运行 `flutter test --no-pub --reporter expanded`：`media_work_aggregation_test.dart`、`home_controller_test.dart`、`features/library/presentation/library_cache_scope_test.dart`、`media_detail_match_restore_test.dart`、`detail_entry_source_preference_test.dart`、`library_cached_items_test.dart`、`media_detail_models_test.dart`、`detail_episode_restore_test.dart`、`features/home/application/home_cache_scope_test.dart`、`detail_library_match_service_test.dart`、`detail_library_match_coordinator_test.dart`，11 个文件共 117 项通过。
+- 覆盖整剧／电影 ID、IMDb 大小写、跨 ID 桥接、冲突与同名翻拍、缺年份拒绝合并、季集身份隔离、分页作品数、来源列表不聚合、资源 JSON 不变，以及无缓存／关闭自动匹配时切换来源季集树、电影来源与同来源版本的实际 widget 点击。
+- 修正前运行曾包含不存在的 `detail_page_actions_test.dart` 路径；新增 widget 用例还修正了测试视口、延迟启动等待及版本控件定位。这些失败不是通过结果，以上最终集合已重新执行。聚焦本次实现与测试的 `dart analyze` 无问题，`git diff --check HEAD` 通过。
+- 仅为主机单元／组件回归，未执行全仓测试、真实媒体服务器／NAS 播放或 TV 真机验收；未运行发布预设、构建 APK 或递增版本。
+
+### 2026-09-24 结构证据与冲突持久化
+
+- 使用 `.fvm/flutter_sdk` 固定 SDK，运行 `flutter test --no-pub --reporter expanded`，覆盖 `external_media_structure_evidence_test.dart`、`nas_media_indexer_test.dart`、`webdav_structure_real_world_naming_test.dart`、`webdav_nas_client_test.dart`、`media_repository_quark_source_test.dart`、`nas_media_index_store_scope_test.dart`、`nas_media_recognition_test.dart`、`nas_media_recognizer_test.dart`、`season_folder_label_parser_test.dart`。2026-09-24 本次复验 9 个文件共 195 项全部通过，包含新增结构证据用例及编号冲突的索引复用/序列化、仅规则变化落盘断言。
+- 修正前快照为 194 项通过、1 项失败：`NFO fills gaps by ID only and survives refresh: true` 的时长预期 `100分钟`，实际 `1h 40m`。两者时长相同，失败是展示字符串断言不一致；当前测试已采用 TMDB 客户端 `_formatRuntime` 的既有格式 `1h 40m`，无需改变生产时长逻辑。另使用 `--plain-name 'NFO fills gaps by ID only and survives refresh'` 定向复验，有 ID 和无 ID 两项均通过。此前 192 项通过及后续失败均是历史快照，本次通过仅涵盖上述主机回归范围。
+- 聚焦 `dart analyze` 检查结构模型、证据定义、WebDAV 扫描、索引刷新及相关新增/扩展测试，无问题；`git diff --check` 通过。没有全仓测试、真实 NAS/网盘请求、TV 真机验证或性能计时；未运行发布预设、未生成 APK、未为本次修改递增版本。
 
 ### 2026-09-21 直播 5 秒等待策略
 
@@ -236,7 +283,7 @@
 
 ### 2026-09-20 十项审查收尾
 
-代码改动、定向回归和发布核验统一记录在 [十项审查收尾](review-closure-2026-09-20.md)。该记录区分合成网络/存储故障、Flutter 组件、Android JVM、Swift 主机策略与完整 APK 静态检查；不把任一主机通过结果计为 Android 6、TV 遥控器、NAS 转码或 AVPlayer 真机验收。以下同日早期批次保留为各自执行时快照，不自动覆盖收尾后的代码。
+代码改动、定向回归和发布核验统一记录在 [十项审查收尾](reviews/review-closure-2026-09-20.md)。该记录区分合成网络/存储故障、Flutter 组件、Android JVM、Swift 主机策略与完整 APK 静态检查；不把任一主机通过结果计为 Android 6、TV 遥控器、NAS 转码或 AVPlayer 真机验收。以下同日早期批次保留为各自执行时快照，不自动覆盖收尾后的代码。
 
 ### 2026-09-20 选集到选季焦点回归
 
@@ -323,7 +370,7 @@ dart analyze lib/features/live_tv lib/app/router/app_routes.dart lib/app/router/
 
 ### 2026-09-20 播放器流畅度修复
 
-对应 [播放器审查处理状态](player-smoothness-review-2026-09-20.md)。以下均为主机执行结果，不是 TV/iPhone 掉帧或首帧测量；没有运行发布预设、改变版本或交付 APK。
+对应 [播放器审查处理状态](reviews/player-smoothness-review-2026-09-20.md)。以下均为主机执行结果，不是 TV/iPhone 掉帧或首帧测量；没有运行发布预设、改变版本或交付 APK。
 
 - Flutter 播放应用层、取消、字幕绑定、历史、外部播放列表及新增 seek 集合 **91 项通过**。补充轨道守卫、seek、飞牛服务、服务端选轨、字幕管线、启动 scope、生命周期集合 **50 项通过**；其中 seek 的 5 项重叠，不能直接相加。新增测试覆盖 2/5/10 秒长按、定位在途合并、取消及自动字幕迟到/手动选择/失败隔离。守卫测试不等同于真实 decoder 下的完整 UI 选轨验收。
 - Android 4 类 JVM **56 项通过，0 失败/错误/跳过**：MemoryStore 15、RuntimeController 9、BufferPolicy 9、RemoteController 23。新并发用例阻塞首个写入，确认调用线程不执行持久化、周期更新合并且强制保存先于后续 tick；现有历史/字幕/跳过偏好及外部原文失效用例保留。验证过程中另有任务执行 Android 构建，计时不作为性能基线。
@@ -378,7 +425,7 @@ Android 在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileF
 
 ### 2026-09-20 播放器流畅度审查
 
-范围与待处理问题见 [播放器流畅度审查](player-smoothness-review-2026-09-20.md)。本轮只读审查播放器实现，新增文档和索引，不修改画质、缓冲、字幕、持久化或版本。以下主机结果不是设备播放验收，也不是同日其他任务后续修改的全绿证明。
+范围与待处理问题见 [播放器流畅度审查](reviews/player-smoothness-review-2026-09-20.md)。本轮只读审查播放器实现，新增文档和索引，不修改画质、缓冲、字幕、持久化或版本。以下主机结果不是设备播放验收，也不是同日其他任务后续修改的全绿证明。
 
 - Flutter 播放启动、策略、恢复、生命周期、系统会话、字幕绑定、播放记忆和 smoke 集合 **123 项通过**；补充飞牛、服务端选轨、字幕管线和外部 M3U 集合 **25 项通过**。两组测试文件不重叠，合计 148 项。
 - Android `:app:testDebugUnitTest` 选择 8 类 **80 项通过，0 失败/错误/跳过**：BufferPolicy 9、MemoryStore 14、RuntimeController 9、RemoteController 23、Session 7、PerformanceTracker 1、SubtitleOutput 13、DualSubtitleTrackPolicy 4。使用 `-x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --console=plain`，原生代码和测试实际编译，不是完整 APK 构建。
@@ -443,13 +490,13 @@ flutter test --no-pub --concurrency 2 --reporter expanded test/native_fntv_servi
 
 ### 2026-09-20 组件重构回归
 
-详情、搜索与转存、缓存、MPV 与 iOS 宿主的四组重构验证单独记在 [组件重构记录](refactoring-2026-09-20.md)。主任务的跨模块集成集合 105 项通过，`dart analyze lib test` 无问题；各子任务的定向集合与它有重叠，不能直接累加。本轮是组件职责和行为回归，不是新一次全仓/发布构建或设备性能采样。其他并行任务的性能改动保持原记录边界。
+详情、搜索与转存、缓存、MPV 与 iOS 宿主的四组重构验证单独记在 [组件重构记录](reviews/review-closure-2026-09-20.md#组件边界重构)。主任务的跨模块集成集合 105 项通过，`dart analyze lib test` 无问题；各子任务的定向集合与它有重叠，不能直接累加。本轮是组件职责和行为回归，不是新一次全仓/发布构建或设备性能采样。其他并行任务的性能改动保持原记录边界。
 
 补充主任务新增组件集合 67 项、缓存/焦点/UI 集合 64 项通过；iOS 模型/存储 runner 和既有记忆/字幕契约通过，无签名 arm64、iOS 13.0 目标的 Xcode Debug 构建成功。RunnerTests 仅类型检查，未执行 XCTest 或真机后台/字幕/遥控器验收；既有主线程隔离与图标资源警告保留。
 
 ### 2026-09-20 性能审计后实施
 
-逐项状态见 [审计处理表](performance-audit-2026-09-20.md)，具体请求/缓存/日志契约见 architecture 与 development-network。本轮不覆盖历史 smoke 数据，不修改画质/缓冲策略、不裁剪历史，不将代码复杂度下降解释为设备测速结果。
+逐项状态见 [审计处理表](reviews/performance-audit-2026-09-20.md)，具体请求/缓存/日志契约见 architecture 与 development-network。本轮不覆盖历史 smoke 数据，不修改画质/缓冲策略、不裁剪历史，不将代码复杂度下降解释为设备测速结果。
 
 - 性能、图片、日志、搜索和 NAS 定向回归 112 项通过；补充夸克取消、动态并发池、搜索迁移和缓存拆分后的回归 59 项通过。这两组有重叠，不能相加作为独立用例总数。
 - 最终 `flutter test --no-pub --concurrency 2 --reporter expanded`：**1681 项全部通过**，包含同工作区完成的搜索/存储/播放组件拆分；实际运行约 7 分钟，受到同机并行构建影响，仅作功能回归，不作速度基线。前一轮 1639 通过/1 失败的空索引取消问题已在本轮通过。
@@ -747,3 +794,37 @@ Android 在 `android/` 运行 `./gradlew :app:testDebugUnitTest -x :app:compileF
 ```
 
 固定 Flutter 3.38.10 下，两文件共 21 项主机测试通过，定向静态分析无问题。页面测试直接断言顶栏／三类菜单背景 alpha，并检查菜单无重复 Material 底色或整层 Opacity；覆盖 TV／非 TV、320／1280 宽度、焦点、返回和播放保留。已检查生成的 1280px 节目单与 390px 设置截图，未见内容遮挡；fake engine 黑底截图不证明真实视频透出效果。未进行真机验收、发布构建或版本递增，与历史测试批次不累加。
+
+## 2026-09-23 WebDAV 目录归并回归
+
+以下为 v16 阶段历史快照；当前验证见下一节，测试数量不累加。
+
+使用项目锁定 Flutter 3.38.10 完成 WebDAV 客户端、真实命名结构、NAS 索引、文件名识别、目录缓存、特殊集、索引作用域、目录路径、夸克共享索引及删除链路共 12 个测试文件，210 项主机回归全部通过；修改代码及测试的定向静态分析无问题。新增《重启人生》三套各 10 集正片与 9 个番外的分类/季集断言、同一一级目录内 30 个电影或混合类型资源只生成一个入口且资源不丢失的断言，以及同名不同实际目录的分组隔离。
+
+使用保存配置只读连接真实 WebDAV，85 个 STRM 资源（包含歌曲）经独立内存索引最终生成 1 个《重启人生》剧集入口。没有远端修改、线上元数据请求或设备索引写入。本记录不是播放、设备性能、TV 真机验收或全量测试通过声明；既有 `test/tmp_reboot_structure_test.dart` 缺少 `debugPrint` 导入，单独运行无法编译，未修改该既有临时文件。
+
+## 2026-09-24 WebDAV 结构流水线回归
+
+项目锁定 Flutter 3.38.10 下，同一组 12 个测试文件共 223 项主机测试通过；并行结构证据扩展合入工作区后再次运行该批测试仍为 223 项通过，相关 20 个源码、测试与诊断文件的定向静态分析无问题，`git diff --check` 通过。覆盖不完整及空扫描保留旧记录、强制重建不覆盖旧分类、深度截断标记、完整增量本地结构写回及 JSON 恢复、episode NFO 覆盖推断并跨刷新保留、平铺电影版本、音频 STRM 过滤、花絮不改变主体类型或抢占默认资源、局部浏览归属及目录祖先校验。
+
+只读使用保存配置复测《重启人生》：39 个视频 STRM，最终 1 个剧集入口，正片第 1 季 10 集且每集 3 个播放版本，第 0 季 9 集番外且各 1 个资源。诊断脚本关闭 sidecar/在线/播放地址补全，避免离线替身触发后台资源检查；仅执行远端目录读取和内存索引。历史 85 个 STRM 中的 46 个音频 STRM 不进入本轮视频索引。
+
+本次不包含设备性能测量、TV 真机播放、发布包构建或版本递增，也不表示全仓测试通过；既有临时测试不在本轮范围内。并行工作区后续改动需独立复验，不能从本节推导其他任务已通过。
+
+## 直播补充验证快照
+
+2026-09-24 从直播功能说明归并的原始记录，以下日期为原执行日期，本次未重跑。各批次有重叠，不累加为全仓通过数。
+
+2026-09-20 开关验证：固定 Flutter 3.38.10，`live_navigation_resume_test.dart`、`interface_accent_test.dart`、`performance_settings_navigation_test.dart`、`app_settings_test.dart`、`app_navigation_shell_tv_focus_test.dart` 共 69 项主机测试通过，相关 6 个 Dart 文件定向静态检查无问题。覆盖默认值、当前配置、JSON 往返、触摸／TV 确认键保存、关闭后首次／重复／切回菜单不自动播放及原有导航回归；该记录不包含本次旧配置清理后的重跑，不代表真机或实际解码验收，未构建 APK。
+
+2026-09-23 旧配置与旧缓存清理验证：固定 Flutter 3.38.10，完整 Flutter 测试集 2860 项通过，`flutter analyze --no-pub` 无问题；Android `NativePlaybackMemoryStoreTest / PlaybackMemoryPolicyTest` 编译并通过。未构建 APK，未做真机或实际直播源验收。
+
+2026-09-22 分组整理主机验证：固定 Flutter 3.38.10，新增分组隐藏/排序、刷新保留、备份替换恢复、备份合并边界和隐藏分组检测过滤测试通过；`live_tv_data_test.dart`、`live_home_layout_test.dart`、`live_channel_probe_controller_test.dart` 以及频道选择器、直播页面、备份页面和直播回归测试共 100 项扩展回归通过，定向分析无问题。仅为主机证据，未做真机、实际直播源或 APK 验证。
+
+2026-09-20 主机验证：`test/live_sources_layout_test.dart` 的 4 项 widget 测试通过，覆盖 360×480 视口、手机／TV 模式及 0／34 逻辑像素底部安全区，检查列表末项、添加与编辑页保存按钮及其下方留白；相关页面与测试静态检查通过。当时扫码页面测试因测试替身缺少接口新增的 `backupBytes` 参数未通过编译；后续扫码备份任务补齐签名并重跑通过，见 [扫码备份验证](performance.md#2026-09-20-tv-直播备份扫码)。未做真实设备验证或发布构建。
+
+2026-09-20 菜单历史播放前置快照（限制为仅 TV 前）：`flutter test test/live_navigation_resume_test.dart test/app_navigation_shell_tv_focus_test.dart test/live_tv_page_test.dart test/live_playback_lifecycle_test.dart` 当时共 68 项主机测试通过。原新增 12 项覆盖手机／TV 菜单触发、返回后不重开、再次点击、无记录／频道删除／隐藏／来源停用／空线路、读取失败、切换菜单／后台／销毁取消，以及连续点击的迟到响应隔离；其中手机自动播放的旧预期已被仅 TV 规则取代，不作为现行行为。菜单测试检查实际播放器路由参数并立即退出，不启动原生解码；现有页面与控制器回归使用测试内核。返回仍按原流程停止并释放播放器，露出保留的频道列表与菜单栏。不是实际直播源或真机验收，未构建发布包。
+
+2026-09-20 订阅列表开关：`live_source_enabled_test.dart`、`live_sources_layout_test.dart`、`live_tv_data_test.dart` 共 32 项主机测试通过，`live_tv_page_test.dart` 与 `live_review_regression_test.dart` 共 29 项通过。覆盖列表直接切换、TV 确认键、320 宽度长名称、保存中重复操作、失败保持原状态、缓存与收藏保留、删除后不重建、编辑保留停用状态及底部留白；定向静态检查无问题。本次没有真机验收或发布构建。
+
+2026-09-20 顶部留白修复：`flutter test test/live_tv_page_test.dart` 共 13 项主机组件测试通过，其中新增 6 项覆盖 0/24/59 逻辑像素顶部安全区及带／不带返回按钮的频道页，断言标题行仅偏移一份安全区高度；对页面与该测试文件的定向 `dart analyze` 无问题。这不是设备截图或真机验收，与下列集合不累加。

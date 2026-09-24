@@ -19,6 +19,7 @@
 
 ## Documentation synchronization
 
+- Use `docs/README.md` as the documentation index. Keep current behavior in the owning topic document, dated review snapshots under `docs/reviews/`, and recurring host verification results in `docs/performance.md`; link to these instead of duplicating full reports in the root README.
 - When user-facing behavior changes, keep `README.md` and the relevant files under `docs/` aligned with the implementation in the same change.
 - Treat `docs/architecture.md` as the source for component boundaries, `docs/development-network.md` as the source for runtime/build networking, and the two performance documents as the source for host and device measurements.
 - Do not describe application logging as disabled: the legacy trace helpers are silent, while the structured local logger, Android native exit capture, preview, filtering, clearing, and export flows are active.

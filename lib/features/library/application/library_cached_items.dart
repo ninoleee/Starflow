@@ -441,6 +441,9 @@ bool _sameStringMap(Map<String, String> left, Map<String, String> right) {
 }
 
 bool _libraryGridMediaItemsVisuallyEquivalent(MediaItem a, MediaItem b) {
+  if (!listEquals(a.workResources, b.workResources)) {
+    return false;
+  }
   if (a.id != b.id) {
     return false;
   }

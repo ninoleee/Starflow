@@ -1,5 +1,7 @@
 # Starflow 性能影响面梳理
 
+> 历史审查与处理状态，2026-09-24 归档。本文保留修复前机制证据，不继续追记现行功能；现行边界见 [架构说明](../architecture.md) 和 [开发网络](../development-network.md)，后续验证见 [主机记录](../performance.md)。
+
 核对日期：2026-09-20。范围为当前工作区，包括已有未提交修改；不是只审查 Git HEAD，也不是设备跑分报告。第 1-7 节保留首次审查快照（当时只新增本文），后续实现状态以本节处理表为准，旧问题描述不可当成修复后现状。
 
 ## 后续处理状态
@@ -29,7 +31,7 @@
 
 实现契约见 architecture/development-network，当前验证见 performance；第 7 节测试数字仅属于原审查阶段。
 
-组件边界以 [架构说明](architecture.md) 为准，请求与代理边界见 [开发网络](development-network.md)，主机计时口径见 [主机性能](performance.md)，设备采集方法见 [真机性能](performance-device.md)。源码行号只用于本次快照定位，后续应结合函数名查找。
+组件边界以 [架构说明](../architecture.md) 为准，请求与代理边界见 [开发网络](../development-network.md)，主机计时口径见 [主机性能](../performance.md)，设备采集方法见 [真机性能](../performance-device.md)。源码行号只用于本次快照定位，后续应结合函数名查找。
 
 ## 1. 结论与优先级
 
@@ -68,12 +70,12 @@
 
 ### F01：播放启动被后台取消收尾阻塞
 
-入口：[PlaybackStartupCoordinator.start](../lib/features/playback/application/playback_startup_coordinator.dart#L33)、[NasMediaIndexer.cancelAllRefreshTasks](../lib/features/library/data/nas_media_indexer.dart#L191)、[刷新取消标记](../lib/features/library/data/nas_media_indexer_refresh_support.dart)。
+入口：[PlaybackStartupCoordinator.start](../../lib/features/playback/application/playback_startup_coordinator.dart#L33)、[NasMediaIndexer.cancelAllRefreshTasks](../../lib/features/library/data/nas_media_indexer.dart#L191)、[刷新取消标记](../../lib/features/library/data/nas_media_indexer_refresh_support.dart)。
 
 - `start()` 首先 `await cancelActiveWebDavRefreshes(includeForceFull: false)`，即使 `targetAlreadyResolved=true` 也一样。
 - 索引器的取消是设置标记，再 `Future.wait` 等待所有选中的任务结束；没有由该标记直接中止底层传输。`forceFull` 任务还不在这次取消范围内。
-- WebDAV 目录读取在 [sidecar 实现](../lib/features/library/data/webdav_nas_client_sidecar.dart#L294) 使用 `Response.fromStream` 收完整正文，该入口没有额外正文总期限或字节上限。慢在途请求可能拖住取消完成。
-- [播放器初始化](../lib/features/playback/presentation/widgets/player_page_startup_mpv.part.dart#L30) 还会等待旧实例清理；[MPV 开流 deadline](../lib/features/playback/presentation/widgets/player_page_startup_mpv_open.part.dart#L13) 到开流阶段才赋值，不覆盖此前所有等待。
+- WebDAV 目录读取在 [sidecar 实现](../../lib/features/library/data/webdav_nas_client_sidecar.dart#L294) 使用 `Response.fromStream` 收完整正文，该入口没有额外正文总期限或字节上限。慢在途请求可能拖住取消完成。
+- [播放器初始化](../../lib/features/playback/presentation/widgets/player_page_startup_mpv.part.dart#L30) 还会等待旧实例清理；[MPV 开流 deadline](../../lib/features/playback/presentation/widgets/player_page_startup_mpv_open.part.dart#L13) 到开流阶段才赋值，不覆盖此前所有等待。
 
 **已复现**：提供一个已解析的播放目标，取消 Future 未完成时启动始终不推进；手动完成取消后才继续。40ms 是实验观察窗口，不是实际最大延迟。
 
@@ -81,7 +83,7 @@
 
 ### F02：图片下载的期限和并发边界不完整
 
-入口：[StarflowHttpClient.send](../lib/core/network/starflow_http_client.dart#L47)、[图片下载](../lib/core/storage/persistent_image_cache_impl_io.dart#L296)、[TV 图片许可](../lib/core/widgets/app_network_image.dart#L457)。
+入口：[StarflowHttpClient.send](../../lib/core/network/starflow_http_client.dart#L47)、[图片下载](../../lib/core/storage/persistent_image_cache_impl_io.dart#L296)、[TV 图片许可](../../lib/core/widgets/app_network_image.dart#L457)。
 
 - HTTP 包装器对 `_inner.send()` 设超时，只等到响应头；`get()` 随后收集正文的时间不在其中。图片配置 15s，共享普通 API 默认为 20s，不能解释为所有请求全程有界。
 - 图片先完整收集正文再校验，没有该入口自己的总下载期限或响应体大小上限。
@@ -94,7 +96,7 @@
 
 ### F03：Android 原生日志可能阻塞播放器主线程
 
-入口：[NativeAppLogger.log / appendRecord](../android/app/src/main/kotlin/com/example/starflow/NativeAppLogger.kt#L145)、[NativePlaybackRuntimeController](../android/app/src/main/kotlin/com/example/starflow/NativePlaybackRuntimeController.kt#L31)。
+入口：[NativeAppLogger.log / appendRecord](../../android/app/src/main/kotlin/com/example/starflow/NativeAppLogger.kt#L145)、[NativePlaybackRuntimeController](../../android/app/src/main/kotlin/com/example/starflow/NativePlaybackRuntimeController.kt#L31)。
 
 - `log()` 是 `@Synchronized`，在调用线程读取/解析配置，然后判断启用状态与等级；即使该条最终不记录，也已经读了配置文件。
 - 正常记录同步构造 JSON、创建目录、检查长度、追加写文件。原生日志达到容量后，每条追加都读取整个旧文件并重写保留尾部，原生上限最高 4 MiB。
@@ -107,7 +109,7 @@
 
 ### F04：详情缓存实际上没有 16ms 合并窗口
 
-入口：[详情保存队列](../lib/features/storage/data/local_storage_cache_repository.dart#L945)、`_saveDetailTargetsBatchUnlocked`、`_saveDetailPayload`。
+入口：[详情保存队列](../../lib/features/storage/data/local_storage_cache_repository.dart#L945)、`_saveDetailTargetsBatchUnlocked`、`_saveDetailPayload`。
 
 - 入队后用 `scheduleMicrotask` 启动 flush；`_detailTargetSaveFlushTimer` 只有声明/取消，没有设置 16ms 的合并计时器。
 - 每次修改先复制整个 records/lookup map，保存时编码整份 payload，再 `PreferencesStore.setString`。网络补全的不同回调分散到不同事件时，合并收益明显下降。
@@ -120,7 +122,7 @@
 
 ### F05：更新一个评分人数仍重写全部来源分片
 
-入口：[updateMediaItemRatingCount](../lib/features/storage/data/local_storage_cache_repository.dart#L670)、[_saveEmbySnapshotShards / _writeEmbyShardPayloads](../lib/features/storage/data/local_storage_cache_repository.dart#L1545)。
+入口：[updateMediaItemRatingCount](../../lib/features/storage/data/local_storage_cache_repository.dart#L670)、[_saveEmbySnapshotShards / _writeEmbyShardPayloads](../../lib/features/storage/data/local_storage_cache_repository.dart#L1545)。
 
 评分人数更新会加载完整来源 snapshot、遍历分区，然后保存 fallback、summary、所有 section shards 和 manifest，没有逐分片相同内容跳写。这是 Emby/飞牛共用的本地缓存成本，并非评分更新本身需要扫远端库。
 
@@ -132,7 +134,7 @@
 
 ### F06：NAS 增量落库后仍同步全源重建内存索引
 
-入口：[分批 patch 与缓存重建](../lib/features/library/data/nas_media_indexer_storage_access.dart#L525)、[_buildLibraryMatchCache](../lib/features/library/data/nas_media_indexer_storage_access.dart#L659)、[Sembast 存储](../lib/features/library/data/nas_media_index_store.dart)。
+入口：[分批 patch 与缓存重建](../../lib/features/library/data/nas_media_indexer_storage_access.dart#L525)、[_buildLibraryMatchCache](../../lib/features/library/data/nas_media_indexer_storage_access.dart#L659)、[Sembast 存储](../../lib/features/library/data/nas_media_index_store.dart)。
 
 - 数据库修改已经按 16 条分批，并在批次间让出事件循环。
 - 批次完成后仍合并整个来源、排序，并同步重建全源系列分组、各分区系列分组、展示条目与多种 ID 查找表。
@@ -145,19 +147,19 @@
 
 ### F07：启动关键路径
 
-入口：[main](../lib/main.dart#L17)、[BootstrapController](../lib/features/bootstrap/application/bootstrap_controller.dart#L113)、[来源缓存协调](../lib/features/settings/application/media_source_cache_lifecycle.dart#L74)。
+入口：[main](../../lib/main.dart#L17)、[BootstrapController](../../lib/features/bootstrap/application/bootstrap_controller.dart#L113)、[来源缓存协调](../../lib/features/settings/application/media_source_cache_lifecycle.dart#L74)。
 
 - `runApp()` 之前串行读取设置、配置日志、等待构建信息（单独最多 2s）、写启动标记、初始化 MediaKit。Bootstrap 的 10s 期限从控制器开始，不包含这些前置工作，也打不断同步阻塞。
 - Bootstrap 保留 40+40+30+40ms 共 150ms 的人工阶段等待。当前已删除的首页刷新 140ms、来源配置读取 120ms 不再算作现存问题。
-- 启动来源协调要读取源状态、缓存来源 ID；[loadCachedSourceIds](../lib/features/library/data/nas_media_index_store.dart#L167) 扫描 source、record、directory-cache store，详情来源 ID 收集也可能读取整个详情 payload。大库冷启动需特别测量。
+- 启动来源协调要读取源状态、缓存来源 ID；[loadCachedSourceIds](../../lib/features/library/data/nas_media_index_store.dart#L167) 扫描 source、record、directory-cache store，详情来源 ID 收集也可能读取整个详情 payload。大库冷启动需特别测量。
 - 首页等待全部启用模块完成，阶段上限 5s，而非首个可见模块可操作就放行。
-- [空媒体服务器缓存](../lib/features/library/application/app_media_query_service.dart#L342) 仍在读链路等待完整 Emby/飞牛刷新；NAS/WebDAV 空库重建已后台化，Quark 的首次空索引路径仍可能同步等待，三者不能混为一谈。
+- [空媒体服务器缓存](../../lib/features/library/application/app_media_query_service.dart#L342) 仍在读链路等待完整 Emby/飞牛刷新；NAS/WebDAV 空库重建已后台化，Quark 的首次空索引路径仍可能同步等待，三者不能混为一谈。
 
 建议定义“最小可交互首页”，保留必要的来源身份隔离和启动恢复保障；把不影响这些保障的信息采集/整理放到首帧后，缓存来源清单避免常规启动全量枚举。
 
 ### F08：首页依赖范围和重建
 
-入口：[_homeSectionSeedProvider](../lib/features/home/application/home_controller.dart#L269)、[首页 build](../lib/features/home/presentation/home_page.dart#L538)、[DiscoveryRepository](../lib/features/discovery/data/discovery_repository.dart)。
+入口：[_homeSectionSeedProvider](../../lib/features/home/application/home_controller.dart#L269)、[首页 build](../../lib/features/home/presentation/home_page.dart#L538)、[DiscoveryRepository](../../lib/features/discovery/data/discovery_repository.dart)。
 
 - seed provider 在判断模块类型前就监听 NAS index 与 library refresh 的全局 revision，因此本地来源变化也能使豆瓣/最近播放等模块重新计算；豆瓣仓库直接委托 API，没有这一层的结果缓存。
 - 页面根节点监听 `homeResolvedSectionsProvider`，单模块 loading/data/error 变化仍可重建根部并重新处理页面焦点结构。
@@ -167,7 +169,7 @@
 
 ### F09：并发、排队和生命周期
 
-入口：[首页调度](../lib/features/home/application/home_feed_load_scheduler.dart)、[元数据调度](../lib/features/metadata/application/metadata_prefetch_concurrency_limiter.dart)、[运行期恢复](../lib/app/lifecycle/app_runtime_recovery_boundary.dart)。
+入口：[首页调度](../../lib/features/home/application/home_feed_load_scheduler.dart)、[元数据调度](../../lib/features/metadata/application/metadata_prefetch_concurrency_limiter.dart)、[运行期恢复](../../lib/app/lifecycle/app_runtime_recovery_boundary.dart)。
 
 | 设置/策略 | 当前默认或约束 | 性能含义 |
 | --- | --- | --- |
@@ -186,7 +188,7 @@
 
 ### F10：搜索扇出和结果处理
 
-入口：[SearchPage](../lib/features/search/presentation/search_page.dart#L547)、[来源启动循环](../lib/features/search/presentation/search_page.dart#L889)、[本地搜索打分](../lib/features/search/data/search_repository.dart#L82)。
+入口：[SearchPage](../../lib/features/search/presentation/search_page.dart#L547)、[来源启动循环](../../lib/features/search/presentation/search_page.dart#L889)、[本地搜索打分](../../lib/features/search/data/search_repository.dart#L82)。
 
 - 选中的搜索来源在循环内直接 `unawaited` 发起，未由 `taskMaxConcurrency` 统一限制；分享验链有自己的共享并发门，不能当成来源请求的限流。
 - 本地检索请求每源最多 2000 条，然后在调用 isolate 标准化文本、逐条打分、排序。实际返回数量还受来源 summary/索引路径限制。
@@ -199,7 +201,7 @@
 
 ### F11：播放历史读写
 
-入口：[PlaybackMemoryRepository](../lib/features/playback/data/playback_memory_repository.dart#L344)、[Android memory store](../android/app/src/main/kotlin/com/example/starflow/NativePlaybackMemoryStore.kt#L22)、[iOS history store](../ios/Runner/AppDelegate.swift#L1835)。
+入口：[PlaybackMemoryRepository](../../lib/features/playback/data/playback_memory_repository.dart#L344)、[Android memory store](../../android/app/src/main/kotlin/com/example/starflow/NativePlaybackMemoryStore.kt#L22)、[iOS history store](../../ios/Runner/AppDelegate.swift#L1835)。
 
 - Dart 有暖快照缓存和串行修改，但冷读缺少 in-flight 合并。探针直接并发调用 12 次 `loadSnapshot()` 产生 12 次 preferences 读取，之后暖读不增加次数。共享 Riverpod snapshot provider 已合并很多 UI 调用，不能推断所有详情页面必然发生 12 次读取。
 - 最近 20 条只裁剪 `items`，`series` 按剧保存且没有相同裁剪；探针写入 25 部不同剧后，`items=20`、`series=25`。跳过规则与字幕偏好也是长期保留数据，但属于用户配置，不能为了缩容擅自删除。
@@ -211,7 +213,7 @@
 
 ### F12：图片与数据缓存
 
-入口：[MediaPosterTile](../lib/core/widgets/media_poster_tile.dart#L136)、[持久图片缓存](../lib/core/storage/persistent_image_cache_impl_io.dart#L25)、[TMDB](../lib/features/metadata/data/tmdb_metadata_client.dart#L26)、[WMDB](../lib/features/metadata/data/wmdb_metadata_client.dart#L27)、[首页分页 provider](../lib/features/home/presentation/home_module_collection_page.dart#L131)。
+入口：[MediaPosterTile](../../lib/core/widgets/media_poster_tile.dart#L136)、[持久图片缓存](../../lib/core/storage/persistent_image_cache_impl_io.dart#L25)、[TMDB](../../lib/features/metadata/data/tmdb_metadata_client.dart#L26)、[WMDB](../../lib/features/metadata/data/wmdb_metadata_client.dart#L27)、[首页分页 provider](../../lib/features/home/presentation/home_module_collection_page.dart#L131)。
 
 - 普通海报按显示高度限制解码；豆瓣图片域名整体跳过 resize，是现有设备兼容策略。高分辨率来源用于小海报时会增加解码及纹理成本，不能未验证图片格式/设备兼容性就删除例外。
 - RGBA 量级可按宽×高×4 估算，例如 2000×3000 约 22.9 MiB，仅用于解释尺寸成本，不代表该应用每张图片的实测驻留大小。
@@ -225,7 +227,7 @@
 
 ### F13：日志预览和导出
 
-入口：[FileAppLogStorage.read / export](../lib/core/logging/app_logger_impl_io.dart#L248)、[日志容量设置](../lib/features/settings/domain/app_settings.dart#L418)。
+入口：[FileAppLogStorage.read / export](../../lib/core/logging/app_logger_impl_io.dart#L248)、[日志容量设置](../../lib/features/settings/domain/app_settings.dart#L418)。
 
 - 只请求最近 300 条也会读取 native/previous/active 三个文件，完整 UTF-8 解码、逐条解析、全量排序，再截尾。
 - 默认总容量设置 20 MiB，最高选项 100 MiB。读取异步，但后续字符串/JSON/排序在调用 isolate 执行，可在打开预览时产生停顿和临时堆峰值。
@@ -238,17 +240,17 @@
 
 ### F14：Flutter 绘制、保留页和焦点
 
-- [首页背景](../lib/features/home/presentation/home_page_sections.dart#L534) blur 为 sigma 54，[Hero](../lib/features/home/presentation/home_page_hero.dart#L1249) 为 28，[导航](../lib/app/router/app_navigation_shell.dart#L374) 为 24/26；全屏背景、透明合成、Hero 自动切换同时出现时值得检查 raster 和重绘区域。
+- [首页背景](../../lib/features/home/presentation/home_page_sections.dart#L534) blur 为 sigma 54，[Hero](../../lib/features/home/presentation/home_page_hero.dart#L1249) 为 28，[导航](../../lib/app/router/app_navigation_shell.dart#L374) 为 24/26；全屏背景、透明合成、Hero 自动切换同时出现时值得检查 raster 和重绘区域。
 - 减少动画、简化界面、透明磨砂、静态 Hero、简化 Hero 是独立设置，并非一个开关全部关闭。TV 固定轻量焦点、精简详情 Hero、精简播放 UI，并禁止实时卡片信息叠加。
 - 焦点已有 ValueNotifier 局部更新和未布局节点保护；长列表方向寻焦、居中滚动、首页拓扑重算仍有布局/计算成本。需要区分短按、长按、边界和数据刷新时的帧时间。
 - 主要媒体库为懒 sliver grid，大剧集行为懒构建；部分嵌套 shrinkWrap 网格是分页 24/50 条级别，不宜仅凭 `shrinkWrap` 就列为最高优先级。
-- [indexedStack](../lib/app/router/app_router.dart#L42) 保留状态有回访收益。TickerMode/可见性能够抑制动画和部分订阅，但不自动销毁保留对象或中断 HTTP。
+- [indexedStack](../../lib/app/router/app_router.dart#L42) 保留状态有回访收益。TickerMode/可见性能够抑制动画和部分订阅，但不自动销毁保留对象或中断 HTTP。
 
 用 profile 的 build/raster 时间和 repaint 证据决定优化位置。单纯拆 Dart 文件、减少行数或到处添加 RepaintBoundary 不保证性能改善。
 
 ### F15：播放缓冲、定位与解码
 
-入口：[Exo 缓冲策略](../android/app/src/main/kotlin/com/example/starflow/NativePlaybackBufferPolicy.kt#L17)、[MPV 缓冲策略](../lib/features/playback/application/mpv_tuning_policy.dart#L34)、[TS extractor](../android/app/src/main/kotlin/com/example/starflow/NativePlaybackExtractorsFactory.kt)。
+入口：[Exo 缓冲策略](../../android/app/src/main/kotlin/com/example/starflow/NativePlaybackBufferPolicy.kt#L17)、[MPV 缓冲策略](../../lib/features/playback/application/mpv_tuning_policy.dart#L34)、[TS extractor](../../android/app/src/main/kotlin/com/example/starflow/NativePlaybackExtractorsFactory.kt)。
 
 | 路径 | 当前成本/策略 | 需要验证的取舍 |
 | --- | --- | --- |
@@ -269,7 +271,7 @@ iOS 封面已在 utility queue 降采样，下载上限 8 MiB、最长边 1200px
 
 ### F16：字幕搜索、处理和呈现
 
-入口：[字幕仓库](../lib/features/playback/data/online_subtitle_repository_io.dart)、[下载验证](../lib/features/playback/data/online_subtitle_validation_pipeline.dart)、[内容处理](../lib/features/playback/application/subtitle_content_processing.dart)、[字幕边界说明](subtitles.md)。
+入口：[字幕仓库](../../lib/features/playback/data/online_subtitle_repository_io.dart)、[下载验证](../../lib/features/playback/data/online_subtitle_validation_pipeline.dart)、[内容处理](../../lib/features/playback/application/subtitle_content_processing.dart)、[字幕边界说明](../subtitles.md)。
 
 - 在线搜索会并行询问启用来源，但当前不预下载全部候选，只在用户点选时下载；因此不能套用旧版本的“搜索时批量解压字幕”判断。
 - 下载已有累计字节限制和约 30s 总期限，ZIP 有展开边界和校验，大部分 Dart 字幕内容处理使用 `compute`；Web 的 isolate 能力需另论。
@@ -281,8 +283,8 @@ iOS 封面已在 utility queue 降采样，下载上限 8 MiB、最长边 1200px
 
 ### F17：设置、收藏和转存
 
-- [设置自动保存](../lib/features/settings/presentation/settings_auto_save_coordinator.dart) 文本有 250ms 防抖、去重和串行队列；步进/选择等即时操作仍可能保存整份设置。播放器还有整份设置监听，低频无害，连续调参数时应看重建/持久化量。
-- [收藏自动同步](../lib/features/search/application/favorite_auto_sync.dart) 是事件触发并串行处理，不是启动后的周期性轮询。多设备清单下载、合并及收藏缺图补全会产生可见等待，但已有页面激活/过期结果保护。
+- [设置自动保存](../../lib/features/settings/presentation/settings_auto_save_coordinator.dart) 文本有 250ms 防抖、去重和串行队列；步进/选择等即时操作仍可能保存整份设置。播放器还有整份设置监听，低频无害，连续调参数时应看重建/持久化量。
+- [收藏自动同步](../../lib/features/search/application/favorite_auto_sync.dart) 是事件触发并串行处理，不是启动后的周期性轮询。多设备清单下载、合并及收藏缺图补全会产生可见等待，但已有页面激活/过期结果保护。
 - 夸克/115 转存需要分页、去重、可选改名及确认；STRM 延时和索引延时是既定等待，媒体库刷新安排后在后台继续。不能通过删除完整分页或对写请求自动重试来提速，否则可能漏项/重复转存。
 - schema、来源身份、扫描范围变化可能触发重建；当前 WebDAV schema 为 v14。重建与增量扫描必须分组比较，缓存清理也会把下一次读取变成冷路径。
 - 设置里的本地存储检查会枚举缓存目录、统计文件和部分 payload；这是按需成本，不应在短周期自动重复执行。

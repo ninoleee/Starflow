@@ -31,7 +31,7 @@ previews are not the source for current app-icon pixels; the PNG masters are.
 Native launch screens currently show only a dark background, while the Flutter
 startup page uses the generated launch logo. See the
 [iOS launch resource notes](../../ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md)
-and [root branding guide](../../README.md).
+and [root branding guide](../../README.md#品牌资源).
 
 This documentation update did not extract, create or replace a backup archive
 and did not regenerate any image assets.

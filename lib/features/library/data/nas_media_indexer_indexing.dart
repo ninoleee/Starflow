@@ -75,6 +75,7 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
         addedAt: scannedItem.addedAt,
       );
       return NasMediaIndexRecord(
+        structure: existingRecord.structure ?? seed.structure,
         id: existingRecord.id,
         sourceId: existingRecord.sourceId,
         sectionId: scannedItem.sectionId,
@@ -116,14 +117,14 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
       // release filename.  Keep the first directory below the configured
       // source section as the stable library title, and only use the filename
       // when the file is directly at the section root.
-      final structureFallbackTitle =
+      final structureFallbackTitle = seed.structure?.rootTitle ??
           NasMediaPathPolicy.firstLibraryDirectoryTitle(
-                resourcePath: scannedItem.actualAddress,
-                sectionId: scannedItem.sectionId,
-                configuredKeywords:
-                    source.normalizedWebDavSeriesTitleFilterKeywords,
-              ) ??
-              '';
+            resourcePath: scannedItem.actualAddress,
+            sectionId: scannedItem.sectionId,
+            configuredKeywords:
+                source.normalizedWebDavSeriesTitleFilterKeywords,
+          ) ??
+          '';
       final normalizedStructureTitle =
           NasMediaPathPolicy.normalizePathToken(structureFallbackTitle);
       final normalizedFileTitle = NasMediaPathPolicy.normalizePathToken(title);
@@ -625,6 +626,7 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     );
 
     return NasMediaIndexRecord(
+      structure: seed.structure,
       id: NasMediaIndexRecord.buildRecordId(
         sourceId: source.id,
         resourceId: scannedItem.resourceId,
@@ -666,6 +668,12 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     required String fallbackTitle,
   }) {
     final baseTitle = _cleanIndexedTitleLabel(fallbackTitle);
+    final structure = scannedItem.metadataSeed.structure;
+    if (structure != null &&
+        structure.rootTitle.isNotEmpty &&
+        !scannedItem.metadataSeed.hasSidecarMatch) {
+      return structure.rootTitle;
+    }
 
     // A movie version folder is a presentation detail, not a title.  The
     // basic WebDAV seed intentionally starts with the file name, so using it
@@ -883,7 +891,9 @@ extension _NasMediaIndexerIndexingX on NasMediaIndexer {
     // changes a stale series record into a movie (or vice versa); without
     // this marker the refresh path would keep reusing that old record.
     final classification =
-        'structure-classification-v2:$normalizedItemType:$season:$episode';
+        'structure-classification-v3:$normalizedItemType:$season:$episode:'
+        '${seed.structure?.rootPath ?? ''}:${seed.structure?.role.name ?? ''}:'
+        '${seed.structure?.seasonEvidence.name ?? ''}:${seed.structure?.episodeEvidence.name ?? ''}';
     if (normalizedItemType != 'movie' ||
         seed.seasonNumber != null ||
         seed.episodeNumber != null) {

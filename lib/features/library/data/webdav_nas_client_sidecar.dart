@@ -427,6 +427,10 @@ extension _WebDavNasClientSidecar on WebDavNasClient {
   }
 
   bool _isPlayableVideo(_WebDavEntry entry) {
+    if (ExternalMediaStructure.isKnownAudio(entry.name) ||
+        entry.contentType.toLowerCase().startsWith('audio/')) {
+      return false;
+    }
     final type = entry.contentType.toLowerCase();
     if (type.startsWith('video/')) {
       return true;

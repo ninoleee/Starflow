@@ -53,6 +53,100 @@ void main() {
             const MethodChannel('starflow/platform'), null);
   });
 
+  testWidgets('aggregate entry switches source trees without cache or auto match',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 1800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const a = MediaDetailTarget(title: 'Show', posterUrl: '', overview: '',
+        sourceId: 'a', itemId: 'series-a', itemType: 'series',
+        sourceName: 'Source A', sourceKind: MediaSourceKind.emby);
+    final b = a.copyWith(sourceId: 'b', itemId: 'series-b', sourceName: 'Source B');
+    final seed = a.copyWith(workResources: [a, b]);
+    final browsed = <String>[];
+    final cache = _FakeRestoreCacheRepository(cachedState: null);
+    addTearDown(cache.dispose);
+    await tester.pumpWidget(ProviderScope(overrides: [
+      isTelevisionProvider.overrideWith((ref) => false),
+      appSettingsProvider.overrideWithValue(AppSettings.fromJson({
+        'mediaSources': const [], 'searchProviders': const [], 'homeModules': const [],
+        'tmdbMetadataMatchEnabled': false, 'wmdbMetadataMatchEnabled': false,
+        'imdbRatingMatchEnabled': false, 'detailAutoLibraryMatchEnabled': false,
+      })),
+      localStorageCacheRepositoryProvider.overrideWithValue(cache),
+      enrichedDetailTargetProvider.overrideWith((ref, target) => target),
+      detailSeriesBrowserProvider.overrideWith((ref, request) {
+        browsed.add('${request.sourceId}|${request.itemId}');
+        return const DetailSeriesBrowserState(groups: []);
+      }),
+    ], child: MaterialApp(home: MediaDetailPage(target: seed))));
+    await tester.pumpAndSettle();
+    expect(browsed.last, 'a|series-a');
+    final finder = find.byType(DropdownButton<int>);
+    expect(tester.widget<DropdownButton<int>>(finder).items, hasLength(2));
+    await tester.ensureVisible(finder);
+    await tester.tap(finder);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Source B').last);
+    await tester.pumpAndSettle();
+    expect(browsed.last, 'b|series-b');
+    expect(tester.widget<DetailHeroSection>(find.byType(DetailHeroSection)).target.sourceId, 'b');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('aggregate movie exposes source and same-source edition choices',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 1800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const playback = PlaybackTarget(title: 'Movie', sourceId: 'a',
+        itemId: 'movie-a', itemType: 'movie', streamUrl: 'https://a/1080',
+        actualAddress: '/1080.mkv', sourceName: 'Source A', sourceKind: MediaSourceKind.nas);
+    const a = MediaDetailTarget(title: 'Movie', posterUrl: '', overview: '',
+        sourceId: 'a', itemId: 'movie-a', itemType: 'movie',
+        sourceName: 'Source A', sourceKind: MediaSourceKind.nas,
+        playbackTarget: playback);
+    final a4k = a.copyWith(itemId: 'movie-a-4k', playbackTarget: playback.copyWith(
+        itemId: 'movie-a-4k', streamUrl: 'https://a/4k', actualAddress: '/4k.mkv'));
+    final b = a.copyWith(sourceId: 'b', itemId: 'movie-b', sourceName: 'Source B',
+        playbackTarget: playback.copyWith(sourceId: 'b', itemId: 'movie-b',
+            sourceName: 'Source B', streamUrl: 'https://b/movie'));
+    final cache = _FakeRestoreCacheRepository(cachedState: null);
+    addTearDown(cache.dispose);
+    await tester.pumpWidget(ProviderScope(overrides: [
+      isTelevisionProvider.overrideWith((ref) => false),
+      appSettingsProvider.overrideWithValue(AppSettings.fromJson({
+        'mediaSources': const [], 'searchProviders': const [], 'homeModules': const [],
+        'tmdbMetadataMatchEnabled': false, 'wmdbMetadataMatchEnabled': false,
+        'imdbRatingMatchEnabled': false, 'detailAutoLibraryMatchEnabled': false,
+      })),
+      localStorageCacheRepositoryProvider.overrideWithValue(cache),
+      enrichedDetailTargetProvider.overrideWith((ref, target) => target),
+    ], child: MaterialApp(home: MediaDetailPage(target: a.copyWith(workResources: [a, a4k, b])))));
+    for (var frame = 0; frame < 8; frame++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pumpAndSettle();
+    final dropdowns = find.byType(DropdownButton<int>);
+    expect(dropdowns, findsNWidgets(2));
+    final editions = dropdowns.first;
+    await tester.ensureVisible(editions);
+    await tester.pumpAndSettle();
+    await tester.tap(editions);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Source A · 4k.mkv').last);
+    await tester.pumpAndSettle();
+    expect(tester.widget<DetailHeroSection>(find.byType(DetailHeroSection))
+        .target.playbackTarget?.streamUrl, 'https://a/4k');
+    await tester.ensureVisible(dropdowns.last);
+    await tester.pumpAndSettle();
+    await tester.tap(dropdowns.last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Source B').last);
+    await tester.pumpAndSettle();
+    expect(tester.widget<DetailHeroSection>(find.byType(DetailHeroSection))
+        .target.playbackTarget?.streamUrl, 'https://b/movie');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('failed enrichment refresh retains resolved actions and series',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 1800));

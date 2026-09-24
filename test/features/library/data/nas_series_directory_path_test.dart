@@ -2,6 +2,29 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/library/data/nas_media_path_policy.dart';
 
 void main() {
+  test('persisted ownership requires an actual directory ancestor', () {
+    expect(
+        NasMediaPathPolicy.isResourceWithinDirectory(
+            '/movies/Alpha/E01.strm', '/movies/Alpha'),
+        isTrue);
+    expect(
+        NasMediaPathPolicy.isResourceWithinDirectory(
+            '/movies/Alpha2/E01.strm', '/movies/Alpha'),
+        isFalse);
+    expect(
+        NasMediaPathPolicy.isResourceWithinDirectory(
+            '/movies/Bravo/E01.strm', '/movies/Alpha'),
+        isFalse);
+    expect(
+        NasMediaPathPolicy.isResourceWithinDirectory(
+            'https://a.test/movies/Alpha/E01.strm',
+            'https://b.test/movies/Alpha'),
+        isFalse);
+    expect(
+        NasMediaPathPolicy.isResourceWithinDirectory(
+            '/movies/Alpha/E01.strm', '/'),
+        isFalse);
+  });
   for (final directory in [
     '/dav/strm/115/Example Show (2026)',
     '/dav/strm/115/Example Show (2026)(1)',

@@ -21,6 +21,36 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   SharedPreferences.setMockInitialValues(const {});
 
+  test('recently added collapses work cards, source modules retain resources', () async {
+    final a = MediaItem(
+      id: 'movie-a', title: 'Movie', overview: '', posterUrl: '',
+      year: 2020, durationLabel: '', genres: const [],
+      sourceId: 'a', sourceName: 'A', sourceKind: MediaSourceKind.nas,
+      itemType: 'movie', tmdbId: '100', streamUrl: '', addedAt: DateTime(2026),
+    );
+    final b = a.copyWith(id: 'movie-b', sourceId: 'b');
+    final media = _FakeMediaRepository(library: [a, b]);
+    const discovery = _FakeDiscoveryRepository(entries: []);
+    Future<HomeSectionViewModel?> build(HomeModuleConfig module) =>
+        const HomeFeedRepository().buildSectionSeed(
+          module: module, mediaRepository: media, discoveryRepository: discovery,
+          doubanAccount: const DoubanAccountConfig(enabled: false),
+          mediaSources: const [], recentItems: Future.value([a, b]),
+          recentPlaybackEntries: Future.value([]), carouselItems: Future.value([]),
+        );
+    final recent = await build(const HomeModuleConfig(id: 'recent',
+        type: HomeModuleType.recentlyAdded, title: 'Recent', enabled: true));
+    expect(recent!.items, hasLength(1));
+    expect(recent.items.single.detailTarget.workResources.map((item) => item.sourceId), ['a', 'b']);
+    final source = await build(const HomeModuleConfig(id: 'source',
+        type: HomeModuleType.librarySection, title: 'A', enabled: true,
+        sourceId: 'a', sourceName: 'A', sectionId: 'section'));
+    // This fake returns its raw input; the source module must not aggregate it.
+    expect(source!.items, hasLength(2));
+    expect(source.items.first.detailTarget.workResources, isEmpty);
+    expect(media.lastFetchLibrarySourceId, 'a');
+  });
+
   group('home controller abstractions', () {
     test('exposes home feed repository and page controller providers', () {
       final container = ProviderContainer();

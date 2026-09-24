@@ -1,5 +1,29 @@
 part of 'webdav_nas_client.dart';
 
+/// A list-compatible scan result keeps existing client integrations working.
+/// Incomplete scans may upsert resources, but may never prove their absence.
+class ExternalScanResult extends ListBase<WebDavScannedItem> {
+  ExternalScanResult(Iterable<WebDavScannedItem> items,
+      {required this.complete})
+      : _items = List.of(items);
+
+  final List<WebDavScannedItem> _items;
+  final bool complete;
+
+  @override
+  int get length => _items.length;
+  @override
+  set length(int value) => _items.length = value;
+  @override
+  WebDavScannedItem operator [](int index) => _items[index];
+  @override
+  void operator []=(int index, WebDavScannedItem value) =>
+      _items[index] = value;
+
+  static bool isComplete(List<WebDavScannedItem> items, int limit) =>
+      items is ExternalScanResult ? items.complete : items.length < limit;
+}
+
 class WebDavNasException implements Exception {
   const WebDavNasException(this.message);
 
@@ -46,6 +70,7 @@ class _WebDavEntry {
 
 class WebDavMetadataSeed {
   const WebDavMetadataSeed({
+    this.structure,
     required this.title,
     required this.overview,
     required this.posterUrl,
@@ -106,8 +131,10 @@ class WebDavMetadataSeed {
   final int? height;
   final int? bitrate;
   final bool hasSidecarMatch;
+  final ExternalMediaStructure? structure;
 
   WebDavMetadataSeed copyWith({
+    ExternalMediaStructure? structure,
     String? title,
     String? overview,
     String? posterUrl,
@@ -139,6 +166,7 @@ class WebDavMetadataSeed {
     bool? hasSidecarMatch,
   }) {
     return WebDavMetadataSeed(
+      structure: structure ?? this.structure,
       title: title ?? this.title,
       overview: overview ?? this.overview,
       posterUrl: posterUrl ?? this.posterUrl,
@@ -172,6 +200,7 @@ class WebDavMetadataSeed {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
+        'structure': structure?.toJson(),
         'title': title,
         'overview': overview,
         'posterUrl': posterUrl,
@@ -212,6 +241,10 @@ class WebDavMetadataSeed {
     List<String> stringList(Object? value) =>
         (value as List? ?? const []).map((item) => '$item').toList();
     return WebDavMetadataSeed(
+      structure: json['structure'] is Map
+          ? ExternalMediaStructure.fromJson(
+              Map<String, dynamic>.from(json['structure'] as Map))
+          : null,
       title: json['title'] as String? ?? '',
       overview: json['overview'] as String? ?? '',
       posterUrl: json['posterUrl'] as String? ?? '',

@@ -15,6 +15,7 @@ import 'package:starflow/features/details/application/detail_rating_prefetch_coo
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/application/emby_refresh_progress.dart';
 import 'package:starflow/features/library/application/library_cached_items.dart';
+import 'package:starflow/features/library/domain/media_work_aggregation.dart';
 import 'package:starflow/features/library/application/library_refresh_revision.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/library/application/nas_media_index_revision.dart';
@@ -230,7 +231,9 @@ final librarySeedItemsProvider =
   ref.watch(nasMediaIndexRevisionProvider);
   ref.watch(libraryRefreshRevisionProvider);
   ref.watch(libraryMediaSourcesSettingsSliceProvider);
-  return ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
+  final items =
+      await ref.read(mediaRepositoryProvider).fetchLibrary(kind: filter.kind);
+  return aggregateMediaWorks(items);
 });
 
 final libraryItemsProvider =

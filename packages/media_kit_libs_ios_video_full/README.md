@@ -40,7 +40,9 @@ The [iOS release preset](../../scripts/build_ipa_to_icloud.sh) cleans stale
 simulator Native Assets and verifies device frameworks before packaging an
 unsigned IPA. `prepare_ios_device_build.sh` and
 `verify_ios_device_frameworks.sh` are the corresponding checks. The script
-changes the app version and cleans the build, so it is not a read-only check.
+changes the app version and conditionally cleans the build when
+`STARFLOW_CLEAN_BUILD=1`, so it is not a read-only check. See the
+[root release rules](../../README.md#快速开始) for the complete preset behavior.
 
 ## Scope
 

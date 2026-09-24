@@ -1,5 +1,7 @@
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
+import 'package:starflow/features/details/domain/cached_artwork.dart';
+import 'package:starflow/features/details/domain/cached_metadata.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
 String detailProviderInvalidationKey(MediaDetailTarget target) {
@@ -70,6 +72,40 @@ class DetailCachedStateRestorer {
     required MediaDetailTarget pageSeedTarget,
     required CachedDetailState cachedState,
   }) {
+    if (pageSeedTarget.workResources.isNotEmpty) {
+      // Fresh list membership is authoritative; cached matches may be stale or
+      // title-only matches for another release of the same name.
+      final cached = cachedState.target;
+      final choices = pageSeedTarget.workResources.map((resource) {
+        final decoration = resource.sourceId == cached.sourceId &&
+                resource.itemId == cached.itemId
+            ? cached
+            : pageSeedTarget;
+        return overlayCachedArtwork(
+          overlayCachedMetadata(resource, decoration), decoration,
+          preserveLiveSecondaryArtwork: true,
+        );
+      }).toList(growable: false);
+      var selectedIndex = choices.indexWhere((choice) =>
+          choice.sourceKind == cached.sourceKind &&
+          choice.sourceId == cached.sourceId &&
+          choice.itemId == cached.itemId &&
+          choice.playbackTarget?.preferredMediaSourceId ==
+              cached.playbackTarget?.preferredMediaSourceId);
+      if (selectedIndex < 0) {
+        selectedIndex = choices.indexWhere((choice) =>
+            choice.sourceKind == cached.sourceKind &&
+            choice.sourceId == cached.sourceId &&
+            choice.itemId == cached.itemId);
+      }
+      if (selectedIndex < 0) selectedIndex = 0;
+      return DetailCachedStateRestorePlan(
+        libraryMatchChoices: choices,
+        selectedLibraryMatchIndex: selectedIndex,
+        manualOverrideTarget: choices[selectedIndex],
+        structuralSeedTarget: choices[selectedIndex],
+      );
+    }
     final structuralSeed =
         cachedState.target.isSeries ? cachedState.target : pageSeedTarget;
     final preservedResolvedTarget = structuralSeed.isSeries

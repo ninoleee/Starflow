@@ -25,7 +25,9 @@ import 'package:starflow/features/search/application/favorite_auto_sync.dart';
 import 'package:starflow/features/search/data/search_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
+import 'package:starflow/features/search/domain/search_result_resolution.dart';
 import 'package:starflow/features/search/presentation/cloud_save_feedback_controller.dart';
+import 'package:starflow/features/search/presentation/widgets/search_filter_row.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -158,6 +160,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
   late bool _showFavoriteResults;
   Set<String> _selectedTargetIds = const {_SearchTarget.allId};
   SearchCloudType? _selectedCloudType;
+  SearchResultResolution? _selectedResolution;
   Set<String> _favoriteResultKeys = const <String>{};
   String? get _errorMessage => _searchState.errorMessage;
   int get _activeSearchRequestId => _searchState.generation;
@@ -276,23 +279,48 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
   List<SearchResult>? _filteredInput;
   SearchCloudType? _filteredCloud;
+  SearchResultResolution? _filteredResolution;
   List<SearchResult> _filteredOutput = const [];
+  List<SearchResult>? _resolutionInput;
+  Map<SearchResult, Set<SearchResultResolution>> _resultResolutions = const {};
+
+  Map<SearchResult, Set<SearchResultResolution>> get _onlineResolutions {
+    if (!identical(_resolutionInput, _results)) {
+      _resolutionInput = _results;
+      _resultResolutions = {
+        for (final result in _results)
+          if (result.detailTarget == null)
+            result: searchResultResolutions(result),
+      };
+    }
+    return _resultResolutions;
+  }
 
   List<SearchResult> get _displayedResults {
     if (_showFavoriteResults) return _favoriteResults;
     final selected = _selectedCloudType;
-    if (selected == null) return _results;
-    if (identical(_filteredInput, _results) && _filteredCloud == selected) {
+    final resolution = _selectedResolution;
+    if (selected == null && resolution == null) return _results;
+    if (identical(_filteredInput, _results) &&
+        _filteredCloud == selected &&
+        _filteredResolution == resolution) {
       return _filteredOutput;
     }
     _filteredInput = _results;
     _filteredCloud = selected;
+    _filteredResolution = resolution;
+    final resolutions = resolution == null ? null : _onlineResolutions;
     return _filteredOutput = _results.where((result) {
-      return resolveSearchCloudTypeCode(
-            rawUrl: result.resourceUrl,
-            hints: [result.cloudType],
-          ) ==
-          selected.code;
+      if (resolution != null &&
+          !(resolutions![result]?.contains(resolution) ?? false)) {
+        return false;
+      }
+      return selected == null ||
+          resolveSearchCloudTypeCode(
+                rawUrl: result.resourceUrl,
+                hints: [result.cloudType],
+              ) ==
+              selected.code;
     }).toList(growable: false);
   }
 
@@ -526,7 +554,12 @@ class _SearchPageState extends ConsumerState<SearchPage>
 
   void _onSearchStateChanged(SearchPresentationState state) {
     if (!mounted) return;
-    setState(() => _searchState = state);
+    setState(() {
+      if (state.results.isEmpty && state.generation != _searchState.generation) {
+        _selectedResolution = null;
+      }
+      _searchState = state;
+    });
     _scheduleTelevisionFocusRecoveryIfLost();
     if (!state.isSearching && state.totalCount > 0) {
       _logSearchResultVisibility();
@@ -541,6 +574,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
         'requestId': _activeSearchRequestId,
         'isSearching': _isSearching,
         'selectedCloudType': _selectedCloudType?.code ?? 'all',
+        'selectedResolution': _selectedResolution?.name ?? 'all',
         'resultCount': _results.length,
         'visibleCount': _displayedResults.length,
         'resultsByCloudType': countSearchResultsByCloudType(_results),
@@ -661,6 +695,11 @@ class _SearchPageState extends ConsumerState<SearchPage>
     if (!availableCloudTypes.contains(_selectedCloudType)) {
       _selectedCloudType = null;
     }
+    final availableResolutions =
+        _onlineResolutions.values.expand((values) => values).toSet();
+    if (!availableResolutions.contains(_selectedResolution)) {
+      _selectedResolution = null;
+    }
     final displayedResults = _displayedResults;
 
     return AppPrimaryScrollController(
@@ -746,64 +785,79 @@ class _SearchPageState extends ConsumerState<SearchPage>
                             if (!_showFavoriteResults &&
                                 _recentQueries.isNotEmpty) ...[
                               const SizedBox(height: 14),
-                              Text(
-                                '最近搜索',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelLarge
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                              ),
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                height:
-                                    StarflowChipButton.minimumHeight(context) +
-                                        12,
-                                child: LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    return ScrollConfiguration(
-                                      behavior: ScrollConfiguration.of(context)
-                                          .copyWith(dragDevices: {
-                                        ...ScrollConfiguration.of(context)
-                                            .dragDevices,
-                                        PointerDeviceKind.mouse,
-                                      }),
-                                      child: SingleChildScrollView(
-                                        key: const PageStorageKey(
-                                            'search-recent-queries'),
-                                        scrollDirection: Axis.horizontal,
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 4, vertical: 6),
-                                        child: Row(
-                                          children: [
-                                            for (var index = 0;
-                                                index < _recentQueries.length;
-                                                index++) ...[
-                                              if (index > 0)
-                                                const SizedBox(width: 10),
-                                              ConstrainedBox(
-                                                constraints: BoxConstraints(
-                                                  maxWidth:
-                                                      constraints.maxWidth - 8,
-                                                ),
-                                                child: _SearchHistoryChip(
-                                                  label: _recentQueries[index],
-                                                  focusId:
-                                                      'search:recent:$index',
-                                                  onPressed: () =>
-                                                      _runRecentQuery(
-                                                          _recentQueries[
-                                                              index]),
-                                                ),
-                                              ),
-                                            ],
-                                          ],
+                              Row(
+                                children: [
+                                  Text(
+                                    '最近搜索',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelLarge
+                                        ?.copyWith(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
                                         ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: SizedBox(
+                                      height: StarflowChipButton.minimumHeight(
+                                              context) +
+                                          12,
+                                      child: LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          return ScrollConfiguration(
+                                            behavior:
+                                                ScrollConfiguration.of(context)
+                                                    .copyWith(dragDevices: {
+                                              ...ScrollConfiguration.of(context)
+                                                  .dragDevices,
+                                              PointerDeviceKind.mouse,
+                                            }),
+                                            child: SingleChildScrollView(
+                                              key: const PageStorageKey(
+                                                  'search-recent-queries'),
+                                              scrollDirection: Axis.horizontal,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 4,
+                                                      vertical: 6),
+                                              child: Row(
+                                                children: [
+                                                  for (var index = 0;
+                                                      index <
+                                                          _recentQueries.length;
+                                                      index++) ...[
+                                                    if (index > 0)
+                                                      const SizedBox(width: 10),
+                                                    ConstrainedBox(
+                                                      constraints:
+                                                          BoxConstraints(
+                                                        maxWidth:
+                                                            constraints.maxWidth -
+                                                                8,
+                                                      ),
+                                                      child: _SearchHistoryChip(
+                                                        label:
+                                                            _recentQueries[index],
+                                                        focusId:
+                                                            'search:recent:$index',
+                                                        onPressed: () =>
+                                                            _runRecentQuery(
+                                                                _recentQueries[
+                                                                    index]),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ],
+                                              ),
+                                            ),
+                                          );
+                                        },
                                       ),
-                                    );
-                                  },
-                                ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                             const SizedBox(height: 10),
@@ -812,80 +866,36 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 '还没有启用可搜索的来源，请先去设置页添加媒体源或搜索服务。',
                               )
                             else if (!_showFavoriteResults)
-                              isTelevision
-                                  ? Wrap(
-                                      spacing: 10,
-                                      runSpacing: 10,
-                                      children: [
-                                        for (var index = 0;
-                                            index < targets.length;
-                                            index++)
-                                          _SearchTargetChip(
-                                            target: targets[index],
-                                            selected: effectiveSelectedTargetIds
-                                                .contains(targets[index].id),
-                                            isTelevision: true,
-                                            focusId:
-                                                'search:target:${targets[index].id}',
-                                            onPressed: () {
-                                              _toggleTargetSelection(
-                                                targets[index],
-                                                targets,
-                                              );
-                                              if (_controller.text
-                                                  .trim()
-                                                  .isNotEmpty) {
-                                                _performSearch();
-                                              }
-                                            },
-                                          ),
-                                      ],
-                                    )
-                                  : SizedBox(
-                                      height: StarflowChipButton.minimumHeight(
-                                              context) +
-                                          12,
-                                      child: ListView.separated(
-                                        padding: const EdgeInsets.symmetric(
-                                            vertical: 6),
-                                        scrollDirection: Axis.horizontal,
-                                        itemCount: targets.length,
-                                        separatorBuilder: (context, index) =>
-                                            const SizedBox(width: 8),
-                                        itemBuilder: (context, index) {
-                                          final target = targets[index];
-                                          return _SearchTargetChip(
-                                            target: target,
-                                            selected: effectiveSelectedTargetIds
-                                                .contains(target.id),
-                                            isTelevision: false,
-                                            onPressed: () {
-                                              _toggleTargetSelection(
-                                                target,
-                                                targets,
-                                              );
-                                              if (_controller.text
-                                                  .trim()
-                                                  .isNotEmpty) {
-                                                _performSearch();
-                                              }
-                                            },
-                                          );
-                                        },
-                                      ),
+                              SearchFilterRow(
+                                key: const ValueKey('search-filter-sources'),
+                                label: '搜索来源',
+                                storageId: 'sources',
+                                isTelevision: isTelevision,
+                                children: [
+                                  for (final target in targets)
+                                    _SearchTargetChip(
+                                      target: target,
+                                      selected: effectiveSelectedTargetIds
+                                          .contains(target.id),
+                                      isTelevision: isTelevision,
+                                      focusId: 'search:target:${target.id}',
+                                      onPressed: () {
+                                        _toggleTargetSelection(target, targets);
+                                        if (_controller.text.trim().isNotEmpty) {
+                                          _performSearch();
+                                        }
+                                      },
                                     ),
+                                ],
+                              ),
                             if (!_showFavoriteResults &&
                                 _results.isNotEmpty &&
-                                availableCloudTypes.isNotEmpty) ...[
-                              const SizedBox(height: 12),
-                              Text(
-                                '网盘类型',
-                                style: Theme.of(context).textTheme.labelLarge,
-                              ),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
+                                availableCloudTypes.isNotEmpty)
+                              SearchFilterRow(
+                                key: const ValueKey('search-filter-cloud-types'),
+                                label: '网盘类型',
+                                storageId: 'cloud-types',
+                                isTelevision: isTelevision,
                                 children: [
                                   for (final type in SearchCloudType.values
                                       .where(availableCloudTypes.contains))
@@ -907,7 +917,37 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                     ),
                                 ],
                               ),
-                            ],
+                            if (!_showFavoriteResults &&
+                                availableResolutions.isNotEmpty)
+                              SearchFilterRow(
+                                key: const ValueKey('search-filter-resolutions'),
+                                label: '清晰度',
+                                storageId: 'resolutions',
+                                isTelevision: isTelevision,
+                                children: [
+                                  for (final resolution in
+                                      SearchResultResolution.values
+                                          .where(availableResolutions.contains))
+                                    StarflowChipButton(
+                                      key: ValueKey(
+                                          'search-resolution:${resolution.name}'),
+                                      label: resolution.label,
+                                      selected:
+                                          _selectedResolution == resolution,
+                                      focusId:
+                                          'search:resolution:${resolution.name}',
+                                      onPressed: () {
+                                        setState(() {
+                                          _selectedResolution =
+                                              _selectedResolution == resolution
+                                                  ? null
+                                                  : resolution;
+                                        });
+                                        _logSearchResultVisibility();
+                                      },
+                                    ),
+                                ],
+                              ),
                             const SizedBox(height: 12),
                             if (!_showFavoriteResults && _isSearching) ...[
                               LinearProgressIndicator(
@@ -937,9 +977,32 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                     _filteredResultCount > 0))
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
-                                child: Text(
-                                  '结果 ${displayedResults.length} 条 · 过滤 $_filteredResultCount 条'
-                                  '${pendingLinkValidationCount > 0 ? ' · 验证 $pendingLinkValidationCount 条' : ''}',
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        '结果 ${displayedResults.length} 条 · 过滤 $_filteredResultCount 条'
+                                        '${pendingLinkValidationCount > 0 ? ' · 验证 $pendingLinkValidationCount 条' : ''}',
+                                      ),
+                                    ),
+                                    if (!_showFavoriteResults &&
+                                        (availableCloudTypes.isNotEmpty ||
+                                            availableResolutions.isNotEmpty))
+                                      StarflowIconButton(
+                                        icon: Icons.filter_alt_off_outlined,
+                                        tooltip: '清除结果筛选',
+                                        focusId: 'search:clear-filters',
+                                        variant: StarflowButtonVariant.ghost,
+                                        size: 40,
+                                        onPressed: () {
+                                          setState(() {
+                                            _selectedCloudType = null;
+                                            _selectedResolution = null;
+                                          });
+                                          _logSearchResultVisibility();
+                                        },
+                                      ),
+                                  ],
                                 ),
                               ),
                             if (!_showFavoriteResults && _errorMessage != null)
@@ -957,9 +1020,10 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 child: Text(
                                   _showFavoriteResults
                                       ? '还没有收藏结果。'
-                                      : _selectedCloudType != null &&
+                                      : (_selectedCloudType != null ||
+                                                  _selectedResolution != null) &&
                                               _results.isNotEmpty
-                                          ? '当前网盘类型暂无结果。'
+                                          ? '当前筛选条件下暂无结果。'
                                           : _controller.text.trim().isEmpty
                                               ? '输入关键字后开始搜索。'
                                               : _filteredResultCount > 0

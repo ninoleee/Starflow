@@ -12,6 +12,7 @@ import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
+import 'package:starflow/features/library/data/external_media_structure.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/metadata/data/imdb_rating_client.dart';
@@ -20,6 +21,345 @@ import 'package:starflow/features/metadata/data/wmdb_metadata_client.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 
 void main() {
+  test('movie representative prefers the feature over its extras', () async {
+    const source = MediaSourceConfig(
+        id: 'movie-extra',
+        name: 'NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/movies/',
+        enabled: true,
+        webDavStructureInferenceEnabled: true);
+    final indexer = _buildStructureGroupingTestIndexer(
+      store: _MemoryNasMediaIndexStore(),
+      source: source,
+      client: _FakeWebDavNasClient(scannedItems: [
+        for (final extra in [true, false])
+          _PendingTestItem(
+              id: extra ? 'extra' : 'feature',
+              path: '/movies/Example Film/${extra ? 'trailer' : 'feature'}.mkv',
+              title: 'Example Film',
+              itemType: 'movie',
+              seasonNumber: null,
+              episodeNumber: null,
+              structure: ExternalMediaStructure(
+                  rootPath: '/movies/Example Film',
+                  rootTitle: 'Example Film',
+                  itemType: 'movie',
+                  role: extra
+                      ? ExternalResourceRole.extra
+                      : ExternalResourceRole.video)),
+      ]),
+    );
+    addTearDown(indexer.dispose);
+    await indexer.refreshSource(source);
+    final library = await indexer.loadLibrary(source);
+    expect(library, hasLength(1));
+    expect(library.single.id, 'feature');
+    final variants =
+        await indexer.loadMovieVariants(source, itemId: library.single.id);
+    expect(variants, hasLength(2));
+    expect(variants.first.id, 'feature');
+  });
+
+  for (final initialType in ['episode', 'movie']) {
+    test(
+        'episode NFO corrects inferred $initialType and incremental preserves evidence',
+        () async {
+      const source = MediaSourceConfig(
+          id: 'nfo-evidence',
+          name: 'NAS',
+          kind: MediaSourceKind.nas,
+          endpoint: 'https://nas.example.com/movies/',
+          enabled: true,
+          webDavStructureInferenceEnabled: true,
+          webDavSidecarScrapingEnabled: true);
+      final structure = ExternalMediaStructure(
+          rootPath: '/movies/Alpha',
+          rootTitle: 'Alpha',
+          itemType: initialType,
+          seasonNumber: initialType == 'episode' ? 1 : null,
+          episodeNumber: initialType == 'episode' ? 1 : null,
+          seasonEvidence: StructureEvidence.inferred,
+          episodeEvidence: StructureEvidence.inferred);
+      final store = _MemoryNasMediaIndexStore();
+      final client = _FakeWebDavNasClient(scannedItems: [
+        _PendingTestItem(
+            id: 'a',
+            path: '/movies/Alpha/part.mkv',
+            title: 'part',
+            itemType: initialType,
+            seasonNumber: initialType == 'episode' ? 1 : null,
+            episodeNumber: initialType == 'episode' ? 1 : null,
+            hasSidecarMatch: false,
+            structure: structure),
+      ], scanResourceOverrides: const {
+        'a': _PendingTestItem(
+            id: 'a',
+            path: '/movies/Alpha/part.mkv',
+            title: 'Episode Five',
+            itemType: 'episode',
+            seasonNumber: 2,
+            episodeNumber: 5),
+      });
+      final indexer = _buildStructureGroupingTestIndexer(
+          store: store, client: client, source: source);
+      addTearDown(indexer.dispose);
+      await indexer.refreshSource(source);
+      await _drainAsyncTasks();
+      var record = (await store.loadSourceRecords(source.id)).single;
+      expect(record.item.seasonNumber, 2);
+      expect(record.item.itemType, 'episode');
+      expect(record.item.episodeNumber, 5);
+      expect(record.structure!.episodeEvidence, StructureEvidence.sidecar);
+      final observedConflicts = record.structure!.conflicts;
+      expect(observedConflicts, isNotEmpty);
+      expect(record.structure!.evidenceFor(StructureField.episodeNumber).ruleId,
+          StructureRule.sidecarNumber);
+      await indexer.refreshSource(source);
+      record = (await store.loadSourceRecords(source.id)).single;
+      expect(record.item.episodeNumber, 5);
+      expect(record.structure!.rootPath, '/movies/Alpha');
+      expect(record.item.itemType, 'episode');
+      expect(record.structure!.conflicts, observedConflicts);
+      final restored = NasMediaIndexRecord.fromJson(record.toJson());
+      expect(restored.structure, record.structure);
+    });
+  }
+
+  test('incomplete scan preserves unseen indexed resources', () async {
+    const source = MediaSourceConfig(
+        id: 'partial',
+        name: 'NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/movies/',
+        enabled: true,
+        webDavStructureInferenceEnabled: true);
+    final store = _MemoryNasMediaIndexStore();
+    final client = _FakeWebDavNasClient(scannedItems: [
+      for (final name in ['Alpha', 'Bravo'])
+        _PendingTestItem(
+            id: name,
+            path: '/movies/$name/video.mkv',
+            title: name,
+            itemType: 'movie',
+            seasonNumber: null,
+            episodeNumber: null),
+    ]);
+    final indexer = _buildStructureGroupingTestIndexer(
+        store: store, client: client, source: source);
+    addTearDown(indexer.dispose);
+    await indexer.refreshSource(source);
+    client.scannedItems.removeLast();
+    client.scanComplete = false;
+    await indexer.refreshSource(source);
+    expect(await store.loadSourceRecords(source.id), hasLength(2));
+    client.scannedItems[0] = const _PendingTestItem(
+        id: 'Alpha',
+        path: '/movies/Alpha/video.mkv',
+        title: 'Alpha',
+        itemType: 'episode',
+        seasonNumber: 1,
+        episodeNumber: 1);
+    await indexer.refreshSource(source, forceFullRescan: true);
+    await _drainAsyncTasks();
+    final partialRecords = await store.loadSourceRecords(source.id);
+    expect(partialRecords, hasLength(2));
+    expect(
+        partialRecords
+            .firstWhere((item) => item.resourceId == 'Alpha')
+            .item
+            .itemType,
+        'movie');
+    final scannedItem = client.scannedItems.removeLast();
+    await indexer.refreshSource(source);
+    expect(await store.loadSourceRecords(source.id), hasLength(2));
+    client.scannedItems.add(scannedItem);
+    client.scanComplete = true;
+    await indexer.refreshSource(source);
+    expect(await store.loadSourceRecords(source.id), hasLength(1));
+  });
+
+  test('incremental structure changes persist without repeating enrichment',
+      () async {
+    const source = MediaSourceConfig(
+        id: 'structure-refresh',
+        name: 'NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/movies/',
+        enabled: true,
+        webDavStructureInferenceEnabled: true);
+    const oldStructure = ExternalMediaStructure(
+        rootPath: '/movies/Alpha', rootTitle: 'Alpha', itemType: 'movie');
+    const nextStructure = ExternalMediaStructure(
+        rootPath: '/movies/Alpha',
+        rootTitle: 'Alpha',
+        itemType: 'episode',
+        seasonNumber: 2,
+        episodeNumber: 5,
+        seasonEvidence: StructureEvidence.filename,
+        episodeEvidence: StructureEvidence.filename);
+    final store = _MemoryNasMediaIndexStore();
+    final client = _FakeWebDavNasClient(scannedItems: [
+      const _PendingTestItem(
+          id: 'a',
+          path: '/movies/Alpha/video.mkv',
+          title: 'Alpha',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+          structure: oldStructure),
+    ]);
+    final indexer = _buildStructureGroupingTestIndexer(
+        store: store, client: client, source: source);
+    addTearDown(indexer.dispose);
+    await indexer.refreshSource(source);
+    final calls = client.scanResourceCallCount;
+    client.scannedItems[0] = const _PendingTestItem(
+        id: 'a',
+        path: '/movies/Alpha/video.mkv',
+        title: 'Alpha',
+        itemType: 'episode',
+        seasonNumber: 2,
+        episodeNumber: 5,
+        structure: nextStructure);
+    await indexer.refreshSource(source);
+    final record = (await store.loadSourceRecords(source.id)).single;
+    expect(record.item.itemType, 'episode');
+    expect(record.item.seasonNumber, 2);
+    expect(record.item.episodeNumber, 5);
+    expect(record.structure!.rootPath, '/movies/Alpha');
+    expect(client.scanResourceCallCount, calls);
+    final restored = NasMediaIndexRecord.fromJson(record.toJson());
+    expect(restored.structure!.toJson(), record.structure!.toJson());
+    await indexer.refreshSource(source, forceFullRescan: true);
+    final rebuilt = (await store.loadSourceRecords(source.id)).single;
+    expect(rebuilt.structure!.toJson(), record.structure!.toJson());
+    final callsBeforeEvidence = client.scanResourceCallCount;
+    client.scannedItems[0] = const _PendingTestItem(
+        id: 'a',
+        path: '/movies/Alpha/video.mkv',
+        title: 'Alpha',
+        itemType: 'episode',
+        seasonNumber: 2,
+        episodeNumber: 5,
+        structure: ExternalMediaStructure(
+          rootPath: '/movies/Alpha',
+          rootTitle: 'Alpha',
+          itemType: 'episode',
+          seasonNumber: 2,
+          episodeNumber: 5,
+          seasonEvidence: StructureEvidence.filename,
+          episodeEvidence: StructureEvidence.filename,
+          fieldEvidence: {
+            StructureField.episodeNumber: StructureFieldEvidence(
+                StructureEvidence.filename, StructureRule.filenameNumber),
+          },
+        ));
+    await indexer.refreshSource(source);
+    final evidenceOnly = (await store.loadSourceRecords(source.id)).single;
+    expect(evidenceOnly.item.episodeNumber, rebuilt.item.episodeNumber);
+    expect(
+        evidenceOnly.structure!
+            .evidenceFor(StructureField.episodeNumber)
+            .ruleId,
+        StructureRule.filenameNumber);
+    expect(client.scanResourceCallCount, callsBeforeEvidence);
+  });
+
+  test('same title in separate public roots keeps independent series',
+      () async {
+    const source = MediaSourceConfig(
+      id: 'separate-roots',
+      name: 'NAS',
+      kind: MediaSourceKind.nas,
+      endpoint: 'https://nas.example.com/movies/',
+      enabled: true,
+      webDavStructureInferenceEnabled: true,
+      webDavSeriesTitleFilterKeywords: ['quark', '115'],
+    );
+    final indexer = _buildStructureGroupingTestIndexer(
+      store: _MemoryNasMediaIndexStore(),
+      client: _FakeWebDavNasClient(scannedItems: [
+        for (final directory in ['quark', '115'])
+          _episodeItem(
+            id: directory,
+            path: '/movies/$directory/同名剧集/Season 1/S01E01.strm',
+            title: '同名剧集',
+            seasonNumber: 1,
+            episodeNumber: 1,
+          ),
+      ]),
+      source: source,
+    );
+    addTearDown(indexer.dispose);
+    await indexer.refreshSource(source);
+    final library = await indexer.loadLibrary(source);
+    expect(library, hasLength(2));
+    expect(library.map((item) => item.id).toSet(), hasLength(2));
+    expect(library.map((item) => item.actualAddress).toSet(), {
+      '/movies/quark/同名剧集',
+      '/movies/115/同名剧集',
+    });
+    for (final series in library) {
+      final seasons = await indexer.loadChildren(source, parentId: series.id);
+      final episodes =
+          await indexer.loadChildren(source, parentId: seasons.single.id);
+      expect(episodes, hasLength(1));
+    }
+  });
+
+  for (final hasEpisode in [false, true]) {
+    test('one first-level directory owns mixed records (series=$hasEpisode)',
+        () async {
+      const source = MediaSourceConfig(
+        id: 'one-root',
+        name: 'NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/movies/',
+        enabled: true,
+        webDavStructureInferenceEnabled: true,
+      );
+      final store = _MemoryNasMediaIndexStore();
+      final client = _FakeWebDavNasClient(scannedItems: [
+        for (var i = 0; i < 30; i++)
+          _PendingTestItem(
+            id: 'resource-$i',
+            path: '/movies/quark/重启人生/发行目录${i % 3}/video-$i.strm',
+            title: '文件标题$i',
+            itemType: hasEpisode && i == 0 ? 'episode' : 'movie',
+            seasonNumber: hasEpisode && i == 0 ? 1 : null,
+            episodeNumber: hasEpisode && i == 0 ? 1 : null,
+          ),
+        const _PendingTestItem(
+          id: 'neighbor',
+          path: '/movies/quark/另一部电影/video.strm',
+          title: '另一部电影',
+          itemType: 'movie',
+          seasonNumber: null,
+          episodeNumber: null,
+        ),
+      ]);
+      final indexer = _buildStructureGroupingTestIndexer(
+          store: store, client: client, source: source);
+      addTearDown(indexer.dispose);
+      await indexer.refreshSource(source);
+      final library = await indexer.loadLibrary(source);
+      expect(library, hasLength(2));
+      final root = library.singleWhere((item) => item.title == '重启人生');
+      expect(root.itemType, hasEpisode ? 'series' : 'movie');
+      if (hasEpisode) {
+        final seasons = await indexer.loadChildren(source, parentId: root.id);
+        final episodes = await indexer.loadChildren(source,
+            parentId: seasons.single.id, limit: 100);
+        expect(episodes, hasLength(30));
+      } else {
+        final versions = await indexer.loadMovieVariants(source,
+            itemId: root.id, sectionId: root.sectionId);
+        expect(versions, hasLength(30));
+      }
+    });
+  }
+
   test('large cold library grouping shares one load and preserves episodes',
       () async {
     final store = _MemoryNasMediaIndexStore();
@@ -981,8 +1321,7 @@ void main() {
     );
   });
 
-  test(
-      'NasMediaIndexer stops upward structure series inference at filtered folders',
+  test('NasMediaIndexer keeps the first title despite nested filtered folders',
       () async {
     final store = _MemoryNasMediaIndexStore();
     final source = const MediaSourceConfig(
@@ -1043,7 +1382,7 @@ void main() {
 
     expect(library, hasLength(1));
     expect(library.single.itemType, 'series');
-    expect(library.single.title, 'Stranger Things');
+    expect(library.single.title, '怪奇物语');
   });
 
   test(
@@ -1304,7 +1643,7 @@ void main() {
     expect(library, hasLength(1));
     expect(library.single.itemType, 'series');
     expect(library.single.title, '十三邀 第九季');
-    expect(library.single.id, isNot(contains('quark')));
+    expect(library.single.actualAddress, 'strm/quark/十三邀 第九季');
 
     final children = await indexer.loadChildren(
       source,
@@ -2941,7 +3280,7 @@ void main() {
     );
     final indexedAt = DateTime.utc(2026, 4, 5, 12);
     final scopeKey =
-        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v15';
+        'root|${source.endpoint.trim()}|structure:${source.webDavStructureInferenceEnabled}|scrape:${source.webDavSidecarScrapingEnabled}|exclude:${source.normalizedWebDavExcludedPathKeywords.join(',')}|title-filter:${source.normalizedWebDavSeriesTitleFilterKeywords.join(',')}|special-filter:${source.normalizedWebDavSpecialEpisodeKeywords.join(',')}|extra-filter:${source.normalizedWebDavExtraKeywords.join(',')}|schema:webdav-v17';
     final record = NasMediaIndexRecord(
       id: NasMediaIndexRecord.buildRecordId(
         sourceId: source.id,
@@ -5397,6 +5736,7 @@ _PendingTestItem _episodeItem({
 
 class _PendingTestItem {
   const _PendingTestItem({
+    this.structure,
     required this.id,
     required this.path,
     required this.title,
@@ -5409,6 +5749,7 @@ class _PendingTestItem {
   });
 
   final String id;
+  final ExternalMediaStructure? structure;
   final String path;
   final String title;
   final String itemType;
@@ -5444,6 +5785,7 @@ class _FakeWebDavNasClient extends WebDavNasClient {
   }) : super(MockClient((request) async => http.Response('', 200)));
 
   final List<_PendingTestItem> scannedItems;
+  bool scanComplete = true;
   final Duration scanDelay;
   final Duration scanResourceDelay;
   final Map<String, _PendingTestItem> scanResourceOverrides;
@@ -5476,7 +5818,7 @@ class _FakeWebDavNasClient extends WebDavNasClient {
       } else if (scanDelay > Duration.zero) {
         await Future<void>.delayed(scanDelay);
       }
-      return scannedItems
+      final result = scannedItems
           .take(limit)
           .map(
             (item) => _buildScannedItem(
@@ -5488,6 +5830,8 @@ class _FakeWebDavNasClient extends WebDavNasClient {
             ),
           )
           .toList(growable: false);
+      return ExternalScanResult(result,
+          complete: scanComplete && scannedItems.length <= limit);
     } finally {
       onScanExit?.call(callIndex);
     }
@@ -5547,6 +5891,7 @@ class _FakeWebDavNasClient extends WebDavNasClient {
       modifiedAt: DateTime.utc(2026, 4, 5, 12, resolvedSeed.episodeNumber ?? 0),
       fileSizeBytes: 1024,
       metadataSeed: WebDavMetadataSeed(
+        structure: item.structure,
         title: item.title,
         overview: '',
         posterUrl: '',

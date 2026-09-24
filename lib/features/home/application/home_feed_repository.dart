@@ -212,6 +212,9 @@ Future<HomeSectionViewModel> _buildLibrarySectionSeed({
   LibraryCollectionTarget? viewAllTarget,
 }) async {
   final mappingStopwatch = Stopwatch()..start();
+  if (module.type == HomeModuleType.recentlyAdded) {
+    items = aggregateMediaWorks(items);
+  }
   final seedTargets =
       items.map(MediaDetailTarget.fromMediaItem).toList(growable: false);
   final detailTargets = seedTargets;

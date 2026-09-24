@@ -1,6 +1,8 @@
 # 音频解码与转换审查
 
-原始审查日期：2026-09-19；现状核对：2026-09-20。范围包含已有未提交修改，不是只审查某个 commit 的差异。本文将当前实现与 9 月 19 日实施前发现分开保留。组件边界见 [架构说明](architecture.md)，当前主机回归见 [主机验证](performance.md)，设备验收见 [真机性能](performance-device.md)。
+> 历史审查与分批修复记录，2026-09-24 归档。下文“当前”和测试结果均指各节标注的执行时快照，不代表最新工作区已复验。现行组件边界见 [架构说明](../architecture.md)，后续验证见 [主机记录](../performance.md)。
+
+原始审查日期：2026-09-19；现状核对：2026-09-20。范围包含已有未提交修改，不是只审查某个 commit 的差异。本文将当前实现与 9 月 19 日实施前发现分开保留。组件边界见 [架构说明](../architecture.md)，当前主机回归见 [主机验证](../performance.md)，设备验收见 [真机性能](../performance-device.md)。
 
 ## 实施状态
 
@@ -17,9 +19,9 @@
 
 ### 此前批次验证
 
-2026-09-20 五项再审修复集成验证：当前主 Kotlin 与 JVM 测试源码在独立目录重新编译，JUnit 全量 **418 项通过**，包含真实 Media3 sink 的配置拒绝/单次回退集成用例；与收尾源码比对一致，`git diff --check` 通过。为避开共享构建目录竞争，本次不是 Gradle/APK 构建，未重建 AAR；`adb devices` 仍无设备。方法与范围见 [主机验证](performance.md)。
+2026-09-20 五项再审修复集成验证：当前主 Kotlin 与 JVM 测试源码在独立目录重新编译，JUnit 全量 **418 项通过**，包含真实 Media3 sink 的配置拒绝/单次回退集成用例；与收尾源码比对一致，`git diff --check` 通过。为避开共享构建目录竞争，本次不是 Gradle/APK 构建，未重建 AAR；`adb devices` 仍无设备。方法与范围见 [主机验证](../performance.md)。
 
-2026-09-20 高位深实现前一批验证：完整 Android JVM **357 项通过，0 失败、0 跳过**，含 24-bit/96 kHz 合成 LPCM 与 FFmpeg PCM24 输出逐字节对比、实际 Media3 转换器测试及输出/倍速/回退策略测试。该计数不包含随后输出状态补强；分批命令和范围见 [主机验证](performance.md)。下文此前批次的失败、PCM16 转换和未启用 float 描述如标为原始建议，均是历史快照，不是当前状态；未新增真机验证。
+2026-09-20 高位深实现前一批验证：完整 Android JVM **357 项通过，0 失败、0 跳过**，含 24-bit/96 kHz 合成 LPCM 与 FFmpeg PCM24 输出逐字节对比、实际 Media3 转换器测试及输出/倍速/回退策略测试。该计数不包含随后输出状态补强；分批命令和范围见 [主机验证](../performance.md)。下文此前批次的失败、PCM16 转换和未启用 float 描述如标为原始建议，均是历史快照，不是当前状态；未新增真机验证。
 
 2026-09-20 前一批输出状态补强验证：Android JVM 全量 **368 项通过，0 失败、0 跳过**，包括实际 sink 异常优先级、倍速/直通边界和独立回退预算；`git diff --check` 通过。此为五项再审修复之前的快照，不作为后续修改的验证结果。`adb devices` 无已连接设备，仍不代表 ARM 解码、HDMI 或最终音频格式已验收。
 
@@ -36,7 +38,7 @@
 
 真机验收仍需 API 23 TV、ARM32/ARM64 和 HDMI 输出设备；本轮无设备连接，不能将单元测试和 ELF 检查写成真实解码通过。
 
-2026-09-19 实施验证记录：78 项相关 Flutter 测试、64 项相关 Android JVM 测试通过；后者包含本地 stereo/48 kHz/16-bit TS 的 LPCM 数据与 FFmpeg PCM16 输出逐字节比较。相关 Dart 静态分析、`git diff --check` 和构建脚本语法检查通过。AAR 两种 ABI 的 `mp3` decoder/JNI 导出符号、Android API 23 note、16 KiB LOAD 对齐及系统库依赖已检查，SHA-256 已同步到 [libs README](../android/app/libs/README.md)。这些是当日记录，不是本次重跑全部原生二进制检查。
+2026-09-19 实施验证记录：78 项相关 Flutter 测试、64 项相关 Android JVM 测试通过；后者包含本地 stereo/48 kHz/16-bit TS 的 LPCM 数据与 FFmpeg PCM16 输出逐字节比较。相关 Dart 静态分析、`git diff --check` 和构建脚本语法检查通过。AAR 两种 ABI 的 `mp3` decoder/JNI 导出符号、Android API 23 note、16 KiB LOAD 对齐及系统库依赖已检查，SHA-256 已同步到 [libs README](../../android/app/libs/README.md)。这些是当日记录，不是本次重跑全部原生二进制检查。
 
 2026-09-19 全量 Android 记录：304 项执行，303 项通过，唯一失败为 `NativePlaybackSettingsAppearanceTest` 的选集面板调色板源码断言。该次因共享构建目录的依赖复制冲突，使用已存在的 MPV 依赖并排除 `:media_kit_libs_android_video:downloadDependencies`。
 

@@ -93,6 +93,10 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
   final ScrollController _scrollController = ScrollController();
   final FocusNode _headerFocusNode =
       FocusNode(debugLabel: 'person-credits-header');
+  final FocusNode _firstCreditsItemFocusNode =
+      FocusNode(debugLabel: 'person-credits:first-item');
+  final FocusNode _lastCreditsItemFocusNode =
+      FocusNode(debugLabel: 'person-credits:last-item');
   final RetainedAsyncController<_PersonCreditsPageResult> _retainedResultAsync =
       RetainedAsyncController<_PersonCreditsPageResult>();
   _PersonCreditsSortMode _sortMode = _PersonCreditsSortMode.newest;
@@ -120,6 +124,8 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
   @override
   void dispose() {
     _headerFocusNode.dispose();
+    _firstCreditsItemFocusNode.dispose();
+    _lastCreditsItemFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -274,30 +280,50 @@ class _PersonCreditsPageState extends ConsumerState<PersonCreditsPage>
                               },
                             ),
                             if (showPager) ...[
-                              _PersonCreditsPagerSummary(
-                                title: '${target.role.label}分页',
-                                currentPage: currentPage,
-                                totalPages: totalPages,
-                                isTelevision: isTelevision,
-                                focusPrefix: 'person-credits:pager:top',
-                                onPageChanged: _handleCreditsPageChanged,
+                              TvDirectionalActionPanel(
+                                enabled:
+                                    isTelevision && visibleItems.isNotEmpty,
+                                onMoveDown: () => requestTvFocus(
+                                  _firstCreditsItemFocusNode,
+                                ),
+                                child: _PersonCreditsPagerSummary(
+                                  title: '${target.role.label}分页',
+                                  currentPage: currentPage,
+                                  totalPages: totalPages,
+                                  isTelevision: isTelevision,
+                                  focusPrefix: 'person-credits:pager:top',
+                                  onPageChanged: _handleCreditsPageChanged,
+                                ),
                               ),
                               const SizedBox(height: 18),
                             ],
                             if (visibleItems.isEmpty)
                               const _EmptyState(message: '当前筛选下没有结果')
                             else
-                              _PersonCreditsGrid(items: visibleItems),
+                              _PersonCreditsGrid(
+                                items: visibleItems,
+                                firstItemFocusNode: _firstCreditsItemFocusNode,
+                                lastItemFocusNode: _lastCreditsItemFocusNode,
+                              ),
                             if (showPager) ...[
                               const SizedBox(height: 18),
-                              _PersonCreditsPagerSummary(
-                                title: '${target.role.label}分页',
-                                currentPage: currentPage,
-                                totalPages: totalPages,
-                                isTelevision: isTelevision,
-                                focusPrefix: 'person-credits:pager:bottom',
-                                onPageChanged: _handleCreditsPageChanged,
-                                compact: true,
+                              TvDirectionalActionPanel(
+                                enabled:
+                                    isTelevision && visibleItems.isNotEmpty,
+                                onMoveUp: () => requestTvFocus(
+                                  visibleItems.length == 1
+                                      ? _firstCreditsItemFocusNode
+                                      : _lastCreditsItemFocusNode,
+                                ),
+                                child: _PersonCreditsPagerSummary(
+                                  title: '${target.role.label}分页',
+                                  currentPage: currentPage,
+                                  totalPages: totalPages,
+                                  isTelevision: isTelevision,
+                                  focusPrefix: 'person-credits:pager:bottom',
+                                  onPageChanged: _handleCreditsPageChanged,
+                                  compact: true,
+                                ),
                               ),
                             ],
                           ],
@@ -945,9 +971,15 @@ String _personInitial(String name) {
 }
 
 class _PersonCreditsGrid extends StatelessWidget {
-  const _PersonCreditsGrid({required this.items});
+  const _PersonCreditsGrid({
+    required this.items,
+    required this.firstItemFocusNode,
+    required this.lastItemFocusNode,
+  });
 
   final List<_PersonCreditCardData> items;
+  final FocusNode firstItemFocusNode;
+  final FocusNode lastItemFocusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -976,9 +1008,15 @@ class _PersonCreditsGrid extends StatelessWidget {
           ),
           itemBuilder: (context, index) {
             final item = items[index];
+            final focusNode = switch (index) {
+              0 => firstItemFocusNode,
+              _ when index == items.length - 1 => lastItemFocusNode,
+              _ => null,
+            };
             return MediaPosterTile(
               focusId:
                   'person-credits:${item.detailTarget.itemId.isNotEmpty ? item.detailTarget.itemId : item.title}',
+              focusNode: focusNode,
               autofocus: false,
               title: item.title,
               subtitle: item.subtitle,

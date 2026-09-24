@@ -21,7 +21,293 @@ List<String> _relativeDirectorySegmentsFromRoot({
 }
 
 class _ExternalScanStructureModule {
+  final _fileRecognitionByResource = <String, NasMediaRecognition>{};
+  final _pathRecognitionByResource = <String, NasMediaRecognition>{};
+  final _evidenceByResource =
+      <String, Map<StructureField, StructureFieldEvidence>>{};
+
+  void _recordRule(ExternalScanPendingItem item, StructureField field,
+      StructureEvidence source, String ruleId) {
+    _evidenceByResource.putIfAbsent(item.resourceId, () => {})[field] =
+        StructureFieldEvidence(source, ruleId);
+  }
+
+  void _recordInitialEvidence(
+      ExternalScanPendingItem item, MediaSourceConfig source) {
+    final seed = item.metadataSeed;
+    final file = NasMediaRecognizer.recognize(item.fileName,
+        specialEpisodeKeywords: source.normalizedWebDavSpecialCategoryKeywords);
+    final path = NasMediaRecognizer.recognize(item.actualAddress,
+        seriesTitleFilterKeywords:
+            source.normalizedWebDavSeriesTitleFilterKeywords,
+        specialEpisodeKeywords: source.normalizedWebDavSpecialCategoryKeywords);
+    _fileRecognitionByResource[item.resourceId] = file;
+    _pathRecognitionByResource[item.resourceId] = path;
+    void number(StructureField field, int? seeded, int? named, int? inherited) {
+      if (seeded != null && seed.hasSidecarMatch) {
+        _recordRule(item, field, StructureEvidence.sidecar,
+            StructureRule.sidecarNumber);
+      } else if (named != null && (seeded == null || seeded == named)) {
+        _recordRule(item, field, StructureEvidence.filename,
+            StructureRule.filenameNumber);
+      } else if (inherited != null && (seeded == null || seeded == inherited)) {
+        final explicitDirectoryNumber = field != StructureField.seasonNumber ||
+            NasMediaPathPolicy.pathSegments(
+                    NasMediaPathPolicy.uriPath(item.actualAddress))
+                .reversed
+                .skip(1)
+                .take(2)
+                .any((label) =>
+                    parseSeasonNumberFromFolderLabel(label) == inherited);
+        _recordRule(
+            item,
+            field,
+            explicitDirectoryNumber
+                ? StructureEvidence.directory
+                : StructureEvidence.inferred,
+            explicitDirectoryNumber
+                ? StructureRule.directoryNumber
+                : StructureRule.defaultSeason);
+      } else if (seeded != null) {
+        _recordRule(
+            item, field, StructureEvidence.inferred, StructureRule.seedNumber);
+      }
+    }
+
+    number(StructureField.seasonNumber, seed.seasonNumber, file.seasonNumber,
+        path.seasonNumber);
+    number(StructureField.episodeNumber, seed.episodeNumber, file.episodeNumber,
+        path.episodeNumber);
+    if (seed.itemType.isNotEmpty) {
+      _recordRule(
+          item,
+          StructureField.itemType,
+          seed.hasSidecarMatch
+              ? StructureEvidence.sidecar
+              : StructureEvidence.inferred,
+          seed.hasSidecarMatch
+              ? StructureRule.sidecarType
+              : StructureRule.seedType);
+    }
+  }
+
+  void _recordType(ExternalScanPendingItem item, String type, String rule) {
+    if (item.metadataSeed.hasSidecarMatch &&
+        item.metadataSeed.itemType == type) {
+      return;
+    }
+    final evidence = _evidenceByResource[item.resourceId]!;
+    final numbers = [
+      evidence[StructureField.seasonNumber],
+      evidence[StructureField.episodeNumber]
+    ].whereType<StructureFieldEvidence>().toList()
+      ..sort((a, b) => b.source.priority.compareTo(a.source.priority));
+    if (type == 'episode' &&
+        numbers.isNotEmpty &&
+        numbers.first.confidence == StructureConfidence.explicit) {
+      _recordRule(item, StructureField.itemType, numbers.first.source,
+          StructureRule.numberedType);
+    } else {
+      _recordRule(
+          item, StructureField.itemType, StructureEvidence.inferred, rule);
+    }
+  }
+
   List<_PendingWebDavScannedItem> apply(
+    List<_PendingWebDavScannedItem> items, {
+    required MediaSourceConfig source,
+  }) {
+    final groups = <String, List<ExternalScanPendingItem>>{};
+    final roots = <String, NasSeriesRootResolution>{};
+    final paths = <String, String>{};
+    for (final item in items) {
+      if (ExternalMediaStructure.isKnownAudio(item.fileName)) continue;
+      _recordInitialEvidence(item, source);
+      var rootRule = StructureRule.ownedDirectory;
+      final configuredPath = source.kind == MediaSourceKind.quark
+          ? source.quarkFolderPath
+          : source.libraryPath.trim().isNotEmpty
+              ? source.libraryPath
+              : source.endpoint;
+      final ownershipScope = NasMediaPathPolicy.isResourceWithinDirectory(
+              item.actualAddress, configuredPath)
+          ? configuredPath
+          : item.sectionId;
+      var root = NasMediaPathPolicy.resolveSeriesRoot(
+        resourcePath: item.actualAddress,
+        sectionId: ownershipScope,
+        fileFallbackTitle: item.metadataSeed.title,
+        seriesLike: true,
+        configuredKeywords: source.normalizedWebDavSeriesTitleFilterKeywords,
+      );
+      final sectionSegments = NasMediaPathPolicy.pathSegments(
+          NasMediaPathPolicy.uriPath(ownershipScope));
+      final scopedTitle = sectionSegments.isEmpty ? '' : sectionSegments.last;
+      if (NasMediaPathPolicy.isResourceWithinDirectory(
+              item.actualAddress, ownershipScope) &&
+          sectionSegments.length > 1 &&
+          !NasMediaPathPolicy.isPublicDirectory(scopedTitle,
+              configuredKeywords:
+                  source.normalizedWebDavSeriesTitleFilterKeywords)) {
+        final context = NasMediaPathPolicy.resolvePathContext(
+            resourcePath: item.actualAddress, sectionId: ownershipScope);
+        root = NasSeriesRootResolution(
+          title: scopedTitle,
+          rootSegments: [scopedTitle],
+          pathContext: context,
+          hasPublicBoundary: false,
+          directoryDepth: sectionSegments.length,
+        );
+        rootRule = StructureRule.scopedDirectory;
+      }
+      final path = root.directoryPathForResource(item.actualAddress);
+      _recordRule(
+          item,
+          StructureField.rootPath,
+          path.isEmpty ? StructureEvidence.unknown : StructureEvidence.inferred,
+          path.isEmpty ? StructureRule.looseFile : rootRule);
+      _recordRule(item, StructureField.rootTitle, StructureEvidence.inferred,
+          path.isEmpty ? StructureRule.looseFile : rootRule);
+      // No owned directory means a loose resource, never the entire library.
+      final key = path.isEmpty
+          ? item.relativeDirectories.isEmpty
+              ? item.resourceId
+              : item.relativeDirectories.join('/')
+          : path;
+      roots[key] = root;
+      paths[key] = path;
+      groups.putIfAbsent(key, () => []).add(item);
+    }
+    final result = <ExternalScanPendingItem>[];
+    for (final entry in groups.entries) {
+      final root = roots[entry.key]!;
+      final path = paths[entry.key]!;
+      final rebased = entry.value.map((item) {
+        if (path.isEmpty) {
+          return item.copyWith(relativeDirectories: [
+            '__media_root__',
+            ...item.relativeDirectories
+          ]);
+        }
+        final directories = NasMediaPathPolicy.resolvePathContext(
+          resourcePath: item.actualAddress,
+          sectionId: path,
+        ).relativeDirectories;
+        return item.copyWith(relativeDirectories: [root.title, ...directories]);
+      }).toList();
+      bool isExtra(ExternalScanPendingItem item) =>
+          MediaNaming.matchesAnySpecialCategoryKeyword(
+            [item.fileName, ...item.relativeDirectories.skip(1)],
+            keywords: source.normalizedWebDavExtraKeywords,
+          );
+      final primary = rebased.where((item) => !isExtra(item)).toList();
+      final primaryResolved = _applyRoot(primary, source: source);
+      final primaryById = {
+        for (final item in primaryResolved) item.resourceId: item
+      };
+      final series = primaryResolved
+          .any((item) => item.metadataSeed.itemType == 'episode');
+      final resolved = rebased
+          .map((item) =>
+              primaryById[item.resourceId] ??
+              item.copyWith(
+                  metadataSeed: item.metadataSeed.copyWith(
+                itemType: series ? 'episode' : 'movie',
+                seasonNumber: series ? 0 : null,
+              )))
+          .toList();
+      for (var index = 0; index < resolved.length; index++) {
+        final item = resolved[index];
+        final original = entry.value[index];
+        final seed = item.metadataSeed;
+        final extra = isExtra(rebased[index]);
+        if (extra) {
+          _recordRule(item, StructureField.itemType, StructureEvidence.inferred,
+              StructureRule.inheritedType);
+          _recordRule(item, StructureField.role, StructureEvidence.inferred,
+              StructureRule.extraKeyword);
+          if (series) {
+            _recordRule(item, StructureField.seasonNumber,
+                StructureEvidence.inferred, StructureRule.extraKeyword);
+          }
+        } else {
+          _recordRule(item, StructureField.role, StructureEvidence.inferred,
+              StructureRule.resolvedType);
+        }
+        final evidence = _evidenceByResource[item.resourceId]!;
+        if (seed.seasonNumber == null) {
+          evidence.remove(StructureField.seasonNumber);
+        }
+        if (seed.episodeNumber == null) {
+          evidence.remove(StructureField.episodeNumber);
+        }
+        final structure = ExternalMediaStructure(
+          rootPath: path,
+          rootTitle: root.title,
+          itemType: seed.itemType,
+          role: extra
+              ? ExternalResourceRole.extra
+              : seed.itemType == 'episode'
+                  ? seed.seasonNumber == 0
+                      ? ExternalResourceRole.special
+                      : ExternalResourceRole.episode
+                  : ExternalResourceRole.video,
+          seasonNumber: seed.seasonNumber,
+          episodeNumber: seed.episodeNumber,
+          seasonEvidence: evidence[StructureField.seasonNumber]?.source ??
+              StructureEvidence.unknown,
+          episodeEvidence: evidence[StructureField.episodeNumber]?.source ??
+              StructureEvidence.unknown,
+          fieldEvidence: Map.unmodifiable(evidence),
+        );
+        final conflicts = <StructureConflict>[];
+        void observe(StructureField field, Object? selected, Object? rejected,
+            StructureFieldEvidence rejectedEvidence) {
+          if (selected == null ||
+              rejected == null ||
+              selected == rejected ||
+              rejected == '') {
+            return;
+          }
+          conflicts.add(StructureConflict(
+              field: field,
+              selectedValue: '$selected',
+              rejectedValue: '$rejected',
+              selectedEvidence: structure.evidenceFor(field),
+              rejectedEvidence: rejectedEvidence));
+        }
+
+        final named = _pathRecognitionByResource[original.resourceId]!;
+        final fileNamed = _fileRecognitionByResource[original.resourceId]!;
+        StructureFieldEvidence namedEvidence(int? fileValue) =>
+            StructureFieldEvidence(
+                fileValue != null
+                    ? StructureEvidence.filename
+                    : StructureEvidence.directory,
+                fileValue != null
+                    ? StructureRule.filenameNumber
+                    : StructureRule.directoryNumber);
+        observe(StructureField.seasonNumber, seed.seasonNumber,
+            named.seasonNumber, namedEvidence(fileNamed.seasonNumber));
+        observe(StructureField.episodeNumber, seed.episodeNumber,
+            named.episodeNumber, namedEvidence(fileNamed.episodeNumber));
+        if (original.metadataSeed.hasSidecarMatch) {
+          observe(
+              StructureField.itemType,
+              seed.itemType,
+              original.metadataSeed.itemType,
+              const StructureFieldEvidence(
+                  StructureEvidence.sidecar, StructureRule.sidecarType));
+        }
+        result.add(original.copyWith(
+            metadataSeed:
+                seed.copyWith(structure: structure.withConflicts(conflicts))));
+      }
+    }
+    return result;
+  }
+
+  List<_PendingWebDavScannedItem> _applyRoot(
     List<_PendingWebDavScannedItem> items, {
     required MediaSourceConfig source,
   }) {
@@ -33,6 +319,32 @@ class _ExternalScanStructureModule {
       items,
       source: source,
     );
+    final hasSeriesEvidence = items.any((item) =>
+        _hasExplicitSeriesEvidence(item,
+            recognition: context.recognitionByResource[item.resourceId]) ||
+        RegExp(r'全\s*\d+\s*[集话期]').hasMatch(item.actualAddress));
+    final flatMovieVersions = items.length >= 2 &&
+        items.every((item) =>
+            _segmentsKey(item.relativeDirectories) ==
+            _segmentsKey(items.first.relativeDirectories)) &&
+        items.every((item) =>
+            item.metadataSeed.itemType == 'movie' ||
+            RegExp(r'(?:2160p|1080p|720p|4k|bluray|remux)',
+                    caseSensitive: false)
+                .hasMatch(item.fileName));
+    if (!hasSeriesEvidence &&
+        (flatMovieVersions ||
+            items.every((item) =>
+                item.metadataSeed.hasSidecarMatch &&
+                item.metadataSeed.itemType == 'movie'))) {
+      for (final item in items) {
+        _recordType(item, 'movie', StructureRule.movieVersions);
+      }
+      return items
+          .map((item) => item.copyWith(
+              metadataSeed: item.metadataSeed.copyWith(itemType: 'movie')))
+          .toList();
+    }
     final seriesRootPlans = _buildSeriesRootPlans(context);
     final singleVideoMovieResourceIds = _resolveSingleVideoMovieResourceIds(
       context,
@@ -85,11 +397,7 @@ class _ExternalScanStructureModule {
     for (final item in items) {
       final directoryKey = _segmentsKey(item.relativeDirectories);
       filesByDirectory.putIfAbsent(directoryKey, () => []).add(item);
-      final recognition = NasMediaRecognizer.recognize(
-        item.actualAddress,
-        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
-        specialEpisodeKeywords: specialEpisodeKeywords,
-      );
+      final recognition = _pathRecognitionByResource[item.resourceId]!;
       recognitionByResource[item.resourceId] = recognition;
       for (var depth = 0; depth < item.relativeDirectories.length; depth++) {
         final parentKey = _segmentsKey(item.relativeDirectories.take(depth));
@@ -138,17 +446,21 @@ class _ExternalScanStructureModule {
       final parentDepth = parentSegments.length;
       final parentTitle = parentSegments.isEmpty ? '' : parentSegments.last;
       final directItems = filesByDirectory[parentEntry.key] ?? const [];
-      // A title directory with explicit episodic files at its root owns its
-      // quality subdirectories.  Do not classify those subdirectories as
-      // movie versions; numeric files below them are alternate episode
-      // resources (for example 4K HDR / DV / SDR copies of one season).
-      final hasDirectSeriesEvidence = directItems.any(
+      // Series evidence anywhere inside a title directory owns its releases.
+      // A quality label must not bypass the enclosing series classification.
+      final hasSeriesEvidence = [
+        ...directItems,
+        ...parentEntry.value.values.expand((items) => items),
+      ].any(
         (item) => _hasExplicitSeriesEvidence(
           item,
           recognition: recognitionByResource[item.resourceId],
         ),
       );
-      if (hasDirectSeriesEvidence) {
+      final hasCompleteSeriesRelease = parentEntry.value.keys.any(
+        (name) => RegExp(r'全\s*\d+\s*[集话期]').hasMatch(name),
+      );
+      if (hasSeriesEvidence || hasCompleteSeriesRelease) {
         continue;
       }
       final movieVersionGroups = parentEntry.value.entries.where((entry) {
@@ -405,6 +717,10 @@ class _ExternalScanStructureModule {
     };
     for (final directoryKey in candidateDirectoryKeys) {
       final directorySegments = _segmentsFromKey(directoryKey);
+      if (directorySegments.isEmpty &&
+          context.childItemsByDirectory[directoryKey]?.isNotEmpty == true) {
+        continue;
+      }
       if (directorySegments.isNotEmpty &&
           _isTransportDirectoryLabel(
             directorySegments.last,
@@ -483,9 +799,9 @@ class _ExternalScanStructureModule {
       return null;
     }
 
-    for (var ancestorLength = candidateSegments.length - 1;
-        ancestorLength >= 0;
-        ancestorLength--) {
+    for (var ancestorLength = 0;
+        ancestorLength < candidateSegments.length;
+        ancestorLength++) {
       if (ancestorLength >= relativeDirectories.length) {
         continue;
       }
@@ -553,8 +869,23 @@ class _ExternalScanStructureModule {
   }) {
     final seed = item.metadataSeed;
     final explicitSeasonNumber = seed.seasonNumber ?? recognition?.seasonNumber;
-    final explicitEpisodeNumber =
-        seed.episodeNumber ?? recognition?.episodeNumber;
+    final rootSegments = _segmentsFromKey(seriesRootKey);
+    final rootTitle = rootSegments.isEmpty ? '' : rootSegments.last;
+    final titleEpisodeMatch = rootTitle.isEmpty
+        ? null
+        : RegExp(
+                '^${RegExp.escape(rootTitle)}[ ._-]*0*(\\d{1,3})(?=[ ._(（]|\$)')
+            .firstMatch(item.fileName);
+    final explicitEpisodeNumber = seed.episodeNumber ??
+        recognition?.episodeNumber ??
+        int.tryParse(titleEpisodeMatch?.group(1) ?? '');
+    if (seed.episodeNumber == null &&
+        recognition?.episodeNumber == null &&
+        explicitEpisodeNumber != null) {
+      _recordRule(item, StructureField.episodeNumber,
+          StructureEvidence.filename, StructureRule.titleSuffixNumber);
+    }
+    _recordType(item, 'episode', StructureRule.seriesStructure);
     final rootDepth = _segmentsFromKey(seriesRootKey).length;
     final isRootDirectFile = item.relativeDirectories.length == rootDepth;
     final childDirectoryName =
@@ -599,6 +930,28 @@ class _ExternalScanStructureModule {
             : hintedSeasonNumber;
     final resolvedExplicitSeasonNumber =
         explicitSeasonNumber ?? (forceSpecialSeason ? 0 : null);
+    if (explicitSeasonNumber == null && derivedSeasonNumber != null) {
+      final namedSeason = !effectiveIsRootDirectFile &&
+          _parseSeasonNumberFromDirectoryName(effectiveChildDirectoryName) !=
+              null;
+      _recordRule(
+          item,
+          StructureField.seasonNumber,
+          namedSeason
+              ? StructureEvidence.directory
+              : StructureEvidence.inferred,
+          forceSpecialSeason
+              ? StructureRule.specialKeyword
+              : namedSeason
+                  ? StructureRule.directoryNumber
+                  : collapseChildDirectoryToRoot
+                      ? StructureRule.collapsedSeason
+                      : effectiveIsRootDirectFile
+                          ? derivedSeasonNumber == 0
+                              ? StructureRule.rootSpecial
+                              : StructureRule.defaultSeason
+                          : StructureRule.siblingSeason);
+    }
     final seasonGroupKey = resolvedExplicitSeasonNumber != null
         ? _buildExplicitSeasonGroupKey(resolvedExplicitSeasonNumber)
         : effectiveIsRootDirectFile
@@ -624,6 +977,7 @@ class _ExternalScanStructureModule {
     final nextSeed = seed.copyWith(
       itemType: 'episode',
       seasonNumber: resolvedExplicitSeasonNumber ?? derivedSeasonNumber,
+      episodeNumber: explicitEpisodeNumber,
     );
     final nextItem = item.copyWith(metadataSeed: nextSeed);
 
@@ -640,6 +994,7 @@ class _ExternalScanStructureModule {
     final seed = item.metadataSeed;
     final recognition = context.recognitionByResource[item.resourceId];
     if (context.movieVersionResourceIds.contains(item.resourceId)) {
+      _recordType(item, 'movie', StructureRule.movieVersions);
       final recognizedTitle = _movieVersionParentTitle(item) ??
           (recognition?.parentTitle.trim().isNotEmpty == true
               ? recognition!.parentTitle.trim()
@@ -684,6 +1039,16 @@ class _ExternalScanStructureModule {
             explicitSeasonNumber != null
         ? 'episode'
         : 'movie';
+
+    _recordType(item, resolvedItemType, StructureRule.singleFile);
+    if (explicitSeasonNumber == null && matchesSpecialEpisodeKeyword) {
+      _recordRule(item, StructureField.seasonNumber, StructureEvidence.inferred,
+          StructureRule.specialKeyword);
+    }
+    if (explicitEpisodeNumber == null && matchesSpecialEpisodeKeyword) {
+      _recordRule(item, StructureField.episodeNumber,
+          StructureEvidence.inferred, StructureRule.orderedEpisode);
+    }
 
     return item.copyWith(
       metadataSeed: seed.copyWith(
@@ -767,6 +1132,27 @@ class _ExternalScanStructureModule {
             ((resolvedSeasonNumber == 0 || !groupHasExplicitEpisodeNumber)
                 ? index + 1
                 : null);
+        if (explicitSeasonNumber == null) {
+          _recordRule(
+              item,
+              StructureField.seasonNumber,
+              StructureEvidence.inferred,
+              isDirectSeasonGroup
+                  ? StructureRule.rootSpecial
+                  : isImplicitSeasonGroup
+                      ? StructureRule.defaultSeason
+                      : StructureRule.siblingSeason);
+        }
+        if (item.metadataSeed.episodeNumber == null &&
+            recognition?.episodeNumber == null &&
+            leadingEpisodeNumbers[item.resourceId] != null) {
+          _recordRule(item, StructureField.episodeNumber,
+              StructureEvidence.filename, StructureRule.groupedLeadingNumber);
+        } else if (explicitEpisodeNumber == null &&
+            resolvedEpisodeNumber != null) {
+          _recordRule(item, StructureField.episodeNumber,
+              StructureEvidence.inferred, StructureRule.orderedEpisode);
+        }
         episodeOverrides[item.resourceId] = item.metadataSeed.copyWith(
           seasonNumber: resolvedSeasonNumber,
           episodeNumber: resolvedEpisodeNumber,
@@ -1056,6 +1442,10 @@ class _ExternalScanStructureModule {
       siblingDirectoryNames: siblingDirectoryNames,
     )) {
       return const _SeasonDirectoryHint(seasonNumber: null);
+    }
+
+    if (RegExp(r'全\s*\d+\s*[集话期]').hasMatch(childDirectoryName)) {
+      return const _SeasonDirectoryHint(seasonNumber: 1);
     }
 
     final childDirectoryDepth = _segmentsFromKey(parentDirectoryKey).length + 1;

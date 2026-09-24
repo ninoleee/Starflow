@@ -177,8 +177,51 @@ class NativePlaybackHttpDataSourceTest {
         val seen = CopyOnWriteArrayList<Request>()
         val origin = server { request -> seen.add(request); Reply() }
         val source = NativePlaybackHttpDataSource(origin.replace("http:", "https:"), credentials)
-        assertThrows(IOException::class.java) { read(source, spec(origin)) }
+        val error = assertThrows(LiveTvHttpTransport.PolicyException::class.java) { read(source, spec(origin)) }
+        assertEquals(MediaHttpRejection.HTTPS_DOWNGRADE, error.rejection.reason)
+        assertEquals("Media HTTP request rejected: HTTPS_DOWNGRADE", error.message)
         assertTrue(seen.isEmpty())
+    }
+
+    @Test fun malformedPlaybackRequestRetainsOnlySafeReason() {
+        val source = NativePlaybackHttpDataSource("file:///local/video.mkv", credentials)
+        val error = assertThrows(LiveTvHttpTransport.PolicyException::class.java) {
+            read(source, spec("https://cdn.test/secret%ZZ?token=secret"))
+        }
+        assertEquals(MediaHttpRejection.MALFORMED_URL, error.rejection.reason)
+        assertFalse(error.stackTraceToString().contains("secret"))
+    }
+
+    @Test fun hlsResourceAndRedirectUseTheSameEncodedUrlAsCredentialValidation() {
+        val seen = CopyOnWriteArrayList<Request>()
+        val foreign = server { request -> seen.add(request); Reply() }
+        val origin = server { request ->
+            seen.add(request)
+            if (request.path.startsWith("/segment")) {
+                Reply(302, headers = mapOf("Location" to "$foreign/final [1].ts?auth=a|b&sig=%2f+%25"))
+            } else Reply()
+        }
+        val source = NativePlaybackHttpDataSource("$origin/master.m3u8", credentials)
+        assertEquals("video", read(source, spec("$origin/segment [1].ts?auth=a|b&sig=%2f+%25")))
+        assertEquals("/segment%20%5B1%5D.ts?auth=a%7Cb&sig=%2f+%25", seen[0].path)
+        assertEquals(credentials["Cookie"], seen[0].headers["cookie"])
+        assertEquals("/final%20%5B1%5D.ts?auth=a%7Cb&sig=%2f+%25", seen[1].path)
+        assertForeign(seen[1])
+    }
+
+    @Test fun quarkOssProcessBracesAreEncodedBeforeJavaUriAndHttpOpen() {
+        val seen = CopyOnWriteArrayList<Request>()
+        val origin = server { request -> seen.add(request); Reply() }
+        val source = NativePlaybackHttpDataSource("$origin/media.m3u8", credentials)
+        val raw = "$origin/media-0.ts?auth_key=a&" +
+            "x-oss-process=if_status_eq_404{hls/ts,from_L3F2}&token=b"
+        assertEquals("video", read(source, spec(raw)))
+        assertEquals(
+            "/media-0.ts?auth_key=a&" +
+                "x-oss-process=if_status_eq_404%7Bhls/ts,from_L3F2%7D&token=b",
+            seen.single().path,
+        )
+        assertEquals(credentials["Cookie"], seen.single().headers["cookie"])
     }
 
     @Test fun ignoredRangeGzipAndExactEndOfFileKeepPlaybackCompatibility() {

@@ -7,6 +7,59 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
+  test('depth-limited traversal reports an incomplete scan', () async {
+    final client = WebDavNasClient(MockClient((request) async {
+      final child = '${request.url.path}nested/';
+      return http.Response(
+          '<d:multistatus xmlns:d="DAV:">'
+          '<d:response><d:href>$child</d:href><d:propstat><d:prop>'
+          '<d:displayname>nested</d:displayname><d:resourcetype><d:collection/></d:resourcetype>'
+          '</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>'
+          '</d:multistatus>',
+          207);
+    }));
+    final result = await client.scanLibrary(
+        const MediaSourceConfig(
+            id: 'deep',
+            name: 'NAS',
+            kind: MediaSourceKind.nas,
+            endpoint: 'https://nas.example.com/dav/',
+            enabled: true),
+        loadSidecarMetadata: false,
+        resolvePlayableStreams: false);
+    expect(result, isEmpty);
+    expect((result as ExternalScanResult).complete, isFalse);
+  });
+
+  test('scan reports truncation and filters known audio without GET requests',
+      () async {
+    final requests = <String>[];
+    final client = WebDavNasClient(MockClient((request) async {
+      requests.add(request.method);
+      final files = ['song.(mp3).strm', 'song.flac.strm', 'a.strm', 'b.strm'];
+      return http.Response(
+          '<d:multistatus xmlns:d="DAV:">${files.map((name) => '<d:response><d:href>/dav/$name</d:href><d:propstat><d:prop>'
+              '<d:displayname>$name</d:displayname><d:resourcetype/>'
+              '</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>').join()}</d:multistatus>',
+          207);
+    }));
+    const source = MediaSourceConfig(
+        id: 'audio-filter',
+        name: 'NAS',
+        kind: MediaSourceKind.nas,
+        endpoint: 'https://nas.example.com/dav/',
+        enabled: true);
+    final truncated = await client.scanLibrary(source,
+        limit: 1, loadSidecarMetadata: false, resolvePlayableStreams: false);
+    expect(truncated, hasLength(1));
+    expect((truncated as ExternalScanResult).complete, isFalse);
+    final complete = await client.scanLibrary(source,
+        limit: 10, loadSidecarMetadata: false, resolvePlayableStreams: false);
+    expect(complete, hasLength(2));
+    expect((complete as ExternalScanResult).complete, isTrue);
+    expect(requests, everyElement('PROPFIND'));
+  });
+
   group('WebDavNasClient', () {
     test('discovers nested videos and resolves strm direct links', () async {
       final client = WebDavNasClient(

@@ -700,10 +700,13 @@ void main() {
         source,
         sectionId: 'food-dao-dir',
         sectionName: '食贫道',
+        sectionPath: '/影视/食贫道',
         limit: 20,
       );
 
       expect(items, hasLength(3));
+      expect(items.map((item) => item.metadataSeed.structure!.rootPath).toSet(),
+          {'/影视/食贫道'});
       expect(
         items.map((item) => item.metadataSeed.seasonNumber),
         containsAll([0, 1, 2]),

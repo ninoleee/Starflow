@@ -13,6 +13,9 @@ internal class LiveTvHttpTransport(
     private val connectTimeoutMs: Int = 10000,
     private val readTimeoutMs: Int = 10000,
 ) {
+    class PolicyException(val rejection: MediaHttpPolicyException, redirect: Boolean = false) :
+        IOException("Media HTTP ${if (redirect) "redirect" else "request"} rejected: ${rejection.reason.name}", rejection)
+
     class HttpStatusException(val status: Int, val headers: Map<String, List<String>>) :
         IOException("Live HTTP status $status")
     data class Response(
@@ -24,8 +27,11 @@ internal class LiveTvHttpTransport(
     fun open(url: String, position: Long, length: Long, gzip: Boolean): Response {
         var target = url
         repeat(11) { redirectCount ->
-            val headers = try { policy.requestHeaders(target) } catch (_: IllegalArgumentException) {
-                throw IOException("Invalid live request")
+            val headers = try {
+                target = LiveTvHttpPolicy.parse(target).toString()
+                policy.requestHeaders(target)
+            } catch (error: MediaHttpPolicyException) {
+                throw PolicyException(error)
             }
             val connection = URL(target).openConnection() as HttpURLConnection
             try {
@@ -46,8 +52,8 @@ internal class LiveTvHttpTransport(
                 if (code in setOf(300, 301, 302, 303, 307, 308)) {
                     if (redirectCount == 10) throw IOException("Too many live redirects")
                     val location = connection.getHeaderField("Location") ?: throw IOException("Missing live redirect")
-                    target = try { policy.redirect(target, location) } catch (_: IllegalArgumentException) {
-                        throw IOException("Invalid live redirect")
+                    target = try { policy.redirect(target, location) } catch (error: MediaHttpPolicyException) {
+                        throw PolicyException(error, redirect = true)
                     }
                     connection.disconnect()
                     return@repeat

@@ -145,6 +145,73 @@ class LiveTvPolicyTest {
     }
 
     @Test
+    fun `rejections identify the rule without retaining private URL parser exceptions`() {
+        val cases = mapOf(
+            "https://host/secret%ZZ?token=secret" to MediaHttpRejection.MALFORMED_URL,
+            "file:///secret" to MediaHttpRejection.UNSUPPORTED_SCHEME,
+            "http:///secret" to MediaHttpRejection.INVALID_HOST,
+            "https://user:secret@host/live" to MediaHttpRejection.EMBEDDED_CREDENTIALS,
+            "https://host:99999/secret" to MediaHttpRejection.INVALID_PORT,
+        )
+        for ((url, reason) in cases) {
+            val error = assertThrows(MediaHttpPolicyException::class.java) { LiveTvHttpPolicy.parse(url) }
+            assertEquals(reason, error.reason)
+            assertFalse(error.message.orEmpty().contains("secret"))
+            assertNull(error.cause)
+        }
+        val policy = LiveTvHttpPolicy("https://source.test/master.m3u8", emptyMap<String, String>())
+        val error = assertThrows(MediaHttpPolicyException::class.java) {
+            policy.requestHeaders("http://cdn.test/segment.ts?token=secret")
+        }
+        assertEquals(MediaHttpRejection.HTTPS_DOWNGRADE, error.reason)
+        val redirect = assertThrows(MediaHttpPolicyException::class.java) {
+            policy.redirect("https://source.test/master.m3u8", "/secret%ZZ")
+        }
+        assertEquals(MediaHttpRejection.MALFORMED_URL, redirect.reason)
+        assertNull(redirect.cause)
+    }
+
+    @Test
+    fun `resource characters are quoted without changing signed escapes or query structure`() {
+        val raw = "https://source.test/a [1].ts?auth=a|b&sig=%2f%2B+%25&meta={\"x\":1}&a=1&a=2"
+        val expected = "https://source.test/a%20%5B1%5D.ts?auth=a%7Cb&sig=%2f%2B+%25&meta=%7B%22x%22:1%7D&a=1&a=2"
+        assertEquals(expected, LiveTvHttpPolicy.parse(raw).toString())
+        assertEquals(expected, LiveTvHttpPolicy.parse(expected).toString())
+        val policy = LiveTvHttpPolicy("https://source.test/master.m3u8", mapOf("Cookie" to "secret"))
+        assertEquals("secret", policy.requestHeaders(raw)["cookie"])
+        assertEquals("https://source.test/a%20b.ts?x=a%7Cb",
+            policy.redirect("https://source.test/master.m3u8", "a b.ts?x=a|b"))
+        assertEquals("https://cdn.test/a%20b.ts",
+            policy.redirect("https://source.test/master.m3u8", "//cdn.test/a b.ts"))
+        assertEquals("https://source.test/a%20b.ts?next=https://cdn.test/x%20y",
+            policy.redirect("https://source.test/master.m3u8", "a b.ts?next=https://cdn.test/x y"))
+        assertTrue(policy.requestHeaders("https://cdn.test/a b.ts").isEmpty())
+        val oss = "https://source.test/media-0.ts?auth_key=a&" +
+            "x-oss-process=if_status_eq_404{hls/ts,from_L3F2}&token=b"
+        val encodedOss = LiveTvHttpPolicy.parse(oss).toString()
+        assertEquals(
+            "https://source.test/media-0.ts?auth_key=a&" +
+                "x-oss-process=if_status_eq_404%7Bhls/ts,from_L3F2%7D&token=b",
+            encodedOss,
+        )
+        assertEquals("secret", policy.requestHeaders(oss)["cookie"])
+    }
+
+    @Test
+    fun `resource normalization never repairs unsafe authorities or control characters`() {
+        for (url in listOf("https://bad host/a b", "https://user:secret@host/a b",
+            "https://host/a\r\nb", "https://host/a\tb", "https://host/a\\b",
+            "https://host/a%ZZ", "https://host:99999/a b")) {
+            assertThrows(MediaHttpPolicyException::class.java) { LiveTvHttpPolicy.parse(url) }
+        }
+        val policy = LiveTvHttpPolicy("https://source.test/master", emptyMap<String, String>())
+        val error = assertThrows(MediaHttpPolicyException::class.java) {
+            policy.requestHeaders("http://cdn.test/a b.ts")
+        }
+        assertEquals(MediaHttpRejection.HTTPS_DOWNGRADE, error.reason)
+    }
+
+    @Test
     fun `HLS fallback is one shot and only on unrecognized container`() {
         val policy = LiveTvHlsFallbackPolicy()
         assertFalse(policy.tryFallback(false)) // HTTP and decoder failures keep their original path.

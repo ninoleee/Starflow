@@ -19,6 +19,72 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  testWidgets('Hero down returns to a horizontally scrolled first rail',
+      (tester) async {
+    final section = HomeSectionViewModel(
+      id: 'test-module',
+      title: 'Content',
+      subtitle: '',
+      emptyMessage: '',
+      layout: HomeSectionLayout.posterRail,
+      items: List.generate(
+        30,
+        (index) => HomeCardViewModel(
+          id: 'rail-$index',
+          title: 'Item $index',
+          subtitle: '',
+          posterUrl: '',
+          detailTarget: MediaDetailTarget(
+            title: 'Item $index',
+            posterUrl: '',
+            overview: '',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        isTelevisionProvider.overrideWith((ref) => true),
+        appSettingsProvider.overrideWithValue(_homeSettings),
+        homeResolvedSectionsProvider.overrideWithValue(
+          HomeResolvedSectionsState(sections: [_singleHeroSection, section]),
+        ),
+        homeSectionProvider.overrideWith((ref, id) async => section),
+      ],
+      child: const MaterialApp(home: HomePage()),
+    ));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    final rail = tester.widget<ListView>(find.byWidgetPredicate(
+      (widget) =>
+          widget is ListView && widget.scrollDirection == Axis.horizontal,
+    ));
+    rail.controller!.jumpTo(2200);
+    await tester.pumpAndSettle();
+    final visibleTile = tester
+        .widgetList<MediaPosterTile>(find.byType(MediaPosterTile))
+        .firstWhere((tile) => tile.title == 'Item 15');
+    visibleTile.focusNode!.requestFocus();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.debugLabel,
+        'home-hero-card:hero-item-1');
+    expect(
+        find.byWidgetPredicate(
+            (widget) => widget is MediaPosterTile && widget.title == 'Item 0'),
+        findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(visibleTile.focusNode!.hasFocus, isTrue);
+    final rect = tester.getRect(find.byWidgetPredicate(
+        (widget) => widget is MediaPosterTile && widget.title == 'Item 15'));
+    expect(rect.top, greaterThanOrEqualTo(0));
+    expect(rect.bottom, lessThanOrEqualTo(600));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('home focus recovery finishes when scrolling cannot reveal target',
       (tester) async {
     var menuRequests = 0;

@@ -111,6 +111,7 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
       modifiedAt: record.modifiedAt,
       fileSizeBytes: record.fileSizeBytes,
       metadataSeed: WebDavMetadataSeed(
+        structure: record.structure,
         title: item.title,
         overview: item.overview,
         posterUrl: item.posterUrl,
@@ -234,6 +235,12 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
     required MediaSourceConfig source,
     required DateTime indexedAt,
   }) {
+    final structure =
+        source.webDavStructureInferenceEnabled && !existing.manualMetadataLocked
+            ? scannedItem.metadataSeed.structure
+                    ?.preservingStrongerNumbers(existing.structure) ??
+                existing.structure
+            : existing.structure;
     final refreshedItem = MediaItem(
       id: scannedItem.resourceId,
       title: existing.item.title,
@@ -255,7 +262,9 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
       genres: existing.item.genres,
       directors: existing.item.directors,
       actors: existing.item.actors,
-      itemType: existing.item.itemType,
+      itemType: existing.manualMetadataLocked
+          ? existing.item.itemType
+          : structure?.itemType ?? existing.item.itemType,
       sectionId: scannedItem.sectionId,
       sectionName: scannedItem.sectionName,
       sourceId: source.id,
@@ -268,8 +277,12 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
           ? scannedItem.playbackItemId
           : existing.item.playbackItemId,
       preferredMediaSourceId: existing.item.preferredMediaSourceId,
-      seasonNumber: existing.item.seasonNumber,
-      episodeNumber: existing.item.episodeNumber,
+      seasonNumber: structure != null && !existing.manualMetadataLocked
+          ? structure.seasonNumber
+          : existing.item.seasonNumber,
+      episodeNumber: structure != null && !existing.manualMetadataLocked
+          ? structure.episodeNumber
+          : existing.item.episodeNumber,
       playbackProgress: existing.item.playbackProgress,
       doubanId: existing.item.doubanId,
       imdbId: existing.item.imdbId,
@@ -287,13 +300,23 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
       lastWatchedAt: existing.item.lastWatchedAt,
     );
     return NasMediaIndexRecord(
+      structure: structure,
       id: existing.id,
       sourceId: existing.sourceId,
       sectionId: scannedItem.sectionId,
       sectionName: scannedItem.sectionName,
       resourceId: existing.resourceId,
       resourcePath: scannedItem.actualAddress,
-      fingerprint: existing.fingerprint,
+      fingerprint: structure == null
+          ? existing.fingerprint
+          : _buildFingerprint(
+              sourceId: source.id,
+              resourcePath: scannedItem.actualAddress,
+              modifiedAt: scannedItem.modifiedAt,
+              fileSizeBytes: scannedItem.fileSizeBytes,
+              structureSignature:
+                  _buildStructureFingerprintSignature(scannedItem),
+            ),
       fileSizeBytes: scannedItem.fileSizeBytes,
       modifiedAt: scannedItem.modifiedAt,
       indexedAt: indexedAt,
@@ -303,10 +326,20 @@ extension _NasMediaIndexerStorageAccessX on NasMediaIndexer {
       originalFileName: scannedItem.fileName,
       parentTitle: existing.parentTitle,
       recognizedYear: existing.recognizedYear,
-      recognizedItemType: existing.recognizedItemType,
-      preferSeries: existing.preferSeries,
-      recognizedSeasonNumber: existing.recognizedSeasonNumber,
-      recognizedEpisodeNumber: existing.recognizedEpisodeNumber,
+      recognizedItemType: !existing.manualMetadataLocked
+          ? structure?.itemType ?? existing.recognizedItemType
+          : existing.recognizedItemType,
+      preferSeries: structure != null && !existing.manualMetadataLocked
+          ? structure.itemType == 'episode'
+          : existing.preferSeries,
+      recognizedSeasonNumber:
+          structure != null && !existing.manualMetadataLocked
+              ? structure.seasonNumber
+              : existing.recognizedSeasonNumber,
+      recognizedEpisodeNumber:
+          structure != null && !existing.manualMetadataLocked
+              ? structure.episodeNumber
+              : existing.recognizedEpisodeNumber,
       sidecarStatus: existing.sidecarStatus,
       wmdbStatus: existing.wmdbStatus,
       tmdbStatus: existing.tmdbStatus,
@@ -694,7 +727,8 @@ _NasLibraryMatchCache _buildNasLibraryMatchCache(
   final seriesGroupsBySectionId = <String, Map<String, _SeriesRecordGroup>>{};
   for (final entry in recordsBySectionId.entries) {
     seriesGroupsBySectionId[entry.key] = <String, _SeriesRecordGroup>{
-      for (final group in grouping.groupSeriesRecords(entry.value))
+      for (final group in seriesGroups.where((group) =>
+          group.records.any((record) => record.sectionId.trim() == entry.key)))
         group.seriesItemId: group,
     };
   }

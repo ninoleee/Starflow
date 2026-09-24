@@ -71,6 +71,10 @@ void main() {
         ));
         await tester.pumpAndSettle();
         expect(find.text(history), findsOneWidget);
+        expect(tester.getCenter(find.text('最近搜索')).dy,
+            closeTo(tester.getCenter(find.text(history)).dy, 0.1));
+        expect(tester.getRect(find.text('最近搜索')).right,
+            lessThan(tester.getRect(find.text(history)).left));
         final chips = find.byType(StarflowChipButton);
         expect(chips, findsWidgets);
         final sizes = <Size>[];

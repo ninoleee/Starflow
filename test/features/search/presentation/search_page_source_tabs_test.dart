@@ -57,6 +57,9 @@ void main() {
       ));
       expect(scrollable.position.maxScrollExtent, greaterThan(0));
       final y = tester.getCenter(find.text(queries.first)).dy;
+      final heading = find.text('最近搜索');
+      expect(tester.getCenter(heading).dy, closeTo(y, 0.1));
+      expect(tester.getRect(heading).right, lessThan(tester.getRect(history).left));
       for (final query in queries) {
         expect(tester.getCenter(find.text(query)).dy, closeTo(y, 0.1));
       }
@@ -93,6 +96,7 @@ void main() {
       expect(scrollable.position.pixels, greaterThan(0));
       expect(tester.getRect(history).contains(tester.getCenter(lastQuery)), isTrue);
       expect(tester.getSize(history).height, originalHeight);
+      expect(tester.getCenter(heading).dy, closeTo(y, 0.1));
       if (mode.television) {
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       } else {

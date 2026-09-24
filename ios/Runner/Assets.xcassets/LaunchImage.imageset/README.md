@@ -17,19 +17,7 @@
 
 以上源码路径相对仓库根目录。不要单独覆盖本目录图片再期待下次生成保留手工修改；应更新母版并统一导出。
 
-在仓库根目录执行，需 Python 3、Pillow，完整导出还需 Microsoft Edge 渲染 TV 横幅：
-
-```sh
-python3 tool/generate_brand_assets.py
-```
-
-Windows 示例：
-
-```powershell
-C:\anaconda3\python.exe tool\generate_brand_assets.py
-```
-
-可用 `EDGE_PATH` 指定浏览器。导出后检查 Asset Catalog、完整构图、深色图标和 Flutter 启动首屏；需要改变原生启动布局时，另行检查 storyboard，而不是把运行时 Flutter UI 添加到本资源说明。
+跨平台导出命令和依赖统一见 [README 品牌资源](../../../../README.md#品牌资源)。导出后检查 Asset Catalog、完整构图、深色图标和 Flutter 启动首屏；需要改变原生启动布局时，另行检查 storyboard，而不是把运行时 Flutter UI 添加到本资源说明。
 
 检查 Xcode 资源：
 

@@ -278,7 +278,7 @@ String _detailLibrarySourceKey(MediaDetailTarget target) {
   final kind = (target.sourceKind ?? MediaSourceKind.nas).name;
   final sourceId = target.sourceId.trim();
   if (sourceId.isNotEmpty) {
-    return '$kind|id:$sourceId';
+    return '$kind|id:$sourceId${target.isSeries ? '|series:${target.itemId}' : ''}';
   }
   return '$kind|name:${target.sourceName.trim().toLowerCase()}';
 }
@@ -502,7 +502,9 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         oldWidget.target.seasonNumber != widget.target.seasonNumber ||
         oldWidget.target.episodeNumber != widget.target.episodeNumber ||
         oldWidget.target.title != widget.target.title ||
-        oldWidget.target.searchQuery != widget.target.searchQuery) {
+        oldWidget.target.searchQuery != widget.target.searchQuery ||
+        !listEquals(
+            oldWidget.target.workResources, widget.target.workResources)) {
       _cancelDetailTasks(
         additionalTargets: [oldWidget.target],
       );
@@ -1138,7 +1140,8 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       setState(() => _detailEnrichmentReady = true);
     }
 
-    if (!runtimePlan.shouldAttemptAutoLibraryMatch) {
+    if (!runtimePlan.shouldAttemptAutoLibraryMatch ||
+        widget.target.workResources.isNotEmpty) {
       return;
     }
 
@@ -1200,12 +1203,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
       return DetailMetadataRefreshStatus.never;
     }
     _initialDetailCacheFuture = null;
-    if (cachedState == null) {
+    if (cachedState == null && widget.target.workResources.isEmpty) {
       return DetailMetadataRefreshStatus.never;
     }
     final restorePlan = _detailCachedStateRestorer.buildPlan(
       pageSeedTarget: widget.target,
-      cachedState: cachedState,
+      cachedState: cachedState ?? CachedDetailState(target: widget.target),
     );
     _updateLibraryMatchView(
       choices: restorePlan.libraryMatchChoices,
@@ -1214,10 +1217,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
     );
     final manualOverrideTarget = restorePlan.manualOverrideTarget;
     if (manualOverrideTarget == null) {
-      return cachedState.metadataRefreshStatus;
+      return cachedState?.metadataRefreshStatus ??
+          DetailMetadataRefreshStatus.never;
     }
     _pageController.setManualOverrideTarget(manualOverrideTarget);
-    return cachedState.metadataRefreshStatus;
+    return cachedState?.metadataRefreshStatus ??
+        DetailMetadataRefreshStatus.never;
   }
 
   Future<void> _restoreIndexedEpisodeVariantChoices(

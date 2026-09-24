@@ -437,6 +437,7 @@ class MediaItem {
     this.fileSizeBytes,
     required this.addedAt,
     this.lastWatchedAt,
+    this.workResources = const [],
   });
 
   final String id;
@@ -492,6 +493,9 @@ class MediaItem {
   final int? fileSizeBytes;
   final DateTime addedAt;
   final DateTime? lastWatchedAt;
+
+  /// Transient card members, never serialized into source/index records.
+  final List<MediaItem> workResources;
 
   bool get isPlayable =>
       streamUrl.trim().isNotEmpty || playbackItemId.trim().isNotEmpty;
@@ -550,6 +554,7 @@ class MediaItem {
     int? fileSizeBytes,
     DateTime? addedAt,
     DateTime? lastWatchedAt,
+    List<MediaItem>? workResources,
   }) {
     return MediaItem(
       id: id ?? this.id,
@@ -606,6 +611,7 @@ class MediaItem {
       fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
       addedAt: addedAt ?? this.addedAt,
       lastWatchedAt: lastWatchedAt ?? this.lastWatchedAt,
+      workResources: workResources ?? this.workResources,
     );
   }
 

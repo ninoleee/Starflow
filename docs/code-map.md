@@ -27,7 +27,7 @@
 | `scripts/` | 发布、环境准备、依赖重建及平台检查；部分脚本修改版本和构建目录 |
 | `tool/` | 代码生成、主机计时、Web 开发代理与手动诊断 |
 | `test/` | Dart 单元 / 组件 / smoke 测试及跨语言 fixture |
-| `docs/` | 当前架构、网络、主机 / 真机性能、字幕与带日期的审查记录；HTML 是品牌设计素材 |
+| `docs/` | [文档索引](README.md)、现行架构与专题；`reviews/` 集中保存带日期的历史审查，HTML 是品牌设计素材 |
 | `backups/branding/`、`icons/` | 品牌历史说明与设计原图，不是应用运行数据 |
 | `pubspec.yaml / pubspec.lock` | 版本、依赖、插件覆盖和资源；自动发布会改版本 |
 | `analysis_options.yaml`、`devtools_options.yaml` | 静态检查和开发工具设置 |
@@ -105,6 +105,8 @@ TMDB / WMDB 标题和 ID 查询缓存以 generation 隔离清空前请求，fina
 
 ### 媒体库与存储
 
+2026-09-24：`library/domain/media_work_aggregation.dart` 是“全部”及最近新增的作品卡片分组入口，不改变 `AppMediaQueryService.fetchLibrary` 的资源返回值；`MediaItem.workResources` 随详情导航转成瞬态候选，`DetailCachedStateRestorer` 恢复当前成员及来源选择。回归入口为 `test/media_work_aggregation_test.dart`、`test/features/library/presentation/library_cache_scope_test.dart`、`test/home_controller_test.dart` 和 `test/media_detail_match_restore_test.dart`。
+
 ```text
 AppMediaRepository -> AppMediaQueryService -> MediaServerClient / 本地索引
                    -> MediaRefreshCoordinator -> 来源刷新 / NAS enrichment
@@ -113,7 +115,7 @@ AppMediaRepository -> AppMediaQueryService -> MediaServerClient / 本地索引
 
 - Emby / 飞牛使用媒体服务器缓存分片；根列表读取最多 400 条 summary，分区只读目标 shard，完整匹配最多两路解码。飞牛刷新成功后按前后快照的条目 ID 差集清理详情关联、匹配候选、续播记录和剧集播放偏好；刷新失败继续保留旧快照。
 - NAS 索引由 `nas_media_indexer.dart` 及 `refresh_flow / storage_access / indexing / grouping / refresh_support` 的 `part` 文件共同实现；这些不是彼此独立的服务。
-- `nas_media_index_store_impl_io.dart` 使用 Sembast；Web 有单独实现。当前 schema 是 `webdav-v15`，支持分区过滤与 upsert / patch，不再只做整库覆盖。
+- `nas_media_index_store_impl_io.dart` 使用 Sembast；Web 有单独实现。当前 schema 是 `webdav-v17`，支持分区过滤与 upsert / patch，不再只做整库覆盖。`external_media_structure.dart` 保存作品目录、资源角色及季集证据；扫描、索引、分组和删除共享该归属，`ExternalScanResult` 传递扫描完整性。`nas_media_indexer_grouping.dart` 按一级媒体目录统一剧集/电影入口。只读真实目录诊断入口为 `tool/debug/webdav_directory_grouping_test.dart`，配置和相对目录通过环境变量传入，禁用在线及 sidecar 补全，索引仅写入内存，并检查《重启人生》的季集与版本数量。
 - `webdav_nas_client.dart` 的 structure / sidecar / background 文件也是同一 Dart library。普通页面优先读索引，不实时扫全目录。
 - `resource_path_identity.dart` 与 `media_source_identity.dart` 分别处理资源路径和来源身份；不要因元数据身份相同复用不同资源的直链或鉴权头。
 - `library/data/nfo_metadata.dart` 共享 WebDAV / 夸克 XML 字段解析，`details/domain/cached_artwork.dart` 共享图片 URL 与 headers 配对合并；`library/presentation/library_resource_deletion.dart` 复用两级媒体库页面的删除确认。
@@ -122,6 +124,9 @@ AppMediaRepository -> AppMediaQueryService -> MediaServerClient / 本地索引
 `local_storage_cache_repository.dart` 保留 provider 和公共兼容入口；`detail_cache_store.dart` 与 `media_server_cache_store.dart` 分别持有详情及分片缓存的读取复用、修改队列和内存状态，`local_storage_cache_models.dart` 保存公共类型并由旧入口导出。重构不改变存储 key 或缓存格式，并保留整理期间已落地的 Timer 批量写入。
 
 ### 搜索、转存与收藏
+
+`search/domain/search_result_resolution.dart` 识别在线结果的清晰度标记；`search/presentation/search_page.dart` 缓存识别结果并组合网盘、清晰度筛选，不改搜索请求或收藏模型。
+`search/presentation/widgets/search_filter_row.dart` 管理三组筛选的标签对齐、手机横向滚动、宽屏 / TV 换行与大字体布局；筛选状态和清除操作仍由搜索页持有。
 
 ```text
 SearchPage -> SearchRequest -> SearchSession -> SearchRepository
@@ -143,7 +148,7 @@ SearchPage -> SearchRequest -> SearchSession -> SearchRepository
 
 ### 直播电视
 
-以下相对 `lib/features/live_tv/`，按 2026-09-20 当前实现核对，不使用 [早期接口契约](live-tv-contract.md) 中尚未落地的文件名或具名播放路由。
+以下相对 `lib/features/live_tv/`，基础入口按 2026-09-20 实现核对，后续变更按节注明；有效约束见 [直播实现契约](live-tv.md#实现契约)，不使用已移除的实现前草稿类名或具名播放路由。
 
 | 入口 | 职责与边界 |
 | --- | --- |
@@ -273,6 +278,8 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 | `tool/debug/manual_nas_grouping_test.dart` | 手动分组诊断，不属于默认 `flutter test` 回归集合 |
 
 ## 测试导航与维护原则
+
+- 2026-09-24 结构证据入口：`library/data/structure_evidence.dart` 定义字段来源、显式优先级、规则编号和冲突；`external_media_structure.dart` 负责持久化兼容与编号合并。`webdav_nas_client_structure.dart` 在 WebDAV / Quark 共用推断分支记录依据，`nas_media_indexer_refresh_flow.dart` 保留 NFO 冲突。`test/external_media_structure_evidence_test.dart` 覆盖优先级、冲突去重/上限、旧 JSON 与命名规则；`test/nas_media_indexer_test.dart` 覆盖补全后的增量复用和记录序列化。
 
 - Dart：`test/` 根目录及 `test/features/` 按领域覆盖模型、仓库、网络、缓存、页面和控制器；`test/core/` 覆盖公共身份等规则；`test/perf/` 是主机 smoke。
 - 整理期间新增 `test/perf/performance_audit_probe_test.dart` 是行为 / 工作量审计探针，不在五场景计时脚本列表内，也不是设备性能报告；前面的全量结果不自动覆盖后续新增测试。

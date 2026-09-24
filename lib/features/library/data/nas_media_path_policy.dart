@@ -58,6 +58,26 @@ class NasSeriesRootResolution {
 class NasMediaPathPolicy {
   const NasMediaPathPolicy._();
 
+  static bool isResourceWithinDirectory(String resource, String directory) {
+    if (directory.trim().isEmpty) return false;
+    final resourceUri = Uri.tryParse(resource);
+    final directoryUri = Uri.tryParse(directory);
+    if (resourceUri?.hasAuthority == true &&
+        directoryUri?.hasAuthority == true &&
+        (resourceUri!.scheme != directoryUri!.scheme ||
+            resourceUri.authority != directoryUri.authority)) {
+      return false;
+    }
+    final resourceSegments = pathSegments(uriPath(resource));
+    final directorySegments = pathSegments(uriPath(directory));
+    return directorySegments.isNotEmpty &&
+        resourceSegments.length > directorySegments.length &&
+        directorySegments
+            .asMap()
+            .entries
+            .every((entry) => entry.value == resourceSegments[entry.key]);
+  }
+
   static const Set<String> defaultPublicDirectoryLabels = <String>{
     'dav',
     'media',
@@ -256,6 +276,10 @@ class NasMediaPathPolicy {
         configuredKeywords: configuredKeywords,
       )) {
         lastBoundaryIndex = index;
+      } else {
+        // Once a title directory is reached, nested transport/quality labels
+        // cannot establish another library boundary.
+        break;
       }
     }
     final firstCandidateIndex = lastBoundaryIndex + 1;

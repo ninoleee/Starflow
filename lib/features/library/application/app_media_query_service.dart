@@ -10,6 +10,7 @@ import 'package:starflow/features/library/data/nas_media_indexer.dart';
 import 'package:starflow/features/library/data/quark_external_storage_client.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/domain/media_work_aggregation.dart';
 import 'package:starflow/features/library/domain/media_title_matcher.dart';
 import 'package:starflow/features/metadata/application/metadata_prefetch_concurrency_limiter.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
@@ -156,8 +157,8 @@ class AppMediaQueryService {
     MediaSourceKind? kind,
     int limit = 10,
   }) async {
-    final items = await fetchLibrary(kind: kind, limit: limit);
-    return items.take(limit).toList();
+    final items = await fetchLibrary(kind: kind, limit: limit < 200 ? 200 : limit);
+    return aggregateMediaWorks(items).take(limit).toList();
   }
 
   Future<List<MediaItem>> fetchChildren({

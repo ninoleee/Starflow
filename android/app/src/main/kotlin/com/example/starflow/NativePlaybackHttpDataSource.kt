@@ -29,8 +29,8 @@ internal class NativePlaybackHttpDataSource(
         val origin = runCatching { LiveTvHttpPolicy.parse(sourceUrl).toString() }.getOrNull()
         val policy = try {
             LiveTvHttpPolicy(origin ?: url, if (origin == null) emptyMap<String, String>() else headers + dataSpec.httpRequestHeaders)
-        } catch (_: IllegalArgumentException) {
-            throw IOException("Invalid playback request")
+        } catch (error: MediaHttpPolicyException) {
+            throw LiveTvHttpTransport.PolicyException(error)
         }
         val opened = try {
             LiveTvHttpTransport(policy, NATIVE_HTTP_CONNECT_TIMEOUT_MS, NATIVE_HTTP_READ_TIMEOUT_MS)

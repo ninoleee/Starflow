@@ -1,10 +1,28 @@
 package com.example.starflow
 
 import androidx.media3.common.C
+import androidx.media3.datasource.DataSpec
+import androidx.media3.exoplayer.source.LoadEventInfo
+import androidx.media3.exoplayer.source.MediaLoadData
+import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import java.io.IOException
+import org.mockito.Mockito.mock
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class NativePlaybackLoadErrorPolicyTest {
+    @Test
+    fun `policy rejection is not retried even when wrapped as an IO error`() {
+        val rejection = LiveTvHttpTransport.PolicyException(
+            MediaHttpPolicyException(MediaHttpRejection.HTTPS_DOWNGRADE))
+        for (error in listOf(rejection, IOException("Source error", rejection))) {
+            val info = LoadErrorHandlingPolicy.LoadErrorInfo(
+                LoadEventInfo(1L, mock(DataSpec::class.java), 0L),
+                MediaLoadData(C.DATA_TYPE_MEDIA), error, 1)
+            assertEquals(C.TIME_UNSET, NativePlaybackLoadErrorPolicy().getRetryDelayMsFor(info))
+        }
+    }
+
     @Test
     fun `classifies permanent and transient HTTP statuses`() {
         assertEquals(

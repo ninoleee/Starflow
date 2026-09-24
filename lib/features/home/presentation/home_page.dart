@@ -171,9 +171,13 @@ class _HomePageState extends ConsumerState<HomePage>
   final GlobalKey<_FeaturedHeroState> _featuredHeroKey =
       GlobalKey<_FeaturedHeroState>();
   final Map<String, FocusNode> _contentFocusNodes = <String, FocusNode>{};
+  // Hero-down returns to the last visible card in the first content section.
+  final Map<String, String> _focusedContentKeyBySection = <String, String>{};
+  final Map<String, String> _contentSectionIdByFocusKey = <String, String>{};
   final FocusNode _homeEditFocusNode =
       FocusNode(debugLabel: 'home-edit-action');
   String _firstFocusableContentKey = '';
+  String _firstFocusableContentSectionId = '';
   bool _contentFocusNodePruneScheduled = false;
   Set<String> _pendingContentFocusNodeKeys = const <String>{};
   int _heroFocusBelowRequestVersion = 0;
@@ -766,6 +770,8 @@ class _HomePageState extends ConsumerState<HomePage>
           resolvedSections: resolvedSections,
         ) ??
         '';
+    _firstFocusableContentSectionId =
+        _contentSectionIdByFocusKey[_firstFocusableContentKey] ?? '';
     final hasHeroListSlot =
         heroEnabled && (featuredItems.isNotEmpty || hasPendingSections);
     _hasHeroSlot = hasHeroListSlot;
@@ -959,7 +965,19 @@ class _HomePageState extends ConsumerState<HomePage>
   FocusNode _focusNodeForContent(String focusKey) {
     return _contentFocusNodes.putIfAbsent(
       focusKey,
-      () => FocusNode(debugLabel: 'home-content:$focusKey'),
+      () {
+        final node = FocusNode(debugLabel: 'home-content:$focusKey');
+        node.addListener(() {
+          if (!node.hasFocus && !node.hasPrimaryFocus) {
+            return;
+          }
+          final sectionId = _contentSectionIdByFocusKey[focusKey];
+          if (sectionId != null) {
+            _focusedContentKeyBySection[sectionId] = focusKey;
+          }
+        });
+        return node;
+      },
     );
   }
 
@@ -987,16 +1005,28 @@ class _HomePageState extends ConsumerState<HomePage>
   List<String> _resolveHomeFocusTopology(
     List<HomeSectionViewModel> sections,
   ) {
+    _contentSectionIdByFocusKey.clear();
     return <String>[
       for (final section in sections) ...<String>[
         'section:${section.id}:${section.layout.name}',
         for (final item in section.items)
-          _homeSectionItemFocusKey(section, item),
+          _recordContentFocusKey(
+            section.id,
+            _homeSectionItemFocusKey(section, item),
+          ),
         for (final item in section.carouselItems)
-          _homeCarouselItemFocusKey(section, item),
+          _recordContentFocusKey(
+            section.id,
+            _homeCarouselItemFocusKey(section, item),
+          ),
         if (section.viewAllTarget != null) _homeSectionViewAllFocusKey(section),
       ],
     ];
+  }
+
+  String _recordContentFocusKey(String sectionId, String focusKey) {
+    _contentSectionIdByFocusKey[focusKey] = sectionId;
+    return focusKey;
   }
 
   void _focusBelowHeroContent() {
@@ -1043,10 +1073,22 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   bool _requestHeroNextSectionFocus() {
-    final targetNode = _contentFocusNodes[_firstFocusableContentKey];
+    final focusedKey =
+        _focusedContentKeyBySection[_firstFocusableContentSectionId];
+    final focusedNode =
+        focusedKey == null ? null : _contentFocusNodes[focusedKey];
+    final focusedContext = focusedNode?.context;
+    final targetKey = focusedNode != null &&
+            focusedContext != null &&
+            focusedContext.mounted &&
+            focusedNode.canRequestFocus
+        ? focusedKey!
+        : _firstFocusableContentKey;
+    final targetNode = _contentFocusNodes[targetKey];
     final targetContext = targetNode?.context;
     if (targetNode == null ||
         targetContext == null ||
+        !targetContext.mounted ||
         !targetNode.canRequestFocus) {
       return false;
     }

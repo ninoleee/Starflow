@@ -1,4 +1,5 @@
 import 'package:starflow/features/library/domain/media_models.dart';
+import 'package:starflow/features/library/data/external_media_structure.dart';
 
 enum NasMetadataFetchStatus {
   never,
@@ -38,6 +39,7 @@ extension NasMetadataFetchStatusX on NasMetadataFetchStatus {
 
 class NasMediaIndexRecord {
   const NasMediaIndexRecord({
+    this.structure,
     required this.id,
     required this.sourceId,
     required this.sectionId,
@@ -69,6 +71,7 @@ class NasMediaIndexRecord {
   });
 
   final String id;
+  final ExternalMediaStructure? structure;
   final String sourceId;
   final String sectionId;
   final String sectionName;
@@ -106,11 +109,13 @@ class NasMediaIndexRecord {
   bool get imdbMatched => imdbStatus.isSuccessful;
 
   NasMediaIndexRecord copyWith({
+    ExternalMediaStructure? structure,
     String? sectionId,
     String? sectionName,
     MediaItem? item,
   }) {
     return NasMediaIndexRecord(
+      structure: structure ?? this.structure,
       id: id,
       sourceId: sourceId,
       sectionId: sectionId ?? this.sectionId,
@@ -151,6 +156,7 @@ class NasMediaIndexRecord {
 
   Map<String, dynamic> toJson() {
     return {
+      'structure': structure?.toJson(),
       'id': id,
       'sourceId': sourceId,
       'sectionId': sectionId,
@@ -184,6 +190,10 @@ class NasMediaIndexRecord {
 
   factory NasMediaIndexRecord.fromJson(Map<String, dynamic> json) {
     return NasMediaIndexRecord(
+      structure: json['structure'] is Map
+          ? ExternalMediaStructure.fromJson(
+              Map<String, dynamic>.from(json['structure'] as Map))
+          : null,
       id: json['id'] as String? ?? '',
       sourceId: json['sourceId'] as String? ?? '',
       sectionId: json['sectionId'] as String? ?? '',

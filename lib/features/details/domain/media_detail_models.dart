@@ -163,6 +163,7 @@ class MediaDetailTarget {
     this.providerIds = const {},
     this.sourceKind,
     this.sourceName = '',
+    this.workResources = const [],
   });
 
   final String title;
@@ -208,6 +209,9 @@ class MediaDetailTarget {
   final Map<String, String> providerIds;
   final MediaSourceKind? sourceKind;
   final String sourceName;
+
+  /// Current aggregate membership travels with navigation, not detail storage.
+  final List<MediaDetailTarget> workResources;
 
   bool get isPlayable => playbackTarget?.canPlay == true;
 
@@ -339,6 +343,7 @@ class MediaDetailTarget {
     Map<String, String>? providerIds,
     MediaSourceKind? sourceKind,
     String? sourceName,
+    List<MediaDetailTarget>? workResources,
   }) {
     return MediaDetailTarget(
       title: title ?? this.title,
@@ -384,6 +389,7 @@ class MediaDetailTarget {
       providerIds: providerIds ?? this.providerIds,
       sourceKind: sourceKind ?? this.sourceKind,
       sourceName: sourceName ?? this.sourceName,
+      workResources: workResources ?? this.workResources,
     );
   }
 
@@ -441,6 +447,9 @@ class MediaDetailTarget {
       ratingCount: item.ratingCount,
       sourceKind: item.sourceKind,
       sourceName: item.sourceName,
+      workResources: item.workResources
+          .map(MediaDetailTarget.fromMediaItem)
+          .toList(growable: false),
     );
   }
 

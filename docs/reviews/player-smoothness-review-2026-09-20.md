@@ -1,5 +1,7 @@
 # 播放器流畅度审查
 
+> 历史审查与分批修复记录，2026-09-24 归档。修复前问题、源码行号、当时未接入的路径及测试计数只对应各自快照；现行组件边界见 [架构说明](../architecture.md)，后续验证见 [主机记录](../performance.md)。
+
 审查及修复日期：2026-09-20。范围是当前工作区的全部播放路径及其共享启动、控制、字幕、存储和媒体会话链路，包含已有未提交修改。最初只读审查，随后按用户要求在当前任务实施修复；下方“优先发现”保留为修复前快照，不代表问题仍原样存在。未递增版本或运行发布预设。
 
 ## 本次处理状态
@@ -11,11 +13,11 @@
 - **附带处理**：原生启动日志区分 exo/avplayer，iOS 容器呈现与 `playing` 指标不再命名为真实首帧。桌面外部播放器用专属临时播放列表目录、唯一分配和十分钟清理节流，不遍历系统临时根目录；不会扫描或删除旧版根目录遗留播放列表。
 - **仍需测量/未扩展范围**：全屏 MPV 属性差异写入、AVPlayer 连续精确 seek 容差、实际首帧像素指标、设备硬解/刷新率/温控和缓存调参未在无设备证据下改动。新建直播功能由其他工作处理，不在本次点播播放器修复范围。
 
-验证记录以 [performance.md](performance.md) 本次实施条目为准；下面最初 148 Flutter / 80 JVM 的审查结果仅是修复前快照，不可当成本次回归。
+验证记录以 [performance.md](../performance.md) 本次实施条目为准；下面最初 148 Flutter / 80 JVM 的审查结果仅是修复前快照，不可当成本次回归。
 
 最初审查收尾期间其他任务继续调整播放器日志/诊断与飞牛选轨。当时重新核对后问题仍存在，随后实施状态见上；最初专项测试不覆盖后续修复。易变化的 Dart 路径按函数名定位，行号不作为长期接口。
 
-组件边界以 [architecture.md](architecture.md) 为准，导航见 [code-map.md](code-map.md)，字幕边界见 [subtitles.md](subtitles.md)，本轮主机证据见 [performance.md](performance.md)，设备验收方法见 [performance-device.md](performance-device.md)。本次没有连接 TV 或运行 iPhone、桌面 GUI、浏览器实际播放，不能给出帧率提升百分比。
+组件边界以 [architecture.md](../architecture.md) 为准，导航见 [code-map.md](../code-map.md)，字幕边界见 [subtitles.md](../subtitles.md)，本轮主机证据见 [performance.md](../performance.md)，设备验收方法见 [performance-device.md](../performance-device.md)。本次没有连接 TV 或运行 iPhone、桌面 GUI、浏览器实际播放，不能给出帧率提升百分比。
 
 ## 十方向复审补充（2026-09-20）
 
@@ -25,7 +27,7 @@
 - **P02**：恢复绑定同步用户意图 revision、播放意图、前后台状态和 player 身份。暂停、seek（含 TV 合并输入）、手动切集、退出或失活作废旧恢复；延迟确认、play 返回后的 seek、硬回收和新目标解析均验证当前性。已提交给原生引擎的单条命令不等于可撤销，本轮阻止其后续陈旧命令和重建提交。硬重建取消后保留显式重试入口，不自动继续或永远显示加载。
 - **P03**：iOS 自动与手动相邻集请求独立判优先级，新手动请求可替代 pending 自动请求。AVPlayer 的 play/pause/rate/seek 命令经同步 intent 边界，包括系统播放控件和 remote command；后续明确操作取消旧自动切集，迟到转码结果仅释放。播放器/异步记忆准备 generation 与 episode resolver generation 分离，取消切集不误伤当前媒体的记忆准备。
 - **P04**：preroll 返回 false 时，仅 item failed 或存在 item.error 才报告失败；无错误的时间/速率中断按取消收尾，不强行 play。显式操作取消 gate 和启动超时，迟到成功回调不得恢复播放；启动自身 seek/play 绕过用户命令 bookkeeping。
-- **T01–T04**：媒体 intent、pointer、菜单回退和大字 chip 高度修复见 [TV 焦点清单](tv-focus.md)。没有修改 README、版本、发布脚本、AppDelegate、原生记忆存储或 Android 原生文件；其他任务修改不纳入本轮文件归属。
+- **T01–T04**：媒体 intent、pointer、菜单回退和大字 chip 高度修复见 [TV 焦点清单](../tv-focus.md)。没有修改 README、版本、发布脚本、AppDelegate、原生记忆存储或 Android 原生文件；其他任务修改不纳入本轮文件归属。
 
 主机验证：首批新增恢复/输入测试 19 项通过；最终扩展回归、Swift runner 和布局截图结果待本轮收尾记录。没有实机弱网播放、iPhone AVKit 手势或物理 TV 遥控/空鼠验收，不声明帧率或真实首帧改善。
 

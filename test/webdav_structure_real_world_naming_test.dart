@@ -13,6 +13,145 @@ void main() {
     webDavSeriesTitleFilterKeywords: ['movies', 'strm', 'quark'],
   );
 
+  test('independent first-level titles never share implicit season numbers',
+      () {
+    final resolved = applyExternalDirectoryStructureInference([
+      for (final title in ['Alpha', 'Bravo'])
+        for (var episode = 1; episode <= 2; episode++)
+          _pendingItem(
+              id: '$title-$episode',
+              address: '/movies/$title/$episode.strm',
+              directories: [title]),
+    ], source: source);
+    expect(resolved.map((item) => item.metadataSeed.seasonNumber),
+        everyElement(1));
+    expect(
+        resolved.map((item) => item.metadataSeed.structure!.rootPath).toSet(),
+        {'/movies/Alpha', '/movies/Bravo'});
+    for (final title in ['Alpha', 'Bravo']) {
+      expect(
+          resolved
+              .where((item) => item.resourceId.startsWith(title))
+              .map((item) => item.metadataSeed.episodeNumber)
+              .toSet(),
+          {1, 2});
+    }
+  });
+
+  test('flat quality versions are a movie and audio STRM cannot affect it', () {
+    final resolved = applyExternalDirectoryStructureInference([
+      for (final name in [
+        '1080p.mkv',
+        '4k.mkv',
+        'song.EP01.(mp3).strm',
+        'song.flac.strm'
+      ])
+        _pendingItem(
+            id: name,
+            address: '/movies/Example Film/$name',
+            directories: ['Example Film']),
+    ], source: source);
+    expect(resolved, hasLength(2));
+    expect(resolved.map((item) => item.metadataSeed.itemType),
+        everyElement('movie'));
+    expect(resolved.map((item) => item.metadataSeed.structure!.rootPath),
+        everyElement('/movies/Example Film'));
+  });
+
+  test('explicit movie NFO wins over unnumbered multiple files', () {
+    final resolved = applyExternalDirectoryStructureInference([
+      for (final name in ['original.mkv', 'directors-cut.mkv'])
+        _pendingItem(id: name, address: '/movies/Film/$name', directories: [
+          'Film'
+        ]).copyWith(
+            metadataSeed: _pendingItem(id: name, address: name, directories: [])
+                .metadataSeed
+                .copyWith(itemType: 'movie', hasSidecarMatch: true)),
+    ], source: source);
+    expect(resolved.map((item) => item.metadataSeed.itemType),
+        everyElement('movie'));
+  });
+
+  test('numbered extras cannot turn a movie into a series', () {
+    final resolved = applyExternalDirectoryStructureInference([
+      _pendingItem(
+          id: 'main',
+          address: '/movies/Example Film/Example Film.1080p.mkv',
+          directories: ['Example Film']),
+      for (var episode = 1; episode <= 3; episode++)
+        _pendingItem(
+            id: 'extra-$episode',
+            address: '/movies/Example Film/花絮/E0$episode.mkv',
+            directories: ['Example Film', '花絮']),
+    ], source: source);
+    expect(resolved, hasLength(4));
+    expect(resolved.map((item) => item.metadataSeed.itemType),
+        everyElement('movie'));
+    expect(
+        resolved.map((item) => item.metadataSeed.structure!.rootPath).toSet(),
+        {'/movies/Example Film'});
+  });
+
+  test('nested browse scopes retain configured first-level ownership', () {
+    final resolved = applyExternalDirectoryStructureInference([
+      _pendingItem(
+              id: 'episode',
+              address:
+                  'https://nas.example.com/movies/Example Series/Season 1/E01.strm',
+              directories: [])
+          .copyWith(
+              sectionId:
+                  'https://nas.example.com/movies/Example Series/Season 1/',
+              sectionName: 'Season 1'),
+    ], source: source);
+    expect(resolved.single.metadataSeed.structure!.rootPath,
+        'https://nas.example.com/movies/Example%20Series');
+  });
+
+  test('keeps complete-series releases and specials under Reboot Life', () {
+    const releases = [
+      '重启人生.全10集.日语中字.无水印.1080P',
+      '重启人生.全10集.中日双字.追新番字幕组.720P',
+      '重启人生.全10集.中日双字.B站特效字幕版.1080P',
+    ];
+    final items = [
+      for (var release = 0; release < releases.length; release++)
+        for (var episode = 1; episode <= 10; episode++)
+          _pendingItem(
+            id: '$release-$episode',
+            address: '/movies/strm/quark/重启人生/${releases[release]}/'
+                '重启人生${episode.toString().padLeft(2, '0')}'
+                '${release == 2 ? ' 本集标题' : ''}.(mp4).strm',
+            directories: ['strm', 'quark', '重启人生', releases[release]],
+          ),
+      for (var episode = 1; episode <= 9; episode++)
+        _pendingItem(
+          id: 'special-$episode',
+          address: '/movies/strm/quark/重启人生/番外篇/番外$episode.(mp4).strm',
+          directories: const ['strm', 'quark', '重启人生', '番外篇'],
+        ),
+    ];
+    final resolved =
+        applyExternalDirectoryStructureInference(items, source: source);
+    expect(resolved, hasLength(39));
+    expect(resolved.map((item) => item.metadataSeed.itemType),
+        everyElement('episode'));
+    for (var release = 0; release < releases.length; release++) {
+      for (var episode = 1; episode <= 10; episode++) {
+        final seed = resolved
+            .singleWhere((item) => item.resourceId == '$release-$episode')
+            .metadataSeed;
+        expect(seed.seasonNumber, 1);
+        expect(seed.episodeNumber, episode);
+      }
+    }
+    expect(
+        resolved
+            .where((item) => item.resourceId.startsWith('special-'))
+            .map((item) => item.metadataSeed.seasonNumber),
+        everyElement(0));
+  });
+
   test('keeps all Local Perspective files in their real seasons and episodes',
       () {
     const seasonFolders = [

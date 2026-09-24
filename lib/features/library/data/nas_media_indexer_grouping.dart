@@ -4,6 +4,9 @@ class _NasMediaIndexerGroupingSupportX {
   _NasMediaIndexerGroupingSupportX(this.settings);
 
   final AppSettings settings;
+  final _directoryGroupsCache =
+      Expando<Map<String, List<NasMediaIndexRecord>>>();
+  final _rootCache = Expando<NasSeriesRootResolution>();
 
   List<String> _pathSegments(String value) =>
       NasMediaPathPolicy.pathSegments(value);
@@ -86,10 +89,23 @@ class _NasMediaIndexerGroupingSupportX {
   List<_MovieVariantRecordGroup> groupMovieVariantRecords(
     List<NasMediaIndexRecord> records,
   ) {
+    final directoryGroups = _structureDirectoryGroups(records);
+    final ownedResourceIds = directoryGroups.values
+        .expand((group) => group.map((record) => record.resourceId))
+        .toSet();
+    final directoryMovies = directoryGroups.values
+        .where((group) => group.length >= 2 && !_directoryIsSeries(group))
+        .map((group) => _MovieVariantRecordGroup(
+              title: _structureDirectoryTitle(group.first),
+              records: group,
+            ));
     final grouped = <String, List<NasMediaIndexRecord>>{};
     final titleByKey = <String, String>{};
     final versionDirectoriesByKey = <String, Set<String>>{};
     for (final record in records) {
+      if (ownedResourceIds.contains(record.resourceId)) {
+        continue;
+      }
       if (!_isMovieVariantRecord(record)) {
         continue;
       }
@@ -114,20 +130,63 @@ class _NasMediaIndexerGroupingSupportX {
       titleByKey.putIfAbsent(key, () => title);
     }
 
-    return grouped.entries
-        .where(
-          (entry) =>
-              entry.value.length >= 2 &&
-              (versionDirectoriesByKey[entry.key]?.length ?? 0) >= 2,
-        )
-        .map(
-          (entry) => _MovieVariantRecordGroup(
-            title: titleByKey[entry.key] ?? entry.value.first.item.title,
-            records: entry.value,
+    return [
+      ...directoryMovies,
+      ...grouped.entries
+          .where(
+            (entry) =>
+                entry.value.length >= 2 &&
+                (versionDirectoriesByKey[entry.key]?.length ?? 0) >= 2,
+          )
+          .map(
+            (entry) => _MovieVariantRecordGroup(
+              title: titleByKey[entry.key] ?? entry.value.first.item.title,
+              records: entry.value,
+            ),
           ),
-        )
-        .toList(growable: false);
+    ];
   }
+
+  Map<String, List<NasMediaIndexRecord>> _structureDirectoryGroups(
+    List<NasMediaIndexRecord> records,
+  ) {
+    final cached = _directoryGroupsCache[records];
+    if (cached != null) return cached;
+    final groups = <String, List<NasMediaIndexRecord>>{};
+    for (final record in records) {
+      final source = _mediaSourceForSourceId(record.sourceId);
+      if (source?.webDavStructureInferenceEnabled != true) {
+        continue;
+      }
+      final root = _resolveSeriesRootForRecord(
+        record,
+        seriesTitleFilterKeywords:
+            source!.normalizedWebDavSeriesTitleFilterKeywords,
+      );
+      final path = root.directoryPathForResource(record.resourcePath);
+      if (path.isEmpty || root.title.isEmpty) {
+        continue;
+      }
+      final key = '${record.sourceId}|$path';
+      groups.putIfAbsent(key, () => []).add(record);
+    }
+    _directoryGroupsCache[records] = groups;
+    return groups;
+  }
+
+  bool _directoryIsSeries(List<NasMediaIndexRecord> records) => records.any(
+        (record) =>
+            record.structure?.role != ExternalResourceRole.extra &&
+            (_shouldGroupAsSeries(record) ||
+                record.item.itemType == 'series' ||
+                record.item.itemType == 'season'),
+      );
+
+  String _structureDirectoryTitle(NasMediaIndexRecord record) =>
+      _resolveSeriesRootForRecord(record,
+              seriesTitleFilterKeywords:
+                  _webDavSeriesTitleFilterKeywordsForSourceId(record.sourceId))
+          .title;
 
   MediaItem buildMovieVariantItem(_MovieVariantRecordGroup group) {
     final records = [...group.records]..sort((left, right) {
@@ -199,7 +258,9 @@ class _NasMediaIndexerGroupingSupportX {
 
   int movieVariantRepresentativeScore(NasMediaIndexRecord record) {
     final item = record.item;
-    var score = item.isPlayable ? 1000 : 0;
+    var score =
+        record.structure?.role == ExternalResourceRole.extra ? -1000000 : 0;
+    score += item.isPlayable ? 1000 : 0;
     score += item.posterUrl.trim().isNotEmpty ? 100 : 0;
     score += item.backdropUrl.trim().isNotEmpty ? 50 : 0;
     score += item.overview.trim().isNotEmpty ? 25 : 0;
@@ -214,7 +275,33 @@ class _NasMediaIndexerGroupingSupportX {
     final seriesTitleFilterKeywords =
         _webDavSeriesTitleFilterKeywordsForRecords(records);
     final grouped = <String, List<NasMediaIndexRecord>>{};
+    final directoryGroups = _structureDirectoryGroups(records);
+    final ownedResourceIds = <String>{};
+    for (final directoryRecords in directoryGroups.values) {
+      ownedResourceIds.addAll(
+        directoryRecords.map((record) => record.resourceId),
+      );
+      if (!_directoryIsSeries(directoryRecords)) {
+        continue;
+      }
+      final representative = directoryRecords.firstWhere(
+        _shouldGroupAsSeries,
+        orElse: () => directoryRecords.first,
+      );
+      final key = _buildSeriesGroupKey(
+        representative,
+        _structureDirectoryTitle(representative),
+        seriesTitleFilterKeywords: seriesTitleFilterKeywords,
+      );
+      grouped[key] = [
+        representative,
+        ...directoryRecords.where((record) => record != representative),
+      ];
+    }
     for (final record in records) {
+      if (ownedResourceIds.contains(record.resourceId)) {
+        continue;
+      }
       if (!_shouldGroupAsSeries(record)) {
         continue;
       }
@@ -495,6 +582,12 @@ class _NasMediaIndexerGroupingSupportX {
     NasMediaIndexRecord record, {
     required List<String> specialEpisodeKeywords,
   }) {
+    // Mixed/legacy movie metadata can belong to a directory-owned series.
+    // Without episode evidence, retain each resource instead of merging all
+    // files that were previously assigned the same movie directory title.
+    if (!_shouldGroupAsSeries(record)) {
+      return 'resource:${record.resourceId}';
+    }
     final seasonNumber = resolvedRecordSeasonNumber(record);
     final episodeNumber = resolvedRecordEpisodeNumber(record);
     if (_isSpecialEpisodeRecord(
@@ -1088,6 +1181,11 @@ class _NasMediaIndexerGroupingSupportX {
     if (structureTitle.isEmpty) {
       return false;
     }
+    if (_mediaSourceForSourceId(record.sourceId)
+            ?.webDavStructureInferenceEnabled ==
+        true) {
+      return true;
+    }
     final itemType = record.item.itemType.trim().toLowerCase();
     final recognizedItemType = record.recognizedItemType.trim().toLowerCase();
     return itemType == 'episode' ||
@@ -1103,6 +1201,25 @@ class _NasMediaIndexerGroupingSupportX {
     NasMediaIndexRecord record, {
     List<String> seriesTitleFilterKeywords = const [],
   }) {
+    final cached = _rootCache[record];
+    if (cached != null) return cached;
+    final structure = record.structure;
+    if (structure != null &&
+        NasMediaPathPolicy.isResourceWithinDirectory(
+            record.resourcePath, structure.rootPath)) {
+      final context = NasMediaPathPolicy.resolvePathContext(
+          resourcePath: record.resourcePath, sectionId: structure.rootPath);
+      final root = NasSeriesRootResolution(
+        title: structure.rootTitle,
+        rootSegments: NasMediaPathPolicy.pathSegments(
+            NasMediaPathPolicy.uriPath(structure.rootPath)),
+        pathContext: context,
+        hasPublicBoundary: true,
+        directoryDepth: context.sectionSegments.length,
+      );
+      _rootCache[record] = root;
+      return root;
+    }
     final hasSeasonHint = record.item.seasonNumber != null ||
         record.recognizedSeasonNumber != null;
     final itemType = record.item.itemType.trim().toLowerCase();
@@ -1116,11 +1233,12 @@ class _NasMediaIndexerGroupingSupportX {
     final configuredSectionPath = record.sectionId.trim().isNotEmpty
         ? record.sectionId
         : source?.libraryPath.trim() ?? '';
-    return NasMediaPathPolicy.resolveSeriesRoot(
+    final root = NasMediaPathPolicy.resolveSeriesRoot(
       resourcePath: record.resourcePath,
       sectionId: configuredSectionPath,
       fileFallbackTitle: fileFallbackTitle,
-      seriesLike: hasSeasonHint ||
+      seriesLike: source?.webDavStructureInferenceEnabled == true ||
+          hasSeasonHint ||
           itemType == 'episode' ||
           recognizedItemType == 'episode' ||
           record.preferSeries ||
@@ -1128,6 +1246,8 @@ class _NasMediaIndexerGroupingSupportX {
           record.recognizedEpisodeNumber != null,
       configuredKeywords: seriesTitleFilterKeywords,
     );
+    _rootCache[record] = root;
+    return root;
   }
 
   List<String> _webDavSeriesTitleFilterKeywordsForRecords(
@@ -1214,8 +1334,10 @@ class _NasMediaIndexerGroupingSupportX {
       return '';
     }
     final normalizedPath =
-        rootSegments.map((segment) => segment.toLowerCase()).join('/');
-    return 'structure:${record.sectionId.trim()}|$normalizedPath';
+        resolution.directoryPathForResource(record.resourcePath);
+    final pathKey =
+        normalizedPath.isNotEmpty ? normalizedPath : rootSegments.join('/');
+    return 'structure:${record.sourceId}|$pathKey';
   }
 }
 

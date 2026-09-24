@@ -199,6 +199,22 @@ void main() {
     );
     expect(nextButton, findsOneWidget);
 
+    final nextFocusDetector = find.descendant(
+      of: nextButton,
+      matching: find.byType(FocusableActionDetector),
+    );
+    tester
+        .widget<FocusableActionDetector>(nextFocusDetector)
+        .focusNode
+        ?.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'person-credits:first-item',
+    );
+
     await tester.tap(nextButton);
     await tester.pumpAndSettle();
 

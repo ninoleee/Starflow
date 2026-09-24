@@ -17,6 +17,33 @@ import 'package:starflow/features/storage/data/local_storage_cache_repository.da
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('all libraries aggregate works while source collections stay scoped', () async {
+    final a = MediaItem(
+      id: 'series-a', title: 'Show', overview: '', posterUrl: '',
+      year: 2020, durationLabel: '', genres: const [],
+      sourceId: 'a', sourceName: 'A', sourceKind: MediaSourceKind.nas,
+      itemType: 'series', tmdbId: '100', streamUrl: '', addedAt: DateTime(2026),
+    );
+    final b = a.copyWith(id: 'series-b', sourceId: 'b');
+    final repository = _CountingMediaRepository(library: [a, b]);
+    final container = ProviderContainer(overrides: [
+      appSettingsProvider.overrideWithValue(const AppSettings(
+        mediaSources: [], searchProviders: [], homeModules: [],
+        doubanAccount: DoubanAccountConfig(enabled: false),
+      )),
+      mediaRepositoryProvider.overrideWithValue(repository),
+    ]);
+    addTearDown(container.dispose);
+    final all = await container.read(librarySeedItemsProvider(LibraryFilter.all).future);
+    expect(all.single.workResources, [a, b]);
+    const target = LibraryCollectionTarget(title: 'A', sourceId: 'a',
+        sourceName: 'A', sourceKind: MediaSourceKind.nas, sectionId: '');
+    final source = await container.read(libraryCollectionSeedItemsProvider(target).future);
+    expect(source, [a]);
+    expect(source.single.workResources, isEmpty);
+    expect(await repository.fetchLibrary(), [a, b]);
+  });
+
   test('library items provider no longer rebuilds for cache scope updates',
       () async {
     final mediaRepository = _CountingMediaRepository(
@@ -880,7 +907,10 @@ class _CountingMediaRepository implements MediaRepository {
     int limit = 200,
   }) async {
     fetchLibraryCallCount += 1;
-    return library.take(limit).toList(growable: false);
+    return library
+        .where((item) => sourceId == null || item.sourceId == sourceId)
+        .where((item) => kind == null || item.sourceKind == kind)
+        .take(limit).toList(growable: false);
   }
 
   @override

@@ -3,7 +3,7 @@
 Verified against the working tree on 2026-09-20. This is the Android ExoPlayer
 audio extension, not the full libmpv dependency used by embedded MPV. Runtime
 policy and historical fixes are documented in the
-[audio review](../../../docs/audio-decoding-review-2026-09-19.md).
+[audio review](../../../docs/reviews/audio-decoding-review-2026-09-19.md).
 
 `media3-decoder-ffmpeg-1.10.1.aar` is built from the official AndroidX Media3
 `1.10.1` source at commit `5fb306449733dd71595700c1227ad6087578c559` and

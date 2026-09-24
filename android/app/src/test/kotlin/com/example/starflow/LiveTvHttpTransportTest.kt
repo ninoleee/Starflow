@@ -186,6 +186,24 @@ class LiveTvHttpTransportTest {
     }
 
     @Test
+    fun `redirect policy error preserves safe reason and never requests the rejected target`() {
+        val calls = CopyOnWriteArrayList<String>()
+        val source = server { exchange ->
+            calls.add(exchange.requestURI.path)
+            exchange.responseHeaders.set("Location", "https://user:secret@host/file?token=secret")
+            exchange.sendResponseHeaders(302, -1)
+        }
+        val transport = LiveTvHttpTransport(LiveTvHttpPolicy(source, emptyMap<String, String>()))
+        val error = assertThrows(LiveTvHttpTransport.PolicyException::class.java) {
+            transport.open(source, 0, -1, false)
+        }
+        assertEquals(MediaHttpRejection.EMBEDDED_CREDENTIALS, error.rejection.reason)
+        assertEquals("Media HTTP redirect rejected: EMBEDDED_CREDENTIALS", error.message)
+        assertFalse(error.stackTraceToString().contains("secret"))
+        assertEquals(1, calls.size)
+    }
+
+    @Test
     fun `HTTP errors do not include private response bodies or URLs`() {
         val source = server { exchange -> exchange.reply("secret body".toByteArray(), 403) }
         val transport = LiveTvHttpTransport(LiveTvHttpPolicy(source, emptyMap<String, String>()))

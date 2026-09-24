@@ -369,7 +369,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
 
   @override
   Widget build(BuildContext context) {
-    final seasonTabHeight = StarflowChipButton.minimumHeight(context) + 7;
+    final seasonTabHeight = StarflowChipButton.minimumHeight(context) + 5;
     final selectedGroup = resolveSelectedEpisodeGroup(
       groups: widget.groups,
       selectedGroupId: widget.selectedGroupId,
@@ -384,7 +384,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
           SizedBox(
             height: seasonTabHeight,
             child: Padding(
-              padding: const EdgeInsets.only(top: 5, bottom: 2),
+              padding: const EdgeInsets.only(top: 5),
               child: _DetailSeasonTabs(
                 groups: widget.groups,
                 selectedGroupId: selectedGroup.id,

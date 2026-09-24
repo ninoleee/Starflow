@@ -11,6 +11,7 @@ import 'package:starflow/features/library/application/webdav_scrape_progress.dar
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/library/data/nas_media_path_policy.dart';
+import 'package:starflow/features/library/data/external_media_structure.dart';
 import 'package:starflow/features/library/data/quark_external_storage_client.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/webdav_nas_client.dart';
@@ -111,7 +112,7 @@ class NasMediaIndexer {
   static const String _seasonGroupPrefix = 'webdav-season';
   // Bump whenever structure classification changes so an existing index is
   // re-evaluated instead of reusing stale `webdav-series` records.
-  static const String _webDavMetadataSchemaVersion = 'webdav-v15';
+  static const String _webDavMetadataSchemaVersion = 'webdav-v17';
   final NasMediaIndexStore _store;
   final WebDavNasClient _webDavNasClient;
   final QuarkExternalStorageClient? _quarkExternalStorageClient;

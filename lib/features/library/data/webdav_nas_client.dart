@@ -1,5 +1,6 @@
 import 'package:starflow/features/library/data/nfo_metadata.dart';
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:isolate';
 
@@ -12,6 +13,7 @@ import 'package:starflow/core/network/bounded_http_request.dart';
 import 'package:starflow/core/network/http_origin_policy.dart';
 import 'package:starflow/features/library/data/season_folder_label_parser.dart';
 import 'package:starflow/features/library/data/nas_media_path_policy.dart';
+import 'package:starflow/features/library/data/external_media_structure.dart';
 import 'package:starflow/features/library/data/webdav_directory_cache_store.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
@@ -225,7 +227,10 @@ class WebDavNasClient {
       if (remaining <= 0) {
         return const _DirectoryWalkResult(truncated: true);
       }
-      if (depth > 8 || !visited.add(uri.toString())) {
+      if (depth > 8) {
+        return const _DirectoryWalkResult(truncated: true);
+      }
+      if (!visited.add(uri.toString())) {
         return const _DirectoryWalkResult();
       }
       if (_isExcludedByKeyword(uri, source: source)) {
@@ -442,7 +447,7 @@ class WebDavNasClient {
       },
     );
 
-    return items;
+    return ExternalScanResult(items, complete: !walkResult.truncated);
   }
 
   Future<WebDavScannedItem?> scanResource(
@@ -572,7 +577,8 @@ class WebDavNasClient {
       streamUrl: resolvedPlayableUrl,
       headers: _headersForResolvedStream(source, resolvedPlayableUrl),
       container: resolvedContainer,
-      fileSizeBytes: resolvedFileSizeBytes,
+      // Null in copyWith preserves the STRM wrapper's size, not the video size.
+      fileSizeBytes: resolvedFileSizeBytes ?? 0,
     );
   }
 
@@ -675,80 +681,119 @@ class WebDavNasClient {
       return null;
     }
     final uri = Uri.tryParse(resolvedUrl);
-    if (uri == null || !uri.hasScheme) {
+    if (uri == null || !isHttpUri(uri)) {
       return null;
     }
 
     final headers = _headersForResolvedStream(source, resolvedUrl);
-    final directSize = await _tryReadContentLength(
-      () => sendBoundedRequest(_client, 'HEAD', uri,
-          headers: headers,
-          timeout: const Duration(seconds: 5),
-          maxBytes: 0,
-          allowUri: (next) => isSameHttpOrigin(uri, next)),
+    final directSize = await _tryReadPlayableFileSize(
+      uri,
+      method: 'HEAD',
+      headers: headers,
     );
     if (directSize != null && directSize > 0) {
       return directSize;
     }
 
-    return _tryReadRangeContentLength(
+    return _tryReadPlayableFileSize(
       uri,
+      method: 'GET',
       headers: headers,
     );
   }
 
-  Future<int?> _tryReadContentLength(
-    Future<http.Response> Function() request,
-  ) async {
-    try {
-      final response = await request().timeout(const Duration(seconds: 5));
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        return null;
-      }
-
-      return _parsePositiveInt(response.headers['content-length']);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<int?> _tryReadRangeContentLength(
+  Future<int?> _tryReadPlayableFileSize(
     Uri uri, {
+    required String method,
     required Map<String, String> headers,
   }) async {
     final abort = Completer<void>();
+    final watch = Stopwatch()..start();
     try {
-      final request =
-          http.AbortableRequest('GET', uri, abortTrigger: abort.future)
-            ..followRedirects = false
-            ..headers.addAll(headers)
-            ..headers['Range'] = 'bytes=0-0';
-      final response =
-          await _client.send(request).timeout(const Duration(seconds: 5));
-      try {
-        if (response.statusCode < 200 || response.statusCode >= 300) {
-          return null;
-        }
-
-        final contentRange = response.headers['content-range']?.trim() ?? '';
-        final rangeMatch =
-            RegExp(r'bytes\s+\d+-\d+/(\d+)$').firstMatch(contentRange);
-        if (rangeMatch != null) {
-          final parsed = _parsePositiveInt(rangeMatch.group(1));
-          if (parsed != null && parsed > 0) {
-            return parsed;
+      var current = uri;
+      var currentHeaders = headers;
+      for (var redirects = 0; redirects <= 5; redirects++) {
+        if (!isHttpUri(current) || _isPlaylistUri(current)) return null;
+        final remaining = const Duration(seconds: 5) - watch.elapsed;
+        if (remaining <= Duration.zero) return null;
+        final request =
+            http.AbortableRequest(method, current, abortTrigger: abort.future)
+              ..followRedirects = false
+              ..headers.addAll(currentHeaders)
+              ..headers['Accept-Encoding'] = 'identity';
+        if (method == 'GET') request.headers['Range'] = 'bytes=0-0';
+        final pending = _client.send(request);
+        // Dispose late headers even when a transport ignores request abortion.
+        unawaited(pending.then((response) {
+          if (abort.isCompleted) {
+            unawaited(response.stream.listen(null).cancel());
           }
+        }, onError: (Object _, StackTrace __) {}));
+        final response = await pending.timeout(remaining);
+        try {
+          if (const [301, 302, 303, 307, 308].contains(response.statusCode)) {
+            final location = response.headers['location'];
+            if (location == null || location.trim().isEmpty) return null;
+            final next = current.resolve(location);
+            if (!isSameHttpOrigin(current, next)) {
+              // Never forward NAS credentials to a CDN, or restore them later.
+              currentHeaders = const {};
+            }
+            current = next;
+            continue;
+          }
+          return _playableFileSizeFromHeaders(response);
+        } finally {
+          // A server may ignore Range and send the entire video. Do not read it.
+          await response.stream.listen(null).cancel();
         }
-
-        return _parsePositiveInt(response.headers['content-length']);
-      } finally {
-        await response.stream.listen(null).cancel();
       }
+      return null;
     } catch (_) {
       return null;
     } finally {
       abort.complete();
     }
+  }
+
+  bool _isPlaylistUri(Uri uri) =>
+      const ['.m3u', '.m3u8', '.mpd'].any(uri.path.toLowerCase().endsWith);
+
+  int? _playableFileSizeFromHeaders(http.StreamedResponse response) {
+    if (response.statusCode != 200 && response.statusCode != 206) return null;
+    final contentType = (response.headers['content-type'] ?? '')
+        .split(';')
+        .first
+        .trim()
+        .toLowerCase();
+    if (contentType.startsWith('text/') ||
+        contentType.contains('json') ||
+        contentType.contains('xml') ||
+        contentType.contains('mpegurl')) {
+      return null;
+    }
+    final encoding = response.headers['content-encoding']?.trim().toLowerCase();
+    if (encoding != null && encoding.isNotEmpty && encoding != 'identity') {
+      return null;
+    }
+    final contentRange = response.headers['content-range'];
+    if (response.statusCode == 206 || contentRange != null) {
+      final match = RegExp(r'^bytes\s+(\d+)-(\d+)/(\d+)$', caseSensitive: false)
+          .firstMatch(contentRange?.trim() ?? '');
+      if (match == null) return null;
+      final start = int.tryParse(match.group(1)!);
+      final end = int.tryParse(match.group(2)!);
+      final total = _parsePositiveInt(match.group(3));
+      if (start == null ||
+          end == null ||
+          total == null ||
+          start > end ||
+          end >= total) {
+        return null;
+      }
+      return total;
+    }
+    return _parsePositiveInt(response.headers['content-length']);
   }
 
   int? _parsePositiveInt(String? rawValue) {

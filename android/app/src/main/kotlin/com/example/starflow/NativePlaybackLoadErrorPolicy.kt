@@ -35,6 +35,10 @@ class NativePlaybackLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
         loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo,
     ): Long {
         val error = loadErrorInfo.exception
+        if (generateSequence<Throwable>(error) { it.cause }.take(10)
+                .any { it is LiveTvHttpTransport.PolicyException }) {
+            return C.TIME_UNSET
+        }
         val responseCode = NativePlaybackErrorPolicy.httpResponseCode(error)
         if (responseCode != null) {
             return when (

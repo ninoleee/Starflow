@@ -39,6 +39,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     MediaSourceConfig source, {
     String? sectionId,
     String sectionName = '',
+    String sectionPath = '',
     required int limit,
     required bool includeSidecarMetadata,
     required bool resetScanCaches,
@@ -48,12 +49,13 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       case MediaSourceKind.quark:
         final client = _quarkExternalStorageClient;
         if (client == null) {
-          return Future.value(const <WebDavScannedItem>[]);
+          return Future.value(ExternalScanResult(const [], complete: false));
         }
         return client.scanLibrary(
           source,
           sectionId: sectionId,
           sectionName: sectionName,
+          sectionPath: sectionPath,
           limit: limit,
           loadSidecarMetadata: includeSidecarMetadata,
           resolvePlayableStreams: false,
@@ -375,6 +377,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         continue;
       }
       final updatedRecord = NasMediaIndexRecord(
+        structure: currentRecord.structure,
         id: currentRecord.id,
         sourceId: currentRecord.sourceId,
         sectionId: currentRecord.sectionId,
@@ -1009,6 +1012,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
                 );
       final resolvedTitle = metadataMatch?.title.trim() ?? '';
       final updatedRecord = NasMediaIndexRecord(
+        structure: currentRecord.structure,
         id: currentRecord.id,
         sourceId: currentRecord.sourceId,
         sectionId: currentRecord.sectionId,
@@ -1150,6 +1154,7 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
                 source,
                 sectionId: collection.id,
                 sectionName: collection.title,
+                sectionPath: collection.subtitle,
                 limit: limitPerCollection,
                 includeSidecarMetadata: includeSidecarMetadata,
                 resetScanCaches: resetScanCaches && collectionIndex == 0,
@@ -1187,7 +1192,9 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       final items = deduped.values.toList(growable: false);
       items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
 
-      return items;
+      return ExternalScanResult(items,
+          complete: groups.every((group) =>
+              ExternalScanResult.isComplete(group, limitPerCollection)));
     }
 
     _progressController.startScanning(
@@ -1257,6 +1264,8 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       resetScanCaches: resetScanCaches,
       controller: controller,
     );
+    final scanComplete =
+        ExternalScanResult.isComplete(scannedItems, limitPerCollection);
     controller.throwIfCancelled();
     appLogInfo(
       'library.index',
@@ -1314,6 +1323,18 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
         structureSignature: _buildStructureFingerprintSignature(scannedItem),
       );
       final existing = existingRecords[scannedItem.resourceId];
+      // A partial tree cannot safely replace an existing directory decision,
+      // including during a forced rebuild or its background enrichment pass.
+      if (!scanComplete && existing != null) {
+        nextRecords.add(existing);
+        _progressController.updateIndexing(
+          sourceId: normalizedSourceId,
+          current: index + 1,
+          total: scannedItems.length,
+          detail: scannedItem.fileName,
+        );
+        continue;
+      }
       final preserveManualMetadata = existing?.manualMetadataLocked == true;
       final hasRequiredSidecar = !includeSidecarMetadata ||
           preserveManualMetadata ||
@@ -1326,8 +1347,8 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
               (existing.fingerprint == fingerprint &&
                   hasRequiredSidecar &&
                   hasRequiredOnlineMetadata));
-      // Incremental refresh is intentionally an append-only enrichment pass:
-      // existing records are reused even when their metadata is incomplete.
+      // Existing metadata is reused, while complete scans may refresh local
+      // structure without repeating online enrichment.
       final needsFurtherEnrichment = collectEnrichmentCandidates &&
           (isNewRecord ||
               (forceFullRescan &&
@@ -1346,6 +1367,9 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
           indexedAt: now,
         );
         nextRecords.add(reusedRecord);
+        if (reusedRecord.structure != existing.structure) {
+          recordsToUpsert.add(reusedRecord);
+        }
       } else {
         final indexedRecord = await _indexScannedItem(
           source,
@@ -1392,8 +1416,13 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
       },
     );
     final existingState = await _store.loadSourceState(source.id);
+    if (!scanComplete) {
+      nextRecords.addAll(existingRecords.values
+          .where((record) => !scannedResourceIds.contains(record.resourceId)));
+    }
     final deletedRecordIds = existingRecords.values
-        .where((record) => !scannedResourceIds.contains(record.resourceId))
+        .where((record) =>
+            scanComplete && !scannedResourceIds.contains(record.resourceId))
         .map((record) => record.id)
         .toList(growable: false);
     await _patchSourceRecords(
@@ -1800,15 +1829,46 @@ extension _NasMediaIndexerRefreshFlowX on NasMediaIndexer {
     }
     final originalSeed = original.metadataSeed;
     final enrichedSeed = enriched.metadataSeed;
+    final hasEpisodeSidecar = enrichedSeed.hasSidecarMatch &&
+        enrichedSeed.itemType == 'episode' &&
+        (enrichedSeed.episodeNumber ?? 0) > 0;
+    var structure = originalSeed.structure?.withSidecarNumbers(
+      season: hasEpisodeSidecar ? enrichedSeed.seasonNumber : null,
+      episode: hasEpisodeSidecar ? enrichedSeed.episodeNumber : null,
+    );
+    if (structure != null &&
+        enrichedSeed.hasSidecarMatch &&
+        enrichedSeed.itemType.isNotEmpty &&
+        enrichedSeed.itemType != structure.itemType) {
+      structure = structure.withConflicts([
+        StructureConflict(
+            field: StructureField.itemType,
+            selectedValue: structure.itemType,
+            rejectedValue: enrichedSeed.itemType,
+            selectedEvidence: structure.evidenceFor(StructureField.itemType),
+            rejectedEvidence: const StructureFieldEvidence(
+                StructureEvidence.sidecar, StructureRule.sidecarType)),
+      ]);
+    }
     final mergedSeed = enrichedSeed.copyWith(
-      itemType: originalSeed.itemType.trim().isNotEmpty
-          ? originalSeed.itemType
-          : enrichedSeed.itemType,
-      seasonNumber: originalSeed.seasonNumber ?? enrichedSeed.seasonNumber,
-      episodeNumber: originalSeed.episodeNumber ?? enrichedSeed.episodeNumber,
+      structure: structure,
+      itemType: hasEpisodeSidecar
+          ? 'episode'
+          : originalSeed.itemType.trim().isNotEmpty
+              ? originalSeed.itemType
+              : enrichedSeed.itemType,
+      seasonNumber: structure?.seasonNumber ??
+          (hasEpisodeSidecar ? enrichedSeed.seasonNumber : null) ??
+          originalSeed.seasonNumber ??
+          enrichedSeed.seasonNumber,
+      episodeNumber: structure?.episodeNumber ??
+          (hasEpisodeSidecar ? enrichedSeed.episodeNumber : null) ??
+          originalSeed.episodeNumber ??
+          enrichedSeed.episodeNumber,
     );
     if (identical(mergedSeed, enrichedSeed) ||
-        (mergedSeed.itemType == enrichedSeed.itemType &&
+        (mergedSeed.structure == enrichedSeed.structure &&
+            mergedSeed.itemType == enrichedSeed.itemType &&
             mergedSeed.seasonNumber == enrichedSeed.seasonNumber &&
             mergedSeed.episodeNumber == enrichedSeed.episodeNumber)) {
       return enriched;

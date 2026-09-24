@@ -4,6 +4,18 @@
 
 ## 网络边界速查
 
+### 原生播放请求拒绝诊断（2026-09-24）
+
+- 2026-09-24 22:57 的两次 TV 点播日志均为飞牛解析出的夸克 HLS，已取得时长但未出首帧；`ERROR_CODE_IO_UNSPECIFIED` 的内层异常是应用 `LiveTvHttpTransport` 抛出的 `Invalid live request`，不是已确认的音视频解码故障。旧实现丢弃具体校验原因，不能仅凭这条日志断定 HTTPS 降级或分片地址格式错误。日志中的主清单 URL 在本机只读复查返回 403，无法取得当时的子请求；此 403 不等于设备当时收到 403。
+- `MediaHttpPolicyException` 只保存固定枚举原因：`MALFORMED_URL / UNSUPPORTED_SCHEME / INVALID_HOST / EMBEDDED_CREDENTIALS / INVALID_PORT / HTTPS_DOWNGRADE`。传输层保留该安全原因及 request/redirect 阶段，不链接可能含完整地址的 URI parser 原始异常。点播 Media3 加载策略对该拒绝不重试，避免确定性拒绝反复等待；普通 HTTP 状态及临时网络重试策略不变。
+- 点播与直播仍共用原逐跳校验，外域不继承请求头，不允许 HTTPS 降级、userinfo 或非 HTTP(S) 地址。此次只补齐诊断和点播失败处理，不放行未知 CDN、不改写签名地址，不宣称上述真实片源已修复。测试与未完成的真机复测见 [主机验证](performance.md)。
+
+后续 23:21 导出日志已将飞牛夸克 HLS 的失败明确为 `MALFORMED_URL`，不是 `HTTPS_DOWNGRADE`。WebDAV SmartStrm 使用相同 Exo 内核且成功出首帧／续播，飞牛另一条渐进式视频也成功；两种来源的剧集路径分别标为 MP4 与 MKV，不能把同剧集当作已验证的同文件。
+
+使用当前配置重新调用飞牛 `play/info`、`stream` 后，失败主清单均返回 HTTP 200；清单分片的查询参数 `x-oss-process` 原样包含花括号状态表达式，例如 `if_status_eq_404{hls/ts,from_<base64>}`。Java `URI` 拒绝原始 `{}`，同一分片将 `{}` 转为 `%7B%7D` 后返回 HTTP 200 / `video/MP2T`。因此错误位于 OSS 分片查询参数的 URI 转义兼容，不是 CDN 拒绝、缺少 `User-Agent` 或 HTTPS 降级。
+
+后续兼容修复在共享 `LiveTvHttpPolicy` 中仅为资源路径／查询／片段里的可转义字符补编码（空格、`|`、花括号、引号等，路径方括号单独处理），Unicode 通过 URI 的 ASCII 表示输出；不修复 authority，不解码／重编码已有 `%xx`、`+`、分隔符、重复参数或顺序。直接请求及相对／绝对重定向都在同一规范化地址上做 origin 校验并发出请求。控制字符、反斜线、无效 `%` 编码、无效主机／端口、userinfo 和 HTTPS 降级仍拒绝。上述真实 OSS 分片已确认编码后可由 CDN 正常返回；电视端完整播放仍待安装修复版本复测。
+
 ### 2026-09-20 N01-N04 与配置 LAN 加固
 
 - Emby PlaybackInfo 和已缓存播放目标统一按 scheme、host、有效 port 判断 origin；外域（含协议相对地址、同主机换协议/端口）不注入会话 token，拒绝 userInfo 和回显源 token 的外域 URL。播放器目标不再携带 `X-Emby-Token / X-Emby-Authorization` 或回显源 token 的 headers；同源媒体使用 URL `api_key`，流专用 headers 独立保留。原生播放器不经过 Dart 请求层，此策略避免原生自动重定向转发自定义 Emby 会话头；原生 HLS 子请求、服务端主动把 token 放进重定向 Location 等仍需按内核/服务器单独验收。
@@ -13,6 +25,7 @@
 - HLS 动态清单要求正整数 TARGETDURATION 与至少一个完整分片，刷新响应禁止缓存；注册表在整份清单校验通过后更新，失败刷新不撤销已有地址。非清单资源离开窗口两分钟后可回收，过期地址不重新分配；回退到更早的历史窗口需要重新加载清单，仍受资源上限保护。LL-HLS 的 PART、PRELOAD-HINT、RENDITION-REPORT、PART-INF、SERVER-CONTROL 不下发引擎，按完整分片兼容播放，**不是低延迟模式**。不发送 `_HLS_*` 刷新参数，不接受 SKIP 增量响应或仅有部分分片的清单；未知标签/属性、变量、DRM、DASH、其他播放列表/远程光盘拒绝，不宣称完整 HLS 协议支持。无认证清单与 Android HLS 不受此限制。代理对渐进式媒体做有界前缀验证，会新增一次小 Range 请求；扩展名不明确的 HLS 会在探测后重新读取完整清单，既有“无启动预检”只适用于不经该安全代理的路径。
 - Emby JSON 使用 20s 总期限、32 MiB 上限。WebDAV PROPFIND 为 30s / 32 MiB，NFO 为 20s / 4 MiB，STRM 文本为 20s / 1 MiB，DELETE 回复为 30s / 1 MiB。目录响应 href 只接受请求目录内且处于配置 endpoint 目录内的同源资源，拒绝编码路径逃逸；NFO/STRM/删除也在发请求前检查 endpoint 范围，父级侧车探测不越过 endpoint。合法外域 STRM 媒体不继承 NAS Basic 凭据。
 - `sendBoundedRequest` 保留 `cancel: Future<void>?`；取消中止当前 AbortableRequest、取消正文订阅，不关闭共享 client。期限覆盖响应头、逐跳重定向与正文；累计字节超过上限立即拒绝。带认证的请求逐跳检查同源，WebDAV 额外检查目录，最多五次跳转，不能依赖底层自动剥离自定义头。Web 开发代理没有禁用上游重定向的契约，因此拒绝需要限制重定向的请求，必须使用能满足 CORS 的直接传输。
+- STRM 源文件大小探测由 `WebDavNasClient` 使用 HEAD，再在无有效长度时回退 `GET Range: bytes=0-0`；每条探测链最多 5 次重定向、响应头总期限 5s，取得响应头即取消正文流，不下载完整视频。手动逐跳检查 HTTP(S) URI，跨源后永久移除本次链上的 NAS 请求头；STRM 文本读取本身仍严格限定来源目录。206 必须提供有效 `Content-Range` 总长度，不能用分片 `Content-Length`；200 使用完整长度。请求使用 identity 编码，已知播放列表 URL、文本/JSON/XML/播放列表响应及压缩表示不作为视频大小。探测失败写入大小未知（0），避免 `copyWith(null)` 保留 STRM 包装文件的长度。
 - `StarflowHttpClient.get/head/post/put/patch/delete` 是缓冲 API：默认 20s 完整请求期限、32 MiB 正文上限；HEAD 的资源 Content-Length 不算实际正文大小。`send()` 保持流式，不给视频正文套 API 大小/总时长限制；带认证的原始流式请求关闭自动重定向，由调用方处理 3xx。NetworkRequestGuard 的 GET 同样使用可中止 bounded 读取，通用 `run` 的任意业务 Future 仍不能自动取消。
 - 日志 formatter 在 category、message、嵌套字段、异常与堆栈截断前统一脱敏 URL userInfo，覆盖编码密码、多 URL 和由该 formatter 处理的 native 文本。结构化本地日志、预览、筛选、清理、导出和 Android native exit capture 仍启用；未经 formatter 的原生文件以及路径中自定义凭据不由此规则保证。
 - 配置 LAN 使用 144-bit 随机访问 token、十分钟会话期限、Host/Origin 校验、no-store/no-referrer、单个上传在途。上传限定 JSON、8 MiB 原始字节和 30s 总接收期限，声明长度/分块都检查；页面需确认替换并发送专用确认头。关闭或过期中止未完成接收，读取后/导入前再次检查会话，迟到下载不返回配置。已进入持久化回调的保存不能回滚；这是手机上传页确认，不是电视端二次授权。失败回复/事件不回显上传正文或底层异常。仍是明文 HTTP，只能在可信 LAN 使用。
@@ -103,7 +116,7 @@ TV 图片在释放加载并发许可后仍保留同一个队列包装层和已�
 - 首页与媒体库的详情缓存合并已统一走批量读取接口；同一批 seed target 会复用一次本地 payload 读取，重点减少卡片装配阶段的重复本地 `I/O`
 - Emby 本地库缓存使用来源 summary、fallback 与分区 shards；来源根列表和分区清单只读取最多 `400` 条 summary，指定分区只解码目标 shard，完整匹配的全分区解码固定最多 `2` 路，相同 snapshot / shard 的并发读取会合并。这是纯本地存储优化；旧单文件缓存不再读取或迁移，因此设备只有旧缓存时会按现有自动/手动刷新设置重新请求一次 Emby 媒体库
 - NAS / WebDAV 指定分区读取已改为 Sembast 数据库层的 `sourceId + sectionId` 过滤；它不扫描远端目录，也不新增 WebDAV 请求
-- WebDAV 结构推断将已确定的母目录固定为剧名；`#004 长标题/同名视频.mp4` 以及名称修正后的 `004 长标题/同名视频.mp4` 这类编号单集目录只提供第 1 季集号和单集标题，不单独成为剧名或季。没有明确季标记且直接只含一个视频的其他子目录也按单集包装目录折叠；母目录已经有明确剧集证据时，其下的画质目录按同一剧集的备用资源处理，不再拆成电影或特别篇；当前索引 schema 为 `webdav-v15`。schema / scope 指纹变化可触发重建；同一指纹下的新识别规则不会自动重写所有旧条目，旧误分类需显式重建，不新增远端请求类型
+- WebDAV 结构推断将已确定的母目录固定为剧名；`#004 长标题/同名视频.mp4` 以及名称修正后的 `004 长标题/同名视频.mp4` 这类编号单集目录只提供第 1 季集号和单集标题，不单独成为剧名或季。没有明确季标记且直接只含一个视频的其他子目录也按单集包装目录折叠；母目录已经有明确剧集证据时，其下的画质目录按同一剧集的备用资源处理，不再拆成电影或特别篇；当前索引 schema 为 `webdav-v17`。schema / scope 指纹变化可触发重建；完整增量扫描会更新未手动锁定记录的本地结构，不因此重试 sidecar/在线元数据，不新增远端请求类型
 - 页面级异步状态统一到 `RetainedAsyncController / retained_async_value` 后，详情、媒体库、人物作品等页在失活或回前台时更倾向复用已有稳定结果
 - 详情页、媒体库、人物作品页和搜索页在 inactive 时现在优先取消当前会话或刷新任务，不再无条件失效成功 provider；返回页面时会明显减少重复请求
 - 搜索页空关键词会直接短路；多来源结果按来源返回进度批量提交 UI，夸克与 115 结果按验证进度逐步补入，不再等待所有来源和链接验证全部结束
@@ -209,10 +222,12 @@ Web 页面不能自行指定浏览器系统代理，因此 Web 端该页只展�
 - `NasMediaIndexer` 的主文件与多个 `part` helper 属于同一条刷新链路，文件拆分本身不改变请求扇出；排查时需连同 storage / refresh / grouping 实现一起看，不能用主文件行数代替性能结论
 - 如果条目后续已经刮削过或手动关联过详情信息，首页、媒体库和详情页展示时会优先使用缓存里的更新后标题；这同样只是本地缓存合并优先级调整，不增加新的网络请求
 - `WebDAV / NAS` 识别里新增的包装目录 / 版本说明忽略，例如 `分段版 / 特效中字 / 会员版 / 导演剪辑版 / 清晰度 / 音轨 / 字幕`，也完全发生在本地，不增加新的网络请求
-- 同一电影根目录下的多个技术版本目录会在本地结构推断中收口为一个电影和多个播放版本；该判断要求至少两个同级版本目录且无季集信号，清晰度、语言（包括英语、日语、韩语）、字幕或码率等组合均可作为技术标签，版本目录下的嵌套文件也沿用同一影片根目录，不新增远程请求。增量只处理新发现文件，旧误分类需通过重建索引或显式元数据操作修复，未命中的条目继续复用原索引
+- 同一电影根目录下的多个技术版本目录会在本地结构推断中收口为一个电影和多个播放版本；清晰度、语言（包括英语、日语、韩语）、字幕或码率等组合均可作为技术标签，版本目录下的嵌套文件也沿用同一影片根目录，无季集信号的平铺画质版本也不自动推为剧集。不新增远程请求。完整增量扫描重算本地结构并保留已有在线结果；在线误匹配仍通过重建索引或显式元数据操作修复
 - 外层有效片名下仅有一个“片名 + 年份 / 语言 / 字幕”发布包装目录且只有一个无季集信号的视频时，也会在本地使用外层目录名索引成电影；这一窄规则不增加请求，明确的 NFO 标题仍优先
 - 电影多版本详情页在 Hero 下方直接展示“播放版本”选择控件；“本地资源”来源切换与当前来源内的播放版本选择分别维护，WMDB / TMDB 只用影片根目录名匹配，文件名中的清晰度、编码和发布组信息不会再作为电影标题提交（明确匹配的 NFO / sidecar 仍优先）。版本展开按来源、分区和条目读取本地索引，也支持只索引选中目录的 NAS / WebDAV 来源，不会重新扫描目录；`.strm` 列表不会批量解析，只有当前选中版本会读取 `.strm` 并通过 `HEAD / Range` 获取源视频大小
-- `WebDAV / Quark` 媒体源现在还支持“顶层推断目录”：只在目录结构推断里，识别到剧文件或季目录后向上推断剧名时生效；命中这里填写的顶层目录名会立刻停止继续向上，改用下一级已推断目录，没有目录时退回文件名，同样不会增加新的网络请求
+- `WebDAV / Quark` 的“顶层推断目录”只补充一级媒体目录之前的自定义包装层；确定媒体目录后，子目录不能重置归属边界。结构推断开启时，每个一级媒体目录最多生成一个剧集或电影入口；混合记录、电影播放版本与季集归并均在本地完成，不增加新的请求类型。
+- 2026-09-23 历史 v16 检查只验证 85 个 STRM（含歌曲）最终为 1 个剧集入口，不能代表当前资源过滤和季集结果。2026-09-24 v17 重新使用本机配置只读 `PROPFIND` 验证《重启人生》：排除 46 个音频 STRM 后为 39 个视频资源、1 个剧集、10 集正片且每集 3 个版本、9 集番外。`tool/debug/webdav_directory_grouping_test.dart` 通过 `STARFLOW_SETTINGS_JSON` 和 `STARFLOW_CHECK_DIRECTORY` 读取配置与目录，禁用 sidecar/在线/播放地址补全，索引只写入内存；不输出凭据、不写远端或设备索引。这是主机网络与索引验证，不是 TV 真机验收。
+- 扫描结果携带完整性标记。命中条数或递归深度上限、夸克缺少 Cookie 等情况不能视为远端删除；任一分区不完整时保留全来源未见记录和已有分类，强制重建也遵守此规则。不增加后台补扫或远程探测；已知音频 STRM 按文件名过滤，不为分类下载 STRM 内容。
 - 新增的“剧集只按剧名层级搜刮”只会改变结构推断剧集条目的在线 metadata 查询词；开启后会只用目录剧名查询，并跳过按单集继续请求剧照，整体上会减少这类请求，不会引入新的服务端协议
 - 新增的综艺/节目文件名轻量识别，例如 `第X期`、`01 会员版` 这类“集号 + 版本说明”形式，同样只在本地解析，不新增网络请求
 - 目录名里如果能识别出明确季号，例如 `Season 1`、`S02`、`SE08`、`第2季`、`Stranger.Things.S02.2160p.BluRay.REMUX`，就会在本地结构推断里直接把这一层当作季目录，不新增网络请求
@@ -266,7 +281,7 @@ Web 页面不能自行指定浏览器系统代理，因此 Web 端该页只展�
 - 剧集页里“单集简介区进入单集详情”同样只是本地路由与焦点拆分；进入后复用既有详情页资源匹配和元数据补全链路，不新增新的服务端协议
 - 简介解析、折叠和“更多 → 视频来源”列表均为本地操作，不获取外链预览或跟随链接。只有用户选择某个合法 HTTP/HTTPS 来源时才通过 `url_launcher` 交给系统外部应用打开；不附带媒体源请求头、Cookie 或 Token。缓存没有来源 URL 时不自动补抓，可使用既有手动更新信息流程重新读取。
 - NAS / WebDAV 的系列、季和单集层级改为从来源索引的分区层级缓存直接读取；这减少本地重复分组，不增加网络请求，也不改变服务端分页参数
-- 媒体库手动“增量更新”仍先按所选来源清除持久化 WebDAV 子树快照，再按原上限遍历所选分区。保留原并发预算、索引复用及缺失条目删除规则，不增加快速模式、定时轮换或后台补扫
+- 媒体库手动“增量更新”仍先按所选来源清除持久化 WebDAV 子树快照，再按原上限遍历所选分区。保留原并发预算及在线结果复用；完整扫描才重算已有结构和删除缺失条目，不增加快速模式、定时轮换或后台补扫
 - TV 应用内弹窗及底部弹层的主按钮由 `StarflowButton` 统一使用 secondary 底色突出白色焦点框，播放器设置的关闭按钮复用 TV 焦点控件；重建确认仍默认聚焦取消。只调整本地样式与焦点，不改变保存、同步或重建请求，普通页面、非 TV 和 Android 原生系统弹窗不受影响。
 - 简化界面特效、减少界面动画、Hero 背景与简化首页 Hero 等开关只改变本地视觉层，不增加新的网络请求
 - TV 固定使用轻量焦点、精简详情 Hero、精简播放 UI，并关闭自动更新卡片信息；这些平台保护不显示开关，只有最后一项会减少后台缓存更新引起的局部订阅刷新
@@ -614,41 +629,9 @@ Emby 来源刷新时，每个媒体分区也会作为 maintenance 任务进入�
 
 ## 9. 品牌资源导出
 
-原生启动页当前只显示 `#121212` 背景，不引用生成的 Android `launch_logo.png` 或 iOS `LaunchImage`。脚本继续生成这些资源以保持导出链完整；Flutter 启动首屏仍使用 `assets/branding/starflow_launch_logo.png` 展示 Logo。
+命令、母版与输出清单统一见 [README 品牌资源](../README.md#品牌资源)，本节只维护联网边界：图标缩放依赖本地 PNG 与 Pillow；TV Banner 由本机 Microsoft Edge 无头渲染 `docs/starflow_tv_banner.html`，HTML 中 Google Fonts 字体可能需要联网，不使用应用运行期代理或在线元数据服务。
 
-当前品牌资源导出不走 Flutter 构建流程：
-
-```powershell
-C:\anaconda3\python.exe tool\generate_brand_assets.py
-```
-
-这条命令依赖：
-
-- 本机可用的 Microsoft Edge
-- 安装 Pillow 的 Python 3（Windows 示例使用 `C:\anaconda3\python.exe`；macOS 可用 `python3`）
-- `Pillow`
-
-当前脚本会优先使用：
-
-- `assets/branding/starflow_logo_source.png` 生成所有品牌 Logo 的统一母版
-- `assets/branding/starflow_ios_dark_icon_source.png` 生成 iOS 深色模式 App Icon
-- `build/brand_assets/app_icon_raw_capture.png` 保存原尺寸 PNG 基准图
-- `assets/branding/starflow_launch_logo.png` 作为启动页首帧图标输出目标
-  当前使用最新的无白边满版彩色原图，保留完整构图
-- `android/app/src/main/res/drawable-nodpi/launch_logo.png` 作为 Android 启动页主图输出目标
-- `docs/starflow_tv_banner.html` 生成 TV Banner
-- `build/brand_assets/starflow_app_icon_master.png` 作为各平台分发缩放前的统一母版
-
-补充说明：
-
-- 图标缩放仅依赖本地 PNG 与 Pillow；TV Banner 使用本机浏览器，HTML 中的 Google Fonts 字体可能需要联网，不依赖在线元数据服务
-- 外部 App Icon 不依赖 HTML 截图，直接从 PNG 母版导出
-- Android 启动器小图标与 TV 横幅里的 Logo 共用同一份 PNG 原图
-- 小尺寸图标采用 Lanczos 缩放，不额外锐化；iOS 默认与深色模式 App Icon 都导出为 RGB，深色模式图标绑定 Asset Catalog 的 `luminosity/dark` 外观
-- TV Banner 仍然依赖本机 Microsoft Edge 无头渲染 `docs/starflow_tv_banner.html`
-- Android 启动页主图与 iOS LaunchImage 保留原图完整构图，不自动抠图或裁边
-- macOS 自动查找 Microsoft Edge，也可用 `EDGE_PATH` 指定浏览器；旧 Swift 入口转发到 Python 脚本，可用 `PYTHON` 指定解释器
-- 如果后续换了外部 Logo 设计，只需要重新执行一次脚本，不要手工逐个平台替换
+该流程不走 Flutter 构建，但会重新生成图片、图标和横幅。普通文档整理不运行导出脚本；原生启动布局与生成图片是否被引用分别见 [iOS 资源说明](../ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md)。
 
 ## 10. 本地匹配与凭据边界
 

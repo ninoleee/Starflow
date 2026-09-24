@@ -9,6 +9,7 @@ import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/library/data/nfo_metadata.dart';
+import 'package:starflow/features/library/data/external_media_structure.dart';
 
 final quarkExternalStorageClientProvider =
     Provider<QuarkExternalStorageClient>((ref) {
@@ -83,6 +84,7 @@ class QuarkExternalStorageClient {
     MediaSourceConfig source, {
     String? sectionId,
     String sectionName = '',
+    String sectionPath = '',
     int limit = 200,
     bool? loadSidecarMetadata,
     bool resolvePlayableStreams = false,
@@ -90,17 +92,22 @@ class QuarkExternalStorageClient {
     bool Function()? shouldCancel,
   }) async {
     if (!source.hasConfiguredQuarkFolder) {
-      return const [];
+      return ExternalScanResult(const [], complete: false);
     }
     final cookie = _quarkCookie;
     if (cookie.isEmpty) {
-      return const [];
+      return ExternalScanResult(const [], complete: false);
     }
     final rootFid = sectionId?.trim().isNotEmpty == true
         ? sectionId!.trim()
         : source.quarkFolderId;
-    final rootPath =
-        sectionId?.trim().isNotEmpty == true ? '/' : source.quarkFolderPath;
+    final rootPath = sectionId?.trim().isNotEmpty == true
+        ? sectionPath.trim().isNotEmpty
+            ? sectionPath.trim()
+            : sectionName.trim().isNotEmpty
+                ? '${source.quarkFolderPath}/${sectionName.trim()}'
+                : '/'
+        : source.quarkFolderPath;
     final result = await _scanQuarkLibrary(
       source,
       cookie: cookie,
@@ -117,7 +124,7 @@ class QuarkExternalStorageClient {
       shouldCancel: shouldCancel,
     );
     if (result.mediaEntries.isEmpty) {
-      return const [];
+      return ExternalScanResult(const [], complete: limit > 0);
     }
     final textFileCache = <String, Future<String>>{};
     final downloadCache = <String, Future<QuarkResolvedDownload>>{};
@@ -168,7 +175,8 @@ class QuarkExternalStorageClient {
         .map(_quarkPendingItemToScannedItem)
         .toList(growable: false);
     items.sort((left, right) => right.addedAt.compareTo(left.addedAt));
-    return items;
+    return ExternalScanResult(items,
+        complete: result.mediaEntries.length < limit);
   }
 
   Future<WebDavScannedItem?> scanResource(
@@ -327,7 +335,7 @@ class QuarkExternalStorageClient {
           );
           continue;
         }
-        if (!entry.isVideo) {
+        if (!entry.isVideo || ExternalMediaStructure.isKnownAudio(entry.name)) {
           continue;
         }
         mediaEntries.add(
