@@ -71,7 +71,24 @@ void main() {
           const ['豆瓣 0', 'TMDB 7.1'],
           const ['豆瓣 8.6', 'IMDb 7.9', 'TMDB 7.4'],
         ),
-        const ['豆瓣 8.6', 'TMDB 7.1', 'IMDb 7.9'],
+        const ['豆瓣 8.6', 'IMDb 7.9', 'TMDB 7.1'],
+      );
+    });
+
+    test('uses a stable provider order regardless of arrival order', () {
+      expect(
+        mergeDistinctRatingLabels(
+          const ['TMDB 8.3', 'IMDb 7.9'],
+          const ['豆瓣 9.1'],
+        ),
+        const ['豆瓣 9.1', 'IMDb 7.9', 'TMDB 8.3'],
+      );
+      expect(
+        mergeDistinctRatingLabels(
+          const ['豆瓣 9.1'],
+          const ['TMDB 8.3', 'IMDb 7.9'],
+        ),
+        const ['豆瓣 9.1', 'IMDb 7.9', 'TMDB 8.3'],
       );
     });
   });

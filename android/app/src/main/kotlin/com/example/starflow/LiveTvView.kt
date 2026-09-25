@@ -46,6 +46,7 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private var progress: Runnable? = null
     private var networkSpeed: LiveTvNetworkSpeed? = null
+    private var cacheAllocator: androidx.media3.exoplayer.upstream.DefaultAllocator? = null
     private var diagnostics: LiveTvDiagnostics? = null
     private val lifecycleObserver = LifecycleEventObserver { _, event ->
         when (event) {
@@ -127,6 +128,21 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
                         networkSpeed?.bytesPerSecond
                     } else null)
                 }
+                "cacheBytes" -> {
+                    result.success(if ((args["generation"] as? Number)?.toLong() == session.generation && player != null) {
+                        cacheAllocator?.totalBytesAllocated?.toLong()
+                    } else null)
+                }
+                "cacheDurationMs" -> {
+                    result.success(if ((args["generation"] as? Number)?.toLong() == session.generation && player != null) {
+                        (player!!.bufferedPosition - player!!.currentPosition).coerceAtLeast(0L)
+                    } else null)
+                }
+                "videoFormat" -> {
+                    result.success(if ((args["generation"] as? Number)?.toLong() == session.generation) {
+                        player?.let { NativePlaybackFormatting.formatVideoFormat(it.videoFormat, it.audioFormat) }
+                    } else null)
+                }
                 "audioTracks" -> {
                     if ((args["generation"] as? Number)?.toLong() != session.generation) {
                         result.success(emptyList<Any>()); return@setMethodCallHandler
@@ -166,7 +182,9 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
         val speed = LiveTvNetworkSpeed { android.os.SystemClock.elapsedRealtime() }
         networkSpeed = speed
         val http = DataSource.Factory { LiveTvHttpDataSource(policy).apply { addTransferListener(speed) } }
-        val control = DefaultLoadControl.Builder().setBufferDurationsMs(3000, 12000, 1000, 2000)
+        val allocator = androidx.media3.exoplayer.upstream.DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
+        cacheAllocator = allocator
+        val control = DefaultLoadControl.Builder().setAllocator(allocator).setBufferDurationsMs(3000, 12000, 1000, 2000)
             .setTargetBufferBytes(32 * 1024 * 1024).setPrioritizeTimeOverSizeThresholds(false).build()
         val renderers = DefaultRenderersFactory(context)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
@@ -279,6 +297,7 @@ private class LiveTvView(context: Context, messenger: BinaryMessenger, id: Int, 
         progress?.let(handler::removeCallbacks)
         progress = null
         networkSpeed = null
+        cacheAllocator = null
         val old = player
         player = null
         root.keepScreenOn = false

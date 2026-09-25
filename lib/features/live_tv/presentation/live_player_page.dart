@@ -445,8 +445,9 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
         ? controller.engine as LiveNetworkSpeedSource
         : null;
     Widget speedLabel() => LiveNetworkSpeedLabel(
-        source: _foreground ? speedSource : null,
-        generation: controller?.generation ?? 0);
+          source: _foreground ? speedSource : null,
+          generation: controller?.generation ?? 0,
+        );
     final guide = ref.watch(liveGuideProvider(_channel.id));
     final nowNext = _list ? ref.watch(liveNowNextProvider).value : null;
     final programmes = guide.value ?? [];
@@ -622,25 +623,7 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                                                                         color: Colors
                                                                             .white70)),
                                                             ])),
-                                                        Column(
-                                                          mainAxisSize:
-                                                              MainAxisSize.min,
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .end,
-                                                          children: [
-                                                            Text(
-                                                                _exo
-                                                                    ? 'Exo'
-                                                                    : 'MPV',
-                                                                style: const TextStyle(
-                                                                    color: Colors
-                                                                        .white70)),
-                                                            const SizedBox(
-                                                                height: 4),
-                                                            speedLabel(),
-                                                          ],
-                                                        ),
+                                                        speedLabel(),
                                                         if (!isTelevision) ...[
                                                           const SizedBox(
                                                               width: 12),

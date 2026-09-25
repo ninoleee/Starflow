@@ -264,7 +264,12 @@ extension _PlayerPageStateControls on _PlayerPageState {
     if (player == null || videoController == null) {
       final startupOverlay = PlayerStartupOverlay(
         target: _resolvedTarget ?? widget.target,
-        speedLabel: _networkEstimate.speedLabel,
+        networkSpeed: player == null
+            ? null
+            : MpvNetworkSpeedLabel(
+                player: player,
+                generation: _startupGeneration,
+              ),
       );
       if (isTelevision) {
         return startupOverlay;
@@ -358,7 +363,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
               return IgnorePointer(
                 child: PlayerStartupOverlay(
                   target: _resolvedTarget ?? widget.target,
-                  speedLabel: _networkEstimate.speedLabel,
+                  networkSpeed: MpvNetworkSpeedLabel(
+                    player: player,
+                    generation: _startupGeneration,
+                  ),
                   bufferingProgress: progressSnapshot.data,
                   showSpinner: isTelevision,
                 ),
@@ -395,7 +403,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
                 ignoring: !isTelevision,
                 child: PlayerStartupOverlay(
                   target: _resolvedTarget ?? widget.target,
-                  speedLabel: _networkEstimate.speedLabel,
+                  networkSpeed: MpvNetworkSpeedLabel(
+                    player: player,
+                    generation: _startupGeneration,
+                  ),
                   showSpinner: isTelevision,
                 ),
               ),
@@ -700,7 +711,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
           },
         ),
       ),
-      MpvNetworkSpeedLabel(player: state.widget.controller.player),
+      MpvNetworkSpeedLabel(
+        player: state.widget.controller.player,
+        generation: _startupGeneration,
+      ),
       const Spacer(),
       if (_hasPlaybackEpisodeQueue)
         Tooltip(
@@ -744,7 +758,10 @@ extension _PlayerPageStateControls on _PlayerPageState {
           },
         ),
       ),
-      MpvNetworkSpeedLabel(player: state.widget.controller.player),
+      MpvNetworkSpeedLabel(
+        player: state.widget.controller.player,
+        generation: _startupGeneration,
+      ),
       const Spacer(),
       if (_hasPlaybackEpisodeQueue)
         Tooltip(
@@ -1076,6 +1093,13 @@ extension _PlayerPageStateControls on _PlayerPageState {
             _resolvedTarget ?? widget.target,
           ),
           onConfigureSeriesSkip: () => _configureSeriesSkipPreference(player),
+          onSelectVersion:
+              supportsPlaybackVariants(_resolvedTarget ?? widget.target)
+              ? () async {
+                  Navigator.of(context).pop();
+                  await _selectPlaybackVersion(player, isTelevision);
+                }
+              : null,
           onSelectQuality: (quality) => _switchFntvPlaybackQuality(
             player,
             quality,

@@ -694,6 +694,27 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     await pending;
   }
 
+  Future<void> _selectPlaybackVersion(Player player, bool isTelevision) async {
+    final target = _resolvedTarget ?? widget.target;
+    final selected = await showPlaybackMenuDialog<PlaybackTarget>(
+      context: context,
+      builder: (_) => PlayerVariantPickerDialog(
+        target: target,
+        isTelevision: isTelevision,
+        load: () => PlaybackVariantResolver(read: _providerContainer.read)
+            .load(target)
+            .timeout(const Duration(seconds: 30)),
+      ),
+    );
+    if (!mounted ||
+        !identical(_player, player) ||
+        selected == null ||
+        isSamePlaybackVariant(selected, target)) {
+      return;
+    }
+    await _switchFntvPlayback(player, selected, switchingVersion: true);
+  }
+
   Future<void> _switchFntvPlaybackQuality(
     Player player,
     FntvPlaybackQuality quality,
@@ -708,7 +729,10 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
   }
 
   Future<void> _switchFntvPlayback(
-      Player player, PlaybackTarget requested) async {
+    Player player,
+    PlaybackTarget requested, {
+    bool switchingVersion = false,
+  }) async {
     if (_fntvSwitchInProgress || _episodeQueueAdvanceInProgress) return;
     _fntvSwitchInProgress = true;
     final oldTarget = _resolvedTarget ?? widget.target;
@@ -725,7 +749,8 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       if (!_isReady || active == null || !mounted) return;
       await active.setRate(rate);
       if (!playing) await active.pause();
-      if (subtitlePreference != null &&
+      if ((!switchingVersion || rollbackAttempted) &&
+          subtitlePreference != null &&
           !(_resolvedTarget?.isFntvTranscoding ?? false)) {
         _subtitleSessionPreference = subtitlePreference;
         await _restoreMpvSubtitleSessionPreference(active, subtitlePreference);
@@ -750,17 +775,19 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
     }
 
     try {
-      final request = requested.copyWith(
-        streamUrl: '',
-        headers: const {},
-        fntvSessionLink: '',
-        fntvStartPositionMs: player.state.position.inMilliseconds,
-        fntvTrackSelectionExplicit: true,
-        preferredSubtitleStreamId: !oldTarget.isFntvTranscoding &&
-                player.state.track.subtitle.id == 'no'
-            ? ''
-            : requested.preferredSubtitleStreamId,
-      );
+      final request = switchingVersion
+          ? requested
+          : requested.copyWith(
+              streamUrl: '',
+              headers: const {},
+              fntvSessionLink: '',
+              fntvStartPositionMs: player.state.position.inMilliseconds,
+              fntvTrackSelectionExplicit: true,
+              preferredSubtitleStreamId: !oldTarget.isFntvTranscoding &&
+                      player.state.track.subtitle.id == 'no'
+                  ? ''
+                  : requested.preferredSubtitleStreamId,
+            );
       next = await PlaybackTargetResolver(read: _providerContainer.read)
           .resolve(request);
       await _fntvSessions.retain(next);

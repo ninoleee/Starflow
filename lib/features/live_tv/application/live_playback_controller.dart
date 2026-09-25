@@ -6,6 +6,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/network/network_proxy_config.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
+import 'package:starflow/features/playback/domain/playback_network_speed.dart';
+import 'package:starflow/features/playback/data/mpv_playback_format.dart';
 import '../domain/live_models.dart';
 import 'live_mpv_options.dart';
 import 'live_playback_error.dart';
@@ -24,6 +26,16 @@ abstract class LiveEngine {
 
 abstract interface class LiveNetworkSpeedSource {
   Future<int?> readNetworkSpeed(int generation);
+}
+
+abstract interface class LiveCacheSizeSource {
+  Future<int?> readCacheBytes(int generation);
+
+  Future<int?> readBufferDurationMs(int generation);
+}
+
+abstract interface class LiveVideoFormatSource {
+  Future<String?> readVideoFormat(int generation);
 }
 
 /// Cancellation acknowledges resource quiescence, not merely a dropped Future.
@@ -50,7 +62,8 @@ enum LivePlaybackFailure {
       };
 }
 
-class MpvLiveEngine implements CancellableLiveEngine, LiveNetworkSpeedSource {
+class MpvLiveEngine
+    implements CancellableLiveEngine, LiveNetworkSpeedSource, LiveCacheSizeSource, LiveVideoFormatSource {
   MpvLiveEngine(this.proxy);
   final NetworkProxyConfig proxy;
   Player? player;
@@ -62,6 +75,38 @@ class MpvLiveEngine implements CancellableLiveEngine, LiveNetworkSpeedSource {
   double _volume = 1;
   bool _cancelRequested = false;
   int? _generation;
+
+  @override
+  Future<String?> readVideoFormat(int generation) async {
+    final current = player;
+    if (_generation != generation || current?.platform is! NativePlayer) return null;
+    final format = await readMpvPlaybackFormat((current!.platform as NativePlayer).getProperty);
+    return _generation == generation && identical(current, player) ? format : null;
+  }
+
+  @override
+  Future<int?> readCacheBytes(int generation) async {
+    final current = player;
+    if (_generation != generation || current?.platform is! NativePlayer) {
+      return null;
+    }
+    final raw = await (current!.platform as NativePlayer)
+        .getProperty('demuxer-cache-state/fw-bytes');
+    if (_generation != generation || !identical(current, player)) return null;
+    return parsePlaybackByteCount(raw);
+  }
+
+  @override
+  Future<int?> readBufferDurationMs(int generation) async {
+    final current = player;
+    if (_generation != generation || current?.platform is! NativePlayer) {
+      return null;
+    }
+    final raw = await (current!.platform as NativePlayer)
+        .getProperty('demuxer-cache-duration');
+    if (_generation != generation || !identical(current, player)) return null;
+    return parsePlaybackDurationMilliseconds(raw);
+  }
 
   @override
   Future<int?> readNetworkSpeed(int generation) async {
@@ -215,6 +260,8 @@ class ExoLiveEngine
     implements
         CancellableLiveEngine,
         LiveNetworkSpeedSource,
+        LiveCacheSizeSource,
+        LiveVideoFormatSource,
         LivePlaybackErrorSource {
   ExoLiveEngine(int viewId)
       : channel = MethodChannel('starflow/live_tv/$viewId');
@@ -226,6 +273,42 @@ class ExoLiveEngine
   @override
   LivePlaybackErrorDetails? errorFor(int generation) =>
       _generation == generation ? _error : null;
+
+  @override
+  Future<String?> readVideoFormat(int generation) async {
+    if (_generation != generation) return null;
+    final format = await channel.invokeMethod<String>(
+        'videoFormat', {'generation': generation});
+    return _generation == generation ? format : null;
+  }
+
+  @override
+  Future<int?> readCacheBytes(int generation) async {
+    if (_generation != generation) return null;
+    final bytes = await channel
+        .invokeMethod<num>('cacheBytes', {'generation': generation});
+    if (_generation != generation ||
+        bytes == null ||
+        !bytes.isFinite ||
+        bytes < 0) {
+      return null;
+    }
+    return bytes.round();
+  }
+
+  @override
+  Future<int?> readBufferDurationMs(int generation) async {
+    if (_generation != generation) return null;
+    final durationMs = await channel.invokeMethod<num>(
+        'cacheDurationMs', {'generation': generation});
+    if (_generation != generation ||
+        durationMs == null ||
+        !durationMs.isFinite ||
+        durationMs < 0) {
+      return null;
+    }
+    return durationMs.round();
+  }
 
   @override
   Future<int?> readNetworkSpeed(int generation) async {

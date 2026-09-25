@@ -45,6 +45,8 @@ import 'package:starflow/features/playback/application/playback_performance_trac
 import 'package:starflow/features/playback/application/playback_remote_preflight.dart';
 import 'package:starflow/features/playback/application/playback_server_track_resolver.dart';
 import 'package:starflow/features/playback/application/fntv_quality_menu.dart';
+import 'package:starflow/features/playback/application/playback_variant_resolver.dart';
+import 'package:starflow/features/playback/presentation/widgets/player_variant_picker_dialog.dart';
 import 'package:starflow/features/playback/application/playback_engine_router.dart';
 import 'package:starflow/features/playback/application/playback_session.dart';
 import 'package:starflow/features/playback/application/subtitle_language_preferences.dart';
@@ -1051,6 +1053,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                       state.bufferingPercentage,
                                   networkSpeed: MpvNetworkSpeedLabel(
                                     player: player,
+                                    generation: _startupGeneration,
                                   ),
                                   backFocusNode: _tvBackControlFocusNode,
                                   previousEpisodeFocusNode:
@@ -1138,14 +1141,6 @@ class _PlaybackNetworkEstimate {
   );
 
   final int? estimatedSpeedBytesPerSecond;
-
-  String get speedLabel {
-    final speed = estimatedSpeedBytesPerSecond ?? 0;
-    if (speed <= 0) {
-      return '';
-    }
-    return '${formatByteSize(speed)}/s';
-  }
 }
 
 class _PictureInPictureAspectRatio {

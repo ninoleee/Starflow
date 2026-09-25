@@ -1,117 +1,61 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:starflow/app/theme/app_typography.dart';
 import 'package:media_kit/media_kit.dart';
-import 'package:starflow/features/playback/domain/playback_models.dart';
+import 'package:starflow/features/playback/data/mpv_playback_format.dart';
+import 'package:starflow/features/playback/domain/playback_network_speed.dart';
 
-class MpvNetworkSpeedLabel extends StatefulWidget {
+import 'playback_network_speed_label.dart';
+
+class MpvNetworkSpeedLabel extends StatelessWidget {
   const MpvNetworkSpeedLabel({
     super.key,
     required this.player,
+    this.generation = 0,
     this.visible = true,
   });
 
   final Player player;
+  final int generation;
   final bool visible;
 
-  @override
-  State<MpvNetworkSpeedLabel> createState() => _MpvNetworkSpeedLabelState();
-}
-
-class _MpvNetworkSpeedLabelState extends State<MpvNetworkSpeedLabel> {
-  Timer? _timer;
-  String _label = '--';
-  bool _polling = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _syncPolling();
+  Future<int?> _readSpeed() async {
+    final native = player.platform;
+    if (native is! NativePlayer) return null;
+    final raw = await native.getProperty('cache-speed');
+    return parsePlaybackByteCount(raw);
   }
 
-  @override
-  void didUpdateWidget(covariant MpvNetworkSpeedLabel oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.player, widget.player) ||
-        oldWidget.visible != widget.visible) {
-      _syncPolling();
-    }
+  Future<int?> _readCacheBytes() async {
+    final native = player.platform;
+    if (native is! NativePlayer) return null;
+    return parsePlaybackByteCount(
+      await native.getProperty('demuxer-cache-state/fw-bytes'),
+    );
   }
 
-  @override
-  void dispose() {
-    _stopPolling();
-    super.dispose();
-  }
-
-  void _syncPolling() {
-    _stopPolling();
-    if (kIsWeb || !widget.visible) {
-      return;
-    }
-    unawaited(_poll());
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      unawaited(_poll());
-    });
-  }
-
-  void _stopPolling() {
-    _timer?.cancel();
-    _timer = null;
-  }
-
-  Future<void> _poll() async {
-    if (_polling || !widget.visible) {
-      return;
-    }
-    _polling = true;
-    try {
-      final native = widget.player.platform;
-      final raw = native == null
-          ? null
-          : await (native as dynamic).getProperty('cache-speed');
-      final bytesPerSecond = double.tryParse('$raw')?.round() ?? 0;
-      final nextLabel =
-          bytesPerSecond > 0 ? '${formatByteSize(bytesPerSecond)}/s' : '0 B/s';
-      if (mounted && nextLabel != _label) {
-        setState(() {
-          _label = nextLabel;
-        });
-      }
-    } catch (_) {
-      if (mounted && _label != '--') {
-        setState(() {
-          _label = '--';
-        });
-      }
-    } finally {
-      _polling = false;
-    }
+  Future<int?> _readBufferDurationMs() async {
+    final native = player.platform;
+    if (native is! NativePlayer) return null;
+    return parsePlaybackDurationMilliseconds(
+      await native.getProperty('demuxer-cache-duration'),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb) {
-      return const SizedBox.shrink();
-    }
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xB310141A),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        child: Text(
-          _label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: AppTextSizes.caption,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ),
+    if (kIsWeb) return const SizedBox.shrink();
+    return PlaybackNetworkSpeedLabel(
+      sampleKey: (player, generation),
+      readSpeed: _readSpeed,
+      readCacheBytes: _readCacheBytes,
+      readBufferDurationMs: _readBufferDurationMs,
+      readFormat: () async {
+        final native = player.platform;
+        return native is NativePlayer
+            ? readMpvPlaybackFormat(native.getProperty)
+            : null;
+      },
+      visible: visible,
     );
   }
 }

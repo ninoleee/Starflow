@@ -174,7 +174,7 @@ SearchPage -> SearchRequest -> SearchSession -> SearchRepository
 | `presentation/live_playlist_transfer_dialog.dart` | 复用 `LanTransferQrAddressCard`，拥有 TV 扫码弹窗、后台/退出清理和迟到会话隔离 |
 | `presentation/live_player_page.dart / live_widgets.dart` | 固定顶栏、无底栏的全屏播放器，按需全屏设置（频道/节目单/音轨/线路/内核）、本地返回记录、Flutter TV 焦点及共享直播按钮；不提供上下频道按钮或静音入口 |
 | `presentation/live_channel_picker.dart` | 播放器左分组／右频道选择器，固定 64dp 行高、当前频道定位、独立列滚动与 TV 跨列焦点；接收本地批量 now/next，复用 `live_widgets.dart` 的 `LiveCurrentProgramme` 显示各台当前节目，不自行读库或拥有播放会话 |
-| `presentation/live_network_speed_label.dart` | 加载／控制栏右上角每秒读取网速，复用 `LiveNetworkSpeedSource`，隔离换台与迟到采样；Exo 原生统计位于 `LiveTvNetworkSpeed.kt` |
+| `presentation/live_network_speed_label.dart` | 将 `LiveNetworkSpeedSource` 和换台 generation 适配到 playback 的共享 `playback_network_speed_label.dart`；格式／平滑位于 `domain/playback_network_speed.dart`，Exo 原生统计位于 `LiveTvNetworkSpeed.kt`，跨 Dart / Kotlin fixture 为 `test/fixtures/playback_network_speed.json` |
 
 ```text
 AppRoutes.liveTv (/live-tv) -> LiveTvPage -> LiveRepository -> 独立直播数据库
@@ -223,7 +223,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 
 ### Android
 
-直播专用 `LiveTvView.kt` 由 `MainActivity.configureFlutterEngine` 注册，视图类型 `starflow/live_tv`、实例通道 `starflow/live_tv/<viewId>`。Flutter 使用 `open / cancelOpen / stop / volume / audioTracks / audio / networkSpeed`；原生另有 `pause / play` 分支，但直播 UI 没有暂停/时移入口。状态携带换台 generation，TextureView 非焦点；标准 renderers 注册随包 FFmpeg 音频扩展并启用 decoder fallback，不进入点播 NativePlaybackActivity，也不继承其 TS/双字幕/自定义音频输出策略。`LiveTvDiagnostics.kt` 负责单实例音轨与输出、缓冲／流结束、掉帧／欠载的脱敏原生日志，不改变通道协议。能力边界见 [直播电视](live-tv.md)。
+直播专用 `LiveTvView.kt` 由 `MainActivity.configureFlutterEngine` 注册，视图类型 `starflow/live_tv`、实例通道 `starflow/live_tv/<viewId>`。Flutter 使用 `open / cancelOpen / stop / volume / audioTracks / audio / networkSpeed / cacheBytes / cacheDurationMs / videoFormat`；原生另有 `pause / play` 分支，但直播 UI 没有暂停/时移入口。状态与速率／缓存／格式查询携带换台 generation，TextureView 非焦点；标准 renderers 注册随包 FFmpeg 音频扩展并启用 decoder fallback，不进入点播 NativePlaybackActivity，也不继承其 TS/双字幕/自定义音频输出策略。`LiveTvDiagnostics.kt` 负责单实例音轨与输出、缓冲／流结束、掉帧／欠载的脱敏原生日志，不改变通道协议。能力边界见 [直播电视](live-tv.md)。
 
 主要目录：`android/app/src/main/kotlin/com/example/starflow/`。
 

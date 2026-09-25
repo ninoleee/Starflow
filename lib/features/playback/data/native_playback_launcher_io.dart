@@ -12,6 +12,7 @@ import 'package:starflow/features/playback/data/native_fntv_service.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_service.dart';
 import 'package:starflow/features/playback/application/playback_episode_browser.dart';
+import 'package:starflow/features/playback/application/playback_variant_resolver.dart';
 import 'package:starflow/features/playback/application/playback_episode_queue_resolver.dart';
 import 'package:starflow/features/playback/application/subtitle_content_decoder.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
@@ -293,6 +294,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       return true;
     }
     if (call.method != 'resolveNativePlaybackEpisode' &&
+        call.method != 'browseNativePlaybackVersions' &&
         call.method != 'browseNativePlaybackEpisodes') {
       throw MissingPluginException('Unsupported native playback resolver call');
     }
@@ -316,6 +318,24 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       final target = PlaybackTarget.fromJson(
         Map<String, dynamic>.from(jsonDecode(rawTargetJson) as Map),
       );
+      if (call.method == 'browseNativePlaybackVersions') {
+        final choices = await PlaybackVariantResolver(read: _ref.read)
+            .load(target)
+            .timeout(const Duration(seconds: 30));
+        if (resolverSessionId != _resolverSessionId) {
+          return {'ok': false, 'message': '播放会话已失效'};
+        }
+        return {
+          'ok': true,
+          'versions': [
+            for (final choice in choices) {
+              'label': playbackVariantLabel(choice),
+              'selected': isSamePlaybackVariant(choice, target),
+              'playbackTargetJson': jsonEncode(choice.toJson()),
+            },
+          ],
+        };
+      }
       if (call.method == 'browseNativePlaybackEpisodes') {
         final browser = _episodeBrowser;
         if (browser == null ||

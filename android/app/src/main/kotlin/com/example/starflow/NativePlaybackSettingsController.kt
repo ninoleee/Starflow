@@ -55,6 +55,9 @@ internal class NativePlaybackSettingsController(private val host: Host) {
         }
 
         val actions = mutableListOf<Pair<String, () -> Unit>>()
+        if (host.fntv.supportsPlaybackVersions()) {
+            actions += "播放版本" to { host.fntv.openVersionPicker() }
+        }
         host.fntv.qualitySettingsLabel()?.let { label ->
             actions += label to { host.fntv.openQualityPicker() }
         }

@@ -62,14 +62,22 @@
                 android:visibility="gone" />
         </LinearLayout>
 
-        <TextView
+        <androidx.appcompat.widget.AppCompatTextView
             android:id="@+id/native_network_speed"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_width="160dp"
+            android:layout_height="40dp"
+            android:gravity="center"
+            android:lines="2"
+            android:ellipsize="end"
+            android:fontFeatureSettings="tnum"
+            app:autoSizeTextType="uniform"
+            app:autoSizeMinTextSize="8sp"
+            app:autoSizeMaxTextSize="12sp"
+            app:autoSizeStepGranularity="1sp"
             android:layout_marginStart="12dp"
-            android:paddingStart="8dp"
+            android:paddingStart="0dp"
             android:paddingTop="4dp"
-            android:paddingEnd="8dp"
+            android:paddingEnd="0dp"
             android:paddingBottom="4dp"
             android:textColor="@android:color/white"
             android:textSize="12sp"

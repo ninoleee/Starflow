@@ -392,12 +392,10 @@ class _DetailLinkedFactRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final action = _DetailLinkedFactAction(
-      value: value,
-      onPressed: onPressed,
-    );
+    final action = _DetailLinkedFactAction(value: value);
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
       children: [
         SizedBox(
           width: 52,
@@ -414,7 +412,7 @@ class _DetailLinkedFactRow extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: Align(
-            alignment: Alignment.centerLeft,
+            alignment: Alignment.topLeft,
             child: isTelevision
                 ? TvFocusableAction(
                     onPressed: onPressed,
@@ -424,7 +422,14 @@ class _DetailLinkedFactRow extends StatelessWidget {
                     focusScale: kTvButtonFocusScale,
                     child: action,
                   )
-                : action,
+                : Semantics(
+                    button: true,
+                    child: InkWell(
+                      onTap: onPressed,
+                      borderRadius: BorderRadius.circular(AppRadii.sm),
+                      child: action,
+                    ),
+                  ),
           ),
         ),
       ],
@@ -433,36 +438,42 @@ class _DetailLinkedFactRow extends StatelessWidget {
 }
 
 class _DetailLinkedFactAction extends StatelessWidget {
-  const _DetailLinkedFactAction({
-    required this.value,
-    required this.onPressed,
-  });
+  const _DetailLinkedFactAction({required this.value});
 
   final String value;
-  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return TextButton.icon(
-      onPressed: onPressed,
-      icon: const Icon(Icons.open_in_new_rounded, size: 15),
-      label: Text(
-        value,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      style: TextButton.styleFrom(
-        foregroundColor: AppColors.foreground,
-        alignment: Alignment.topLeft,
-        padding: EdgeInsets.zero,
-        minimumSize: const Size(0, 30),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        textStyle: const TextStyle(
-          fontSize: AppTextSizes.body,
-          fontWeight: FontWeight.w700,
-          height: 1.5,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        const SizedBox(
+          width: 21,
+          height: 21,
+          child: Center(
+            child: Icon(
+              Icons.open_in_new_rounded,
+              size: 15,
+              color: AppColors.foreground,
+            ),
+          ),
         ),
-      ),
+        Flexible(
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: AppColors.foreground,
+              fontSize: AppTextSizes.body,
+              fontWeight: FontWeight.w700,
+              height: 1.5,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

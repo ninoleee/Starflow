@@ -1,6 +1,7 @@
 package com.example.starflow
 
 import androidx.media3.common.Player
+import androidx.media3.common.Format
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -26,14 +27,76 @@ internal object NativePlaybackFormatting {
         return "${normalized}x"
     }
 
-    fun formatNetworkSpeed(bytesPerSecond: Long): String {
-        val safeValue = bytesPerSecond.coerceAtLeast(0L)
-        return when {
-            safeValue >= 1024L * 1024L ->
-                String.format(Locale.US, "%.1f MB/s", safeValue / (1024.0 * 1024.0))
-            safeValue >= 1024L -> String.format(Locale.US, "%.0f KB/s", safeValue / 1024.0)
-            else -> "$safeValue B/s"
+    fun formatNetworkSpeed(bytesPerSecond: Long?): String {
+        val size = formatCacheBytes(bytesPerSecond)
+        return if (size == "--") size else "$size/s"
+    }
+
+    fun formatCacheBytes(bytes: Long?): String {
+        if (bytes == null || bytes < 0L) return "--"
+        val units = arrayOf("B", "KB", "MB", "GB")
+        var value = bytes.toDouble()
+        var unit = 0
+        while (value >= 1024 && unit < units.lastIndex) {
+            value /= 1024
+            unit++
         }
+        if (unit > 0 && unit < units.lastIndex && value >= 1023.95) {
+            value /= 1024
+            unit++
+        }
+        return String.format(Locale.US, if (unit == 0) "%.0f %s" else "%.1f %s", value, units[unit])
+    }
+
+    fun formatBufferDuration(durationMs: Long?): String {
+        if (durationMs == null || durationMs < 0L) return "--"
+        val totalSeconds = durationMs / 1_000L + if (durationMs % 1_000L >= 500L) 1L else 0L
+        val hours = totalSeconds / 3_600L
+        val minutes = (totalSeconds % 3_600L) / 60L
+        val seconds = totalSeconds % 60L
+        return when {
+            hours > 0L -> "${hours}h ${minutes}m"
+            minutes > 0L -> "${minutes}m ${seconds}s"
+            else -> "${seconds}s"
+        }
+    }
+
+    fun formatPlaybackMetrics(
+        bytesPerSecond: Long?,
+        cacheBytes: Long?,
+        bufferDurationMs: Long?,
+    ): String = listOf(
+        formatNetworkSpeed(bytesPerSecond),
+        formatCacheBytes(cacheBytes),
+        formatBufferDuration(bufferDurationMs),
+    ).joinToString(" · ")
+
+    fun formatVideoFormat(video: Format?, audio: Format?): String? {
+        val parts = buildList {
+            if (video != null && video.width > 0 && video.height > 0) {
+                add("${video.width}x${video.height}")
+            }
+            mediaMimeLabel(video?.sampleMimeType)?.let { add(it) }
+            mediaMimeLabel(audio?.sampleMimeType)?.let { add(it) }
+        }
+        return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+    }
+
+    private fun mediaMimeLabel(mime: String?): String? = when (mime) {
+        null, "" -> null
+        "video/avc" -> "H.264"
+        "video/hevc" -> "HEVC"
+        "video/av01" -> "AV1"
+        "video/x-vnd.on2.vp9" -> "VP9"
+        "video/x-vnd.on2.vp8" -> "VP8"
+        "video/mpeg2" -> "MPEG-2"
+        "video/dolby-vision" -> "Dolby Vision"
+        "audio/mp4a-latm" -> "AAC"
+        "audio/mpeg" -> "MP3"
+        "audio/true-hd" -> "TrueHD"
+        "audio/vnd.dts" -> "DTS"
+        "audio/vnd.dts.hd" -> "DTS-HD"
+        else -> mime.substringAfter('/').uppercase(Locale.ROOT)
     }
 
     fun formatClockDuration(valueMs: Long): String {

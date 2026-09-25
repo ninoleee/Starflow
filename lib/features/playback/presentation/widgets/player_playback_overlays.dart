@@ -8,13 +8,15 @@ class PlayerStartupOverlay extends StatelessWidget {
   const PlayerStartupOverlay({
     super.key,
     required this.target,
-    required this.speedLabel,
+    this.speedLabel = '--',
+    this.networkSpeed,
     this.bufferingProgress,
     this.showSpinner = true,
   });
 
   final PlaybackTarget target;
   final String speedLabel;
+  final Widget? networkSpeed;
   final double? bufferingProgress;
   final bool showSpinner;
 
@@ -38,17 +40,23 @@ class PlayerStartupOverlay extends StatelessWidget {
           top: MediaQuery.paddingOf(context).top + kToolbarHeight + 12,
           right: 18,
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _StartupMetricText(
-                label: '网速',
-                value: speedLabel.isEmpty ? '测速中' : speedLabel,
-              ),
-              const SizedBox(height: 6),
-              _StartupMetricText(
-                label: '格式',
-                value: buildPlaybackStartupFormatValue(target),
-              ),
+              networkSpeed ??
+                  SizedBox(
+                    width: 160,
+                    height: 36,
+                    child: Column(
+                      children: [
+                        _StartupMetricText(
+                          value: '${speedLabel.isEmpty ? '--' : speedLabel} · -- · --',
+                        ),
+                        _StartupMetricText(
+                          value: buildPlaybackStartupFormatValue(target),
+                        ),
+                      ],
+                    ),
+                  ),
               if (_normalizeBufferProgress(bufferingProgress)
                   case final progress?)
                 Padding(
@@ -130,50 +138,29 @@ class TvPlaybackProgressBar extends StatelessWidget {
 
 class _StartupMetricText extends StatelessWidget {
   const _StartupMetricText({
-    required this.label,
     required this.value,
   });
 
-  final String label;
   final String value;
 
   @override
   Widget build(BuildContext context) {
-    return RichText(
-      textAlign: TextAlign.right,
-      text: TextSpan(
-        children: [
-          TextSpan(
-            text: '$label ',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.72),
-              fontSize: AppTextSizes.caption,
-              fontWeight: FontWeight.w600,
-              shadows: const [
-                Shadow(
-                  color: Color(0xA6000000),
-                  blurRadius: 10,
-                  offset: Offset(0, 2),
-                ),
-              ],
-            ),
-          ),
-          TextSpan(
-            text: value,
+    return Expanded(
+      child: Center(
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value,
+            maxLines: 1,
+            textAlign: TextAlign.center,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: AppTextSizes.body,
-              fontWeight: FontWeight.w700,
-              shadows: [
-                Shadow(
-                  color: Color(0xB8000000),
-                  blurRadius: 12,
-                  offset: Offset(0, 2),
-                ),
-              ],
+              fontSize: AppTextSizes.caption,
+              fontWeight: FontWeight.w600,
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
-        ],
+        ),
       ),
     );
   }

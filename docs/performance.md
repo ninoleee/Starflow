@@ -2,6 +2,39 @@
 
 本文负责主机侧 smoke 计时、可重复运行方法及自动化回归证据；验证日期以各节为准。2026-09-24 仅整理章节和归并直播记录，不重跑历史测试。电视、手机和桌面实际界面的测量方法见 [真机性能验证](performance-device.md)，组件关系见 [架构说明](architecture.md)。下文历史代码优化只说明工作量与策略变化，不代表已经测得设备收益。
 
+## 2026-09-25 播放器版本选择
+
+- 后续入口消失修复：NAS / WebDAV 索引文件的 `playbackItemId` 可为空，原版本转换只读取该字段，未回退到候选自身的索引 ID，导致切换后入口判定失败。新增电影和单集连续 `A -> B -> A -> B` 测试先复现空 ID，再修复共享转换；同时补齐候选缺失的类型和季集上下文，检查 JSON 往返及 STRM 解析后仍可查询新文件的版本。相同八文件集合重跑 **130 项通过**，定向分析无问题，`git diff --check` 通过。本次未改 Kotlin，未重跑 Android JVM 或做真机验收；下列 128 / 48 项是此前批次，不覆盖当时遗漏的空 ID 场景。
+
+- 使用 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9。`flutter test --no-pub --reporter expanded` 定向执行 `playback_variant_resolver_test.dart`、`player_variant_picker_dialog_test.dart`、`player_playback_options_dialog_test.dart`、`native_playback_transport_test.dart`、`fntv_api_client_test.dart`、`nas_media_indexer_test.dart`、`features/playback/application/native_playback_episode_queue_policy_test.dart`、`player_startup_cancellation_test.dart`，最终 128 项通过。覆盖版本身份／去重、STRM 解析前后按稳定文件 ID 识别、飞牛旧轨道与转码会话清除、队列当前项身份更新、桥接会话校验、加载／重试／取消／当前项，以及 320px 手机和 1280px TV 布局与遥控器确认。相关 Dart 源码和测试定向分析无问题，`git diff --check` 通过。
+- Android 使用 JDK 17、相同 Flutter SDK 的 `local.properties`，在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativeFntvControllerTest' --tests '*NativePlaybackEpisodeControllerTest' --tests '*NativePlaybackSettingsAppearanceTest' --console=plain --quiet`。Kotlin 编译与 3 类 48 项 JVM 测试通过，无失败／错误／跳过；验证换版本保留进度、暂停和倍速、更新身份及队列、失败回退、迟到列表隔离，并回归既有飞牛画质切换。
+- 初轮新增 Flutter 夹具字段、TV ProviderScope 和重试 setState 回调有错误，均已修正；Android 首轮暴露文件身份更新影响画质重开及一个 Mockito 夹具问题，限定版本分支并修正夹具后重跑通过。
+- 这是主机逻辑／widget／JVM 回归，未进行真实媒体、Android TV 遥控器或 iOS 原生设备验收；未构建发布包、运行发布预设或递增应用版本。工作区其他任务的改动不据此宣称全部验收通过。
+
+## 2026-09-25 播放信息两行统一
+
+- 第一行网速、缓存大小与缓存时长，第二行仅当前媒体分辨率及视频／音频编码；去掉 `Cache / Buf` 标签、内核名、容器与码率。Flutter 160×36、原生 Exo 160×40dp，两行居中。当前行为以 [架构说明](architecture.md) 和 [直播电视](live-tv.md) 为准，下节 Cache 布局为此前验证快照。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，`flutter test --no-pub --reporter expanded` 执行 `playback_network_speed_test.dart`、`playback_network_speed_label_test.dart`、`mpv_playback_format_test.dart`、`live_network_speed_label_test.dart`、`live_exo_bridge_test.dart`、`live_tv_page_test.dart`、`player_tv_playback_widgets_test.dart`、`player_startup_overlay_test.dart`、`player_adaptive_controls_layout_test.dart`、`perf/player_open_smoke_test.dart`，10 文件 64 项通过。覆盖时长、实际格式字段、去容器／码率、迟到格式隔离、超时不影响有效网速，以及固定尺寸／字号。随后统一未创建播放器的启动占位，单独复测 `player_startup_overlay_test.dart` 5 项通过，与前述集合重叠不累加。相关 Dart 源码及测试定向分析无问题。
+- `LIVE_TV_REVIEW=true` 单独运行 `live_tv_page_test.dart --plain-name 'live remote controls fit mobile and TV across repeated sessions'`，1 项通过。检查 `player-390.png`、`player-1280.png`、`guide-390.png`：两行居中、文字可读，与标题及操作无重叠。截图使用 fake engine 黑底，不代表真实媒体或原生 Exo 真机验收。
+- Android 执行 `./gradlew :app:testDebugUnitTest --tests '*PlaybackNetworkSpeedTest' --tests '*NativePlaybackTransferProgressTest' --tests '*LiveTvNetworkSpeedTest' --tests '*LiveTvViewTest' -Pandroid-skip-build-dependency-validation=true --console=plain --quiet`，最终 4 类 20 项通过，XML 报告无失败／错误／跳过。新增场景覆盖当前视频格式、缓冲时长、换台／停止隔离；中间一轮因在 Mockito `thenReturn` 参数内构建 Format 触发嵌套静态 mock 初始化失败，先构建值再设桩后复测通过。`git diff --check` 通过。
+- 未运行发布预设、递增版本或交付 APK；本次为主机功能、布局与启动 smoke 验证，不代表设备吞吐量或性能测量。
+
+## 2026-09-25 网速标签显示已缓存大小（此前布局）
+
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，执行 `flutter test --no-pub --reporter expanded`：`playback_network_speed_test.dart`、`playback_network_speed_label_test.dart`、`live_network_speed_label_test.dart`、`live_exo_bridge_test.dart`、`live_tv_page_test.dart`、`player_tv_playback_widgets_test.dart`、`player_startup_overlay_test.dart`、`player_adaptive_controls_layout_test.dart`、`perf/player_open_smoke_test.dart`，9 文件共 58 项通过。覆盖缓存单位、非法属性、缓存下降／归零、与网速失败隔离、超时、换台迟到结果及 2 倍字号双行固定布局。
+- Android 使用 `./gradlew :app:testDebugUnitTest --tests '*PlaybackNetworkSpeedTest' --tests '*NativePlaybackTransferProgressTest' --tests '*LiveTvNetworkSpeedTest' --tests '*LiveTvViewTest' -Pandroid-skip-build-dependency-validation=true` 验证：4 类共 18 项通过。新增测试使用真实 DefaultAllocator 分配／释放一个缓冲块，核对 `cacheBytes` 通道值与换台／停止后的隔离；格式复用跨语言 fixture。此为 JVM 策略／通道测试，不是 Media3 真机缓存测量。
+- 开发中先修正直播可选缓存接口的显式类型转换，再修正超时测试未等待旧请求的有界定时器收尾；随后上述 Flutter 集合全绿。网速／缓存相关实现和测试定向 `dart analyze` 无问题，`git diff --check` 通过。未运行发布预设、递增版本或交付 APK；MPV 属性在不支持时显示未知，未作各平台真机读取验收。
+- `LIVE_TV_REVIEW=true` 截图发现双行标签的 DefaultTextStyle 丢失父级字体，已改为合并继承样式并增加回归断言。重新检查 `player-390.png`、`player-1280.png`、`guide-390.png`：网速与“已缓存 32.0 MB”可读，无重叠。截图场景通过；同批新增字体断言曾错误假设父级必为 Roboto，改为核对实际父级样式后重跑。截图为 fake engine，不代表真实媒体或原生 Exo 真机视觉验收。
+- 后续将双行文案统一为 `Cache`，Flutter 与 Android 原生两行均水平居中；固定尺寸、数据来源和缓存语义不变。
+
+## 2026-09-25 播放器网速统一
+
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，既有 package_config 与 Android local.properties 均指向该 SDK，未切换工具链。执行 `flutter test --no-pub --reporter expanded`，文件为 `playback_network_speed_test.dart`、`playback_network_speed_label_test.dart`、`live_network_speed_label_test.dart`、`live_exo_bridge_test.dart`、`live_tv_page_test.dart`、`player_tv_playback_widgets_test.dart`、`player_startup_overlay_test.dart`、`player_adaptive_controls_layout_test.dart`、`perf/player_open_smoke_test.dart`、`features/playback/application/playback_startup_preparation_test.dart`、`features/playback/application/playback_startup_routing_test.dart`，共 57 项通过。
+- 新增跨 Dart / Kotlin 格式和平滑 fixture；覆盖单位升档、未知／零值、三样本窗口、超时恢复、迟到结果、隐藏停轮询、换台代次及 2 倍字号固定布局。启动叠层验证未创建播放器时显示未知、可接收当前会话网速组件。首轮两个新增 widget 测试因异步完成后缺少下一帧 pump 失败，修正测试时序后上述完整集合通过。
+- Android 执行 `./gradlew :app:testDebugUnitTest --tests '*PlaybackNetworkSpeedTest' --tests '*NativePlaybackTransferProgressTest' --tests '*LiveTvNetworkSpeedTest' --tests '*LiveTvViewTest' -Pandroid-skip-build-dependency-validation=true`：Kotlin 编译成功，4 类共 17 项 JVM 测试通过。覆盖长连接传输未结束时可采样、实际时间间隔、忽略本地／非法字节、空闲归零、启动进展时间戳不受显示采样影响及会话隔离。仅有既有 API 弃用警告。
+- 上述网速实现、播放器入口和定向测试 `dart analyze` 无问题，`git diff --check` 通过。本次为主机功能／布局／启动 smoke 回归，不代表真机吞吐量或帧率提升；未运行发布预设、递增版本或交付 APK。
+- 另用 `--dart-define=LIVE_TV_REVIEW=true` 单独运行 `live_tv_page_test.dart --plain-name 'live remote controls fit mobile and TV across repeated sessions'`，1 项通过（与上列集合重叠，不累加）。人工检查 `build/live-tv-review/player-390.png`、`player-1280.png`，右侧网速与频道信息无重叠；截图为 fake engine 黑底，不代表真实视频或原生 Exo 真机视觉验收。
+
 ## 2026-09-20 订阅保存按钮焦点配色
 
 - `flutter test test/live_source_save_focus_test.dart test/live_sources_layout_test.dart test/live_accent_test.dart --reporter expanded`：3 文件共 52 项通过，其中新增 32 项覆盖全部 8 种强调色、添加／编辑订阅及 TV／非 TV；验证 TV 低亮度底色、白色描边的实际绘制、上下移焦和按钮尺寸稳定性，非 TV 保留强调色。

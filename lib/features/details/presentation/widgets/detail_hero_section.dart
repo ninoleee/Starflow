@@ -46,7 +46,7 @@ class DetailHeroSection extends ConsumerWidget {
     final hasHeroLogo = target.logoUrl.trim().isNotEmpty;
     final ratingCountLabel = buildRatingCountLabel(target.ratingCount);
     final metadata = <String>[
-      ...target.ratingLabels.where((item) => item.trim().isNotEmpty),
+      ...mergeDistinctRatingLabels(target.ratingLabels, const []),
       if (ratingCountLabel.isNotEmpty) ratingCountLabel,
       if (target.year > 0) '${target.year}',
       if (target.durationLabel.trim().isNotEmpty) target.durationLabel,

@@ -65,6 +65,10 @@ internal class NativePlaybackSession(private val host: Host) {
     var playbackTransferProgress: NativePlaybackTransferProgress? = null
         private set
 
+    private var playbackAllocator: DefaultAllocator? = null
+    val cachedMediaBytes: Long?
+        get() = playbackAllocator?.totalBytesAllocated?.toLong()
+
     var baseMediaItem: MediaItem? = null
 
     var restoredResumePositionMs: Long = 0L
@@ -502,6 +506,7 @@ internal class NativePlaybackSession(private val host: Host) {
         playbackBandwidthMeter?.removeEventListener(host.diagnostics.bandwidthEventListener)
         playbackBandwidthMeter = null
         playbackTransferProgress = null
+        playbackAllocator = null
         host.diagnostics.latestNetworkBytesPerSecond = 0L
         host.diagnostics.latestNetworkSampleAtMs = 0L
         host.diagnostics.networkSpeedVisible = false
@@ -584,8 +589,10 @@ internal class NativePlaybackSession(private val host: Host) {
             host.showToast("当前网速低于片源码率，可能持续缓冲")
         }
 
+        val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
+        playbackAllocator = allocator
         return DefaultLoadControl.Builder()
-            .setAllocator(DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE))
+            .setAllocator(allocator)
             .setBufferDurationsMs(
                 bufferConfig.minBufferMs,
                 bufferConfig.maxBufferMs,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/details/application/detail_page_controller.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -65,12 +66,21 @@ void main() {
         ('时长', '2 小时'),
       ]) {
         expect(
-          tester.getTopLeft(find.text(pair.$2)).dy -
-              tester.getTopLeft(find.text(pair.$1)).dy,
+          _textBaseline(tester, pair.$2) - _textBaseline(tester, pair.$1),
           closeTo(0, 0.1),
-          reason: '${pair.$1} label should align with its value',
+          reason: '${pair.$1} label should share its value baseline',
         );
       }
     });
   });
+}
+
+double _textBaseline(WidgetTester tester, String text) {
+  final finder = find.text(text);
+  final paragraph = tester.renderObject<RenderParagraph>(finder);
+  return tester.getTopLeft(finder).dy +
+      paragraph.getDryBaseline(
+        paragraph.constraints,
+        TextBaseline.alphabetic,
+      )!;
 }

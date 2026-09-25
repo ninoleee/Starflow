@@ -6,7 +6,77 @@ import 'package:starflow/features/live_tv/application/live_playback_controller.d
 import 'package:starflow/features/live_tv/domain/live_models.dart';
 
 void main() {
+  test('duration and format discard responses from a stopped session', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final engine = ExoLiveEngine(901);
+    final format = Completer<String?>();
+    num? duration = 18000;
+    messenger.setMockMethodCallHandler(engine.channel, (call) async {
+      if (call.method == 'videoFormat') return format.future;
+      if (call.method == 'cacheDurationMs') return duration;
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(engine.channel, null));
+    expect(await engine.readVideoFormat(1), isNull);
+    await engine.open(const LiveLine('https://example.test/live'), 1, (_, __) {});
+    expect(await engine.readBufferDurationMs(1), 18000);
+    for (final invalid in [null, -1, double.nan, double.infinity]) {
+      duration = invalid;
+      expect(await engine.readBufferDurationMs(1), isNull);
+    }
+    final pending = engine.readVideoFormat(1);
+    await Future<void>.delayed(Duration.zero);
+    await engine.stop();
+    format.complete('1920x1080 · HEVC · AAC');
+    expect(await pending, isNull);
+    await engine.open(const LiveLine('https://example.test/live'), 2, (_, __) {});
+    expect(await engine.readVideoFormat(2), '1920x1080 · HEVC · AAC');
+    expect(await engine.readVideoFormat(1), isNull);
+    await engine.dispose();
+    expect(await engine.readBufferDurationMs(2), isNull);
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('Exo cache is generation scoped and rejects invalid or late results',
+      () async {
+    final engine = ExoLiveEngine(60);
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final pending = Completer<num>();
+    final calls = <MethodCall>[];
+    num? bytes;
+    var delayed = true;
+    messenger.setMockMethodCallHandler(engine.channel, (call) async {
+      calls.add(call);
+      if (call.method == 'cacheBytes') {
+        return delayed ? pending.future : bytes;
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(engine.channel, null));
+    expect(await engine.readCacheBytes(1), isNull);
+    await engine.open(const LiveLine('https://example.test/live'), 1, (_, __) {});
+    final reading = engine.readCacheBytes(1);
+    await Future<void>.delayed(Duration.zero);
+    expect(calls.last.arguments, {'generation': 1});
+    await engine.stop();
+    pending.complete(4096);
+    expect(await reading, isNull);
+    delayed = false;
+    await engine.open(const LiveLine('https://example.test/live'), 2, (_, __) {});
+    for (final invalid in [null, -1, double.nan, double.infinity]) {
+      bytes = invalid;
+      expect(await engine.readCacheBytes(2), isNull);
+    }
+    bytes = 0;
+    expect(await engine.readCacheBytes(2), 0);
+    bytes = 33554432;
+    expect(await engine.readCacheBytes(2), 33554432);
+    await engine.dispose();
+    expect(await engine.readCacheBytes(2), isNull);
+  });
 
   test('Exo speed reads use the current generation and discard late responses',
       () async {

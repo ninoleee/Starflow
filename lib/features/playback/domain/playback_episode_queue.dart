@@ -94,12 +94,18 @@ class PlaybackEpisodeQueue {
   PlaybackEpisodeQueueEntry? get nextEntry =>
       hasNext ? entries[currentIndex + 1] : null;
 
-  PlaybackEpisodeQueue replaceCurrentTarget(PlaybackTarget target) {
+  PlaybackEpisodeQueue replaceCurrentTarget(
+    PlaybackTarget target, {
+    String? playbackItemKey,
+    String? seriesKey,
+  }) {
     if (!hasCurrent) {
       return this;
     }
     final nextEntries = [...entries];
     nextEntries[currentIndex] = nextEntries[currentIndex].copyWith(
+      playbackItemKey: playbackItemKey,
+      seriesKey: seriesKey,
       target: target.isFntvTranscoding
           ? target.copyWith(
               streamUrl: '',

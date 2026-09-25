@@ -14,6 +14,7 @@ void main() {
   testWidgets('TV playback dialogs use remote-focusable close buttons',
       (tester) async {
     final player = Player(platformPlayer: _FakePlatformPlayer());
+    var versionSelections = 0;
     addTearDown(player.dispose);
     await tester.binding.setSurfaceSize(const Size(1280, 1000));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -46,6 +47,9 @@ void main() {
                 onLoadExternalSubtitle: () async {},
                 onSearchSubtitlesOnline: () async {},
                 onConfigureSeriesSkip: () async {},
+                onSelectVersion: () async {
+                  versionSelections++;
+                },
                 runtimeSettings: const PlaybackMpvRuntimeSettings(
                   backgroundPlaybackEnabled: true,
                   doubleTapToSeekEnabled: true,
@@ -95,6 +99,8 @@ void main() {
       await select(close);
     }
 
+    await select(find.widgetWithText(StarflowSelectionTile, '播放版本'));
+    expect(versionSelections, 1);
     for (final title in ['字幕', '更多']) {
       await select(find.widgetWithText(StarflowSelectionTile, title));
       await closeDialog();

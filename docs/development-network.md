@@ -330,8 +330,9 @@ Web 页面不能自行指定浏览器系统代理，因此 Web 端该页只展�
 - Exo 倍速按 `0.05x`、外挂字幕偏移按 `100ms` 本地微调；普通 PCM16 倍速直接更新 Media3 参数，高精度/直通需要更换输出路径时保留进度重建并重新开流。字幕偏移按 `250ms` 合并后重新生成偏移字幕文件并挂载，不增加网络请求
 - Android TV 对 `DDP / E-AC-3` 启用的 PCM 兼容输出只调整设备本地 Media3 音频渲染，并由随 APK 打包的 FFmpeg 扩展解码音频；不改变 Emby 播放地址、鉴权请求头、直连/转码选择或网络重试行为
 - 非 `TV` 内嵌播放器复用 media_kit 的 Adaptive Material / MaterialDesktop 控件，并定制 Starflow 顶栏、网速和播放设置入口；字幕、音轨、外挂字幕、在线字幕、字幕偏移、后台播放和 MPV 参数复用现有播放链路，不新增服务端接口
-- Exo 右上角网速来自 Media3 当前会话已有传输事件；MPV 顶栏以左上角返回按钮起始，右侧网速来自本地 libmpv `cache-speed` 属性。两者都不额外发起测速或网络请求；控制栏隐藏只隐藏标签，MPV 的属性读取也只发生在本地进程
+- Exo 右上角网速由当前会话已有 TransferListener 的实际网络字节量／采样间隔计算，空闲归零，不用旧带宽估计填充。MPV 顶栏返回按钮右侧及启动／缓冲叠层读取本地 libmpv `cache-speed`，不把主机缓存当实时速率。点播／直播共用每秒刷新、3 个有效样本平滑和格式契约，零值立即清空平滑窗口，未知／2 秒读取超时显示 `--`；Flutter 标签隐藏或销毁停止轮询，换播放器／播放代次丢弃旧结果。两者都不额外发起测速或网络请求；显示平滑不参与自动恢复、缓冲阈值或启动期限判断
 - Android Exo 在播放器内切换远程剧集时会完全关闭旧媒体连接并为新地址创建独立会话；已知 MKV 的 `/smartstrm_fid/` 新集不再先发 64 字节格式探测，避免额外请求与新播放连接争用。低内存 TV 切集后会先积累约 `6s` 才播放，卡顿后积累约 `12s` 再恢复，目标缓存为 `48 MB`；首次打开仍沿用较快的 `32 MB / 1.5s / 4s` 档
+- 网速、缓存大小与缓存时长放在第一行，仅查询本地播放器：MPV 的 `demuxer-cache-state/fw-bytes`、`demuxer-cache-duration`，Exo 本会话 `DefaultAllocator.totalBytesAllocated` 和已缓冲位置减播放位置。第二行仅查询当前媒体分辨率和视频／音频编码，不显示容器或码率。直播 Exo 用带 generation 的 `cacheBytes / cacheDurationMs / videoFormat` 通道读取；指标沿用每秒轮询和 2 秒超时，各自失败隔离，不增加 HTTP 请求。字节值为当前媒体缓存的近似量，不是累计下载流量或磁盘缓存；时长单独读取而非以字节推算，不改变缓存目标和 LoadControl 策略。
 - Exo 与 MPV 会把同主机实测速度在进程内保留 `10` 分钟用于下一集调参，不写入配置或磁盘。MPV 启动只读该缓存，命中与否都不额外发送 Range 请求；缓存缺失时按片源元数据调参，播放后从本地 `cache-speed` 更新缓存，历史缓存不计入新会话的实测速率统计。Exo 直接复用同一原生 Activity 的 Media3 带宽样本
 - MPV / Exo 的可靠性配置位于 `config/playback_policy.json`；修改后运行 `dart tool/generate_playback_policy.dart`，通过 `dart tool/generate_playback_policy.dart --check` 验证。生成不联网、不升级依赖。两端自动卡顿重建最多两次，MPV 运行期错误重建也使用同一预算；切集/手动重试重置，实例释放不重置。Exo 使用独立的 `exoStartupHardLimitMs=60000 / exoStartupNoProgressTimeoutMs=30000`，MPV 自适应期限仍由 `startupHardLimitMs=120000` 封顶。`playback.reliability` 在状态/恢复边界记录 engine、policyVersion、phase、positionMs，恢复记录 action、reason、attempt，不新增预检、测速或远端上报。
 - MPV 仅对临时网络失败重试；Exo 的 Media3 加载策略也只对超时、连接类、`408/425/429/5xx` 做有限退避。鉴权、文件不存在、永久 HTTP 状态和格式/解码错误不会因新策略产生额外请求
@@ -582,7 +583,7 @@ Emby 来源刷新时，每个媒体分区也会作为 maintenance 任务进入�
 - 详情页“手动更新信息”会无视当前是否已有标题、简介、图片或外部 ID，直接重新搜索在线元数据
 - 只要搜索命中，当前详情缓存就会被命中结果直接覆盖
 - 手动索引管理页在应用匹配结果时，也会把 `IMDb ID` 和 `TMDB ID` 一并写回本地索引与详情缓存
-- 详情页评分标签会在本地按来源归一去重；`豆瓣 / IMDb / TMDB` 各最多保留一条，这一步只影响缓存合并与展示，不新增网络请求
+- 详情页评分标签会在本地按来源归一去重并固定按 `豆瓣 -> IMDb -> TMDB` 排列；`豆瓣 / IMDb / TMDB` 各最多保留一条，这一步只影响缓存合并与展示，不新增网络请求
 - “匹配来源”会直接限制详情页本地资源匹配时实际访问的 `Emby / 飞牛影视 / WebDAV / Quark` 来源；如果没有单独勾选，则默认使用全部已启用来源
 - 删除某个已匹配 `WebDAV` 资源后，详情缓存只会精确失效这条资源相关的本地匹配关系；影片本身的在线详情信息和其他候选资源不会因为这次删除被整批清空
 - 如果详情缓存里恢复到的是剧集下的某个单集或文件资源，页面仍会保留原来的剧集结构上下文；这一步直接复用本地缓存，不需要额外发请求去重建季/集结构

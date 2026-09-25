@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicLong
 internal class LiveTvNetworkSpeed(private val nowMs: () -> Long) : TransferListener {
     private val bytes = AtomicLong()
     private var sampledAt = nowMs()
-    var bytesPerSecond = 0L
+    var bytesPerSecond: Long? = null
         private set
 
     fun sample() {

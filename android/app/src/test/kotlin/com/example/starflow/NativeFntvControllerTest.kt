@@ -37,6 +37,62 @@ class NativeFntvControllerTest {
     }
 
     @Test
+    fun versionsAvailableForIndexedMoviesAndServerEpisodesOnly() {
+        for (kind in listOf("nas", "quark", "emby", "fntv")) {
+            json = """{"sourceKind":"$kind","sourceId":"source","itemId":"file","itemType":"movie"}"""
+            assertTrue(controller.supportsPlaybackVersions())
+        }
+        json = """{"sourceKind":"nas","sourceId":"source","itemId":"show","itemType":"series"}"""
+        assertFalse(controller.supportsPlaybackVersions())
+    }
+
+    @Test
+    fun versionReopenPreservesPositionSpeedPauseAndUpdatesIdentityAndQueue() {
+        json = """{"sourceKind":"nas","sourceId":"source","itemId":"a","itemType":"episode","streamUrl":"https://nas/a.mkv"}"""
+        val original = json
+        val next = """{"sourceKind":"nas","sourceId":"source","itemId":"b","itemType":"episode","streamUrl":"https://nas/b.mkv","headers":{"Authorization":"test"}}"""
+        `when`(host.target.playbackItemKey).thenReturn("old-key")
+        `when`(host.target.seriesKey).thenReturn("series")
+        `when`(host.episodes.episodeQueue).thenReturn(NativeEpisodeQueue(listOf(
+            NativeEpisodeQueueEntry(original, "old-key", "series"),
+            NativeEpisodeQueueEntry("{}", "next-episode", "series"),
+        )))
+        `when`(host.session.player!!.playbackParameters).thenReturn(PlaybackParameters(1.5f))
+        `when`(host.session.player!!.currentPosition).thenReturn(42_000L)
+        `when`(host.session.player!!.playWhenReady).thenReturn(false)
+        val nativeTarget = host.target
+        doAnswer { json = it.arguments[0] as String; null }.`when`(nativeTarget).playbackTargetJson = anyString()
+        controller.switchVersion(JSONObject(next))
+        assertEquals("https://nas/b.mkv", JSONObject(requestJson).getString("streamUrl"))
+        assertEquals("test", JSONObject(requestJson).getJSONObject("headers").getString("Authorization"))
+        pending!!(mapOf("ok" to true, "playbackTargetJson" to next, "playbackItemKey" to "new-key", "seriesKey" to "series"))
+        verify(host.target).playbackItemKey = "new-key"
+        verify(host.session).pendingResumePositionOverrideMs = 42_000L
+        verify(host.session).nextInitializePlayWhenReady = false
+        verify(host.session).stagePlaybackParameters(PlaybackParameters(1.5f))
+        val queueCaptor = org.mockito.ArgumentCaptor.forClass(NativeEpisodeQueue::class.java)
+        verify(host.episodes).episodeQueue = queueCaptor.capture()
+        assertEquals(next, queueCaptor.value.currentEntry()!!.playbackTargetJson)
+        assertEquals("next-episode", queueCaptor.value.entries[1].playbackItemKey)
+        assertTrue(controller.recoverQualityFailure())
+        assertEquals(original, json)
+        verify(host.target).playbackItemKey = "old-key"
+        assertFalse(controller.recoverQualityFailure())
+    }
+
+    @Test
+    fun versionLoadDeduplicatesRequestsAndRejectsStaleResponse() {
+        json = """{"sourceKind":"nas","sourceId":"source","itemId":"a","itemType":"movie"}"""
+        controller.openVersionPicker()
+        controller.openVersionPicker()
+        assertEquals(listOf("browseNativePlaybackVersions"), calls)
+        controller.invalidateMedia()
+        pending!!(mapOf("ok" to false))
+        verify(host, never()).showToast("版本加载失败，请重试")
+        verify(host.session, never()).releasePlayer()
+    }
+
+    @Test
     fun initialAudioPreferenceAppliedOnceWithoutOverwritingManualSelection() {
         json = """{"sourceKind":"fntv","preferredAudioStreamId":"b","audioStreams":[{"id":"a","index":0},{"id":"b","index":1}]}"""
         val player = host.session.player!!

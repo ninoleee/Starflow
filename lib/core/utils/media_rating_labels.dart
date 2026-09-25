@@ -100,10 +100,29 @@ List<String> mergeDistinctRatingLabels(
 
   collect(primary);
   collect(secondary);
-  return orderedKeys
+  final labels = orderedKeys
       .map((key) => valuesByKey[key] ?? '')
       .where((label) => label.trim().isNotEmpty)
       .toList(growable: false);
+  return _orderRatingLabels(labels);
+}
+
+List<String> _orderRatingLabels(Iterable<String> labels) {
+  final indexed = labels
+      .map((label) => label.trim())
+      .where((label) => label.isNotEmpty)
+      .indexed
+      .toList(growable: false);
+  indexed.sort((left, right) {
+    final sourceComparison = _ratingSourcePriority(
+      resolveMediaRatingSource(left.$2),
+    ).compareTo(_ratingSourcePriority(resolveMediaRatingSource(right.$2)));
+    if (sourceComparison != 0) {
+      return sourceComparison;
+    }
+    return left.$1.compareTo(right.$1);
+  });
+  return indexed.map((entry) => entry.$2).toList(growable: false);
 }
 
 MediaRatingSource resolveMediaRatingSource(String label) {
@@ -144,6 +163,15 @@ String _labelMergeKey(String value) {
     MediaRatingSource.imdb => 'rating:imdb',
     MediaRatingSource.tmdb => 'rating:tmdb',
     MediaRatingSource.other => value.trim().toLowerCase(),
+  };
+}
+
+int _ratingSourcePriority(MediaRatingSource source) {
+  return switch (source) {
+    MediaRatingSource.douban => 0,
+    MediaRatingSource.imdb => 1,
+    MediaRatingSource.tmdb => 2,
+    MediaRatingSource.other => 3,
   };
 }
 

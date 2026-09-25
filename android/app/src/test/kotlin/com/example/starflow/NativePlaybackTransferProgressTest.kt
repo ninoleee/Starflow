@@ -50,5 +50,35 @@ class NativePlaybackTransferProgressTest {
         val next = NativePlaybackTransferProgress { time }
         progress.onBytesTransferred(source, spec, true, 4_096)
         assertEquals(-1L, next.lastProgressAtMs)
+        assertNull(next.networkBytesPerSecond)
+    }
+
+    @Test
+    fun samplesOngoingReadsByElapsedTimeAndClearsIdleImmediately() {
+        assertNull(progress.networkBytesPerSecond)
+        progress.onBytesTransferred(source, spec, true, 1024)
+        progress.onBytesTransferred(source, spec, true, 3072)
+        progress.onBytesTransferred(source, spec, false, 99999)
+        progress.onBytesTransferred(source, spec, true, -1)
+        time += 500L
+        progress.sampleNetworkSpeed()
+        assertNull(progress.networkBytesPerSecond)
+        time += 1500L
+        progress.sampleNetworkSpeed()
+        assertEquals(2048L, progress.networkBytesPerSecond)
+        progress.onBytesTransferred(source, spec, true, 4096)
+        progress.sampleNetworkSpeed()
+        assertEquals(2048L, progress.networkBytesPerSecond)
+        time += 1000L
+        progress.sampleNetworkSpeed()
+        assertEquals(3072L, progress.networkBytesPerSecond)
+        time += 1000L
+        progress.sampleNetworkSpeed()
+        assertEquals(0L, progress.networkBytesPerSecond)
+        progress.onBytesTransferred(source, spec, true, 1024)
+        time += 1000L
+        progress.sampleNetworkSpeed()
+        assertEquals(1024L, progress.networkBytesPerSecond)
+        assertEquals(5000L, progress.lastProgressAtMs)
     }
 }

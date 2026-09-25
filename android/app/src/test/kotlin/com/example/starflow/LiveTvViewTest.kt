@@ -29,6 +29,43 @@ import org.mockito.Mockito.*
 class LiveTvViewTest {
     @get:org.junit.Rule internal val android = AudioAndroidStubs()
 
+    @Test fun durationAndFormatFollowOnlyTheCurrentPlayer() = withView { f ->
+        f.open(1)
+        val current = f.players.single()
+        `when`(current.bufferedPosition).thenReturn(28000L)
+        `when`(current.currentPosition).thenReturn(10000L)
+        val video = androidx.media3.common.Format.Builder()
+            .setWidth(1920).setHeight(1080).setSampleMimeType("video/hevc").build()
+        `when`(current.videoFormat).thenReturn(video)
+        verify(f.call("cacheDurationMs", mapOf("generation" to 1L))).success(18000L)
+        verify(f.call("videoFormat", mapOf("generation" to 1L))).success("1920x1080 · HEVC")
+        `when`(current.currentPosition).thenReturn(30000L)
+        verify(f.call("cacheDurationMs", mapOf("generation" to 1L))).success(0L)
+        f.open(2)
+        verify(f.call("videoFormat", mapOf("generation" to 1L))).success(null)
+        verify(f.call("cacheDurationMs", mapOf("generation" to 1L))).success(null)
+        verify(f.call("videoFormat", mapOf("generation" to 2L))).success(null)
+        f.call("stop")
+        verify(f.call("cacheDurationMs", mapOf("generation" to 2L))).success(null)
+    }
+
+    @Test fun cacheBytesUsesCurrentAllocatorAndIsClearedOnStop() = withView { f ->
+        verify(f.call("cacheBytes", mapOf("generation" to 1L))).success(null)
+        f.open(1)
+        val field = f.view.javaClass.getDeclaredField("cacheAllocator").apply { isAccessible = true }
+        val allocator = field.get(f.view) as androidx.media3.exoplayer.upstream.DefaultAllocator
+        val allocation = allocator.allocate()
+        verify(f.call("cacheBytes", mapOf("generation" to 1L)))
+            .success(C.DEFAULT_BUFFER_SEGMENT_SIZE.toLong())
+        allocator.release(allocation)
+        verify(f.call("cacheBytes", mapOf("generation" to 1L))).success(0L)
+        f.open(2)
+        verify(f.call("cacheBytes", mapOf("generation" to 1L))).success(null)
+        verify(f.call("cacheBytes", mapOf("generation" to 2L))).success(0L)
+        f.call("stop")
+        verify(f.call("cacheBytes", mapOf("generation" to 2L))).success(null)
+    }
+
     private class Fixture(
         val view: PlatformView,
         val channel: MethodChannel,

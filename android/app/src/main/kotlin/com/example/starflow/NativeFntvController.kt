@@ -9,6 +9,10 @@ import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_URL
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_HEADERS_JSON
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_MEDIA_MIME_TYPE
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_PLAYBACK_TARGET_JSON
+import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_PLAYBACK_ITEM_KEY
+import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_SERIES_KEY
+import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_EPISODE_QUEUE_JSON
+import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_TITLE
 
 internal class NativeFntvController(
     private val host: Host,
@@ -43,6 +47,7 @@ internal class NativeFntvController(
     private var loadedSubtitleUri = ""
     private var pendingSubtitleRevision: Long? = null
     private var automaticSubtitleLoadingAllowed = true
+    private var versionPickerLoading = false
 
     fun cancelSubtitleLoad() {
         pendingSubtitleRevision = null
@@ -289,24 +294,69 @@ internal class NativeFntvController(
         switchPlayback(currentSelectionSnapshot().put("preferredPlaybackQualityIndex", index))
     }
 
-    private fun switchPlayback(request: JSONObject) {
+    fun supportsPlaybackVersions(): Boolean {
+        val value = target()
+        return value.optString("sourceId").isNotBlank() && value.optString("itemId").isNotBlank() &&
+            value.optString("itemType").lowercase() in listOf("movie", "episode") &&
+            value.optString("sourceKind") in listOf("nas", "quark", "emby", "fntv")
+    }
+
+    fun openVersionPicker() {
+        if (closed || isSwitching || host.episodes.isSwitching || versionPickerLoading) return
+        versionPickerLoading = true
+        val original = host.target.playbackTargetJson
+        val token = generation
+        host.showToast("正在读取播放版本")
+        invoke("browseNativePlaybackVersions", args()) callback@{ result ->
+            versionPickerLoading = false
+            if (closed || token != generation || host.target.playbackTargetJson != original ||
+                host.activity.isFinishing || host.activity.isDestroyed ||
+                host.episodes.isSwitching || isSwitching) return@callback
+            val choices = (result["versions"] as? List<*>)?.mapNotNull { it as? Map<*, *> }.orEmpty()
+            if (result["ok"] != true || choices.isEmpty()) {
+                host.showToast("版本加载失败，请重试")
+                return@callback
+            }
+            val selected = choices.indexOfFirst { it["selected"] == true }
+            val labels = choices.map { it["label"]?.toString().orEmpty() }
+            val dialog = AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
+                .setTitle(if (choices.size == 1) "播放版本（仅一个）" else "播放版本")
+                .setSingleChoiceItems(NativePlaybackSettingsAppearance.labels(host.activity, labels), selected) { picker, which ->
+                    picker.dismiss()
+                    if (which != selected && !closed && token == generation &&
+                        host.target.playbackTargetJson == original) {
+                        val request = runCatching { JSONObject(choices[which]["playbackTargetJson"].toString()) }.getOrNull()
+                        if (request != null) switchVersion(request)
+                    }
+                }.setNegativeButton("取消", null).create()
+            host.settings.showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
+        }
+    }
+
+    // Version changes share the existing transactional reopen/rollback path.
+    fun switchVersion(request: JSONObject) {
+        if (!supportsPlaybackVersions() || request.optString("sourceId") != target().optString("sourceId")) return
+        switchPlayback(request, switchingVersion = true)
+    }
+
+    private fun switchPlayback(request: JSONObject, switchingVersion: Boolean = false) {
         if (closed) return
         if (isSwitching || host.episodes.isSwitching) return
         val oldPlayer = host.session.player ?: return
         val oldJson = host.target.playbackTargetJson
         val subtitleRevision = host.subtitles.subtitleSelectionRevision
-        request.put("streamUrl", "").put("headers", JSONObject())
+        if (!switchingVersion) request.put("streamUrl", "").put("headers", JSONObject())
             .put("fntvSessionLink", "")
             .put("fntvTrackSelectionExplicit", true)
             .put("fntvStartPositionMs", oldPlayer.currentPosition.coerceAtLeast(0))
         busy = true
         val token = ++generation
-        host.showToast("正在解析画质")
+        host.showToast("正在解析播放设置")
         val timeout = Runnable {
             if (token == generation && busy) {
                 generation++
                 busy = false
-                host.showToast("画质解析超时，已保留当前播放")
+                host.showToast("播放设置解析超时，已保留当前播放")
             }
         }
         host.playerView.postDelayed(timeout, 45_000)
@@ -329,7 +379,7 @@ internal class NativeFntvController(
             val json = result["playbackTargetJson"]?.toString().orEmpty()
             val next = runCatching { JSONObject(json) }.getOrNull()
             if (result["ok"] != true || next == null || next.optString("streamUrl").isBlank()) {
-                host.showToast("画质解析失败，已保留当前播放")
+                host.showToast("播放设置解析失败，已保留当前播放")
                 return@callback
             }
             val position = oldPlayer.currentPosition.coerceAtLeast(0)
@@ -351,6 +401,9 @@ internal class NativeFntvController(
                 else -> null
             }
             val oldMime = host.activity.intent.getStringExtra(EXTRA_MEDIA_MIME_TYPE).orEmpty()
+            val oldKey = host.target.playbackItemKey
+            val oldSeriesKey = host.target.seriesKey
+            val oldQueue = host.episodes.episodeQueue
             val oldExternal = host.externalSubtitles.externalSubtitleSource
             host.runtime.persistPlaybackProgress(force = true)
             host.episodes.invalidateResolution()
@@ -361,6 +414,22 @@ internal class NativeFntvController(
                 pendingSubtitleRevision = null
                 automaticSubtitleLoadingAllowed = true
                 val value = JSONObject(targetJson)
+                val restoring = targetJson == oldJson
+                if (switchingVersion) {
+                    val itemKey = if (restoring) oldKey else result["playbackItemKey"]?.toString() ?: oldKey
+                    val seriesKey = if (restoring) oldSeriesKey else result["seriesKey"]?.toString() ?: oldSeriesKey
+                    host.target.playbackItemKey = itemKey
+                    host.target.seriesKey = seriesKey
+                    val queue = if (restoring) oldQueue else oldQueue?.replaceEntry(
+                        oldQueue.currentIndex, NativeEpisodeQueueEntry(targetJson, itemKey, seriesKey, mime),
+                    )
+                    host.episodes.episodeQueue = queue
+                    host.activity.intent.putExtra(EXTRA_PLAYBACK_ITEM_KEY, itemKey)
+                    host.activity.intent.putExtra(EXTRA_SERIES_KEY, seriesKey)
+                    host.activity.intent.putExtra(EXTRA_EPISODE_QUEUE_JSON, queue?.toJsonString().orEmpty())
+                    host.activity.intent.putExtra(EXTRA_TITLE, value.optString("title"))
+                    host.runtime.resetForNewMedia()
+                }
                 host.externalSubtitles.externalSubtitleSource = if (targetJson == oldJson) oldExternal else null
                 host.target.playbackTargetJson = targetJson
                 host.activity.intent.putExtra(EXTRA_PLAYBACK_TARGET_JSON, targetJson)
@@ -398,9 +467,11 @@ internal class NativeFntvController(
                         }
                     }
                 }
+                if (switchingVersion && !restoring) restoreTracks = null
                 host.session.stagePlaybackParameters(speed)
                 host.session.initializePlayer()
                 host.subtitles.subtitleSessionPreference = when {
+                    switchingVersion && !restoring -> null
                     value.optBoolean("fntvTrackSelectionExplicit") &&
                         value.optString("preferredSubtitleStreamId").isBlank() ->
                         NativeSubtitleSessionPreference(NativeSubtitleSessionMode.OFF)
@@ -430,7 +501,7 @@ internal class NativeFntvController(
             rollback = null
             rollbackJson?.let(::releasePlayback)
             rollbackJson = null
-            host.showToast("画质已切换")
+            host.showToast("播放设置已切换")
         }
         if (isTranscoding() && !busy && automaticSubtitleLoadingAllowed && pendingSubtitleRevision == null) {
             externalSubtitles().firstOrNull {

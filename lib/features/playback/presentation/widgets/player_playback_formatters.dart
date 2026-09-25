@@ -24,10 +24,10 @@ String buildPlaybackOptionMeta(PlaybackTarget target) {
 }
 
 String buildPlaybackStartupFormatValue(PlaybackTarget target) {
+  final codecs = target.copyWith(container: '').formatLabel;
   final parts = <String>[
     if (target.resolutionLabel.isNotEmpty) target.resolutionLabel,
-    if (target.formatLabel.isNotEmpty) target.formatLabel,
-    if (target.bitrateLabel.isNotEmpty) target.bitrateLabel,
+    if (codecs.isNotEmpty) codecs,
   ];
   if (parts.isEmpty) {
     return '识别中';

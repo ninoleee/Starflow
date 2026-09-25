@@ -98,7 +98,7 @@ Starflow 不是单一播放器，而是一个面向个人影音库的统一入�
 - `media_repository.dart`、`discovery_repository.dart`、`search_repository.dart` 是真实仓库入口，不再使用 `mock_` 文件名。媒体查询由 `AppMediaQueryService` 负责，夸克扫描与 sidecar 读取由 `QuarkExternalStorageClient` 及索引链负责；仓库中迁移后未调用的查询、夸克扫描和 NFO 解析实现已删除，刷新与同步删除仍保留在原职责边界。
 - `detail_metadata_service.dart` 统一 WMDB/TMDB 请求、单集图片解析、豆瓣评分补全及元数据结果状态。详情刷新和后台解析复用同一服务，后台按需补缺、强制刷新允许替换，NAS 后台元数据仍优先由索引负责。字段合并复用 `DetailLibraryMatchService`，不以系列简介覆盖单集简介或覆盖已有单集类型。
 - 执行结果区分 `skipped / noMatch / succeeded / partialFailure / failed`。现有持久化格式不变：未执行时保留原刷新状态，部分失败、全部失败写入 `failed`，正常完成但无匹配仍为已完成尝试；首页和详情不再用“是否改了字段”推断请求成功。部分成功的数据仍保存，页面离开后的会话校验不变。
-- 评分合并统一到 `media_rating_labels.dart`，按来源去重并以有效值替换零分；已有有效评分保持优先，豆瓣实时评分刷新仍可更新对应值。
+- 评分合并统一到 `media_rating_labels.dart`，按来源去重并以有效值替换零分；已有有效评分保持优先，豆瓣实时评分刷新仍可更新对应值。展示顺序固定为 `豆瓣 -> IMDb -> TMDB`，与数据写入先后和缓存命中路径无关。
 - `core/storage/resource_path_identity.dart` 为详情缓存和播放历史提供来源内路径相等、目录范围比较。URL 按段解码一次，普通路径按字面处理，保留大小写、百分号和编码分隔符的身份，来源隔离仍由仓库校验。
 - 首页两种 Ref 入口共用刷新调度，返回表示已调度；启动等待仍由 `waitForHomeModules` 承担，移除无条件 `140ms` 延迟。来源列表直接读取配置，移除原 `120ms` 人工等待。废弃 body inset 接口、无效底栏参数和未调用的 trace 去重集合已移除；结构化本地日志与原生退出捕获保持启用能力。
 - 公共逻辑继续收口：`details/domain/cached_artwork.dart` 保持图片 URL 与 headers 同源合并；`library/data/nfo_metadata.dart` 共享 WebDAV / 夸克的 XML 解析及字段合并；`library/presentation/library_resource_deletion.dart` 复用媒体库删除确认；`search/application/cloud_save_postprocessing.dart` 共享 STRM 触发及刷新失败反馈；`core/widgets/tv_text_input_launcher.dart` 统一遥控器按键释放后才打开输入。
@@ -764,7 +764,7 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - `TMDB` 已接入 `poster / backdrop / still / profile / logo` 等图片字段，并把 `TMDB x.x` 写入统一评分标签链路；详情不主动请求 IMDb。NAS 索引仅在配置 `imdbRatingMatchEnabled=true` 时调用独立 IMDb 客户端，默认关闭；上游 `WMDB / TMDB` 与既有索引的 IMDb 标签继续展示和保存
 - `MediaItem.ratingCount` 与 `MediaDetailTarget.ratingCount` 共用豆瓣评分人数。详情 Hero 使用 `buildRatingCountLabel` 显示 `☆31.6万`；`douban_rating_stats_service` 获取 `rating.count` 后，`MediaRepository.updateRatingCount` 会把人数写回 Emby / 飞牛分片缓存或 NAS / WebDAV / Quark 索引。索引建条目、系列 / 季 / 特殊集分组和增量刷新均保留该字段，因此媒体库入口再次打开详情时可直接恢复人数。
 - 人数不再作为独立预取条件：resolver 在缺豆瓣评分、豆瓣 ID 新匹配或强制刷新时同步获取评分与人数。`DoubanEntry` 保留列表响应的 `rating.count`；首页（含轮播）和媒体库批量缓存合并、可见页变化检测、资源匹配、剧集变体及清理失效资源关联时均保留人数；仅人数变化也归入 `LocalStorageDetailCacheChangedField.ratings`，沿评分缓存订阅更新入口。人数随当前详情缓存保存。
-- 详情页评分标签会按来源归一去重；`豆瓣 / IMDb / TMDB` 各最多保留一条，避免 seed target、详情缓存和后续在线补全合并后出现重复评分标签；评分人数不占用标签条目
+- 详情页评分标签会按来源归一去重，并固定按 `豆瓣 -> IMDb -> TMDB` 排列；`豆瓣 / IMDb / TMDB` 各最多保留一条，避免 seed target、详情缓存和后续在线补全合并后出现重复评分标签或位置互换；评分人数不占用标签条目
 - 人物头像统一来自 `TMDB profile`，详情页公司 Logo 来自 `TMDB production_companies.logo_path`，不再把 `networks` 混作公司展示
 - 详情页公司 Logo 位于资源信息之后的页面底部，使用带柔和高对比度背景卡片的单行横向 `PlatformRail`，超出可视区域时可左右滑动，TV 端每个 Logo 都有独立焦点目标并带轻微放大提示，不再通过多行 `Wrap` 换行；点击 Logo 会直接使用详情数据里的 `TMDB` 公司 ID，并打开与人物作品页共用的电影 / 剧集作品浏览页
 - `MediaItem` 只持久化演职员姓名，`MediaDetailTarget.resolved*Profiles` 负责无头像时的姓名占位；占位不写入真实 profile 列表。详情缓存、资源匹配和 TMDB 结果通过 `mergeMediaPersonProfiles(...)` 合并，同名条目优先保留已有顺序并用非空头像升级。NAS 索引已有完整文字元数据但没有人物图时，只允许一次面向 `TMDB profile` 的详情补全，不重新请求 WMDB
@@ -896,6 +896,10 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 
 ## 10. 播放链路
 
+索引版本转为播放目标时，`PlaybackVariantResolver` 优先保留非空 `playbackItemId`，缺失时使用该候选自己的 `MediaItem.id`，不能复用上一个文件的 ID；候选缺失的类型及季集号由当前同作品／同集上下文补齐。此规则确保切换后设置入口仍可用，下一次版本查询仍定位到新文件，且经过原生 JSON 桥接或 STRM 地址解析后身份不丢失。
+
+`PlaybackVariantResolver` 按当前 source/item 身份复用媒体服务器 `fetchPlaybackVariants` 或 NAS 索引的电影／单集版本分组，不跨来源按标题猜测，不为列出版本解析 STRM。MPV `PlayerVariantPickerDialog` 与 Android `browseNativePlaybackVersions` 共用版本标签、去重和当前项判断；飞牛版本候选清除旧文件音轨 GUID、画质和转码会话。MPV 与 Android 原生复用既有画质切换的解析、串行释放、重开和失败回退事务，换文件时保留时间、倍速、暂停状态并更新播放记忆身份和队列当前项，不复用旧文件的临时轨道选择。Android 入口暂由 `NativeFntvController` 的共享重开路径承接，非飞牛版本不执行飞牛请求重写。iOS 系统 AVPlayer 控制栏与外部播放器没有此入口。
+
 2026-09-20 流畅度修复边界：iOS 与 Android 原生容器均接收完整延迟解析剧集队列，iOS 只在切集时经 `starflow/native_playback_resolver` 解析目标，30 秒截止及会话代次拒绝迟到提交。iOS 宿主更换请求身份前完成旧实例字幕/进度快照与清理，再异步读取新集记忆。`NativePlaybackMemoryStore` 在两端拥有串行写入队列，合并待写周期进度而保留强制最终快照；iOS 缓存最大时间戳及复用日期解析器，Android 高频跳过检查读取发布快照。写入完成通过 `nativePlaybackMemoryChanged` 使 Flutter 历史缓存失效，不能把主线程提交完成等同磁盘同步。
 
 MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播放器代次和手动选轨优先；`PlaybackSeekCoalescer` 合并 TV 长按输入，稳定的播放页 key 不因 ready 状态销毁视频子树。AVPlayer StartupGate 只允许一个 preroll，ready 时间轴区分点播/直播，不以 `.m3u8` 判断直播。iOS 呈现回调和 `playing` 不是实际像素首帧。处理状态与限制见 [播放器审查](reviews/player-smoothness-review-2026-09-20.md)。
@@ -971,7 +975,7 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
   - 本地续播记忆
   - Android 在线字幕搜索与挂载；iOS AVPlayer 暂未完成该闭环
   - Android 原生音轨/字幕选择、播放中音频输出切换、外挂字幕加载与外挂字幕偏移
-  - Android 原生播放设置弹窗一级只保留本剧跳过片头片尾、音轨、字幕和选择剧集；播放速度、音频输出、主字幕大小、主/副字幕位置、副字幕大小、在线查找字幕、加载外部字幕和字幕偏移全部收进列表最下方的“更多”二级弹窗
+  - Android 原生播放设置弹窗一级提供播放版本（支持的电影／单集）、画质（飞牛）、本剧跳过片头片尾、音轨、字幕和选择剧集；播放速度、音频输出、主字幕大小、主/副字幕位置、副字幕大小、在线查找字幕、加载外部字幕和字幕偏移全部收进列表最下方的“更多”二级弹窗
   - Android TV 原生控制层只让进度条参与遥控器焦点；播放/暂停及右下角字幕、音轨和更多按钮仍保留显示与点击，但不进入方向键焦点链。确定键由原生遥控器处理层直接切换播放状态。`NativePlaybackRemoteController` 无论控制栏是否可见，按下都统一优先打开选集；没有选集才打开播放设置。选集直接叠加在当前画面上，不主动收起或重新显示控制栏。长按重复不重开，已有弹窗和字幕搜索中的下键交还原界面；菜单键、字幕键快捷入口不变
   - Android 原生播放器的主字幕大小可在“更多”里按 `20–78号` 调整，主/副位置和副字幕大小按百分比调整；改完立即重新套用 `NativeSubtitleStylePolicy / NativeDualSubtitleController`，并通过原生播放回调调用 Flutter `SettingsController` 的字幕样式窄保存入口。设置页、MPV 与 ExoPlayer 因而共用同一份全局值，不再保留原生会话临时覆盖
   - Android 原生音轨与字幕轨选择使用单选即应用的轻量弹窗；点选轨道或“关闭”会立即更新 Media3 `TrackSelectionParameters` 并关闭弹窗，不保留额外的确定步骤
@@ -1051,7 +1055,9 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 - Android 双字幕由 `NativeDualSubtitleController` 管理主/副文本 renderer，按选定轨道的 `NativeSubtitleFormatKey` 路由，不再把副轨写死为英文。样式从 Flutter 全局设置传入，播放内修改经窄保存回调持久化；普通模式只启用主字幕，PGS/VobSub/DVB 不进入双字幕候选
 - Android 原生播放器的跨集字幕恢复由 `NativeSubtitleSessionPreferencePolicy` 匹配新的 `TrackSelectionOverride`；双字幕恢复成功后再重新配置 `NativeDualSubtitleController` 的主/副路由，不保存上一集的 Media3 group 或 override 实例
 - 非 Web 内置 MPV 使用原生 `sid / secondary-sid` 选择两条分离的内封文本轨，同时向 libmpv 写入 `sub-pos / secondary-sub-pos / secondary-sub-scale`；由于当前 `libass=false`，画面上的主/副字幕由 Starflow 自定义 Flutter 叠层分别渲染，保证窗口态与全屏态都使用独立位置和字号。跨集时由 `PlaybackSubtitleSessionPreference` 分别匹配新的 `sid / secondary-sid`。图片字幕和临时外挂字幕不进入特殊模式。播放设置一级通过“更多”打开二级页，二级页同时提供字幕布局、后台播放、手势、卡顿恢复和性能调优开关
-- 非 Web MPV 控制层左上角以返回按钮作为第一个控件，不保留人为前置间距；其右侧网速标签使用轻量轮询读取 libmpv `cache-speed`，展示当前缓存下层 I/O 读取速度。桌面 / 手机 Adaptive 控制层和 TV chrome 复用同一排列与网速组件
+- 非 Web MPV 控制层左上角以返回按钮作为第一个控件，不保留人为前置间距；其右侧网速标签每秒读取 libmpv `cache-speed`。`MpvNetworkSpeedLabel` 与直播 `LiveNetworkSpeedLabel` 适配到共享 `PlaybackNetworkSpeedLabel`，按播放器／来源与播放 generation 隔离迟到结果，2 秒读取超时后显示未知并允许下一轮重试。隐藏或销毁停止轮询，重新显示清空旧样本。启动／缓冲叠层接入当前播放器标签后不重复显示格式行。标签无独立背景，固定 160×36 逻辑像素，两行水平居中、等宽数字，各行超出时独立缩小以保持边界；桌面 / 手机 Adaptive 控制层和 TV chrome 共用组件。
+- 第一行为 `网速 · 缓存大小 · 缓存时长`，无 `Cache / Buf` 标签：MPV 读取 `demuxer-cache-state/fw-bytes` 和 `demuxer-cache-duration`；Exo 每会话保留 LoadControl 的 `DefaultAllocator` 并读取 `totalBytesAllocated`，时长取已缓冲位置减播放位置且不小于零，释放／换集清空引用。两种内核提供的都是近似媒体缓存量，Exo 包含分块余量，不等同精确下载大小或磁盘离线缓存。各指标独立处理失败／超时，缓存值不平滑，未知显示 `--`。第二行仅为当前媒体的分辨率、视频编码、音频编码；MPV 的 `mpv_playback_format.dart` 读取 `video-params/w / h`、`video-format`、`audio-codec-name`，Exo 读取当前 `videoFormat / audioFormat` 而非任意候选轨道。缺项省略，全未知显示“识别中”，不显示引擎名、容器或码率；未创建播放器的启动格式可使用目标元数据。不更改缓存策略、网络传输或解码流程。
+- `PlaybackNetworkSpeedWindow`（Dart / Kotlin）仅用于显示：最近 3 个正值取平均，零值／未知立即清空窗口。按 1024 进位，B/s 整数，KB/s、MB/s、GB/s 一位小数，舍入抵达边界时升单位。非法、未采样、超时显示 `--`；两端通过 `test/fixtures/playback_network_speed.json` 校验相同格式及平滑规则，不改变性能统计、启动进展或带宽不足判断。
 - 非 TV MPV 的 Material / MaterialDesktop Adaptive 控制层共用 `player_controls_layout.dart`：`PlayerEmbeddedSurface` 在普通模式横竖屏均铺满可用区域，视频继续由 `Video.fit` / `aspectRatio` 处理画面适配；TV 保留居中的比例容器。`PlayerAdaptiveControlsLayout` 在控制层当前位置监听 `MediaQuery.viewPadding`，计算 `viewPadding + EdgeInsets.symmetric(horizontal: 12, vertical: 6)` 并交给两套主题 builder，不在整个控件外加 Padding。主题 `padding` 保持 `0`；上栏 margin 只使用顶部和左右留白，下栏 margin 只使用底部和左右留白，栏高保持 `56`。手机进度条自身使用底部及左右留白再加 `playbackSeekBarMargin` 的底部 `6`，让正常进度条和隐藏控制栏后的临时快进进度条位置一致；桌面进度条在下栏上方，只加左右留白和自身底部 `6`，底部安全区由下栏占位承担。手机中央按钮行单独加左右留白。普通/全屏及播放状态不参与边距计算，视频、自定义字幕、遮罩和手势根层仍使用完整播放器区域，按钮内部点击区域及 TV chrome 不变。
 - `media_kit_video 2.0.1` 的 Material / MaterialDesktop 主题 `updateShouldNotify` 使用了反向的身份比较，Adaptive 返回的 `VideoControlsThemeDataInjector` 会导致新主题不通知内部控件。`PlayerAdaptiveControlsLayout` 将这个内部依赖限制在单一兼容适配点：取出 injector 的原始 child，由应用直接提供两套主题，通过私有 `_PlayerControlsThemeRefresh` ThemeExtension 使现有控件的 `Theme.of` 依赖刷新；不修改 pub-cache，不通过旋转 key 重新挂载控制层，不重置显隐、计时器或手势状态，原有系统音量/亮度同步 revision key 仍保留。升级 media_kit 时应复查并移除已不需要的兼容处理。`test/player_adaptive_controls_layout_test.dart` 使用真实 Video / Adaptive 控件及假的播放器后端覆盖横竖屏、单侧安全区、仅 insets 更新、全屏往返、隐藏状态、正常及临时进度条、四角像素和边缘手势。
 - Android / iOS 非 TV MPV 的 `MaterialVideoControlsThemeData.backdropColor` 显式设为 `Color(0x33000000)`，即黑色 `20%` 不透明度（`80%` 透明），普通和全屏共用该主题。遮罩铺满播放器并沿用控件库的显隐动画，不跟随按钮栏留白缩小；手势层保留库内 `16` 逻辑像素系统边缘保护及底栏避让，不再额外缩小。MaterialDesktop 渐变铺满播放器，颜色与强度不变；TV 和启动/错误临时顶栏的背景不变。
@@ -1106,7 +1112,7 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 - Android `PlaybackSystemSessionManager` 继续每次发布 PlaybackState，`PlaybackSystemSessionUpdatePolicy` 将标题/副标题/时长变化与通知按钮变化分开去重；仅位置、缓冲或速度变化不重建元数据和通知。图标每个管理器最多解码一次，将现有 `1024×1024` 资源以 `inSampleSize=4` 解码；停用/重新激活清空发布状态，通知权限不可用时不标记已发布，恢复后重发。策略与管理器分别有 JVM 回归测试，MPV 共用此 Android 系统媒体去重逻辑。
 - Android / iOS 播放记忆仓库使用带 `reload()` 的 shared preferences，与原生播放器共享物理键 `flutter.starflow.playback.memory.v2`；返回前台时递增播放历史 revision 使首页和详情页重新读取
 - Android 原生播放器每 `10s` 记录一次位置、时长、缓冲位置、缓冲比例、播放态、首帧状态与视频尺寸；位置不连续事件单独记录旧/新位置和 Media3 原因码
-- Android 原生播放器为当前 Exo 会话创建独立 `DefaultBandwidthMeter`，控制层完全显示时在右上角展示最近一次真实传输采样；手机 / TV 的 `native_network_speed` 不设置独立背景，直接使用所在顶栏的背景，保留原文字样式和间距。手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
+- Android 原生播放器的 `DefaultBandwidthMeter` 保留性能统计和主机调参用途；右上角显示值改由每会话 `NativePlaybackTransferProgress` 汇总实际网络字节，复用运行期约每秒任务按真实间隔采样，无读取时归零，不回退历史带宽估计。与启动进展时间戳共享既有传输回调，但独立保存计数／显示窗口，释放或重建会话即隔离旧值。手机 / TV 的 `native_network_speed` 无独立背景，固定 160×40dp 双行等宽数字，第一行网速、缓存大小与时长，第二行当前媒体分辨率及编码，两行水平居中；AppCompat 字号自适应兼容 API 23，文本未变不重复赋值。手机 / TV 控制布局分别覆盖 Media3 的底栏动画高度，使两阶段自动隐藏的第一阶段把剩余进度条下沉到实际底边
 - 选集初始定位在首次绘制前完成：Flutter 在 `LayoutBuilder` 中按当前分段、行高和实际视口高度设置 `ScrollController.initialScrollOffset`，由当前集 autofocus 接收焦点，不再首帧后 jump；Android 预先构建条目，在一次性 `OnPreDrawListener` 中请求当前集焦点并 `scrollTo`，抑制初始焦点回调的平滑滚动。打开后的遥控器浏览继续沿用原有滚动行为。
 - 播放器弹窗经 `showPlaybackMenuDialog` 统一挂载 `PlaybackMenuTheme`，背景唯一配置为 `playbackMenuBackground = #CC18181B`（80% 不透明），禁用 surface tint 和 elevation，避免叠加背景使透明度失真；选集及各级设置菜单不单独重复配置。退出确认通过通用 action dialog 的可选 `dialogWrapper` 接入主题，其他页面不受影响。Android 的 `NativePlaybackSettingsDialogTheme` 仅由 windowBackground 绘制 `native_settings_background = #CC18181B`，内容 colorBackground 透明，选集自绘底板复用同一颜色。前景控件及各入口原有遮罩保持不变。
 - 选集结构切换（季、布局、分段）复用绘制前定位：Flutter 用布局代次更换滚动子树和初始 offset，旧控制器在卸载后释放，过时代次不请求焦点；同段方向移动直接更新焦点和滚动，不调用面板 setState。Android 仅保留一个待执行 pre-draw listener，同段焦点回调只发起一次居中，不再 post 重复滚动，关闭移除 listener。

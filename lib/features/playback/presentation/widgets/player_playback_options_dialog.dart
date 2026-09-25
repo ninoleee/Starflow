@@ -85,6 +85,7 @@ class PlaybackOptionsDialog extends StatelessWidget {
     required this.onSearchSubtitlesOnline,
     required this.onConfigureSeriesSkip,
     this.onSelectQuality,
+    this.onSelectVersion,
     required this.runtimeSettings,
     required this.onApplyRuntimeSettings,
   });
@@ -107,6 +108,7 @@ class PlaybackOptionsDialog extends StatelessWidget {
   final Future<void> Function() onSearchSubtitlesOnline;
   final Future<void> Function() onConfigureSeriesSkip;
   final Future<void> Function(FntvPlaybackQuality quality)? onSelectQuality;
+  final Future<void> Function()? onSelectVersion;
   final PlaybackMpvRuntimeSettings runtimeSettings;
   final Future<void> Function(PlaybackMpvRuntimeSettings settings)
       onApplyRuntimeSettings;
@@ -152,6 +154,7 @@ class PlaybackOptionsDialog extends StatelessWidget {
             onSelectAudio: onSelectAudio,
             onConfigureSeriesSkip: onConfigureSeriesSkip,
             onSelectQuality: onSelectQuality,
+            onSelectVersion: onSelectVersion,
             runtimeSettings: runtimeSettings,
             onApplyRuntimeSettings: onApplyRuntimeSettings,
           ),
@@ -186,6 +189,7 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
     required this.onSelectAudio,
     required this.onConfigureSeriesSkip,
     this.onSelectQuality,
+    this.onSelectVersion,
     required this.runtimeSettings,
     required this.onApplyRuntimeSettings,
   });
@@ -206,6 +210,7 @@ class _PlaybackOptionsDialogBody extends StatefulWidget {
   ) onSelectAudio;
   final Future<void> Function() onConfigureSeriesSkip;
   final Future<void> Function(FntvPlaybackQuality quality)? onSelectQuality;
+  final Future<void> Function()? onSelectVersion;
   final PlaybackMpvRuntimeSettings runtimeSettings;
   final Future<void> Function(PlaybackMpvRuntimeSettings settings)
       onApplyRuntimeSettings;
@@ -478,6 +483,15 @@ class _PlaybackOptionsDialogBodyState
           icon: Icons.tune_rounded,
         ),
         const SizedBox(height: 8),
+        if (widget.onSelectVersion != null) ...[
+          _PlaybackOptionTile(
+            isTelevision: widget.isTelevision,
+            title: '播放版本',
+            value: '选择版本',
+            onPressed: widget.onSelectVersion!,
+          ),
+          const SizedBox(height: 8),
+        ],
         _PlaybackOptionTile(
           isTelevision: widget.isTelevision,
           title: '速度',

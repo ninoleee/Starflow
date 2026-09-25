@@ -102,7 +102,9 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       // embedded route resolves it in the background instead of blocking.
       final existingQueue = _episodeQueue;
       final reusableQueue = existingQueue != null && existingQueue.hasCurrent
-          ? existingQueue.replaceCurrentTarget(resolvedTarget)
+          ? existingQueue.replaceCurrentTarget(resolvedTarget,
+              playbackItemKey: buildPlaybackItemKey(resolvedTarget),
+              seriesKey: buildSeriesKeyForTarget(resolvedTarget))
           : null;
       final needsQueueBeforeLaunch =
           outcome.routeAction != PlaybackStartupRouteAction.openEmbeddedMpv;

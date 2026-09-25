@@ -284,6 +284,28 @@ void main() {
     expect(relays.single.closeCalls, 1);
   });
 
+  test(
+      'version browsing validates session and does not allocate playback transport',
+      () async {
+    await _launch(launcher,
+        episodeResolver: (target) async =>
+            NativeResolvedPlaybackTarget(target: target));
+    final args = Map<String, dynamic>.from(launches.single.arguments as Map);
+    final request = <String, Object?>{
+      'resolverSessionId': args['resolverSessionId'],
+      'playbackTargetJson': jsonEncode(_target.toJson()),
+    };
+    expect(
+        (await _nativeCall('browseNativePlaybackVersions',
+            {...request, 'resolverSessionId': 'stale'}))['ok'],
+        isFalse);
+    final result = await _nativeCall('browseNativePlaybackVersions', request);
+    expect(result['ok'], isTrue);
+    expect(result['versions'], hasLength(1));
+    expect((result['versions'] as List).single['selected'], isTrue);
+    expect(relays, hasLength(1));
+  });
+
   test('NAS without sensitive headers bypasses relay', () async {
     final target = _target.copyWith(headers: const {'User-Agent': 'Starflow'});
     expect((await _launch(launcher, target: target)).launched, isTrue);
