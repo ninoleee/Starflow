@@ -1,7 +1,7 @@
 package com.example.starflow
 
 internal class NativePlaybackHealthPolicy {
-    private var lastEventAtMs = mutableMapOf<String, Long>()
+    private val lastEventAtMs = mutableMapOf<String, Long>()
 
     fun reset() { lastEventAtMs.clear() }
 

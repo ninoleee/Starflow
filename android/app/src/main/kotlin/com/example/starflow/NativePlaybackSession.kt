@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.ActivityManager
 import android.os.Handler
 import android.os.Looper
+import android.os.Build
 import android.view.View
 import android.widget.TextView
 import androidx.media3.common.C
@@ -70,12 +71,38 @@ internal class NativePlaybackSession(private val host: Host) {
     private var adaptiveLoadControl: NativePlaybackLoadControl? = null
     val bufferTargetBytes: Int? get() = adaptiveLoadControl?.currentTargetBytes
     val frameRate by lazy { NativePlaybackFrameRateController(host.activity) }
+    val supportsFrameRateMatching: Boolean
+        get() = host.isTelevisionDevice && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+    var frameRateMatchingEnabled = false
+        private set
+    private var displayActive = false
+
+    fun setFrameRateMatching(enabled: Boolean) {
+        frameRateMatchingEnabled = enabled && supportsFrameRateMatching
+        frameRate.setEnabled(frameRateMatchingEnabled)
+        player?.setVideoChangeFrameRateStrategy(if (frameRateMatchingEnabled) {
+            C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
+        } else {
+            C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
+        })
+        updatePlaybackHealth()
+    }
+
+    fun setDisplayActive(active: Boolean) {
+        displayActive = active
+        if (!active) frameRate.restore() else updatePlaybackHealth()
+    }
 
     fun onMemoryPressure() { adaptiveLoadControl?.onMemoryPressure() }
 
     fun updatePlaybackHealth() {
         val current = player ?: return
-        if (host.isTelevisionDevice) frameRate.update(current)
+        if (supportsFrameRateMatching && displayActive && current.isPlaying &&
+            current.playbackParameters.speed == 1f) {
+            frameRate.update(current)
+        } else {
+            frameRate.restore()
+        }
     }
     val cachedMediaBytes: Long?
         get() = playbackAllocator?.totalBytesAllocated?.toLong()
@@ -400,6 +427,9 @@ internal class NativePlaybackSession(private val host: Host) {
                     .build()
         }
         player = exoPlayer
+        if (frameRateMatchingEnabled) {
+            exoPlayer.setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
+        }
         audioStateListener = object : AnalyticsListener {
             override fun onAudioDecoderInitialized(eventTime: AnalyticsListener.EventTime,
                 decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {

@@ -2,6 +2,8 @@
 
 part of '../player_page.dart';
 
+final _mpvStaticOptions = MpvStaticOptionCache();
+
 extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
   String _resolveMpvHardwareDecodeMode() {
     switch (_playbackDecodeMode) {
@@ -24,7 +26,17 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
       return;
     }
     try {
-      await (native as dynamic).setProperty(name, value);
+      await _mpvStaticOptions.write(
+        player: player,
+        name: name,
+        value: value,
+        writeProperty: () async {
+          if (!_startupTrackWorkIsCurrent) {
+            throw StateError('MPV tuning cancelled');
+          }
+          await (native as dynamic).setProperty(name, value);
+        },
+      );
     } catch (_) {
       // Keep playback available even if a tuning hint is unsupported.
     }
@@ -35,7 +47,9 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     String name,
     String value,
   ) async {
-    if (!_startupTrackWorkIsCurrent || !mounted || !identical(_player, player)) {
+    if (!_startupTrackWorkIsCurrent ||
+        !mounted ||
+        !identical(_player, player)) {
       return;
     }
     if (kIsWeb) {
@@ -121,7 +135,8 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
     final uri = Uri.tryParse(target.streamUrl.trim());
     // A local capability URL must never be handed to an external HTTP proxy.
     final proxyUrl = uri == null || isLoopbackPlaybackRelayUrl(target.streamUrl)
-        ? '' : _playbackSettings.networkProxy.mpvProxyUrlFor(uri);
+        ? ''
+        : _playbackSettings.networkProxy.mpvProxyUrlFor(uri);
     await _setMpvOption(player, 'http-proxy', proxyUrl);
   }
 

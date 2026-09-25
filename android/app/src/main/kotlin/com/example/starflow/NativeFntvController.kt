@@ -401,6 +401,8 @@ internal class NativeFntvController(
                 else -> null
             }
             val oldMime = host.activity.intent.getStringExtra(EXTRA_MEDIA_MIME_TYPE).orEmpty()
+            val oldTransportUrl = host.activity.intent.getStringExtra(EXTRA_URL).orEmpty()
+            val oldTransportHeaders = host.activity.intent.getStringExtra(EXTRA_HEADERS_JSON).orEmpty()
             val oldKey = host.target.playbackItemKey
             val oldSeriesKey = host.target.seriesKey
             val oldQueue = host.episodes.episodeQueue
@@ -433,8 +435,11 @@ internal class NativeFntvController(
                 host.externalSubtitles.externalSubtitleSource = if (targetJson == oldJson) oldExternal else null
                 host.target.playbackTargetJson = targetJson
                 host.activity.intent.putExtra(EXTRA_PLAYBACK_TARGET_JSON, targetJson)
-                host.activity.intent.putExtra(EXTRA_URL, value.optString("streamUrl"))
-                host.activity.intent.putExtra(EXTRA_HEADERS_JSON, value.optJSONObject("headers")?.toString() ?: "{}")
+                val transportUrl = if (restoring) oldTransportUrl else result["transportUrl"]?.toString().orEmpty()
+                val transportHeaders = if (restoring) oldTransportHeaders else
+                    (result["transportHeaders"] as? Map<*, *>)?.let { JSONObject(it).toString() }.orEmpty()
+                host.activity.intent.putExtra(EXTRA_URL, transportUrl.ifBlank { value.optString("streamUrl") })
+                host.activity.intent.putExtra(EXTRA_HEADERS_JSON, transportHeaders.ifBlank { value.optJSONObject("headers")?.toString() ?: "{}" })
                 host.activity.intent.putExtra(EXTRA_MEDIA_MIME_TYPE, mime)
                 host.session.pendingResumePositionOverrideMs = position
                 host.session.nextInitializePlayWhenReady = playing

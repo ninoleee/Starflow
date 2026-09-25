@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/playback/application/playback_engine_support.dart';
+import 'package:starflow/features/playback/application/playback_stream_relay_service.dart';
+import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/settings_auto_save_coordinator.dart';
@@ -40,6 +42,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   late PlaybackEngine _draftPlaybackEngine;
   late PlaybackDecodeMode _draftPlaybackDecodeMode;
   late NativeAudioOutputMode _draftNativeAudioOutputMode;
+  late int _draftDiskCacheMiB;
   final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
 
   @override
@@ -57,6 +60,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     );
     _draftPlaybackDecodeMode = widget.initialPlaybackDecodeMode;
     _draftNativeAudioOutputMode = widget.initialNativeAudioOutputMode;
+    _draftDiskCacheMiB = ref.read(appSettingsProvider).playbackDiskCacheMiB;
     _autoSave.markCurrentAsSaved(_draftFingerprint());
   }
 
@@ -79,6 +83,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         _draftPlaybackEngine.name,
         _draftPlaybackDecodeMode.name,
         _draftNativeAudioOutputMode.name,
+        _draftDiskCacheMiB,
       ].join('|');
 
   void _scheduleAutoSave() {
@@ -92,6 +97,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     final playbackEngine = _draftPlaybackEngine;
     final playbackDecodeMode = _draftPlaybackDecodeMode;
     final nativeAudioOutputMode = _draftNativeAudioOutputMode;
+    final diskCacheMiB = _draftDiskCacheMiB;
     _autoSave.schedule(
       fingerprint: _draftFingerprint(),
       save: () => controller.savePlaybackPreferences(
@@ -101,6 +107,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,
         nativeAudioOutputMode: nativeAudioOutputMode,
+        diskCacheMiB: diskCacheMiB,
       ),
     );
   }
@@ -116,6 +123,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     final playbackEngine = _draftPlaybackEngine;
     final playbackDecodeMode = _draftPlaybackDecodeMode;
     final nativeAudioOutputMode = _draftNativeAudioOutputMode;
+    final diskCacheMiB = _draftDiskCacheMiB;
     _autoSave.flush(
       fingerprint: _draftFingerprint(),
       save: () => controller.savePlaybackPreferences(
@@ -125,6 +133,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,
         nativeAudioOutputMode: nativeAudioOutputMode,
+        diskCacheMiB: diskCacheMiB,
       ),
     );
   }
@@ -229,6 +238,28 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
             value: _formatSpeedLabel(_draftPlaybackSpeed),
             onPressed: _openSpeedPicker,
           ),
+          if (!kIsWeb) ...[
+            const SizedBox(height: 18),
+            SettingsSelectionTile(
+              title: '播放磁盘缓存',
+              value: _draftDiskCacheMiB == 0 ? '关闭' : '$_draftDiskCacheMiB MiB',
+              onPressed: _openDiskCachePicker,
+            ),
+            const SizedBox(height: 18),
+            SettingsSelectionTile(
+              title: '清理播放磁盘缓存',
+              value: '',
+              onPressed: () async {
+                await clearPlaybackDiskCache();
+                await ref.read(onlineSubtitleRepositoryProvider).clearCache();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('播放磁盘缓存已清理')),
+                  );
+                }
+              },
+            ),
+          ],
         ],
       ),
     );
@@ -250,6 +281,20 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
       _timeoutController.text = '$selection';
     });
     _scheduleAutoSave();
+  }
+
+  Future<void> _openDiskCachePicker() async {
+    final value = await showSettingsOptionDialog<int>(
+      context: context,
+      title: '播放磁盘缓存',
+      options: const [0, 256, 512, 1024],
+      currentValue: _draftDiskCacheMiB,
+      labelBuilder: (value) => value == 0 ? '关闭' : '$value MiB',
+    );
+    if (value == null || !mounted) return;
+    setState(() => _draftDiskCacheMiB = value);
+    _scheduleAutoSave();
+    await clearPlaybackDiskCache();
   }
 
   Future<void> _openSpeedPicker() async {

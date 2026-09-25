@@ -92,6 +92,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                session.updatePlaybackHealth()
                 diagnostics.playbackPerformanceTracker.onBufferingChanged(
                     buffering = session.player?.playbackState == Player.STATE_BUFFERING,
                     playWhenReady = session.player?.playWhenReady == true,
@@ -362,6 +363,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onResume() {
+        session.setDisplayActive(true)
         controllerView.setFocusRequestsAllowed(true)
         controllerView.enterImmersiveMode()
         controllerView.restoreVideoSurfaceIfNeeded()
@@ -385,7 +387,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onPause() {
-        session.frameRate.restore()
+        session.setDisplayActive(false)
         remote.resetInputState()
         controllerView.setFocusRequestsAllowed(false)
         if (externalSubtitles.subtitleSearchActive) {

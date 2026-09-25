@@ -101,7 +101,7 @@ internal class NativePlaybackEpisodeController(
                 switchToResolvedEpisode(key, decision.destination)
             is NativeEpisodeTransition.Decision.Resolve -> {
                 val entry = key.queue.entries[index]
-                if (entry.needsResolution()) resolve(decision.request, entry)
+                if (needsTransportResolution(entry)) resolve(decision.request, entry)
                 else
                     transition.resolve(decision.request, entry)?.let {
                         switchToResolvedEpisode(key, it)
@@ -141,11 +141,15 @@ internal class NativePlaybackEpisodeController(
         if (!NativePlaybackSkipPolicy.shouldPrepareNext(player.currentPosition, boundaryMs)) return
         val key = preparationKey(queue.currentIndex + 1) ?: return
         val entry = key.queue.entries[key.index]
-        if (!entry.needsResolution() || key.resolverSessionId.isBlank()) return
+        if (!needsTransportResolution(entry) || key.resolverSessionId.isBlank()) return
         transition.prefetch(key)?.let { resolve(it, entry) }
     }
 
     fun cancelAutomaticAdvance() = transition.cancelAutomaticAdvance()
+
+    private fun needsTransportResolution(entry: NativeEpisodeQueueEntry): Boolean =
+        entry.needsResolution() || entry.transportUrl.isNotBlank() ||
+            host.activity.intent.getStringExtra(EXTRA_URL).orEmpty().contains("/playback-relay/")
 
     fun onUserSeek() {
         if (transition.isSwitching) return
@@ -212,6 +216,9 @@ internal class NativePlaybackEpisodeController(
                                     entry.seriesKey
                                 },
                             mediaMimeType = result["mediaMimeType"]?.toString()?.trim().orEmpty(),
+                            transportUrl = result["transportUrl"]?.toString().orEmpty(),
+                            transportHeadersJson = (result["transportHeaders"] as? Map<*, *>)
+                                ?.let { org.json.JSONObject(it).toString() }.orEmpty(),
                         )
                     if (
                         result["ok"] != true ||
@@ -272,6 +279,13 @@ internal class NativePlaybackEpisodeController(
         host.fntv.invalidateMedia()
         host.diagnostics.finishPlaybackPerformanceSession("episode-switch")
         host.session.releasePlayer()
+        val oldTransport = host.activity.intent.getStringExtra(EXTRA_URL).orEmpty()
+        if (oldTransport.contains("/playback-relay/") && oldTransport != nextEntry.transportUrl) {
+            MainActivity.invokeNativeFntv("releaseNativePlaybackTransport", mapOf(
+                "resolverSessionId" to host.target.resolverSessionId,
+                "transportUrl" to oldTransport,
+            )) {}
+        }
         NativePlaybackFormatting.logPlayback(
             "native.queue.old-player-released reason=$reason playerCleared=${host.session.player == null} bandwidthCleared=${host.session.playbackBandwidthMeter == null}"
         )
@@ -295,9 +309,9 @@ internal class NativePlaybackEpisodeController(
         host.session.nextInitializePlayWhenReady = true
         host.runtime.resetForNewMedia()
 
-        host.activity.intent.putExtra(EXTRA_URL, nextEntry.url())
+        host.activity.intent.putExtra(EXTRA_URL, nextEntry.transportUrl.ifBlank { nextEntry.url() })
         host.activity.intent.putExtra(EXTRA_TITLE, nextEntry.title())
-        host.activity.intent.putExtra(EXTRA_HEADERS_JSON, nextEntry.headersJson())
+        host.activity.intent.putExtra(EXTRA_HEADERS_JSON, nextEntry.transportHeadersJson.ifBlank { nextEntry.headersJson() })
         host.activity.intent.putExtra(EXTRA_PLAYBACK_TARGET_JSON, nextEntry.playbackTargetJson)
         host.activity.intent.putExtra(EXTRA_PLAYBACK_ITEM_KEY, nextEntry.playbackItemKey)
         host.activity.intent.putExtra(EXTRA_SERIES_KEY, nextEntry.seriesKey)

@@ -150,6 +150,28 @@ void main() {
     _resolver.setMethodCallHandler(null);
   });
 
+  test('unified cache opt-in routes ordinary HTTP through the shared transport',
+      () async {
+    container.dispose();
+    container = ProviderContainer(overrides: [
+      appSettingsProvider.overrideWithValue(
+          AppSettings.fromJson(const {}).copyWith(playbackDiskCacheMiB: 512)),
+    ]);
+    final provider = Provider<PlatformNativePlaybackLauncher>((ref) =>
+        PlatformNativePlaybackLauncher(ref, isIOS: true, relayFactory: () {
+          final relay = makeRelay();
+          relays.add(relay);
+          return relay;
+        }));
+    launcher = container.read(provider);
+    final ordinary = _target.copyWith(headers: const {});
+    expect((await _launch(launcher, target: ordinary)).launched, true);
+    expect(relays.single.targets.single, ordinary);
+    final args = Map<String, dynamic>.from(launches.single.arguments as Map);
+    expect(args['url'], relays.single.url);
+    _expectOriginalIdentity(args, ordinary);
+  });
+
   test(
       'NAS launch uses loopback transport but preserves target and history key',
       () async {

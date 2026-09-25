@@ -52,6 +52,27 @@ class NativePlaybackBufferPolicyTest {
     }
 
     @Test
+    fun baseBudgetKeepsLowerTiersAndUses128MiBAbove512ForAllMedia() {
+        for ((memory, normalMb, heavyMb) in listOf(
+            Triple(256, 32, 48), Triple(257, 64, 80), Triple(512, 64, 80),
+            Triple(513, 128, 128), Triple(1024, 128, 128),
+        )) {
+            for (heavy in listOf(false, true)) {
+                for (episodeSwitch in listOf(false, true)) {
+                    val config = NativePlaybackBufferPolicy.resolve(
+                        isTelevision = true,
+                        memoryClassMb = memory,
+                        isHeavyPlayback = heavy,
+                        isRemoteEpisodeSwitch = episodeSwitch,
+                    )
+                    val expectedMb = if (heavy || episodeSwitch) heavyMb else normalMb
+                    assertEquals(expectedMb * 1024 * 1024, config.targetBufferBytes)
+                }
+            }
+        }
+    }
+
+    @Test
     fun phoneKeepsTimePrioritizedDefault() {
         val config = NativePlaybackBufferPolicy.resolve(
             isTelevision = false,

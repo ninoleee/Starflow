@@ -4,6 +4,8 @@ part of '../player_page.dart';
 
 extension _PlayerPageStatePerformance on _PlayerPageState {
   void _beginMpvPerformanceSession(PlaybackTarget target) {
+    _mpvHealthLogGate = MpvHealthLogGate();
+    _mpvLastDroppedFrames = 0;
     _mpvPerformanceTracker = PlaybackPerformanceTracker()
       ..begin(sourceBitrate: target.bitrate ?? 0)
       ..onBufferingChanged(true);
@@ -38,6 +40,7 @@ extension _PlayerPageStatePerformance on _PlayerPageState {
   }
 
   void _stopMpvPerformanceSampling() {
+    _mpvPerformanceSampleGeneration++;
     _mpvPerformanceSampleTimer?.cancel();
     _mpvPerformanceSampleTimer = null;
     _mpvPerformanceSampleInProgress = false;
@@ -53,16 +56,61 @@ extension _PlayerPageStatePerformance on _PlayerPageState {
       return;
     }
     _mpvPerformanceSampleInProgress = true;
+    final generation = _mpvPerformanceSampleGeneration;
+    final tracker = _mpvPerformanceTracker;
     try {
       final cacheSpeed = await _readMpvIntProperty(player, 'cache-speed');
-      if (cacheSpeed == null || cacheSpeed <= 0) {
+      if (_player != player ||
+          generation != _mpvPerformanceSampleGeneration ||
+          tracker != _mpvPerformanceTracker) {
         return;
       }
-      _mpvPerformanceTracker?.recordNetworkBytesPerSecond(cacheSpeed);
-      _PlayerPageState._hostBandwidthCache.record(target, cacheSpeed);
+      if (cacheSpeed != null && cacheSpeed > 0) {
+        tracker?.recordNetworkBytesPerSecond(cacheSpeed);
+        _PlayerPageState._hostBandwidthCache.record(target, cacheSpeed);
+      }
+      if (appLogger.isRecording(AppLogLevel.info)) {
+        final decoderDrops =
+            await _readMpvIntProperty(player, 'decoder-frame-drop-count');
+        final outputDrops =
+            await _readMpvIntProperty(player, 'frame-drop-count');
+        if (_player != player || generation != _mpvPerformanceSampleGeneration) {
+          return;
+        }
+        final drops = (decoderDrops ?? 0) + (outputDrops ?? 0);
+        if (drops > _mpvLastDroppedFrames) {
+          unawaited(_logMpvPlaybackHealth(player, 'dropped-frames'));
+        }
+        _mpvLastDroppedFrames = drops;
+      }
     } finally {
-      _mpvPerformanceSampleInProgress = false;
+      if (generation == _mpvPerformanceSampleGeneration) {
+        _mpvPerformanceSampleInProgress = false;
+      }
     }
+  }
+
+  Future<void> _logMpvPlaybackHealth(Player player, String reason) async {
+    if (!appLogger.isRecording(AppLogLevel.info) ||
+        _player != player ||
+        !_mpvHealthLogGate.admit(DateTime.now())) {
+      return;
+    }
+    final tracker = _mpvPerformanceTracker;
+    final properties = await readMpvHealthProperties(
+      readProperty: (name) => _readMpvStringProperty(player, name),
+    );
+    if (!mounted || _player != player || tracker != _mpvPerformanceTracker) {
+      return;
+    }
+    appLogInfo('playback.health', 'Playback health snapshot', fields: {
+      'engine': 'mpv',
+      'reason': reason,
+      'positionMs': player.state.position.inMilliseconds,
+      'buffering': player.state.buffering,
+      'speed': player.state.rate,
+      ...properties,
+    });
   }
 
   Future<void> _finishMpvPerformanceSession({

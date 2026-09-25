@@ -2,6 +2,35 @@
 
 本文负责主机侧 smoke 计时、可重复运行方法及自动化回归证据；验证日期以各节为准。2026-09-24 仅整理章节和归并直播记录，不重跑历史测试。电视、手机和桌面实际界面的测量方法见 [真机性能验证](performance-device.md)，组件关系见 [架构说明](architecture.md)。下文历史代码优化只说明工作量与策略变化，不代表已经测得设备收益。
 
+## 2026-09-26 内置内核共享磁盘缓存
+
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，执行 `flutter test --no-pub --reporter expanded`：`test/playback_relay_disk_cache_test.dart`、`test/playback_stream_relay_service_test.dart`、`test/playback_stream_relay_security_test.dart`、`test/playback_hls_relay_test.dart`、`test/native_playback_transport_test.dart`、`test/app_settings_test.dart`、`test/features/settings/presentation/settings_page_auto_save_test.dart` 共 **88 项通过**。覆盖真实本机 HTTP／文件缓存、未知扩展名、区间命中、低空间／写失败回退、缺失文件、LRU、本地文件直读、HLS 点播分片／WebVTT 命中与清单／密钥实时读取，以及设置持久化、界面自动保存、原始身份隔离和既有代理安全回归。
+- Android 使用 JDK 17 与同一 Flutter 配置，执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativePlaybackEpisodeControllerTest' --tests '*NativeFntvControllerTest' --tests '*NativePlaybackSessionTest' --tests '*NativePlaybackSettingsAppearanceTest' --tests '*NativePlaybackHttpDataSourceTest' --console=plain --quiet`，5 类 **77 项通过，0 失败／错误／跳过**；编译原生修改并回归切集／画质／会话行为，不执行 ARM 播放器。
+- 12 个相关 Dart 源码与测试定向分析无问题；`xcrun swiftc -frontend -parse ios/Runner/AppDelegate.swift` 通过，仅为 Swift 语法检查，不等同 iOS 应用链接／运行。`git diff --check` 通过。首轮新增测试夹具遗漏必填配置字段，随后有 1 项测试重复删除已清理目录，修正夹具与收尾后完整集合通过。
+- 本批以共享代理缓存替代下节 TV 专属 SimpleCache 原型，其旧源码／测试已移除，历史通过数不累加。未做 Android/iOS 真机、iOS 后台 Dart 代理存活、实际低空间／慢闪存、长时间播放或远端 NAS 测量；未构建 APK／IPA、运行发布预设或递增版本。外挂字幕沿用既有文件流程，统一清理但不纳入视频块额度；动态 HLS 资源不缓存，外部播放器与独立直播页不受控。
+
+## 2026-09-26 TV Exo 可选临时磁盘缓存（统一前快照）
+
+以下为此前仅 TV SimpleCache 原型的验证，当前实现已替换为上节共享代理；不是当前代码的验收记录。
+
+- 使用固定 Flutter 3.38.10 的 Android 配置和 JDK 17，在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativePlaybackDiskCacheTest' --tests '*NativePlaybackHttpDataSourceTest' --tests '*NativePlaybackSessionTest' --tests '*NativePlaybackSettingsAppearanceTest' --tests '*NativePlaybackLoadControlTest' --console=plain --quiet`。最终 5 类 **62 项通过，0 失败／错误／跳过**，其中新增磁盘缓存 17 项；原生 Kotlin 与测试实际编译，未打包 Flutter/APK。
+- 覆盖容量列表、LRU 淘汰、剩余空间边界、写入中途空间保护、Range 偏移／剩余长度／请求头保留、网络错误不误回退、开关代次、释放幂等、初始化失败、共享缓存实例和最后句柄关闭后清理，以及缓存键会话隔离、签名重定向元数据移除。另使用真实 Media3 `CacheDataSource` 配合受控 Cache／DataSink 测试替身，验证缓存命中不打开网络、Tee 写入失败不遗漏尚未交付字节；不是实际 Android 文件系统／SQLite 集成测试。既有本机 HTTP 逐跳鉴权测试一并通过。
+- 首轮编译发现可空 MIME 类型，补齐空值处理；新增后台释放测试曾有 2 项未观察到预期调用，改为独立仓库及可注入清理执行器后逐步推进任务、验证句柄顺序，最终上述完整集合通过。`git diff --check` 通过。
+- 未修改 Flutter 行为，未重跑 Flutter 测试；未做 TV 遥控器、真机闪存／低空间、断流、长期播放或性能测量，未构建 APK、运行发布预设或递增版本。当前范围是 TV Exo 已知 HTTP 渐进式视频的会话临时缓存，非 HLS／MPV 磁盘缓存或主动整片下载；待验收清单见 [真机性能验证](performance-device.md)。与历史回归集合重叠，不累加为全仓通过数。
+
+## 2026-09-25 高内存 TV Exo 缓存扩大
+
+- 将应用内存等级大于 512 MB 的 TV Exo 基础目标统一为 128 MiB，自适应上限提高到 192 MiB；低／中内存档、手机、MPV 和起播／恢复时长不变。运行期内存压力仍退回基础目标，不清除待播数据。
+- 使用 JDK 17、固定 Flutter 3.38.10 的 Android 配置，在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativePlaybackBufferPolicyTest' --tests '*NativePlaybackReadAheadPolicyTest' --tests '*NativePlaybackLoadControlTest' --console=plain --quiet`，3 类共 **31 项通过，0 失败／错误／跳过**。覆盖 256／257／512／513 MB 分档边界、普通／重型片源及切集基础预算、高码率扩容上限、内存压力回退，以及缓存未满时起播／恢复。`git diff --check` 通过。
+- 这是主机 Kotlin 编译与 JVM 定向回归，与下节用例重叠不累加；未做 TV 真机、长时间内存或实际网络测量，未重跑 Flutter 测试，未构建 APK 或递增版本。
+
+## 2026-09-25 点播流畅度组合策略
+
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，执行 `flutter test --no-pub --reporter expanded`，集合为 `test/playback_mpv_policy_test.dart`、`test/features/playback/application/mpv_playback_diagnostics_test.dart`、`test/features/playback/application/playback_performance_tracker_test.dart`、`test/features/playback/application/mpv_playback_lifecycle_test.dart`、`test/playback_network_speed_test.dart`、`test/playback_network_speed_label_test.dart`、`test/player_startup_cancellation_test.dart`、`test/playback_startup_coordinator_test.dart`，共 **70 项通过**。覆盖 MPV 恢复门槛与预读预算分离、静态属性去重／失败重试、诊断限频、生命周期和启动取消。相关 Dart 实现及测试定向分析无问题。
+- Android 使用 JDK 17 和同一 Flutter SDK，在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --console=plain --quiet`，逐类追加 `--tests '*NativePlayback<名称>Test'`：`BufferPolicy`、`EpisodeController`、`FrameRateController`、`HealthIntegration`、`HealthPolicy`、`LoadControl`、`ReadAheadPolicy`、`RuntimeController`、`Session`、`SettingsAppearance`、`TransferProgress`、`WatchdogPolicy`。原生 Kotlin 与测试实际编译，12 类共 **128 项通过，0 失败／错误／跳过**。
+- JVM 回归覆盖动态字节上限、缓存下降与活动网络吞吐、预读水位、内存压力退回、暂停／seek／倍速重置，以及帧率提示的版本门槛、分数帧率、显示模式兼容和撤销。首轮发现 Kotlin 接口委托没有转发 Media3 Java 默认方法，显式转发起播和后向缓冲方法后修复；另修正增强预读测试仍使用普通水位的断言，完整定向集合重跑通过。
+- `git diff --check` 通过。以上是主机策略、mock 和组件回归，不是全仓全量验收，不执行真实 TV 网络流、ARM 解码、HDMI 刷新率或温控测量；Android 命令跳过 Flutter 打包步骤，未构建 APK、运行发布预设或递增版本。未新增视频磁盘缓存。与下节先前 40 项短缓冲测试有重叠，不累加数量；当前行为见 [播放架构](architecture.md)，设备待验项见 [真机性能验证](performance-device.md)。
+
 ## 2026-09-25 TV Exo 短缓冲恢复
 
 - 使用 JDK 17，Gradle 的 `local.properties` 与 `.fvm/flutter_sdk` 均指向固定 Flutter 3.38.10，依赖配置为对应 Dart 3.10.9，未切换 SDK。在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativePlaybackBufferPolicyTest' --tests '*NativePlaybackLoadControlTest' --tests '*NativePlaybackWatchdogPolicyTest' --tests '*NativePlaybackEpisodeControllerTest' --console=plain --quiet`，4 类共 **40 项通过，0 失败／错误／跳过**，原生 Kotlin 与测试实际编译。

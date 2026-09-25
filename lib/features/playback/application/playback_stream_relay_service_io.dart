@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:starflow/core/network/http_origin_policy.dart';
 import 'package:starflow/core/network/network_proxy_runtime.dart';
 import 'package:starflow/features/playback/application/playback_hls_rewriter.dart';
+import 'package:starflow/features/playback/application/playback_relay_disk_cache.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
@@ -15,15 +16,46 @@ const _requestTimeout = Duration(seconds: 15);
 const _maxManifestBytes = 1024 * 1024;
 const _maxResources = 20000;
 const _resourceGrace = Duration(minutes: 2);
+final _diskCaches = <PlaybackRelayDiskCache>{};
+PlaybackRelayDiskCache? _sharedDiskCache;
+final _cacheOwners = <PlaybackRelayDiskCache, int>{};
+
+PlaybackRelayDiskCache? _acquireDiskCache(int capacityMiB) {
+  if (!const [256, 512, 1024].contains(capacityMiB)) return null;
+  final bytes = capacityMiB * 1024 * 1024;
+  final previous = _sharedDiskCache;
+  if (previous == null ||
+      previous.disabled ||
+      previous.capacityBytes != bytes) {
+    if (previous != null) unawaited(previous.clear());
+    _sharedDiskCache = PlaybackRelayDiskCache(capacityBytes: bytes);
+  }
+  return _sharedDiskCache;
+}
+
+Future<void> clearPlaybackDiskCache() async {
+  await Future.wait(_diskCaches.toList().map((cache) => cache.clear()));
+  await PlaybackRelayDiskCache.clearInactiveFiles();
+}
 
 PlaybackStreamRelayService createPlaybackStreamRelayService({
   Duration requestTimeout = _requestTimeout,
   DateTime Function()? clock,
+  int diskCacheMiB = 0,
+  PlaybackRelayDiskCache? diskCache,
 }) =>
-    _IoPlaybackStreamRelayService(requestTimeout, clock ?? DateTime.now);
+    _IoPlaybackStreamRelayService(requestTimeout, clock ?? DateTime.now,
+        diskCache ?? _acquireDiskCache(diskCacheMiB));
 
 class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
-  _IoPlaybackStreamRelayService(this.requestTimeout, this.clock);
+  _IoPlaybackStreamRelayService(
+      this.requestTimeout, this.clock, this.diskCache) {
+    if (diskCache != null) {
+      _diskCaches.add(diskCache!);
+      _cacheOwners.update(diskCache!, (count) => count + 1, ifAbsent: () => 1);
+    }
+  }
+  final PlaybackRelayDiskCache? diskCache;
   final Duration requestTimeout;
   final DateTime Function() clock;
   final _sessions = <String, _RelaySession>{};
@@ -32,10 +64,20 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
   HttpServer? _server;
   Future<void>? _starting;
   bool _closed = false;
+  bool _cacheReleased = false;
 
   @override
   Future<PlaybackTarget> prepareTarget(PlaybackTarget target) async {
-    if (!requiresPlaybackStreamRelay(target)) return target;
+    final needsSecurityRelay = requiresPlaybackStreamRelay(target);
+    final candidate = Uri.tryParse(target.streamUrl.trim());
+    if (candidate != null &&
+        const {'file', 'content'}.contains(candidate.scheme)) {
+      return target;
+    }
+    if (!needsSecurityRelay &&
+        (diskCache == null || candidate == null || !isHttpUri(candidate))) {
+      return target;
+    }
     if (_closed) throw const PlaybackRelayException();
     final uri = Uri.tryParse(target.streamUrl.trim());
     if (uri == null || !isHttpUri(uri)) throw const PlaybackRelayException();
@@ -93,8 +135,12 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
         await opened.close();
       }
       if (_closed || session.closed) throw const PlaybackRelayException();
+      if (session.hls) {
+        session.path = '/$kPlaybackRelayPathSegment/$id/media.m3u8';
+      }
       _sessions[id] = session;
       return target.copyWith(
+        container: session.hls ? 'hls' : target.container,
         streamUrl: Uri(
                 scheme: 'http',
                 host: '127.0.0.1',
@@ -107,8 +153,10 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
         headers: const {},
       );
     } on PlaybackRelayException {
+      if (!needsSecurityRelay && !_closed) return target;
       rethrow;
     } catch (_) {
+      if (!needsSecurityRelay && !_closed) return target;
       // Network exceptions can contain signed URLs or Basic credentials.
       throw const PlaybackRelayException();
     } finally {
@@ -131,6 +179,8 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
   Future<void> clear({String reason = ''}) async {
     for (final session in {..._sessions.values, ..._preparing}) {
       session.close();
+      await diskCache?.removePrefix(
+          session.path.substring(0, session.path.lastIndexOf('/') + 1));
     }
     _sessions.clear();
     _preparing.clear();
@@ -142,10 +192,22 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
     await clear();
     await _server?.close(force: true);
     _server = null;
+    if (!_cacheReleased && diskCache != null) {
+      _cacheReleased = true;
+      final count = (_cacheOwners[diskCache] ?? 1) - 1;
+      if (count == 0) {
+        _cacheOwners.remove(diskCache);
+        _diskCaches.remove(diskCache);
+        await diskCache!.close();
+      } else {
+        _cacheOwners[diskCache!] = count;
+      }
+    }
   }
 
   Future<void> _serve(HttpRequest request) async {
     _Opened? opened;
+    PlaybackCachedResponse? cached;
     try {
       final parts = request.uri.pathSegments;
       final session =
@@ -179,6 +241,46 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       final playlist = resource?.kind == HlsResourceKind.playlist ||
           (resource == null && session.hls);
       if (playlist || resource?.kind == HlsResourceKind.key) forwarded.clear();
+      final cacheable = request.method == 'GET' &&
+          !playlist &&
+          resource?.kind != HlsResourceKind.key &&
+          !forwarded.keys.any((key) => key.startsWith('if-'));
+      // Dynamic playlist resources can reuse URLs for changing content. Only VOD is reusable.
+      final reusable = resource == null || resource.reusable;
+      if (cacheable && reusable && diskCache != null) {
+        cached = await diskCache!
+            .read(request.uri.path, request.headers.value('range'));
+        if (cached != null) {
+          try {
+            await cached.send(request.response);
+            return;
+          } on FileSystemException {
+            await diskCache!.clear();
+            opened = await _open(
+                session,
+                'GET',
+                {
+                  'range': [
+                    'bytes=${cached.start + cached.delivered}-${cached.end}'
+                  ]
+                },
+                resource: resource);
+            final expectedStart = cached.start + cached.delivered;
+            if (opened.response.statusCode != 206 ||
+                opened.response.headers.value('content-range') !=
+                    'bytes $expectedStart-${cached.end}/${cached.total}') {
+              throw const PlaybackRelayException();
+            }
+            while (await session
+                .wait(opened.body.moveNext())
+                .timeout(requestTimeout)) {
+              request.response.add(opened.body.current);
+              await request.response.flush();
+            }
+            return;
+          }
+        }
+      }
       opened = await _open(
           session, playlist ? 'GET' : request.method, forwarded,
           resource: resource, allowHls: playlist);
@@ -241,14 +343,21 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       }
       request.response.bufferOutput = false;
       if (request.method != 'HEAD') {
+        final writer = cacheable
+            ? diskCache?.writer(
+                request.uri.path, response.statusCode, response.headers,
+                reusable: reusable)
+            : null;
         for (final chunk in chunks) {
           request.response.add(chunk);
+          await writer?.add(chunk);
         }
         await session.wait(request.response.flush()).timeout(requestTimeout);
         while (await session
             .wait(opened.body.moveNext())
             .timeout(requestTimeout)) {
           request.response.add(opened.body.current);
+          await writer?.add(opened.body.current);
           await session.wait(request.response.flush()).timeout(requestTimeout);
         }
       }
@@ -262,6 +371,7 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
         request.response.add(errorBody);
       } catch (_) {}
     } finally {
+      await cached?.close();
       await opened?.close();
       try {
         await request.response.close();
@@ -376,7 +486,10 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
     final now = clock();
     final staged = <String, _RelayResource>{};
     final stagedPaths = <String, String>{};
-    final text = rewritePlaybackHls(utf8.decode(bytes), (value, kind) {
+    final sourceText = utf8.decode(bytes);
+    final vod =
+        sourceText.split('\n').any((line) => line.trim() == '#EXT-X-ENDLIST');
+    final text = rewritePlaybackHls(sourceText, (value, kind) {
       final uri = opened.uri.resolve(value);
       if (!isHttpUri(uri) ||
           uri.hasFragment ||
@@ -395,8 +508,9 @@ class _IoPlaybackStreamRelayService implements PlaybackStreamRelayService {
       }
       stagedPaths[key] = path;
       final previous = session.resources[path] ?? staged[path];
-      staged[path] =
-          _RelayResource(uri, kind, max(depth + 1, previous?.depth ?? 0), now);
+      staged[path] = _RelayResource(
+          uri, kind, max(depth + 1, previous?.depth ?? 0), now,
+          reusable: vod);
       return 'http://127.0.0.1:${_server!.port}$path';
     });
     // Publish only after the whole manifest validates. Keep recent segments for
@@ -653,11 +767,13 @@ class _RelaySession {
 }
 
 class _RelayResource {
-  _RelayResource(this.uri, this.kind, this.depth, this.lastSeen);
+  _RelayResource(this.uri, this.kind, this.depth, this.lastSeen,
+      {this.reusable = false});
   final Uri uri;
   final HlsResourceKind kind;
   final int depth;
   final DateTime lastSeen;
+  final bool reusable;
 }
 
 class _Opened {

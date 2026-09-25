@@ -32,7 +32,11 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
     bool? isIOS,
     PlaybackStreamRelayService Function()? relayFactory,
   })  : _isIOS = isIOS ?? Platform.isIOS,
-        _relayFactory = relayFactory ?? createPlaybackStreamRelayService {
+        _relayFactory = relayFactory ??
+            (() => createPlaybackStreamRelayService(
+                  diskCacheMiB:
+                      _ref.read(appSettingsProvider).playbackDiskCacheMiB,
+                )) {
     _resolverChannel.setMethodCallHandler(_handleResolverMethodCall);
     _ref.onDispose(() {
       _resolverSessionId = '';
@@ -57,7 +61,10 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
 
   Future<PlaybackTarget> _prepareTransport(
       String sessionId, PlaybackTarget target) async {
-    if (!_isIOS || !requiresPlaybackStreamRelay(target)) return target;
+    final diskCache = _ref.read(appSettingsProvider).playbackDiskCacheMiB > 0;
+    if (!diskCache && (!_isIOS || !requiresPlaybackStreamRelay(target))) {
+      return target;
+    }
     final transports = _transports[sessionId];
     if (transports == null) throw const PlaybackRelayException();
     final relay = _relayFactory();
@@ -160,7 +167,9 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'defaultSubtitle': defaultSubtitle.name,
           'dualSubtitlePrimaryLanguage': dualSubtitlePrimaryLanguage.name,
           'dualSubtitleSecondaryLanguage': dualSubtitleSecondaryLanguage.name,
-          'mediaMimeType': mediaMimeType,
+          'mediaMimeType': transport.container == 'hls'
+              ? 'application/x-mpegURL'
+              : mediaMimeType,
           'resolverSessionId': sessionId,
           'playbackTargetJson': jsonEncode(target.toJson()),
           'playbackItemKey': buildPlaybackItemKey(target),
@@ -328,11 +337,12 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         return {
           'ok': true,
           'versions': [
-            for (final choice in choices) {
-              'label': playbackVariantLabel(choice),
-              'selected': isSamePlaybackVariant(choice, target),
-              'playbackTargetJson': jsonEncode(choice.toJson()),
-            },
+            for (final choice in choices)
+              {
+                'label': playbackVariantLabel(choice),
+                'selected': isSamePlaybackVariant(choice, target),
+                'playbackTargetJson': jsonEncode(choice.toJson()),
+              },
           ],
         };
       }
@@ -390,7 +400,9 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         'playbackTargetJson': jsonEncode(resolved.target.toJson()),
         'playbackItemKey': resolvedPlaybackItemKey,
         'seriesKey': buildSeriesKeyForTarget(resolved.target),
-        'mediaMimeType': resolved.mediaMimeType,
+        'mediaMimeType': transport.container == 'hls'
+            ? 'application/x-mpegURL'
+            : resolved.mediaMimeType,
         'transportUrl': transport.streamUrl,
         'transportHeaders': transport.headers,
       };

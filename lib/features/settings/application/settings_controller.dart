@@ -343,6 +343,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     required PlaybackEngine playbackEngine,
     required PlaybackDecodeMode playbackDecodeMode,
     required NativeAudioOutputMode nativeAudioOutputMode,
+    int? diskCacheMiB,
   }) async {
     final current = state.value ?? await _repository.load();
     if (current.playbackBackgroundPlaybackEnabled &&
@@ -359,6 +360,7 @@ class SettingsController extends AsyncNotifier<AppSettings> {
         playbackEngine: playbackEngine,
         playbackDecodeMode: playbackDecodeMode,
         nativeAudioOutputMode: nativeAudioOutputMode,
+        playbackDiskCacheMiB: diskCacheMiB,
       ),
     );
   }

@@ -1263,6 +1263,7 @@ class AppSettings {
     this.playbackEngine = PlaybackEngine.embeddedMpv,
     this.playbackDecodeMode = PlaybackDecodeMode.auto,
     this.nativeAudioOutputMode = NativeAudioOutputMode.auto,
+    this.playbackDiskCacheMiB = 0,
     this.playbackMpvQualityPreset = PlaybackMpvQualityPreset.performanceFirst,
     this.playbackMpvDoubleTapToSeekEnabled = true,
     this.playbackMpvSwipeToSeekEnabled = true,
@@ -1342,6 +1343,7 @@ class AppSettings {
   final PlaybackEngine playbackEngine;
   final PlaybackDecodeMode playbackDecodeMode;
   final NativeAudioOutputMode nativeAudioOutputMode;
+  final int playbackDiskCacheMiB;
   final PlaybackMpvQualityPreset playbackMpvQualityPreset;
   final bool playbackMpvDoubleTapToSeekEnabled;
   final bool playbackMpvSwipeToSeekEnabled;
@@ -1419,6 +1421,7 @@ class AppSettings {
     PlaybackEngine? playbackEngine,
     PlaybackDecodeMode? playbackDecodeMode,
     NativeAudioOutputMode? nativeAudioOutputMode,
+    int? playbackDiskCacheMiB,
     PlaybackMpvQualityPreset? playbackMpvQualityPreset,
     bool? playbackMpvDoubleTapToSeekEnabled,
     bool? playbackMpvSwipeToSeekEnabled,
@@ -1577,6 +1580,7 @@ class AppSettings {
       playbackDecodeMode: playbackDecodeMode ?? this.playbackDecodeMode,
       nativeAudioOutputMode:
           nativeAudioOutputMode ?? this.nativeAudioOutputMode,
+      playbackDiskCacheMiB: playbackDiskCacheMiB ?? this.playbackDiskCacheMiB,
       playbackMpvQualityPreset:
           playbackMpvQualityPreset ?? this.playbackMpvQualityPreset,
       playbackMpvDoubleTapToSeekEnabled: playbackMpvDoubleTapToSeekEnabled ??
@@ -1679,6 +1683,7 @@ class AppSettings {
       'playbackEngine': playbackEngine.name,
       'playbackDecodeMode': playbackDecodeMode.name,
       'nativeAudioOutputMode': nativeAudioOutputMode.name,
+      'playbackDiskCacheMiB': playbackDiskCacheMiB,
       'playbackMpvQualityPreset': playbackMpvQualityPreset.name,
       'playbackMpvDoubleTapToSeekEnabled': playbackMpvDoubleTapToSeekEnabled,
       'playbackMpvSwipeToSeekEnabled': playbackMpvSwipeToSeekEnabled,
@@ -1887,6 +1892,10 @@ class AppSettings {
       nativeAudioOutputMode: NativeAudioOutputModeX.fromName(
         json['nativeAudioOutputMode'] as String? ?? '',
       ),
+      playbackDiskCacheMiB:
+          const [0, 256, 512, 1024].contains(json['playbackDiskCacheMiB'])
+              ? (json['playbackDiskCacheMiB'] as num).toInt()
+              : 0,
       playbackMpvQualityPreset: PlaybackMpvQualityPresetX.fromName(
         json['playbackMpvQualityPreset'] as String? ?? 'performanceFirst',
       ),

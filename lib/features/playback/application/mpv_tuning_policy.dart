@@ -50,8 +50,15 @@ MpvBufferBudget resolveMpvBufferBudget({
     _ => 32 * _mib,
   };
   var backCapBytes = quark ? 64 * _mib : 32 * _mib;
+  if (isTelevision && (target.bitrate ?? 0) > 0) {
+    final readaheadBytes = (target.bitrate! / 8 * 12).ceil();
+    if (readaheadBytes > forwardBytes) forwardBytes = readaheadBytes;
+  }
   final originalForwardBytes = forwardBytes;
 
+  // Bitrate may enlarge the TV budget, but never past the largest existing
+  // TV budget, even when the device's memory class is unavailable.
+  if (isTelevision) forwardBytes = forwardBytes.clamp(32 * _mib, 256 * _mib);
   if (isTelevision && memoryClassMb != null && memoryClassMb > 0) {
     if (memoryClassMb <= 256) {
       forwardBytes = forwardBytes.clamp(
@@ -71,6 +78,61 @@ MpvBufferBudget resolveMpvBufferBudget({
     backBytes: backBytes,
     memoryCapApplied: forwardBytes < originalForwardBytes,
   );
+}
+
+class MpvStaticOptionCache {
+  static const _cacheableOptions = <String>{
+    'demuxer-thread',
+    'demuxer-max-bytes',
+    'demuxer-max-back-bytes',
+    'cache',
+    'cache-on-disk',
+    'cache-secs',
+    'demuxer-readahead-secs',
+    'demuxer-hysteresis-secs',
+    'cache-pause-wait',
+    'cache-pause-initial',
+    'audio-display',
+    'osd-bar',
+    'deband',
+    'scale',
+    'cscale',
+    'dscale',
+    'sigmoid-upscaling',
+    'correct-downscaling',
+    'interpolation',
+    'vd-lavc-dr',
+    'vd-lavc-skiploopfilter',
+  };
+
+  final _players = Expando<_MpvStaticOptionState>();
+
+  Future<void> write({
+    required Object player,
+    required String name,
+    required String value,
+    required Future<void> Function() writeProperty,
+  }) {
+    // Load-specific transport options and externally managed subtitles must
+    // always reach MPV, even when this helper last wrote the same value.
+    if (!_cacheableOptions.contains(name)) return writeProperty();
+    final state = _players[player] ??= _MpvStaticOptionState();
+    final next = state.pending.then((_) async {
+      if (state.applied[name] == value) return;
+      state.applied.remove(name);
+      await writeProperty();
+      state.applied[name] = value;
+    });
+    // Serialize overlapping tuning passes without poisoning later retries.
+    state.pending =
+        next.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return next;
+  }
+}
+
+class _MpvStaticOptionState {
+  final applied = <String, String>{};
+  Future<void> pending = Future<void>.value();
 }
 
 typedef MpvOpenFailureKind = PlaybackFailureKind;
@@ -297,6 +359,7 @@ class MpvRemotePlaybackTuningProfile {
   final String cacheSecs;
   final String demuxerReadaheadSecs;
   final String demuxerHysteresisSecs;
+  // Recovery waits for this short cushion, not the full readahead window.
   final String cachePauseWait;
   final String cachePauseInitial;
   final bool lowLatency;
@@ -314,7 +377,11 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
       ? target.actualAddress
       : target.streamUrl;
   final scheme = playbackUrlScheme(transportUrl);
-  final measuredSpeedMbps = estimatedMegabitsPerSecond;
+  final measuredSpeedMbps = estimatedMegabitsPerSecond != null &&
+          estimatedMegabitsPerSecond.isFinite &&
+          estimatedMegabitsPerSecond > 0
+      ? estimatedMegabitsPerSecond
+      : null;
   final bitrateMbps =
       (target.bitrate ?? 0) > 0 ? (target.bitrate! / 1000000) : null;
   final throughputToBitrateRatio = measuredSpeedMbps != null &&
@@ -325,16 +392,19 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
       : null;
   final fastStartupSpeed =
       throughputToBitrateRatio != null && throughputToBitrateRatio >= 2.5;
-  final lowStartupSpeed = measuredSpeedMbps != null &&
-      measuredSpeedMbps > 0 &&
-      measuredSpeedMbps < 16;
-  final criticalStartupSpeed = measuredSpeedMbps != null &&
-      measuredSpeedMbps > 0 &&
-      measuredSpeedMbps < 8;
+  final lowStartupSpeed =
+      (measuredSpeedMbps != null && measuredSpeedMbps < 16) ||
+          (throughputToBitrateRatio != null && throughputToBitrateRatio < 1.25);
   final highRiskContainer =
       highRiskContainerOverride ?? isHighRiskRemotePlaybackContainer(target);
   final codecComplexityRisk = _isCodecComplexityRisk(target);
   final veryHeavyPlayback = _isVeryHeavyPlaybackTargetMetadata(target);
+  final highRisk = isLikelyQuarkPlaybackTarget(target) ||
+      lowStartupSpeed ||
+      veryHeavyPlayback ||
+      highRiskContainer ||
+      codecComplexityRisk ||
+      heavyPlayback;
   if (_kLowLatencyRemotePlaybackSchemes.contains(scheme)) {
     return const MpvRemotePlaybackTuningProfile(
       name: 'low-latency',
@@ -350,7 +420,7 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
   }
 
   if (_kBufferedRemotePlaybackSchemes.contains(scheme)) {
-    if (fastStartupSpeed && !veryHeavyPlayback && !highRiskContainer) {
+    if (fastStartupSpeed && !highRisk) {
       return const MpvRemotePlaybackTuningProfile(
         name: 'fast-start',
         networkTimeoutSeconds: '16',
@@ -363,22 +433,15 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
         lowLatency: false,
       );
     }
-    final highRisk = isLikelyQuarkPlaybackTarget(target) ||
-        criticalStartupSpeed ||
-        lowStartupSpeed ||
-        veryHeavyPlayback ||
-        highRiskContainer ||
-        codecComplexityRisk ||
-        heavyPlayback;
     if (highRisk) {
-      return const MpvRemotePlaybackTuningProfile(
+      return MpvRemotePlaybackTuningProfile(
         name: 'buffered-high-risk',
         networkTimeoutSeconds: '32',
         cacheOnDisk: 'no',
         cacheSecs: '150',
         demuxerReadaheadSecs: '42',
         demuxerHysteresisSecs: '20',
-        cachePauseWait: '5.2',
+        cachePauseWait: lowStartupSpeed ? '3.0' : '2.0',
         cachePauseInitial: 'yes',
         lowLatency: false,
       );
@@ -390,7 +453,7 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
       cacheSecs: '90',
       demuxerReadaheadSecs: '28',
       demuxerHysteresisSecs: '12',
-      cachePauseWait: '3.0',
+      cachePauseWait: '2.0',
       cachePauseInitial: 'yes',
       lowLatency: false,
     );

@@ -127,6 +127,9 @@ internal class NativePlaybackSettingsController(private val host: Host) {
                 ) to { openPlaybackSpeedPicker() }
         actions +=
             "音频输出 · ${host.session.audioOutputMode.displayLabel}" to { openAudioOutputModePicker() }
+        if (host.session.supportsFrameRateMatching) {
+            actions += "刷新率匹配" to { openFrameRateMatchingDialog() }
+        }
         actions +=
             "${host.activity.getString(R.string.native_subtitle_scale)} · " +
                 NativePlaybackFormatting.formatSubtitleScaleLabel(
@@ -196,6 +199,18 @@ internal class NativePlaybackSettingsController(private val host: Host) {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    private fun openFrameRateMatchingDialog() {
+        val dialog = AlertDialog.Builder(host.activity, R.style.NativePlaybackSettingsDialogTheme)
+            .setTitle("刷新率匹配")
+            .setMultiChoiceItems(
+                arrayOf("匹配视频帧率（本次播放）"),
+                booleanArrayOf(host.session.frameRateMatchingEnabled),
+            ) { _, _, enabled -> host.session.setFrameRateMatching(enabled) }
+            .setPositiveButton("完成", null)
+            .create()
+        showTransientDialog(dialog, ControllerFocusTarget.SETTINGS)
     }
 
     private fun openSeriesSkipPreferenceDialog() {

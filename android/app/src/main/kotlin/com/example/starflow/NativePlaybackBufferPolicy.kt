@@ -55,7 +55,7 @@ object NativePlaybackBufferPolicy {
                 maxBufferMs = 120_000,
                 bufferForPlaybackMs = 2_500,
                 bufferForPlaybackAfterRebufferMs = 2_000,
-                targetBufferBytes = (if (isHeavyPlayback) 128 else 96) * MEBIBYTE,
+                targetBufferBytes = 128 * MEBIBYTE,
                 prioritizeTimeOverSizeThresholds = false,
             )
         }
@@ -97,7 +97,7 @@ object NativePlaybackBufferPolicy {
         val episodeTargetBufferBytes = when {
             memoryClassMb <= 256 -> 48 * MEBIBYTE
             memoryClassMb <= 512 -> 80 * MEBIBYTE
-            else -> 96 * MEBIBYTE
+            else -> 128 * MEBIBYTE
         }
         return bandwidthAdjusted.copy(
             // Keep read-ahead capacity independent of startup and resume thresholds.

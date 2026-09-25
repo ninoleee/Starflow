@@ -14,9 +14,11 @@ internal class NativePlaybackTransferProgress(
     @Volatile var rawBytesPerSecond: Long? = null
         private set
     private var activeTransfers = 0
+    private var activeSinceMs = sampledAtMs
+    private var activeDurationMs = 0L
     @Volatile var isNetworkTransferActive = false
         private set
-    var networkBytesPerSecond: Long? = null
+    @Volatile var networkBytesPerSecond: Long? = null
         private set
 
     @Synchronized
@@ -24,10 +26,23 @@ internal class NativePlaybackTransferProgress(
         val sampledAt = now()
         val elapsed = sampledAt - sampledAtMs
         if (elapsed < 1_000L) return
-        rawBytesPerSecond = (bytes.toDouble() * 1_000 / elapsed).toLong()
-        networkBytesPerSecond = speedWindow.add(rawBytesPerSecond!!)
+        val activeMs = activeDurationMs +
+            if (activeTransfers > 0) (sampledAt - activeSinceMs).coerceAtLeast(0) else 0L
+        rawBytesPerSecond = if (activeMs > 0) (bytes.toDouble() * 1_000 / activeMs).toLong() else null
+        networkBytesPerSecond = speedWindow.add((bytes.toDouble() * 1_000 / elapsed).toLong())
         bytes = 0L
         sampledAtMs = sampledAt
+        activeDurationMs = 0L
+        activeSinceMs = sampledAt
+    }
+
+    internal data class ReadAheadSnapshot(val active: Boolean, val bytesPerSecond: Long?)
+
+    @Synchronized
+    fun readAheadSnapshot(): ReadAheadSnapshot {
+        sampleNetworkSpeed()
+        return ReadAheadSnapshot(isNetworkTransferActive,
+            rawBytesPerSecond.takeIf { isNetworkTransferActive })
     }
 
     @Volatile
@@ -38,7 +53,13 @@ internal class NativePlaybackTransferProgress(
 
     @Synchronized
     override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {
-        if (isNetwork) activeTransfers++
+        if (isNetwork) {
+            if (activeTransfers == 0) {
+                activeSinceMs = now()
+                rawBytesPerSecond = null
+            }
+            activeTransfers++
+        }
         isNetworkTransferActive = activeTransfers > 0
     }
 
@@ -57,7 +78,10 @@ internal class NativePlaybackTransferProgress(
 
     @Synchronized
     override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {
-        if (isNetwork) activeTransfers = (activeTransfers - 1).coerceAtLeast(0)
+        if (isNetwork && activeTransfers > 0) {
+            activeTransfers--
+            if (activeTransfers == 0) activeDurationMs += (now() - activeSinceMs).coerceAtLeast(0)
+        }
         isNetworkTransferActive = activeTransfers > 0
     }
 }

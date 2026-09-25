@@ -16,9 +16,43 @@ import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/douban_account_editor_page.dart';
 import 'package:starflow/features/settings/presentation/mpv_settings_page.dart';
+import 'package:starflow/features/settings/presentation/playback_settings_page.dart';
 import 'package:starflow/features/settings/presentation/subtitle_settings_page.dart';
 
 void main() {
+  testWidgets(
+      'playback disk cache capacity saves through the shared settings page',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final initial = SeedData.defaultSettings;
+    final repository = _MemorySettingsRepository(initial);
+    await tester.pumpWidget(ProviderScope(
+        overrides: [
+          appSettingsRepositoryProvider.overrideWithValue(repository),
+          appSettingsProvider.overrideWithValue(initial),
+        ],
+        child: MaterialApp(
+            home: PlaybackSettingsPage(
+          initialTimeoutSeconds: initial.playbackOpenTimeoutSeconds,
+          initialDefaultSpeed: initial.playbackDefaultSpeed,
+          initialBackgroundPlaybackEnabled:
+              initial.playbackBackgroundPlaybackEnabled,
+          initialPlaybackEngine: initial.playbackEngine,
+          initialPlaybackDecodeMode: initial.playbackDecodeMode,
+          initialNativeAudioOutputMode: initial.nativeAudioOutputMode,
+        ))));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('播放磁盘缓存'));
+    await tester.tap(find.text('播放磁盘缓存'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('512 MiB'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    expect(repository.settings.playbackDiskCacheMiB, 512);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final is115 in [false, true]) {
     testWidgets('Drive page saves and tests its own STRM task: $is115',
         (tester) async {

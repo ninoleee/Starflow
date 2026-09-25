@@ -91,6 +91,10 @@ import UIKit
         }
       case "getSystemVolumeLevel":
         result(self?.currentSystemVolumeLevel() ?? AVAudioSession.sharedInstance().outputVolume)
+      case "getPlaybackCacheFreeBytes":
+        let path = NSTemporaryDirectory()
+        let attributes = try? FileManager.default.attributesOfFileSystem(forPath: path)
+        result((attributes?[.systemFreeSize] as? NSNumber)?.int64Value)
       case "setSystemVolumeLevel":
         let arguments = call.arguments as? [String: Any]
         let value = arguments?["value"] as? Double ?? 0.5

@@ -125,6 +125,9 @@ class MainActivity : FlutterActivity() {
                     val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
                     result.success(activityManager.memoryClass)
                 }
+                "getPlaybackCacheFreeBytes" -> {
+                    result.success(cacheDir.usableSpace)
+                }
                 "isPictureInPictureSupported" -> {
                     result.success(isPictureInPictureSupported())
                 }

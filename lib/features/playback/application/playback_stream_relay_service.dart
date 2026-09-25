@@ -7,8 +7,11 @@ import 'package:starflow/features/playback/application/playback_stream_relay_ser
     as impl;
 
 // Each engine owns its transport lifetime; closing one cannot revoke another.
-PlaybackStreamRelayService createPlaybackStreamRelayService() =>
-    impl.createPlaybackStreamRelayService();
+PlaybackStreamRelayService createPlaybackStreamRelayService(
+        {int diskCacheMiB = 0}) =>
+    impl.createPlaybackStreamRelayService(diskCacheMiB: diskCacheMiB);
+
+Future<void> clearPlaybackDiskCache() => impl.clearPlaybackDiskCache();
 
 final playbackStreamRelayServiceProvider =
     Provider<PlaybackStreamRelayService>((ref) {

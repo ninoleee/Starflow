@@ -340,6 +340,9 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   PlaybackPerformanceTracker? _mpvPerformanceTracker;
   Timer? _mpvPerformanceSampleTimer;
   bool _mpvPerformanceSampleInProgress = false;
+  int _mpvPerformanceSampleGeneration = 0;
+  MpvHealthLogGate _mpvHealthLogGate = MpvHealthLogGate();
+  int _mpvLastDroppedFrames = 0;
   DateTime? _playbackStartupStartedAt;
   int _playbackTargetResolutionMs = 0;
 

@@ -7,6 +7,8 @@ internal data class NativeEpisodeQueueEntry(
     val playbackItemKey: String,
     val seriesKey: String,
     val mediaMimeType: String = "",
+    val transportUrl: String = "",
+    val transportHeadersJson: String = "",
 ) {
     private fun targetObject(): JSONObject {
         return try {

@@ -3,6 +3,8 @@ package com.example.starflow
 import android.app.Activity
 import android.net.Uri
 import android.os.SystemClock
+import android.os.Build
+import android.os.PowerManager
 import android.view.View
 import android.widget.TextView
 import androidx.media3.common.C
@@ -64,8 +66,16 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
             "videoDecoder=${currentVideoDecoder.ifBlank { "unknown" }} " +
             "audioDecoder=${currentAudioDecoder.ifBlank { "unknown" }} " +
             "frameRate=${current.videoFormat?.frameRate ?: -1} " +
+            "thermalStatus=${thermalStatus()} " +
             "width=${current.videoSize.width} height=${current.videoSize.height}")
     }
+
+    private fun thermalStatus(): Int = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            (host.activity.getSystemService(Activity.POWER_SERVICE) as? PowerManager)
+                ?.currentThermalStatus ?: -1
+        } else -1
+    } catch (_: RuntimeException) { -1 }
 
     fun logSubtitleCues(cueGroup: CueGroup) {
         if (cueGroup.cues.isEmpty()) return

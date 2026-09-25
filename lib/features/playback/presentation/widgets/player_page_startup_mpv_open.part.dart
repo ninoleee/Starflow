@@ -249,9 +249,12 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
     try {
       // Only the transport copy reaches libmpv. Identity, history, recovery and
       // server session ownership keep the original resolved target.
-      final relay = createPlaybackStreamRelayService();
+      final relay = createPlaybackStreamRelayService(
+        diskCacheMiB: ref.read(appSettingsProvider).playbackDiskCacheMiB,
+      );
       _mpvRelays[player] = relay;
-      final engineTarget = await scope.wait(relay.prepareTarget(resolvedTarget));
+      final engineTarget =
+          await scope.wait(relay.prepareTarget(resolvedTarget));
       ensurePlayerActive();
       await scope.wait(_applyMpvNetworkProxy(player, engineTarget));
       ensurePlayerActive();

@@ -960,7 +960,13 @@ extension _PlayerPageStateControls on _PlayerPageState {
     _recordMpvBufferingState(player.state.buffering);
     _mpvPerformanceTracker?.onBufferingChanged(player.state.buffering);
     _mpvLifecycle.listen(player.stream.buffering, (buffering) {
+      if (!identical(_player, player)) {
+        return;
+      }
       _mpvPerformanceTracker?.onBufferingChanged(buffering);
+      if (buffering && player.state.playing) {
+        unawaited(_logMpvPlaybackHealth(player, 'buffering'));
+      }
       _recordMpvBufferingState(buffering);
     });
     _mpvLifecycle.listen(player.stream.bufferingPercentage, (percentage) {

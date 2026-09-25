@@ -233,6 +233,8 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 | `NativePlaybackActivity / LaunchController / Coordinator / Session` | 原生页面装配、启动及 Exo 生命周期，不把策略都放回 Activity |
 | `NativePlaybackSource / Target / Options` | Dart JSON 契约、媒体源与会话设置 |
 | `NativePlaybackRuntimeController / RecoveryController` 及各 `*Policy` | tick、启动进展、缓冲、恢复、错误、HLS、TV seek 和焦点规则 |
+| `NativePlaybackLoadControl / ReadAheadPolicy / HealthPolicy / FrameRateController` | TV 点播有界动态预读、活动读取采样、卡顿诊断限频与可选 Surface 帧率提示；Session 接入，Runtime 复用每秒循环 |
+| `playback_relay_disk_cache.dart / playback_stream_relay_service_io.dart` | MPV／Exo／iOS 共享的可选临时区间缓存、LRU／低空间保护、HLS 点播分片与 WebVTT、会话撤销和网络回退；本地文件直读，不提供独立下载 |
 | `NativePlaybackRenderersFactory / AudioPolicy / AudioTracks` | renderer / sink、实际 MIME 输出策略、音轨身份恢复 |
 | `NativeAudioOutputState` | 每个播放器的 sink 输入、decoder 与实际输出观测，供倍速重建判断及输出故障分类；不跨实例复用 |
 | `NativeAudioPrecisionHistory / NativeAudioDecoderPrecisionPolicy` | 当前媒体按源音轨身份记录倍速临时降精度，恢复只尝试一次；FFmpeg float 恢复候选排除固定 PCM16 的 AC-3 |
