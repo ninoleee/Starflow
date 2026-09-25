@@ -1014,7 +1014,7 @@ Flutter 启动 Logo 和字标始终静态显示，保持固定大小、位置与
 - 设计源：`assets/branding/starflow_logo_source.png`（2026-09-07 提供的彩色播放按钮原图）
 - 应用内主 Logo：`assets/branding/starflow_logo_primary.png`
 - 启动页首帧图标：`assets/branding/starflow_launch_logo.png`
-- Flutter 资源只打包主 Logo、启动 Logo 和 bootstrap 目录；设计源图与 `assets/perf/baseline.mp4` 保留在仓库但不进入运行资源包。未使用的 `cupertino_icons` 直接依赖已移除
+- Flutter 资源只打包主 Logo、启动 Logo 和 bootstrap 目录；设计源图与 `assets/perf/baseline.mp4` 保留在仓库但不进入运行资源包。`cupertino_icons` 作为字体来源保留，release 图标裁剪只子集化实际可达的 Cupertino 字形
   使用最新的无白边满版彩色原图，保留完整构图
 - 导出脚本：`tool/generate_brand_assets.py`
 - 当前外部 Logo 原尺寸基准图：`build/brand_assets/app_icon_raw_capture.png`
