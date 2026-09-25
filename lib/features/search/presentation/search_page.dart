@@ -555,7 +555,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
   void _onSearchStateChanged(SearchPresentationState state) {
     if (!mounted) return;
     setState(() {
-      if (state.results.isEmpty && state.generation != _searchState.generation) {
+      if (state.results.isEmpty &&
+          state.generation != _searchState.generation) {
         _selectedResolution = null;
       }
       _searchState = state;
@@ -833,13 +834,13 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                                     ConstrainedBox(
                                                       constraints:
                                                           BoxConstraints(
-                                                        maxWidth:
-                                                            constraints.maxWidth -
-                                                                8,
+                                                        maxWidth: constraints
+                                                                .maxWidth -
+                                                            8,
                                                       ),
                                                       child: _SearchHistoryChip(
-                                                        label:
-                                                            _recentQueries[index],
+                                                        label: _recentQueries[
+                                                            index],
                                                         focusId:
                                                             'search:recent:$index',
                                                         onPressed: () =>
@@ -881,7 +882,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                       focusId: 'search:target:${target.id}',
                                       onPressed: () {
                                         _toggleTargetSelection(target, targets);
-                                        if (_controller.text.trim().isNotEmpty) {
+                                        if (_controller.text
+                                            .trim()
+                                            .isNotEmpty) {
                                           _performSearch();
                                         }
                                       },
@@ -892,7 +895,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 _results.isNotEmpty &&
                                 availableCloudTypes.isNotEmpty)
                               SearchFilterRow(
-                                key: const ValueKey('search-filter-cloud-types'),
+                                key:
+                                    const ValueKey('search-filter-cloud-types'),
                                 label: '网盘类型',
                                 storageId: 'cloud-types',
                                 isTelevision: isTelevision,
@@ -920,13 +924,14 @@ class _SearchPageState extends ConsumerState<SearchPage>
                             if (!_showFavoriteResults &&
                                 availableResolutions.isNotEmpty)
                               SearchFilterRow(
-                                key: const ValueKey('search-filter-resolutions'),
+                                key:
+                                    const ValueKey('search-filter-resolutions'),
                                 label: '清晰度',
                                 storageId: 'resolutions',
                                 isTelevision: isTelevision,
                                 children: [
-                                  for (final resolution in
-                                      SearchResultResolution.values
+                                  for (final resolution
+                                      in SearchResultResolution.values
                                           .where(availableResolutions.contains))
                                     StarflowChipButton(
                                       key: ValueKey(
@@ -1021,7 +1026,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                   _showFavoriteResults
                                       ? '还没有收藏结果。'
                                       : (_selectedCloudType != null ||
-                                                  _selectedResolution != null) &&
+                                                  _selectedResolution !=
+                                                      null) &&
                                               _results.isNotEmpty
                                           ? '当前筛选条件下暂无结果。'
                                           : _controller.text.trim().isEmpty
@@ -1416,6 +1422,11 @@ class _SearchResultCard extends ConsumerWidget {
     final hasPosterCandidate =
         posterUrl.isNotEmpty || posterFallbackSources.isNotEmpty;
     final resourceUri = _parseLaunchUri(result.resourceUrl);
+    final hasMetadata = result.providerName.trim().isNotEmpty ||
+        result.quality.trim().isNotEmpty ||
+        result.sizeLabel.trim().isNotEmpty ||
+        result.seeders > 0 ||
+        linkValidationLabel.isNotEmpty;
 
     void onOpen() {
       if (result.detailTarget != null) {
@@ -1476,23 +1487,25 @@ class _SearchResultCard extends ConsumerWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  if (result.providerName.trim().isNotEmpty)
-                    _MetaChip(label: result.providerName),
-                  if (result.quality.trim().isNotEmpty)
-                    _MetaChip(label: result.quality),
-                  if (result.sizeLabel.trim().isNotEmpty)
-                    _MetaChip(label: result.sizeLabel),
-                  if (result.seeders > 0)
-                    _MetaChip(label: '${result.seeders} seeders'),
-                  if (linkValidationLabel.isNotEmpty)
-                    _MetaChip(label: linkValidationLabel),
-                ],
-              ),
+              if (hasMetadata) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    if (result.providerName.trim().isNotEmpty)
+                      _MetaChip(label: result.providerName),
+                    if (result.quality.trim().isNotEmpty)
+                      _MetaChip(label: result.quality),
+                    if (result.sizeLabel.trim().isNotEmpty)
+                      _MetaChip(label: result.sizeLabel),
+                    if (result.seeders > 0)
+                      _MetaChip(label: '${result.seeders} seeders'),
+                    if (linkValidationLabel.isNotEmpty)
+                      _MetaChip(label: linkValidationLabel),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

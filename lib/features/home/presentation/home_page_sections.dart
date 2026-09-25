@@ -329,7 +329,7 @@ class _HomePosterTile extends StatelessWidget {
         color: Colors.white,
         fontWeight: FontWeight.w800,
         letterSpacing: 0,
-        fontSize: 19,
+        fontSize: AppTextSizes.section,
         shadows: const [
           Shadow(color: Colors.black, blurRadius: 2),
           Shadow(
@@ -1175,7 +1175,7 @@ class _HomeCarouselCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: AppColors.foreground,
-                        height: 1.45,
+                        height: AppLineHeights.body,
                       ),
                     ),
                   ],

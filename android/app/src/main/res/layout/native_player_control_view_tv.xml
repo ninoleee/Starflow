@@ -48,7 +48,7 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:textColor="@android:color/white"
-                android:textSize="20sp"
+                android:textSize="18sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -58,7 +58,7 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:textColor="@color/native_player_secondary_text"
-                android:textSize="13sp"
+                android:textSize="14sp"
                 android:visibility="gone" />
         </LinearLayout>
 

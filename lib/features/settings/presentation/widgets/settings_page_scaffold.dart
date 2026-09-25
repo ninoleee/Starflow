@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:starflow/app/shell_layout.dart';
@@ -196,6 +197,7 @@ class SettingsActionButton extends ConsumerWidget {
     this.expand = false,
     this.compact,
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
     this.focusNode,
     this.focusId,
   });
@@ -208,6 +210,7 @@ class SettingsActionButton extends ConsumerWidget {
   final bool expand;
   final bool? compact;
   final bool autofocus;
+  final bool focusableWhenDisabled;
   final FocusNode? focusNode;
   final String? focusId;
 
@@ -215,6 +218,7 @@ class SettingsActionButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     return StarflowButton(
+      focusableWhenDisabled: focusableWhenDisabled,
       label: label,
       icon: icon,
       onPressed: onPressed,
@@ -239,6 +243,7 @@ class SettingsSelectionTile extends StatelessWidget {
     this.leading,
     this.trailing,
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
     this.focusNode,
     this.focusId,
   });
@@ -250,12 +255,14 @@ class SettingsSelectionTile extends StatelessWidget {
   final Widget? leading;
   final Widget? trailing;
   final bool autofocus;
+  final bool focusableWhenDisabled;
   final FocusNode? focusNode;
   final String? focusId;
 
   @override
   Widget build(BuildContext context) {
     return StarflowSelectionTile(
+      focusableWhenDisabled: focusableWhenDisabled,
       title: title,
       value: value,
       subtitle: subtitle,
@@ -409,6 +416,7 @@ class SettingsToggleTile extends StatelessWidget {
     required this.onChanged,
     this.subtitle = '',
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
     this.focusNode,
     this.focusId,
   });
@@ -418,12 +426,14 @@ class SettingsToggleTile extends StatelessWidget {
   final ValueChanged<bool>? onChanged;
   final String subtitle;
   final bool autofocus;
+  final bool focusableWhenDisabled;
   final FocusNode? focusNode;
   final String? focusId;
 
   @override
   Widget build(BuildContext context) {
     return StarflowToggleTile(
+      focusableWhenDisabled: focusableWhenDisabled,
       title: title,
       value: value,
       subtitle: subtitle,
@@ -490,12 +500,15 @@ class SettingsSectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(top: 22, bottom: 10),
+      padding: const EdgeInsets.only(
+        top: AppContentSpacing.sectionStart,
+        bottom: AppContentSpacing.sectionHeading,
+      ),
       child: Text(
         label,
         style: theme.textTheme.titleSmall?.copyWith(
           fontWeight: FontWeight.w800,
-          letterSpacing: 0.2,
+          letterSpacing: 0,
           color: theme.colorScheme.primary,
         ),
       ),
@@ -536,12 +549,12 @@ class SettingsInfoCard extends StatelessWidget {
               fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: AppContentSpacing.related),
           Text(
             description,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: colorScheme.onSurfaceVariant,
-              height: 1.45,
+              height: AppLineHeights.body,
             ),
           ),
         ],
@@ -552,7 +565,7 @@ class SettingsInfoCard extends StatelessWidget {
 
 List<Widget> buildSettingsTileGroup(
   List<Widget> children, {
-  double spacing = 18,
+  double spacing = AppContentSpacing.listItem,
 }) {
   if (children.isEmpty) {
     return const <Widget>[];

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/utils/media_rating_labels.dart';
@@ -178,7 +179,7 @@ class DetailHeroSection extends ConsumerWidget {
           Positioned(
             left: 16,
             right: 16,
-            bottom: simplifyVisualEffects ? 18 : 24,
+            bottom: 8,
             child: Padding(
               padding: const EdgeInsets.only(top: kToolbarHeight),
               child: LayoutBuilder(
@@ -395,14 +396,14 @@ class _DetailHeroContentState extends State<DetailHeroContent> {
     final titleStyle = Theme.of(context).textTheme.headlineSmall?.copyWith(
           color: Colors.white,
           fontWeight: FontWeight.w800,
-          fontSize: simplifyVisualEffects ? 32 : 38,
-          height: 1.04,
+          fontSize: AppTextSizes.hero,
+          height: AppLineHeights.hero,
         );
     final episodeTitleStyle = Theme.of(context).textTheme.titleMedium?.copyWith(
           color: AppColors.foreground,
           fontWeight: FontWeight.w600,
-          fontSize: simplifyVisualEffects ? 16 : 18,
-          height: 1.25,
+          fontSize: AppTextSizes.section,
+          height: AppLineHeights.title,
         );
     return ConstrainedBox(
       constraints: BoxConstraints(
@@ -437,7 +438,7 @@ class _DetailHeroContentState extends State<DetailHeroContent> {
                         item,
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: simplifyVisualEffects ? 11.5 : 12,
+                          fontSize: AppTextSizes.caption,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -509,7 +510,7 @@ class _DetailHeroContentState extends State<DetailHeroContent> {
                         item,
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: simplifyVisualEffects ? 11.5 : 12,
+                          fontSize: AppTextSizes.caption,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -530,8 +531,8 @@ class _DetailHeroContentState extends State<DetailHeroContent> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: AppColors.foreground,
-                fontSize: simplifyVisualEffects ? 13 : 14,
-                height: 1.45,
+                fontSize: AppTextSizes.body,
+                height: AppLineHeights.body,
               ),
             ),
           ],
@@ -547,9 +548,9 @@ class _DetailHeroContentState extends State<DetailHeroContent> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: AppColors.foregroundMuted,
-                fontSize: simplifyVisualEffects ? 13 : 14,
+                fontSize: AppTextSizes.body,
                 fontWeight: FontWeight.w600,
-                height: 1.4,
+                height: AppLineHeights.supporting,
               ),
             ),
             SizedBox(height: simplifyVisualEffects ? 10 : 12),
@@ -622,6 +623,7 @@ class DetailBackdropImage extends StatelessWidget {
           fit: BoxFit.cover,
           alignment: Alignment.topCenter,
           throttleOnTelevision: false,
+          gaplessPlayback: true,
           errorBuilder: (context, error, stackTrace) {
             return const ColoredBox(color: AppColors.neutral1);
           },

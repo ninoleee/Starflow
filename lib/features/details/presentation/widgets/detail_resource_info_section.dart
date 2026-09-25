@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/application/detail_library_match_service.dart';
@@ -281,7 +282,7 @@ class DetailResourceInfoSection extends StatelessWidget {
                 iconEnabledColor: Colors.white70,
                 style: const TextStyle(
                   color: AppColors.foreground,
-                  fontSize: 14,
+                  fontSize: AppTextSizes.body,
                   height: 1.35,
                 ),
                 items: supportedEngines
@@ -404,8 +405,9 @@ class _DetailLinkedFactRow extends StatelessWidget {
             label,
             style: const TextStyle(
               color: AppColors.foregroundMuted,
-              fontSize: 13,
+              fontSize: AppTextSizes.body,
               fontWeight: FontWeight.w700,
+              height: AppLineHeights.bodyLarge,
             ),
           ),
         ),
@@ -451,11 +453,12 @@ class _DetailLinkedFactAction extends StatelessWidget {
       ),
       style: TextButton.styleFrom(
         foregroundColor: AppColors.foreground,
+        alignment: Alignment.topLeft,
         padding: EdgeInsets.zero,
         minimumSize: const Size(0, 30),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         textStyle: const TextStyle(
-          fontSize: 14,
+          fontSize: AppTextSizes.body,
           fontWeight: FontWeight.w700,
           height: 1.5,
         ),
@@ -544,7 +547,7 @@ class DetailPlayableVariantSelector extends StatelessWidget {
             subtitle,
             style: const TextStyle(
               color: AppColors.foregroundMuted,
-              fontSize: 13,
+              fontSize: AppTextSizes.body,
               height: 1.45,
             ),
           ),
@@ -597,7 +600,7 @@ class _DetailLibraryMatchSelectionControl extends StatelessWidget {
         iconEnabledColor: Colors.white70,
         style: const TextStyle(
           color: AppColors.foreground,
-          fontSize: 14,
+          fontSize: AppTextSizes.body,
           height: 1.35,
         ),
         items: List.generate(viewData.choices.length, (i) {

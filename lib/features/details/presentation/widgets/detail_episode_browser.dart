@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
@@ -210,7 +211,7 @@ class _DetailSeasonEpisodesRequest {
   final String sectionId;
   final String sectionName;
 
-  String get _cacheKey => '$sourceId|$seasonId|$sectionId|$sectionName';
+  String get _cacheKey => '$sourceId|$seasonId|$sectionId';
 
   @override
   bool operator ==(Object other) {
@@ -322,6 +323,15 @@ class DetailEpisodeBrowser extends ConsumerStatefulWidget {
       _DetailEpisodeBrowserState();
 }
 
+const _episodeSummaryMaxLines = 3;
+const _episodeSummaryPadding = EdgeInsets.fromLTRB(14, 8, 14, 14);
+const _episodeListPadding = EdgeInsets.only(top: 14, bottom: 10);
+const _episodeSummaryStyle = TextStyle(
+  color: AppColors.foreground,
+  fontSize: AppTextSizes.body,
+  height: AppLineHeights.body,
+);
+
 class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
   static const double _episodeCardWidth = 292;
   static const double _episodeCardSpacing = 14;
@@ -347,13 +357,14 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
   AsyncValue<DetailEpisodeGroup> _selectedGroupAsync(
     DetailEpisodeGroup selectedGroup,
   ) {
-    if (selectedGroup.episodesLoaded) {
-      return AsyncData<DetailEpisodeGroup>(selectedGroup);
-    }
     final request = _DetailSeasonEpisodesRequest.fromTargetAndGroup(
       target: widget.seriesTarget,
       group: selectedGroup,
     );
+    if (selectedGroup.episodesLoaded) {
+      _loadedGroups[request] = selectedGroup;
+      return AsyncData<DetailEpisodeGroup>(selectedGroup);
+    }
     final cached = _loadedGroups[request];
     if (cached != null) return AsyncData(cached);
     final episodesAsync = ref.watch(detailSeasonEpisodesProvider(request));
@@ -370,6 +381,15 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
   @override
   Widget build(BuildContext context) {
     final seasonTabHeight = StarflowChipButton.minimumHeight(context) + 5;
+    final summaryHeight = (MediaQuery.textScalerOf(context)
+                .scale(_episodeSummaryStyle.fontSize!) *
+            _episodeSummaryStyle.height! *
+            _episodeSummaryMaxLines)
+        .ceilToDouble();
+    final episodeListHeight = _episodeCardWidth / (16 / 9) +
+        summaryHeight +
+        _episodeSummaryPadding.vertical +
+        _episodeListPadding.vertical;
     final selectedGroup = resolveSelectedEpisodeGroup(
       groups: widget.groups,
       selectedGroupId: widget.selectedGroupId,
@@ -399,7 +419,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
           ),
         ],
         SizedBox(
-          height: 292,
+          height: episodeListHeight,
           child: selectedGroupAsync.when(
             skipLoadingOnReload: true,
             data: (resolvedGroup) {
@@ -410,7 +430,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                     '当前分组暂无剧集',
                     style: TextStyle(
                       color: AppColors.foregroundMuted,
-                      fontSize: 14,
+                      fontSize: AppTextSizes.body,
                     ),
                   ),
                 );
@@ -434,7 +454,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                   controller: controller,
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  padding: _episodeListPadding,
                   clipBehavior: Clip.none,
                   itemCount: episodes.length,
                   separatorBuilder: (context, index) =>
@@ -466,7 +486,7 @@ class _DetailEpisodeBrowserState extends ConsumerState<DetailEpisodeBrowser> {
                 '加载剧集失败：$error',
                 style: const TextStyle(
                   color: AppColors.foregroundMuted,
-                  fontSize: 14,
+                  fontSize: AppTextSizes.body,
                 ),
               ),
             ),
@@ -504,7 +524,8 @@ class _DetailSeasonTabsState extends State<_DetailSeasonTabs> {
         final initialGroupId = widget.selectedGroupId;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted || !controller.hasClients) return;
-          final tab = _tabKeys[initialGroupId]?.currentContext?.findRenderObject();
+          final tab =
+              _tabKeys[initialGroupId]?.currentContext?.findRenderObject();
           if (tab == null) return;
           // Position once on entry, without moving the page or TV focus.
           controller.position.ensureVisible(tab, alignment: 0.5);
@@ -519,7 +540,8 @@ class _DetailSeasonTabsState extends State<_DetailSeasonTabs> {
             for (var index = 0; index < widget.groups.length; index++) ...[
               if (index > 0) const SizedBox(width: 8),
               StarflowChipButton(
-                key: _tabKeys.putIfAbsent(widget.groups[index].id, GlobalKey.new),
+                key: _tabKeys.putIfAbsent(
+                    widget.groups[index].id, GlobalKey.new),
                 label: widget.groups[index].label,
                 selected: widget.groups[index].id == widget.selectedGroupId,
                 focusId: 'detail:season:${widget.groups[index].id}',
@@ -598,7 +620,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
     final borderRadius = BorderRadius.circular(AppRadii.lg);
     final titleStyle = TextStyle(
       color: Colors.white,
-      fontSize: 16,
+      fontSize: AppTextSizes.title,
       fontWeight: FontWeight.w800,
       height: 1.25,
       shadows: isTelevision
@@ -685,7 +707,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     color: AppColors.foreground,
-                                    fontSize: 12,
+                                    fontSize: AppTextSizes.caption,
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
@@ -729,7 +751,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 12,
+                              fontSize: AppTextSizes.caption,
                               fontWeight: FontWeight.w800,
                             ),
                           );
@@ -756,7 +778,7 @@ class _DetailEpisodeCard extends ConsumerWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Colors.white,
-                            fontSize: 12,
+                            fontSize: AppTextSizes.caption,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -768,20 +790,16 @@ class _DetailEpisodeCard extends ConsumerWidget {
           ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+              padding: _episodeSummaryPadding,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Flexible(
                     child: Text(
                       summary,
-                      maxLines: 3,
+                      maxLines: _episodeSummaryMaxLines,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.foreground,
-                        fontSize: 13,
-                        height: 1.45,
-                      ),
+                      style: _episodeSummaryStyle,
                     ),
                   ),
                 ],

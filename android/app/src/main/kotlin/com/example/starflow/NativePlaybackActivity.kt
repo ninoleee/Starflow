@@ -10,6 +10,13 @@ class NativePlaybackActivity : Activity() {
     private val playback by lazy { NativePlaybackCoordinator(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val textScale = intent?.getFloatExtra(EXTRA_UI_TEXT_SCALE, 1f)
+            ?.coerceIn(0.85f, 1.30f) ?: 1f
+        if (textScale != 1f) {
+            applyOverrideConfiguration(Configuration(resources.configuration).apply {
+                fontScale *= textScale
+            })
+        }
         super.onCreate(savedInstanceState)
         playback.onCreate(savedInstanceState)
     }
@@ -88,6 +95,7 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_SERIES_KEY = "seriesKey"
         const val EXTRA_EPISODE_QUEUE_JSON = "episodeQueueJson"
         const val EXTRA_EPISODE_ACCENT_COLOR = "episodeAccentColor"
+        const val EXTRA_UI_TEXT_SCALE = "uiTextScale"
         const val EXTRA_LAUNCH_REQUEST_ID = "launchRequestId"
         const val EXTRA_LAUNCH_RESULT_RECEIVER = "launchResultReceiver"
         const val RESULT_DATA_REQUEST_ID = "requestId"

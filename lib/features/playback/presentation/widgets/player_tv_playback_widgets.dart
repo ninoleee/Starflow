@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_mpv_controls_sections.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
@@ -135,7 +136,7 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 14,
+                        fontSize: AppTextSizes.body,
                         fontWeight: FontWeight.w600,
                       ),
                     ),

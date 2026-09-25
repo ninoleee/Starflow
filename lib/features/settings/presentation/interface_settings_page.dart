@@ -4,6 +4,7 @@ import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/application/settings_slice_providers.dart';
+import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/widgets/settings_page_scaffold.dart';
 
 class InterfaceSettingsPage extends ConsumerWidget {
@@ -25,6 +26,9 @@ class InterfaceSettingsPage extends ConsumerWidget {
       appSettingsProvider.select(
         (settings) => settings.liveNavigationAutoPlayEnabled,
       ),
+    );
+    final uiTextScale = ref.watch(
+      appSettingsProvider.select((settings) => settings.uiTextScale),
     );
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
     final theme = Theme.of(context);
@@ -76,6 +80,21 @@ class InterfaceSettingsPage extends ConsumerWidget {
         ),
         const SettingsSectionTitle(label: '界面'),
         ...buildSettingsTileGroup([
+          SettingsStepperTile(
+            title: '界面文字大小',
+            subtitle: '统一调整全局文字大小，不改变字号层级。',
+            value: '${(uiTextScale * 100).round()}%',
+            onDecrease: uiTextScale > kAppTextScaleMin
+                ? () => controller.setUiTextScale(
+                      normalizeAppTextScale(uiTextScale - kAppTextScaleStep),
+                    )
+                : null,
+            onIncrease: uiTextScale < kAppTextScaleMax
+                ? () => controller.setUiTextScale(
+                      normalizeAppTextScale(uiTextScale + kAppTextScaleStep),
+                    )
+                : null,
+          ),
           SettingsToggleTile(
             title: '简化界面特效',
             subtitle: '同时关闭透明磨砂，并减少背景、渐变和阴影层级。',

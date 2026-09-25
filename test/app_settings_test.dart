@@ -2,11 +2,73 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/core/logging/app_log_api.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
+import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/metadata/domain/metadata_match_models.dart';
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  test('global text scale defaults, clamps and round-trips', () {
+    expect(AppSettings.fromJson(const {}).uiTextScale, 1.0);
+    expect(normalizeAppTextScale(0.5), kAppTextScaleMin);
+    expect(normalizeAppTextScale(1.13), 1.15);
+    expect(normalizeAppTextScale(2.0), kAppTextScaleMax);
+
+    const settings = AppSettings(
+      mediaSources: [],
+      searchProviders: [],
+      doubanAccount: DoubanAccountConfig(enabled: false),
+      homeModules: [],
+      uiTextScale: 1.15,
+    );
+    expect(AppSettings.fromJson(settings.toJson()).uiTextScale, 1.15);
+  });
+
+  for (final kind in MediaSourceKind.values) {
+    final prefix = switch (kind) {
+      MediaSourceKind.emby => 'Emby',
+      MediaSourceKind.nas => 'WebDAV',
+      MediaSourceKind.quark => '夸克',
+      MediaSourceKind.fntv => '飞牛',
+    };
+    test('home collection title keeps source identity for ${kind.name}', () {
+      final collection = MediaCollection(
+        id: 'movies',
+        title: '电影',
+        sourceId: 'server',
+        sourceName: '家庭媒体库',
+        sourceKind: kind,
+      );
+      final module = HomeModuleConfig.libraryCollection(collection);
+      expect(module.title, '$prefix · 电影');
+      expect(module.sourceId, collection.sourceId);
+      expect(module.sourceName, collection.sourceName);
+      expect(module.sectionId, collection.id);
+      expect(module.sectionName, collection.title);
+      expect(HomeModuleConfig.fromJson(module.toJson()).title, module.title);
+      expect(
+        HomeModuleConfig.fromJson(module.copyWith(title: '我的电影').toJson()).title,
+        '我的电影',
+      );
+    });
+    test('home source root title includes ${kind.name}', () {
+      final source = MediaSourceConfig(
+        id: 'server',
+        name: '家庭媒体库',
+        kind: kind,
+        endpoint: 'https://example.com',
+        enabled: true,
+      );
+      final module = HomeModuleConfig.librarySource(source);
+      expect(module.title, prefix);
+      expect(module.sourceId, source.id);
+      expect(module.sourceName, source.name);
+      expect(module.sectionId, isEmpty);
+      expect(module.sectionName, '全部内容');
+      expect(HomeModuleConfig.fromJson(module.toJson()).title, module.title);
+    });
+  }
+
   test('home module display style persists', () {
     const module = HomeModuleConfig(
       id: 'display-style-module',

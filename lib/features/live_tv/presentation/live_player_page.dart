@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -596,7 +597,8 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                                                                       color: Colors
                                                                           .white,
                                                                       fontSize:
-                                                                          20)),
+                                                                          AppTextSizes
+                                                                              .section)),
                                                               Text(
                                                                   current ==
                                                                           null

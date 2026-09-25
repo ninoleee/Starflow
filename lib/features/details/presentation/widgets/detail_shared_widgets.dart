@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
 import 'package:starflow/core/widgets/desktop_horizontal_pager.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -20,7 +21,7 @@ class DetailBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 26),
+      padding: const EdgeInsets.only(bottom: AppContentSpacing.section),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -31,7 +32,7 @@ class DetailBlock extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                 ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: AppContentSpacing.sectionHeading),
           child,
         ],
       ),
@@ -50,8 +51,27 @@ class InfoLabel extends StatelessWidget {
       text,
       style: const TextStyle(
         color: AppColors.foregroundMuted,
-        fontSize: 12,
+        fontSize: AppTextSizes.caption,
         fontWeight: FontWeight.w700,
+      ),
+    );
+  }
+}
+
+class DetailGroupLabel extends StatelessWidget {
+  const DetailGroupLabel(this.text, {super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        color: AppColors.foregroundMuted,
+        fontSize: AppTextSizes.title,
+        fontWeight: FontWeight.w700,
+        height: AppLineHeights.title,
       ),
     );
   }
@@ -108,7 +128,7 @@ class PersonRail extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 13,
+                    fontSize: AppTextSizes.body,
                     fontWeight: FontWeight.w600,
                     height: 1.3,
                   ),
@@ -148,7 +168,7 @@ class _PersonAvatar extends StatelessWidget {
                 _personInitial(person.name),
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 24,
+                  fontSize: AppTextSizes.display,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -164,7 +184,7 @@ class _PersonAvatar extends StatelessWidget {
                     _personInitial(person.name),
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 24,
+                      fontSize: AppTextSizes.display,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -313,8 +333,9 @@ class FactRow extends StatelessWidget {
             label,
             style: const TextStyle(
               color: AppColors.foregroundMuted,
-              fontSize: 13,
+              fontSize: AppTextSizes.body,
               fontWeight: FontWeight.w700,
+              height: AppLineHeights.bodyLarge,
             ),
           ),
         ),
@@ -325,7 +346,7 @@ class FactRow extends StatelessWidget {
                   value,
                   style: const TextStyle(
                     color: AppColors.foreground,
-                    fontSize: 14,
+                    fontSize: AppTextSizes.body,
                     height: 1.5,
                   ),
                 )
@@ -333,7 +354,7 @@ class FactRow extends StatelessWidget {
                   value,
                   style: const TextStyle(
                     color: AppColors.foreground,
-                    fontSize: 14,
+                    fontSize: AppTextSizes.body,
                     height: 1.5,
                   ),
                 ),

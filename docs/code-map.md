@@ -36,6 +36,8 @@
 
 ## 启动、路由与公共层
 
+内容排版入口：`app/theme/app_typography.dart` 定义语义行高与内容间距，`app_theme.dart` 应用公共标题／正文样式；首页和详情 Hero、详情简介、设置公共组件复用。回归入口为 `app_theme_test.dart`、`settings_content_spacing_test.dart`、`detail_overview_section_test.dart`，不覆盖字幕或原生播放器排版。
+
 | 入口 | 职责 |
 | --- | --- |
 | `lib/main.dart` | 初始设置、代理、结构化日志、错误钩子、帧监测、启动标记、MediaKit 初始化及 ProviderScope；关闭 Riverpod 自动重试 |

@@ -778,11 +778,21 @@ class HomeModuleConfig {
     );
   }
 
+  static String _libraryTitle(MediaSourceKind kind, String sectionName) {
+    final prefix = switch (kind) {
+      MediaSourceKind.emby => 'Emby',
+      MediaSourceKind.nas => 'WebDAV',
+      MediaSourceKind.quark => '夸克',
+      MediaSourceKind.fntv => '飞牛',
+    };
+    return sectionName.isEmpty ? prefix : '$prefix · $sectionName';
+  }
+
   static HomeModuleConfig libraryCollection(MediaCollection collection) {
     return HomeModuleConfig(
       id: 'home-module-${DateTime.now().millisecondsSinceEpoch}',
       type: HomeModuleType.librarySection,
-      title: collection.title,
+      title: _libraryTitle(collection.sourceKind, collection.title),
       enabled: true,
       sourceId: collection.sourceId,
       sourceName: collection.sourceName,
@@ -795,7 +805,7 @@ class HomeModuleConfig {
     return HomeModuleConfig(
       id: 'home-module-${DateTime.now().millisecondsSinceEpoch}',
       type: HomeModuleType.librarySection,
-      title: source.name.trim().isEmpty ? '媒体库' : source.name.trim(),
+      title: _libraryTitle(source.kind, ''),
       enabled: true,
       sourceId: source.id,
       sourceName: source.name,
@@ -1165,6 +1175,18 @@ List<String> normalizeNavigationDestinationIds(Iterable<String> values) {
   return selected.toList();
 }
 
+const kAppTextScaleMin = 0.85;
+const kAppTextScaleMax = 1.30;
+const kAppTextScaleStep = 0.05;
+const kAppTextScaleDefault = 1.0;
+
+double normalizeAppTextScale(double value) {
+  final clamped = value.clamp(kAppTextScaleMin, kAppTextScaleMax);
+  final steps = (clamped / kAppTextScaleStep).round();
+  final rounded = ((steps * kAppTextScaleStep) * 100).round() / 100;
+  return rounded.clamp(kAppTextScaleMin, kAppTextScaleMax).toDouble();
+}
+
 class AppSettings {
   const AppSettings({
     required this.mediaSources,
@@ -1186,6 +1208,7 @@ class AppSettings {
     this.liveNavigationAutoPlayEnabled = true,
     this.translucentEffectsEnabled = true,
     this.appAccent = AppAccent.teal,
+    this.uiTextScale = kAppTextScaleDefault,
     this.autoHideNavigationBarEnabled = true,
     this.navigationDestinationIds = kDefaultNavigationDestinationIds,
     this.performanceReduceDecorationsEnabled = false,
@@ -1272,6 +1295,7 @@ class AppSettings {
   final bool liveNavigationAutoPlayEnabled;
   final bool translucentEffectsEnabled;
   final AppAccent appAccent;
+  final double uiTextScale;
   final bool autoHideNavigationBarEnabled;
   final List<String> navigationDestinationIds;
   final bool performanceReduceDecorationsEnabled;
@@ -1348,6 +1372,7 @@ class AppSettings {
     bool? liveNavigationAutoPlayEnabled,
     bool? translucentEffectsEnabled,
     AppAccent? appAccent,
+    double? uiTextScale,
     bool? autoHideNavigationBarEnabled,
     List<String>? navigationDestinationIds,
     bool? performanceReduceDecorationsEnabled,
@@ -1436,6 +1461,7 @@ class AppSettings {
       translucentEffectsEnabled:
           translucentEffectsEnabled ?? this.translucentEffectsEnabled,
       appAccent: appAccent ?? this.appAccent,
+      uiTextScale: uiTextScale ?? this.uiTextScale,
       autoHideNavigationBarEnabled:
           autoHideNavigationBarEnabled ?? this.autoHideNavigationBarEnabled,
       navigationDestinationIds:
@@ -1597,6 +1623,7 @@ class AppSettings {
       'liveNavigationAutoPlayEnabled': liveNavigationAutoPlayEnabled,
       'translucentEffectsEnabled': translucentEffectsEnabled,
       'appAccent': appAccent.name,
+      'uiTextScale': uiTextScale,
       'autoHideNavigationBarEnabled': autoHideNavigationBarEnabled,
       'navigationDestinationIds': navigationDestinationIds,
       'performanceReduceDecorationsEnabled':
@@ -1732,6 +1759,9 @@ class AppSettings {
       translucentEffectsEnabled:
           json['translucentEffectsEnabled'] as bool? ?? true,
       appAccent: AppAccent.fromJson(json['appAccent']),
+      uiTextScale: normalizeAppTextScale(
+        (json['uiTextScale'] as num?)?.toDouble() ?? kAppTextScaleDefault,
+      ),
       autoHideNavigationBarEnabled:
           json['autoHideNavigationBarEnabled'] as bool? ?? true,
       navigationDestinationIds: json.containsKey('navigationDestinationIds')

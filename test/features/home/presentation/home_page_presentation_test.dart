@@ -14,6 +14,64 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  for (final simplified in [false, true]) {
+    for (final mode in HomeHeroDisplayMode.values) {
+      testWidgets(
+          'auto play retains Hero focus after visiting a lower module across multiple loops: $mode static=$simplified',
+          (tester) async {
+        final section = HomeSectionViewModel(
+          id: _heroSection.id,
+          title: 'Recent',
+          subtitle: '',
+          emptyMessage: '',
+          layout: HomeSectionLayout.posterRail,
+          items: [
+            ..._heroSection.items,
+            for (var i = 2; i < 5; i++)
+              HomeCardViewModel(
+                id: 'layout-$i',
+                title: 'Film $i',
+                subtitle: '',
+                posterUrl: '',
+                detailTarget: MediaDetailTarget(
+                    title: 'Film $i', posterUrl: '', overview: ''),
+              ),
+          ],
+        );
+        await tester.pumpWidget(_heroTestApp(
+          mode: mode,
+          autoPlay: true,
+          simplified: simplified,
+          section: section,
+        ));
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await tester.pumpAndSettle();
+        expect(FocusManager.instance.primaryFocus?.debugLabel,
+            startsWith('home-content:'));
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await tester.pumpAndSettle();
+        expect(FocusManager.instance.primaryFocus?.debugLabel,
+            'home-hero-card:layout-a');
+        for (var i = 1; i <= 10; i++) {
+          await tester.pump(const Duration(seconds: 6));
+          // Exercise lazy page eviction over real intermediate animation frames.
+          for (var frame = 0; frame < 20; frame++) {
+            await tester.pump(const Duration(milliseconds: 16));
+          }
+          await tester.pumpAndSettle();
+          final index = i % section.items.length;
+          expect(
+              tester.widget<PageView>(find.byType(PageView)).controller!.page,
+              index.toDouble());
+          expect(FocusManager.instance.primaryFocus?.debugLabel,
+              'home-hero-card:${section.items[index].id}');
+        }
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+  }
+
   testWidgets('auto play does not reclaim focus moved during animation',
       (tester) async {
     await tester.pumpWidget(_heroTestApp(
@@ -444,7 +502,7 @@ void main() {
       find.byType(MediaPosterTile).first,
     );
     expect(poster.imageTopRightBadgeText, '家庭影音库');
-    expect(poster.imageTopRightBadgeTextStyle?.fontSize, 19);
+    expect(poster.imageTopRightBadgeTextStyle?.fontSize, 18);
     expect(poster.imageTopRightBadgeShowDecoration, isFalse);
     expect(poster.tvPosterFocusShowBorder, isTrue);
     expect(poster.tvPosterFocusBorderWidth, 1.6);

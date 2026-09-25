@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/app/theme/app_colors.dart';
 
 const Key kPlayerMpvLeanActionsSectionKey =
@@ -290,7 +291,7 @@ class PlayerMpvPlaybackInfoSection extends StatelessWidget {
           data.positionText,
           style: const TextStyle(
             color: Colors.white,
-            fontSize: 13,
+            fontSize: AppTextSizes.body,
             fontWeight: FontWeight.w600,
           ),
         ),

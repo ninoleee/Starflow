@@ -134,13 +134,6 @@ double _resolveHeroTextWidthFactor(HomeHeroDisplayMode displayMode) {
   };
 }
 
-double _resolveHeroTitleFontSize(HomeHeroDisplayMode displayMode) {
-  return switch (displayMode) {
-    HomeHeroDisplayMode.normal => 30,
-    HomeHeroDisplayMode.borderless => 36,
-  };
-}
-
 BoxConstraints _resolveHeroLogoConstraints(HomeHeroDisplayMode displayMode) {
   final useLargeLogo = displayMode == HomeHeroDisplayMode.borderless;
   return BoxConstraints(
@@ -955,22 +948,26 @@ class _FeaturedHeroState extends State<_FeaturedHero>
                                   ? 0
                                   : widget.displayMode.cardGap,
                             ),
-                            child: _FeaturedHeroCard(
-                              item: item,
-                              displayMode: widget.displayMode,
-                              isTelevision: widget.isTelevision,
-                              logoTitleEnabled: widget.logoTitleEnabled,
-                              translucentEffectsEnabled:
-                                  widget.translucentEffectsEnabled,
-                              simplifyVisualEffects: simplifyVisualEffects,
+                            child: _HeroFocusedCardRetention(
                               focusNode: _focusNodeForItem(item.id),
-                              focusId: '${widget.focusScopePrefix}:${item.id}',
-                              autofocus: widget.autofocusCurrentItem &&
-                                  index == _currentPageIndex,
-                              onFocusPreviousControl: _focusPreviousControl,
-                              onFocusNextControl: _focusNextControl,
-                              onFocusBelowControl: widget.onFocusBelowControl,
-                              onFocused: widget.onHeroFocusGained,
+                              child: _FeaturedHeroCard(
+                                item: item,
+                                displayMode: widget.displayMode,
+                                isTelevision: widget.isTelevision,
+                                logoTitleEnabled: widget.logoTitleEnabled,
+                                translucentEffectsEnabled:
+                                    widget.translucentEffectsEnabled,
+                                simplifyVisualEffects: simplifyVisualEffects,
+                                focusNode: _focusNodeForItem(item.id),
+                                focusId:
+                                    '${widget.focusScopePrefix}:${item.id}',
+                                autofocus: widget.autofocusCurrentItem &&
+                                    index == _currentPageIndex,
+                                onFocusPreviousControl: _focusPreviousControl,
+                                onFocusNextControl: _focusNextControl,
+                                onFocusBelowControl: widget.onFocusBelowControl,
+                                onFocused: widget.onHeroFocusGained,
+                              ),
                             ),
                           );
                         },
@@ -1160,6 +1157,56 @@ class _HeroPagerButton extends StatelessWidget {
   }
 }
 
+// Keep the outgoing focused page mounted until focus is handed to the new page.
+// Otherwise PageView eviction restores an unrelated target from scope history.
+class _HeroFocusedCardRetention extends StatefulWidget {
+  const _HeroFocusedCardRetention({
+    required this.focusNode,
+    required this.child,
+  });
+
+  final FocusNode focusNode;
+  final Widget child;
+
+  @override
+  State<_HeroFocusedCardRetention> createState() =>
+      _HeroFocusedCardRetentionState();
+}
+
+class _HeroFocusedCardRetentionState extends State<_HeroFocusedCardRetention>
+    with AutomaticKeepAliveClientMixin<_HeroFocusedCardRetention> {
+  @override
+  bool get wantKeepAlive => widget.focusNode.hasFocus;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.focusNode.addListener(updateKeepAlive);
+  }
+
+  @override
+  void didUpdateWidget(covariant _HeroFocusedCardRetention oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode) {
+      oldWidget.focusNode.removeListener(updateKeepAlive);
+      widget.focusNode.addListener(updateKeepAlive);
+      updateKeepAlive();
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.removeListener(updateKeepAlive);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
 class _FeaturedHeroCard extends StatelessWidget {
   const _FeaturedHeroCard({
     required this.item,
@@ -1314,7 +1361,7 @@ class _FeaturedHeroCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: AppColors.foreground,
-                          fontSize: 13,
+                          fontSize: AppTextSizes.caption,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1336,8 +1383,8 @@ class _FeaturedHeroCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: AppColors.foreground,
-                            fontSize: 15,
-                            height: 1.45,
+                            fontSize: AppTextSizes.body,
+                            height: AppLineHeights.body,
                             shadows: simplifyVisualEffects
                                 ? null
                                 : const [
@@ -1595,8 +1642,8 @@ class _HeroTitleText extends StatelessWidget {
       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
             color: Colors.white,
             fontWeight: FontWeight.w800,
-            fontSize: _resolveHeroTitleFontSize(displayMode),
-            height: 1.05,
+            fontSize: AppTextSizes.hero,
+            height: AppLineHeights.hero,
             shadows: simplifyVisualEffects
                 ? null
                 : [

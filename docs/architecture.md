@@ -18,7 +18,7 @@
 
 普通文字由 `AppColors.foreground / foregroundBody / foregroundMuted` 提供标题、正文、辅助三档亮度；`AppTheme` 和普通 `secondary / ghost` 按钮复用该层级。强调色按钮前景仍由 `AppAccent.onPrimary` 决定，TV 焦点框统一保持纯白，不随强调色或选中状态改变；普通叠层与轻量 painter 共用规则。
 
-`StarflowButton` 在 TV 的 `Dialog`（含 `AlertDialog / SimpleDialog`）或 `BottomSheet` 内统一将 `primary` 映射为 `secondary` 调色板，低亮度背景与白色焦点描边分离；`TvAdaptiveButton` 和共享操作弹窗通过该组件自动继承规则。`ghost / danger` 保持原语义，普通页面和非 TV 不受影响，业务调用处无需重复判断平台。该规则不接管初始焦点、回调或 Android 原生系统弹窗；播放器设置、更多、字幕的 TV 关闭按钮也使用 `StarflowButton`。
+`StarflowButton` 与 `StarflowIconButton` 在 TV 上通过共享调色板统一将 `primary` 映射为 `secondary`，覆盖普通页面、`Dialog`（含 `AlertDialog / SimpleDialog`）及 `BottomSheet`，低亮度背景与白色焦点描边分离；`TvAdaptiveButton` 和共享操作弹窗自动继承规则。`ghost / danger` 保持原语义，非 TV 不受影响，业务调用处无需重复判断平台。该规则不接管初始焦点、回调或 Android 原生系统弹窗；播放器设置、更多、字幕的 TV 关闭按钮也使用 `StarflowButton`。
 
 ## 1. 总体定位
 
@@ -174,8 +174,8 @@ lib/
 - `TV` 焦点组件、菜单键动作和页面边界处理
 - 详情季标签不设置固定或最小宽度，由文字和对称内边距决定宽度，选中时不添加对号或改变宽度，季选择区域维持 `52dp` 高度。共享 `StarflowChipButton` 默认关闭 `showSelectedCheckmark`，各页面 Tab / 标签按钮保留原有功能图标和文字、底色、边框高亮；复选框与菜单勾选标记不变。`_DetailSeasonTabs` 用稳定 key 保留标签，只在实例首次布局后调用一次横向 `ScrollPosition.ensureVisible(alignment: 0.5)`，按打开详情时的当前季实际布局定位，并夹紧首尾滚动边界；不再使用 `index * 120` 估算，也不监听选中季或可用宽度触发重新定位。季标签使用完整 Row 以便定位远处选中项，剧集卡片仍保持懒构建；切换季、手动滚动、尺寸变化和播放器返回不重置横向位置，不滚动外层页面，不请求焦点。
 - 详情页的延迟内容一旦显示，不再使用 `TickerMode` 控制其挂载寿命；播放器覆盖期间保留剧集组件和滚动状态，剧集 provider 的监听仍由页面可见性与 `TickerMode` 共同限制。
-- `DetailHeroSection` 监听 `playbackMemorySnapshotProvider`，使用仓库同步快照计算续播入口。“从头播放”只依赖 `MediaDetailTarget.hasMatchedResource`（已有直接播放目标，或来源 ID 与资源 ID 均非空）；不依赖历史、剧集加载或地址解析。历史 readiness 仅控制自动首焦点，避免记录晚到前先抢焦点。操作行由稳定 key 的 `KeyedSubtree` 包装，补充续播位置文字时不重建按钮子树。剧集区域将 `DetailBlock` 放在异步分支外，保留加载到完成期间标题的 Element 和布局位置。
-- 详情启动将 `_seriesSourceReady` 与 `_detailEnrichmentReady` 分开：本地缓存和版本恢复后允许剧集读取，在线元数据刷新结束后再订阅 enrichment，保留解析防重约束。剧集 provider 在区域内的 `Consumer` 监听，卡片角标通过 `select` 订阅最终显示文字；无关快照更新不会重建图片。季列表和可选历史查询使用 record `.wait` 并行，历史失败回退默认季。单季列表高度为 `292dp`，多季另加 `68dp` 季选择条空间；错误态按内容高度显示，无可用分组仍隐藏。
+- `DetailHeroSection` 监听 `playbackMemorySnapshotProvider`，使用仓库同步快照计算续播入口。“从头播放”只依赖 `MediaDetailTarget.hasMatchedResource`（已有直接播放目标，或来源 ID 与资源 ID 均非空）；不依赖历史、剧集加载或地址解析。历史 readiness 仅控制自动首焦点，避免记录晚到前先抢焦点。操作行由稳定 key 的 `KeyedSubtree` 包装，补充续播位置文字时不重建按钮子树。剧集区域将 `DetailBlock` 放在异步分支外，保留加载到完成期间标题的 Element 和布局位置。Hero 背景图使用 gapless playback；元数据替换图片源时保留上一张已解码帧到新图就绪，候选列表只新增或重排且当前源仍在时直接沿用当前候选。
+- 详情启动将 `_seriesSourceReady` 与 `_detailEnrichmentReady` 分开：本地缓存和版本恢复后允许剧集读取，在线元数据刷新结束后再订阅 enrichment，保留解析防重约束。剧集 provider 在区域内的 `Consumer` 监听，卡片角标通过 `select` 订阅最终显示文字；无关快照更新不会重建图片。季列表和可选历史查询使用 record `.wait` 并行，历史失败回退默认季。单季列表高度按 `16:9` 卡片、三行简介、内边距和文字缩放动态计算，多季另加 `68dp` 季选择条空间；错误态按内容高度显示，无可用分组仍隐藏。
 - `TV` 主要页面和弹窗的普通方向键使用 Flutter 默认寻焦，不再声明 `OrderedTraversalPolicy / NumericFocusOrder`；文本编辑弹窗仅在输入框局部把上下键映射为前后焦点，选择弹窗只在首帧请求一次初始焦点，不安排延迟补焦点
 - `TvFocusableAction` 与描边按钮通过自身 State 更新焦点视觉，海报使用 `ValueNotifier + ValueListenableBuilder` 局部更新；`TvFocusVisualStyle.none` 供自绘焦点外观使用
 - `TV` 页面级焦点边界、页头回顶锚点和统一的上下方向焦点兜底
@@ -189,6 +189,7 @@ lib/
 - `TvDialogOption` 在 TV 复用轻量高亮与确认键映射，普通端仍为 `SimpleDialogOption`；播放器字幕/音轨/倍速/循环与配置路径选项由首项申请焦点。来源多选优先“全部”或首项，无选项时聚焦取消；字幕偏移、片头片尾和删除/覆盖确认框也有明确首焦点。夸克目录页由常驻“选择”按钮持有首焦点，不依赖异步子目录存在
 - `StarflowApp` 仅覆盖默认 `DirectionalFocusIntent` Action，补齐页面级策略覆盖不到的路由/Overlay 焦点：只捕获 `RenderBox was not laid out` 并忽略当次按键，不做下一帧重试、候选过滤或顺序改写；警告按 Action 实例做 `5s` 限频
 - App 外观由 `app/theme/app_colors.dart` 的固定近中性色阶与 `AppRadii`（12/18/28/999）控制；共享控件、首页和详情组件复用这些 token。`AppAccent` 是无 Flutter 依赖的设置枚举，`appAccent` 持久化为 bone/teal/indigo/coral/amber/rose/lime/violet，当前设置只接受这些值。`StarflowApp` 只监听该字段重建主题；`ColorScheme` 保持中性，`AppActionColors` ThemeExtension 显式提供交互强调色：主行动、导航选中态、开关开启态、勾选/单选、筛选与排序选中项、线路选中标记、已收藏图标、进度/滑块和输入框聚焦描边。共享 `StarflowChipButton` 在聚焦时保留选中颜色，TV 外侧焦点框统一保持纯白；错误语义色、禁用弱化与中性背景不变。`surfaceTint` 固定透明，页面背景不绘制彩色光晕
+- `app/theme/app_typography.dart` 维护内容行高、六档字号与公共内容间距：字号为 36（Hero）、24（页面／大标题）、18（区域标题）、16（列表标题）、14（正文）、12（辅助说明）；行高为 Hero 1.15、普通标题 1.3、辅助说明 1.4、正文 1.45／大正文 1.5，详情长简介普通端 1.6、TV 1.7。`AppTheme` 为 TextTheme 提供默认字号，首页／详情 Hero、剧集卡片和播放器选集显式复用相同档位，字号不按 TV／普通端分支；Android `NativePlaybackEpisodePicker` 和手机／TV 原生控制布局同步使用 24/18/16/14/12 档位，不再按端切换语义字号。`AppSettings.uiTextScale` 持久化全局倍率（85%–130%，5% 步进，默认 100%），`StarflowApp` 将其乘到系统 TextScaler，Android 原生播放器通过 `uiTextScale` Intent extra 调整 Activity `fontScale`。品牌字标宽度、用户字幕倍率和头像首字母等动态尺寸保持独立。内容关联间距 6dp、Hero 后直接内容 8dp、区域标题到正文 10dp、上一内容到下一设置标题 12dp、正文模块和设置分组默认项间距 8dp；电影和单集直接接 `DetailOverviewSection` 时使用 Hero 后间距，剧集先渲染卡片区块，不叠加。设置显式 spacing 覆盖仍有效，不缩小按钮 padding 或 TV 焦点区域。搜索结果标签为空时连同前置 8dp 间距一起隐藏。字体放大通过现有 TextScaler 和布局约束处理，不固定裁切正文。
 - 详情 Hero 的“继续播放 / 从头播放”继续使用与普通操作按钮相同的 `secondary` 中性样式，不读取 `AppActionColors`；详情线路选择使用淡强调色底、边框与选中图标；当前播放剧集使用中性白色选中样式。详情上次播放剧集由 `findLastPlayedEpisodeIndex` 匹配，在卡片上半部图片区的 Stack 内居中显示中性历史图标和“Last Played”文字，配半透明黑底，下方简介统一最多三行；无匹配时不显示，不增加强调色边框，不改变卡片尺寸、滚动恢复或焦点行为。播放器显式绘制的已播放进度段同样读取 `AppActionColors`，缓冲段与未播放轨道保持中性
 - 首页在重新变为活动页以及 `hasPendingSections` 从 `true` 变为 `false` 时各安排一次下一帧检查；仅在主焦点为空、落在 `FocusScopeNode`、已卸载或不可请求时调用现有侧栏恢复入口，已有可操作焦点时不做任何处理
 - TV 菜单上下键按显示顺序在可见菜单项之间移动，首尾保持原位。搜索页异步结果只在主焦点为空、落在 `FocusScopeNode`、已卸载或不可请求时恢复到搜索输入框；收藏页优先恢复 `favorites:sync`，设置首页优先补到 `settings:header`。菜单或其他已挂载的可操作焦点不会被页面恢复逻辑抢占
@@ -506,6 +507,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 首页装配特点：
 
 - 模块配置持久化在设置里
+- `HomeModuleConfig.libraryCollection / librarySource` 共用首页标题规则，为新添加的分区生成“来源类型 · 分区名”，整个来源根只显示来源类型，不追加“全部内容”；前缀固定为 `Emby / WebDAV / 夸克 / 飞牛`。只改变首页模块的 `title`，保留原始 `sourceId / sourceName / sectionId / sectionName`（来源根的 `sectionName` 仍为“全部内容”），不迁移已有标题，也不覆盖用户编辑的标题。
 - 普通模块的 `HomeModuleDisplayStyle` 随 `HomeModuleConfig` 持久化，支持 `poster / landscape`；缺失或未知值回退 `poster`。页面保留相同 section、焦点键和详情路由，只按模块切换卡片宽度、图片比例和图片候选顺序
 - `landscape` 使用 `16:9`，优先 `backdropUrl`，再回退 `bannerUrl / posterUrl`；Hero 与豆瓣轮播继续使用专用布局，不参与普通模块样式选择
 - Hero 只引用选中的 `HomeSectionViewModel`，不会从普通模块列表中移除同一 section；自动 Hero 选中首个完成模块时，“最近播放”等首模块仍保留在 Hero 下方
@@ -528,6 +530,7 @@ UI 不直接依赖第三方协议，而是尽量消费统一领域模型：
 - 首页滚动区外层 `LayoutBuilder` 按实际可用高度计算 Hero 高度：扣除 Hero 外边距后取 `62%`，常规下限 `220dp`，普通/无边框上限分别为 `440/500dp`；空间不足时以预留 `140dp` 给分页区、下一模块标题和卡片露出为优先。加载占位和真实内容共用计算值与 `20dp` 分页占位，单项也保留分页高度。简介最多两行，元信息限制一行；局部布局结合文字缩放在矮窗口下依次隐藏简介、元信息，优先保留片名。
 - `homeHeroAutoPlayEnabled` 默认 false，经设置模型、序列化、controller 和 `SettingsHeroSlice` 持久化；首页设置提供独立开关，TV 不禁用。`_FeaturedHeroState` 复用 `PageActivityMixin`，以可取消的单次 `6s` Timer 调度自动翻页；仅在首页活动、滚动区顶部且至少两项时准入，触摸按住、鼠标悬停、TV 焦点离开当前 Hero 卡时取消，恢复后重新计时。手动翻页与按键重置计时；列表或来源、展示模式、开关变化重置，dispose 释放 Timer 和监听。自动切换完成后仅在页面仍活动、来源和目标仍匹配且主焦点未被用户移开时跟随到可见 TV 卡片。
 - “简化首页 Hero”仅控制翻页动画和装饰效果，与自动轮播独立；TV 不强制开启。简化时自动切图不执行动画，末项回首项也直接切换。
+- Hero 页面由 `_HeroFocusedCardRetention` 按自身 `FocusNode.hasFocus` 申请 `AutomaticKeepAlive`：自动翻页结束并完成焦点交接前，旧持焦页面不被 `PageView` 回收，防止 Flutter 恢复到下方模块的历史焦点；失焦立即释放保留请求，不常驻全部页面。不放宽自动翻页末尾的用户焦点保护，主动移到其他控件仍暂停。
 - 无边框自动翻页可能卸载旧卡片；旧焦点已卸载且当前没有可操作焦点时允许补到新的可见卡片，已有菜单或其他内容焦点时仍不抢焦点。
 - Hero 会根据横竖屏优先选择对应方向的素材；横屏优先横图、竖屏优先竖图，只有单张图可用时会直接按海报布局展示
 - `Hero` 当前项、翻页按钮和指示状态已经收口到局部监听；切换当前 Hero 时不会再带动首页根节点整块重建
@@ -767,8 +770,11 @@ WebDAV 与 115 同步删除接收同一选定目录范围，包含范围内全�
 - `MediaItem` 只持久化演职员姓名，`MediaDetailTarget.resolved*Profiles` 负责无头像时的姓名占位；占位不写入真实 profile 列表。详情缓存、资源匹配和 TMDB 结果通过 `mergeMediaPersonProfiles(...)` 合并，同名条目优先保留已有顺序并用非空头像升级。NAS 索引已有完整文字元数据但没有人物图时，只允许一次面向 `TMDB profile` 的详情补全，不重新请求 WMDB
 - 演职员头像可跳转到人物关联影片页，公司 Logo 可跳转到同一作品浏览页的公司模式，`TV` 焦点动作只包裹圆形头像并采用圆形焦点框与 `1.06` 缩放，姓名在头像下方但不参与焦点区域。作品列表继续复用首页同款海报卡片；卡片右上角会优先显示题材/类型标签，左下角继续显示可用评分标签
 - 剧集详情里的单集卡片已拆成两个入口：图片区继续走播放，图片下方的简介区进入单集详情
+- 详情模块标题与下方正文读取 `AppContentSpacing.sectionHeading = 10dp`、模块自身底部读取 `section = 8dp`：`DetailBlock`、`DetailOverviewSection` 与已匹配资源时无标题剧集分支一致，覆盖简介、剧集、剧照、演职员、资源信息和公司。剧集横排自身底部保留 10dp 焦点空间，因此卡片边界到后续区域为 18dp；卡片简介内边距不参与此次模块间距调整。
+- 资源信息的 `FactRow` 与豆瓣链接行统一让标签、普通值和可选值使用 1.5 行高；链接按钮保持 30dp 点击高度，但内容顶部对齐，因此来源、链接、时长和状态等单行项的字形起点一致。长地址等多行值仍与标签顶部对齐。
+- 详情“演职员”的“导演 / 演员”使用 `DetailGroupLabel`（16、`w700`、次级灰色、标题行高 1.3），与 18 的 `DetailBlock` 区域标题和 14 的人物姓名形成三级结构；资源信息里的“本地资源 / 播放器 / 播放版本”等字段标签继续使用 12 的 `InfoLabel`。
 - 简介由 `core/utils/metadata_text.dart` 使用 HTML DOM 解析成纯正文与去重来源 URI，原始 `overview` 仍在 WMDB/TMDB 结果、MediaItem 和详情缓存中保存；显示清理不写回数据。正文保留段落，链接及其附带换行被移除；标签删除仅接受明确分隔的已知来源标签或短地址标签，不向前吞掉正文。安全来源限制为无用户凭据的有效 HTTP/HTTPS 地址。
-- `DetailOverviewSection` 独立管理六行折叠、展开/收起、空简介及“更多 → 视频来源”；复用详情选择弹窗与 TV 焦点组件，来源打开失败可恢复，关闭弹窗后回到更多按钮。剧集卡片使用三行摘要并保留现有集数/时长/文件名兜底，不增加卡片内外链按钮。首页 Hero 和元数据预览也在展示时清理简介。缓存没有来源 URL 时只能通过重新读取元数据恢复来源。
+- `DetailOverviewSection` 独立管理六行折叠、展开/收起、空简介及“更多 → 视频来源”；复用详情选择弹窗与 TV 焦点组件，来源打开失败可恢复，关闭弹窗后回到更多按钮。剧集卡片使用三行摘要并保留现有集数/时长/文件名兜底，不增加卡片内外链按钮。`DetailEpisodeBrowser` 横排高度由 292dp 宽的 16:9 图片、随文字缩放的三行摘要、顶部 8dp／底部 14dp 内边距及顶部 14dp／底部 10dp 滚动留白组成，卡片保持等高，不额外预留第四行空间。`DetailHeroSection` 内容底部偏移统一为 8dp，缩小播放操作到后续内容的空白；此偏移与横排留白不按 TV／普通端分支，不增加设置项。首页 Hero 和元数据预览也在展示时清理简介。缓存没有来源 URL 时只能通过重新读取元数据恢复来源。
 - `TV` 短简介保留正文焦点；展开控件固定在正文上方，长正文可获得独立焦点并上下滚动，到达边界后交回页面方向寻焦。正文确认键可收起并将焦点送回展开控件，避免长段落推动控件离屏后难以返回。
 - NAS / WebDAV 的系列与季层级会随来源索引缓存一次构建，并按分区直接查找；切季和重新进入详情页不再重复扫描、分组整个来源索引
 - 单集横排继续使用惰性列表；`TV` 单集图纳入全局四路图片加载门，卡片离开视口或页面失活时会取消尚未取得 permit 的任务；gate 直接追踪活动 permit，并为每个 permit 设置 `8s` 自恢复租约，避免隐藏组件漏释放后让全局图片队列永久停住
@@ -1123,7 +1129,7 @@ MPV 媒体就绪与非必要字幕准备分离，`PlaybackTrackGuard` 保持播�
 - 有续播目标时 Hero 操作顺序固定为“继续播放 / 从头播放”，继续播放作为 Hero 的默认 TV 焦点，并在操作区上方明确展示“上次播放：第 X 季 · 第 Y 集 · mm:ss”；系列详情加载出历史剧集后只滚动到该集，不把焦点从继续播放移走。播放版本仍限定在单集详情页，系列页的剧集卡片不新增版本弹窗
 - Hero 从共享 `playbackMemorySnapshotProvider` 同步派生续播入口；“从头播放”只依赖已匹配资源，历史读取只控制自动首焦点和续播信息。操作行使用稳定 key，`DetailHeroContent` 维护共用启动锁，覆盖旧会话清理和播放器路由存活期，异常或返回后解除。
 - 详情页初始化在恢复缓存、版本选择及按需刷新完成前不订阅 `enrichedDetailTargetProvider`，避免首帧补全与缓存恢复并行竞争；恢复失败时仍放行补全。种子目标改变时清理详情保留态，新目标立即生效，同一种子重载继续保留已有展示；系列保留态仅在系列请求身份变化时清理。
-- 系列保留态单独按 `DetailSeriesBrowserRequest` 隔离，不随元数据对象变化清空；请求身份包含源、系列和分区 ID，不包含分区显示名。初始化读取共享播放历史，预载历史季而非固定第一季，浏览器保存已加载季；剧集匹配优先播放身份，再在同源内按季集编号回退。首次水平定位使远端卡片被构建并滚动可见，但不请求焦点；手动切季取消待执行的初始定位，元数据重建不再次滚动。卡片进度同步派生自共享快照，避免每卡异步查询闪动。
+- 系列保留态单独按 `DetailSeriesBrowserRequest` 隔离，不随元数据对象变化清空；请求身份包含源、系列和分区 ID，不包含分区显示名。初始化读取共享播放历史，预载历史季而非固定第一季，浏览器按源、季和分区保存已加载季，不受分区显示名更新影响；剧集匹配优先播放身份，再在同源内按季集编号回退。首次水平定位使远端卡片被构建并滚动可见，但不请求焦点；手动切季取消待执行的初始定位，元数据重建不再次滚动。卡片进度同步派生自共享快照，避免每卡异步查询闪动。
 - 详情页播放入口统一通过 `activePlaybackLaunchInProgress` 协调，Hero 按钮和剧集卡片共享同一启动锁，禁止清理旧会话或路由期间再次发起播放。详情页从播放器返回后保留系列浏览器的季选择、滚动位置和已加载季。
 - iOS 的播放会话桥接由 `ios/Runner/PlaybackSystemSessionBridge.swift` 承担，`AppDelegate` 会把它绑定到 Flutter channel，用于原生播放会话、遥控器命令和 AirPlay 入口
 - Android 系统播放器优先调用原生 `ACTION_VIEW`，并显式标记 `video/*`
@@ -1358,6 +1364,7 @@ Android TV 下的设置页还额外做了遥控器适配：
 - IO 平台的图片网络读取遵循运行期代理配置；Web 端仍由浏览器网络栈和 `STARFLOW_WEB_PROXY_BASE` 开发转发入口决定
 - raster 解码失败会同步从 Flutter image cache 与持久化缓存中淘汰对应条目，下一次重试重新请求原图
 - 内存层按条目数和字节预算双阈值淘汰，尽量减少重复 decode
+- 详情 Hero 可选择 gapless playback：替换图片源时保留上一张已解码 raster 到新图就绪，避免元数据或缓存回写造成背景闪空
 
 ## 13. 平台分支
 

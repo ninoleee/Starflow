@@ -28,6 +28,8 @@ void main() {
         itemId: 'movie-1',
         sourceKind: MediaSourceKind.emby,
         sourceName: '客厅 Emby',
+        availabilityLabel: '已匹配',
+        durationLabel: '2 小时',
         doubanId: '1292052',
       );
 
@@ -56,6 +58,19 @@ void main() {
       expect(find.text('Emby · 客厅 Emby'), findsOneWidget);
       expect(find.text('链接'), findsOneWidget);
       expect(find.text('跳转豆瓣详情页'), findsOneWidget);
+      for (final pair in [
+        ('状态', '已匹配'),
+        ('来源', 'Emby · 客厅 Emby'),
+        ('链接', '跳转豆瓣详情页'),
+        ('时长', '2 小时'),
+      ]) {
+        expect(
+          tester.getTopLeft(find.text(pair.$2)).dy -
+              tester.getTopLeft(find.text(pair.$1)).dy,
+          closeTo(0, 0.1),
+          reason: '${pair.$1} label should align with its value',
+        );
+      }
     });
   });
 }

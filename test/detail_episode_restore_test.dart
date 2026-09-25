@@ -58,30 +58,39 @@ void main() {
           overrides: [
             appSettingsProvider.overrideWithValue(SeedData.defaultSettings),
             isTelevisionProvider.overrideWith((ref) => tv),
-            playbackMemorySnapshotProvider.overrideWith(
-                (ref) async => const PlaybackMemorySnapshot()),
+            playbackMemorySnapshotProvider
+                .overrideWith((ref) async => const PlaybackMemorySnapshot()),
           ],
-          child: MaterialApp(home: Scaffold(body: DetailEpisodeBrowser(
+          child: MaterialApp(
+              home: Scaffold(
+                  body: DetailEpisodeBrowser(
             seriesTarget: series,
-            groups: [DetailEpisodeGroup(
-              id: 's1', title: 'Season 1', seasonNumber: 1,
-              episodes: [episode],
-            )],
+            groups: [
+              DetailEpisodeGroup(
+                id: 's1',
+                title: 'Season 1',
+                seasonNumber: 1,
+                episodes: [episode],
+              )
+            ],
             selectedGroupId: 's1',
-            lastPlayedTarget: hasHistory
-                ? PlaybackTarget.fromMediaItem(episode) : null,
+            lastPlayedTarget:
+                hasHistory ? PlaybackTarget.fromMediaItem(episode) : null,
             onSeasonSelected: (_) {},
           ))),
         ));
         await tester.pumpAndSettle();
-        expect(find.text('Last Played'), hasHistory ? findsOneWidget : findsNothing);
+        expect(find.text('Last Played'),
+            hasHistory ? findsOneWidget : findsNothing);
         expect(find.byIcon(Icons.history_rounded),
             hasHistory ? findsOneWidget : findsNothing);
         if (hasHistory) {
-          final marker = find.ancestor(
-            of: find.text('Last Played'),
-            matching: find.byType(Row),
-          ).first;
+          final marker = find
+              .ancestor(
+                of: find.text('Last Played'),
+                matching: find.byType(Row),
+              )
+              .first;
           final artwork = find.ancestor(
             of: marker,
             matching: find.byType(AspectRatio),
@@ -94,13 +103,15 @@ void main() {
           final titleBounds = tester.getRect(find.text('e1'));
           expect(markerBounds.top, greaterThanOrEqualTo(titleBounds.bottom));
         }
-        expect(tester.getSize(find.byType(DetailEpisodeBrowser)).height, 292);
+        expect(
+            tester.getSize(find.byType(DetailEpisodeBrowser)).height, 271.25);
         expect(tester.takeException(), isNull);
       }
     });
   }
 
-  testWidgets('selected season tab keeps its width without a checkmark', (tester) async {
+  testWidgets('selected season tab keeps its width without a checkmark',
+      (tester) async {
     var selected = 's1';
     await tester.pumpWidget(ProviderScope(
       overrides: [
@@ -135,10 +146,12 @@ void main() {
     expect(tester.getSize(second).width, before);
     expect(selected, 's2');
     final selectedBounds = tester.getRect(second);
-    expect(find.descendant(
-      of: second,
-      matching: find.byIcon(Icons.check_circle_rounded),
-    ), findsNothing);
+    expect(
+        find.descendant(
+          of: second,
+          matching: find.byIcon(Icons.check_circle_rounded),
+        ),
+        findsNothing);
     final selectedLabelBounds = tester.getRect(find.text('第 2 季'));
     expect(selectedLabelBounds.left - selectedBounds.left,
         closeTo(selectedBounds.right - selectedLabelBounds.right, 0.1));
@@ -160,6 +173,60 @@ void main() {
     history.complete(const PlaybackMemorySnapshot());
     expect((await result)!.groups, isNotEmpty);
   });
+
+  for (final preloaded in [false, true]) {
+    testWidgets(
+        'loaded season survives metadata refresh (preloaded=$preloaded)',
+        (tester) async {
+      final repository = _Repository();
+      final refreshed = ValueNotifier(false);
+      addTearDown(refreshed.dispose);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(SeedData.defaultSettings),
+          isTelevisionProvider.overrideWith((ref) => false),
+          mediaRepositoryProvider.overrideWithValue(repository),
+          playbackMemorySnapshotProvider
+              .overrideWith((ref) async => const PlaybackMemorySnapshot()),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: ValueListenableBuilder<bool>(
+              valueListenable: refreshed,
+              builder: (context, updated, _) => DetailEpisodeBrowser(
+                seriesTarget: updated
+                    ? series.copyWith(sectionName: 'Updated name')
+                    : series,
+                groups: [
+                  DetailEpisodeGroup(
+                    id: 's2',
+                    title: 'Season 2',
+                    seasonNumber: 2,
+                    episodes: preloaded && !updated
+                        ? [item('e8', 'episode', 2, 8)]
+                        : const [],
+                    episodesLoaded: preloaded && !updated,
+                  ),
+                ],
+                selectedGroupId: 's2',
+                onSeasonSelected: (_) {},
+              ),
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      final episode = tester.element(find.text('e8'));
+      final requests = repository.parents.length;
+      refreshed.value = true;
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(tester.element(find.text('e8')), same(episode));
+      await tester.pumpAndSettle();
+      expect(repository.parents, hasLength(requests));
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
 
   test('preloads history season, including completed episodes', () async {
     final episode = item('e8', 'episode', 2, 8);
@@ -260,7 +327,7 @@ void main() {
             ))));
     await tester.pumpWidget(app(series));
     await tester.pumpAndSettle();
-    expect(tester.getSize(find.byType(DetailEpisodeBrowser)).height, 292);
+    expect(tester.getSize(find.byType(DetailEpisodeBrowser)).height, 271.25);
     final action = tester.widget<TvFocusableAction>(find.byWidgetPredicate(
         (widget) =>
             widget is TvFocusableAction &&

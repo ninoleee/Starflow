@@ -9,6 +9,58 @@
 - 扩展检查未计为通过：运行时工作区的 `live_playlist_transfer_page_test.dart` 有 4 项失败（保存按钮匹配到多个元素及后台恢复状态转换断言）；`settings_text_input_field_test.dart` 因文件末尾存在 import 未通过编译。共用输入组件已修正 `const Semantics` 编译错误；对该组件分析另有一条既有 if 缺少花括号的 info。工作区扫码输入相关改动同期仍在更新，上述为执行时快照，不代表当前全部输入流程验收。
 - 未执行真实 TV／遥控器验收，未生成 APK 或调整版本。此处为主机组件回归，不是设备性能测量。
 
+## 2026-09-25 剧集卡片简介留白
+
+使用项目固定 Flutter 3.38.10 运行 `test/detail_episode_summary_test.dart`、`test/detail_episode_restore_test.dart`、`test/detail_season_tabs_layout_test.dart`，共 30 项主机测试通过。新增 6 项覆盖 TV／非 TV 及 1／1.5／2 倍字体，断言三行简介下方仅保留 14dp 内边距（允许 1dp 取整误差）；修复前默认字体多留 22.75dp，新增断言可复现失败。选季布局、历史标记、滚动恢复、焦点与播放启动锁回归通过。卡片组件和摘要测试定向静态分析无问题。未做真机视觉验收、发布构建或版本递增。
+
+## 2026-09-25 内容行高与间距统一
+
+使用 `.fvm/flutter_sdk` 固定 Flutter 3.38.10。第一批运行主题、设置间距、详情简介／Hero／播放操作／剧集摘要与恢复／选季、首页呈现、搜索字体缩放、播放器选集、直播首页和设置层级共 13 个测试文件，214 项通过；第二批运行收藏海报与空标签间距、搜索字体缩放／分辨率筛选、媒体库可见性、设置选项弹窗／强调色、直播页面／订阅布局和首页横排共 9 个文件，68 项通过。两批包含重复文件，不合计为独立测试总数或全仓测试结果。
+
+新增断言覆盖语义行高、按钮原有 padding、TV／非 TV 的 1／1.5／2 倍字体简介与设置项间距、空标签无占位，以及显式设置间距覆盖。搜索缩放与详情简介测试使用实际 `AppTheme`。最终 `flutter analyze --no-pub` 全仓通过；按用户要求不运行截图确认，未做真机视觉／遥控器验收、原生排版验证、发布构建或版本递增。字幕及原生播放器布局未修改。
+
+## 2026-09-25 详情模块间距收紧
+
+固定 Flutter 3.38.10 下，`detail_shared_widgets_test.dart`、`detail_episode_summary_test.dart`、`detail_episode_restore_test.dart`、`media_detail_match_restore_test.dart`、`detail_overview_section_test.dart` 共 65 项主机测试通过；6 个相关文件定向静态分析通过。验证公共模块外间距 14dp、TV／非 TV 与字体缩放下简介到下一区域的距离，以及卡片简介顶部 8dp／底部 14dp。初次扩展回归发现页面恢复测试仍断言旧卡片高度 269.25dp，更新为顶部收紧后的 263.25dp 后通过。未截图、未做真机验证、未构建发布包；本批与此前测试有重叠，不累加。
+
+## 2026-09-25 剧集顶部与播放操作间距统一
+
+固定 Flutter 3.38.10 下，`detail_hero_action_order_test.dart`、`detail_episode_summary_test.dart`、`detail_episode_restore_test.dart`、`media_detail_match_restore_test.dart`、`detail_season_tabs_layout_test.dart` 共 70 项主机测试通过，相关 6 个文件定向静态分析通过。新增手机／TV 双播放按钮到 Hero 底边均为 8dp 的布局断言；卡片顶部留白均为 14dp，覆盖字体缩放，底部与简介内部间距保持不变。横排默认总高随顶部增加 4dp 更新为 267.25dp。无独立端别设置，未截图、未真机验收、未构建发布包；与前批测试有重叠，不累加。
+
+## 2026-09-25 电影标题 Hero 后间距
+
+固定 Flutter 3.38.10 下，`media_detail_match_restore_test.dart`、`detail_hero_action_order_test.dart`、`detail_episode_summary_test.dart`、`detail_episode_restore_test.dart` 共 59 项主机测试通过，相关 3 个源码与测试文件定向静态分析通过。新增电影详情断言，要求 `DetailOverviewSection` 标题布局框顶部距 Hero 底边 8dp；剧集分支有独立卡片区块，不叠加该间距。未截图、未真机验收、未构建发布包。
+
+## 2026-09-25 标题正文与模块间距再收紧
+
+固定 Flutter 3.38.10 下，12dp 中间态先通过主题、公共设置间距、详情共享区块／简介／剧集／Hero／恢复、设置导航与选项、首页呈现、搜索收藏和直播页面共 13 个文件 179 项回归；随后按最终要求把设置区域标题上方也改为 8dp，并运行主题、公共设置间距、详情共享区块／简介／恢复和电影标题间距共 7 个文件 79 项回归，全部通过。最终规则为区域标题上方、区域标题到正文、详情正文模块之间和设置项默认间隔统一为 8dp；详情剧集横排底部另保留 10dp 焦点空间，卡片到下一区域合计 18dp。6 个相关文件定向静态分析无问题。未压缩正文行高、按钮 padding、TV 焦点区域或字幕排版。未截图、未真机验收、未构建发布包；各批测试有重叠，不累加。
+
+## 2026-09-25 六档字号与 TV 字号统一
+
+固定 Flutter 3.38.10 下，`app_theme_test.dart`、详情 Hero／简介／共享区块／剧集恢复、媒体库匹配恢复、首页呈现、搜索字体缩放、播放器选集、设置导航与选项、收藏海报和直播页面共 14 个文件 247 项主机测试通过；最终 `flutter analyze --no-pub` 全仓无问题，`git diff --check` 通过。字号统一为 36（Hero）、24（页面／大标题）、18（区域标题）、16（列表标题）、14（正文）、12（辅助说明），全局 TextTheme、详情、首页、播放器选集、设置和直播等显式字号已改用该组 token；详情 Hero 与选集面板移除 TV／普通端字号分支，同名内容两端同字号。品牌字标宽度、用户字幕倍率和头像首字母等按尺寸计算的动态值保持独立。剧集卡片自适应高度随正文从 13 调整到 14dp 字号，测试断言更新为 271.25dp。未截图、未真机验收、未构建发布包；本批与同日前序测试有重叠，不累加。
+
+## 2026-09-25 标题正文与设置标题间距定稿
+
+固定 Flutter 3.38.10 下，`app_theme_test.dart`、`settings_content_spacing_test.dart`、`detail_shared_widgets_test.dart`、`detail_overview_section_test.dart` 及相关详情回归通过；全仓 `flutter analyze --no-pub` 和 `git diff --check` 无问题。最终间距为区域标题到正文 10dp、上一内容到下一设置标题 12dp、正文模块之间 8dp、设置项之间 8dp。未截图、未真机验收、未构建发布包。
+
+## 2026-09-25 资源信息行文字对齐
+
+固定 Flutter 3.38.10 下，`detail_resource_info_section_test.dart`、`media_detail_match_restore_test.dart` 共 24 项主机测试通过，3 个源码与测试文件定向静态分析无问题。`FactRow` 与豆瓣链接行的标签、普通值统一使用 1.5 行高；链接按钮保留 30dp 点击高度并改为内容顶部对齐。新增断言覆盖状态、来源、链接和时长的标签与值顶部起点一致。未截图、未真机验收、未构建发布包。
+
+## 2026-09-25 演职员分组标题层级
+
+固定 Flutter 3.38.10 下，`detail_shared_widgets_test.dart` 和详情相关回归通过；新增 `DetailGroupLabel` 断言字号 16、`w700`、标题行高 1.3，并确认资源字段 `InfoLabel` 仍为 12。未截图、未真机验收、未构建发布包。
+
+## 2026-09-25 Android 原生控制字号统一
+
+Android `NativePlaybackEpisodePicker` 移除手机／TV 字号三元分支，标题、剧集行、季、状态和集号统一到 24/18/16/14/12；`native_player_control_view_phone.xml` 与 `native_player_control_view_tv.xml` 的标题、副标题和网速文字分别统一为 18/14/12。字幕用户倍率、图标和点击尺寸不进入字号统一。执行 Android 调试变体 Kotlin 编译验证；未构建 APK、未做 TV 真机验收。
+
+## 2026-09-25 全局文本缩放设置
+
+`AppSettings.uiTextScale` 将全局文本倍率持久化为 85%–130%、5% 步进、默认 100%；`设置 -> 界面 -> 界面文字大小` 使用公共步进控件调整。`StarflowApp` 将其乘到系统 TextScaler，Android 原生播放器通过 `uiTextScale` Intent extra 调整 Activity `fontScale`，因此 Flutter 页面、Flutter 播放器和 Android 原生播放器使用同一个用户设置。六档语义字号不变。
+
+固定 Flutter 3.38.10 下，设置持久化、界面设置、原生播放传输和 App 启动共 5 个测试文件 59 项通过；修正倍率归一化的浮点误差后，`app_settings_test.dart` 32 项复跑通过。相关 7 个 Dart 文件定向静态分析无问题，Android `:app:compileDebugKotlin` 构建成功。未截图、未构建 APK、未做真机验收。
+
 ## 计时含义
 
 `tool/perf/run_perf_baselines.dart` 串行启动 `flutter test` 子进程，用 wall-clock 记录整个子进程耗时，包含工具启动、可能的依赖检查、编译与测试执行。名称中的 `first_screen` 或 `player_open` 是场景标识，不是设备首屏 / 视频首帧时间，也不是远程服务吞吐量。
@@ -24,6 +76,33 @@
 默认每场景运行 5 次；`--scenario` 接受逗号分隔的场景 ID。每次保存原始 `runsMs`，p50 / p95 使用排序后的 nearest-rank（`ceil(n * p) - 1`）。只有 1 个样本时两者相等，5 个样本的 p95 实际就是最大值，不宜据此宣称稳定尾延迟。
 
 ## 当前验证记录
+
+### 2026-09-25 日志页 TV 焦点
+
+- 使用 `.fvm/flutter_sdk` 固定 Flutter 3.38.10 执行 `flutter test --no-pub test/core/widgets/tv_focus_test.dart test/core/widgets/tv_dialog_button_style_test.dart test/core/widgets/tv_remote_action_test.dart test/features/settings/presentation/settings_hierarchy_navigation_test.dart test/features/settings/presentation/home_auto_play_settings_test.dart test/features/settings/presentation/logging_settings_page_test.dart test/features/settings/presentation/log_export_page_test.dart --reporter expanded`，7 文件共 99 项通过。
+- 新增回归覆盖日志开关、记录级别和预览级别保存期间保焦及重复确认拦截；日志预览新增项时保持当前节点，首条上移回到刷新、末条下移和左右键停留，空列表恢复刷新；清理确认默认取消并恢复触发按钮；电视导出页首焦点、二维码弹窗首焦点及返回链路、关闭弹窗后恢复导出入口。
+- 对相关 8 个实现／测试文件执行 `flutter analyze --no-pub`，无问题。仅为主机组件验证，未做真实遥控器验收，未截图、未构建 APK 或调整版本。
+
+### 2026-09-25 详情 Hero 与剧集刷新闪动
+
+- 使用 `.fvm/flutter_sdk` 固定 Flutter 3.38.10，执行 `flutter test test/core/widgets/app_network_image_test.dart test/detail_episode_restore_test.dart test/detail_initial_artwork_test.dart test/media_detail_match_restore_test.dart test/detail_hero_section_test.dart test/detail_shared_widgets_test.dart --reporter compact`，6 文件共 73 项通过。
+- 新增回归覆盖 TV／非 TV 的候选列表新增或重排、鉴权头变化、Hero 替换图片解码期间继续显示上一帧，以及预载／后加载季在元数据刷新后保留卡片、不闪回 loading、不重复读取。`flutter analyze` 全仓无问题，`git diff --check` 通过。
+- 仅为主机组件和图片解码验证，未做真机视觉／遥控器验收，未构建安装包或递增版本。
+
+### 2026-09-25 Hero 自动轮播焦点交接
+
+- 使用固定 Flutter 3.38.10 执行 `flutter test --no-pub test/features/home/presentation/home_page_presentation_test.dart test/features/settings/presentation/home_auto_play_settings_test.dart test/tv_focus_regressions_test.dart --reporter expanded`，3 文件共 66 项通过；对首页页面、Hero 实现和新增测试执行 `dart analyze` 无问题，`git diff --check` 通过。
+- 新增回归先让焦点从 Hero 移到下方模块，再返回 Hero，使用五张卡片连续自动切换两轮，并逐帧覆盖 `PageView` 惰性回收；普通／无边框模式、动画／简化模式修复前均会把焦点恢复到下方模块并停止轮播，修复后每轮焦点都落在新显示卡片。
+- 修复未放宽用户主动移焦保护；已有自动轮播在翻页控件、下方内容、后台和覆盖路由时暂停的回归继续通过。仅为主机组件验证，未做 TV 真机长播验收，未构建 APK 或调整版本。
+
+### 2026-09-25 共享按钮焦点与飞牛首页标题
+
+- 最终调整：整个来源根的新增首页标题只显示来源类型，去掉“· 全部内容”，分区标题规则不变；原始 `sectionName` 保留。再次执行下述 3 文件回归，57 项通过，配置实现／测试静态分析无问题，`git diff --check` 通过。下条“来源根加全部内容”为本次调整前的中间状态。
+- 后续统一全部来源命名：新增分区使用 `Emby / WebDAV / 夸克 / 飞牛 · 分区名`，来源根使用相同前缀加“全部内容”。固定 SDK 重跑 `flutter test --no-pub test/app_settings_test.dart test/home_controller_test.dart test/home_editor_tv_reorder_test.dart --reporter expanded`，57 项通过；实现及配置测试 `dart analyze` 无问题，`git diff --check` 通过。以下 139 项是此前只修改飞牛命名时的验证快照，不把“其他来源标题不变”视为最新命名规则。
+- 使用固定 Flutter 3.38.10 / Dart 3.10.9，先执行 `flutter pub get`；`flutter test --no-pub test/core/widgets/tv_dialog_button_style_test.dart test/core/widgets/tv_focus_test.dart test/core/widgets/tv_playback_input_test.dart test/home_editor_tv_reorder_test.dart test/app_settings_test.dart test/home_controller_test.dart --reporter expanded`，6 文件共 139 项通过。
+- 覆盖 8 种强调色下页面／弹窗的紧凑文字按钮与图标按钮：3 倍分辨率像素检查聚焦白边、失焦恢复、布局尺寸不变及遥控器确认；同时保留非 TV 配色、禁用／忙碌焦点和首页排序恢复回归。初次扩展测试使用 1 倍截图的边缘抗锯齿像素，32 项亮度断言失败；调整为描边内部高分辨率采样后完整重跑通过，未降低对比阈值。
+- 分区配置测试覆盖飞牛默认“飞牛 · 分区名”、其他来源标题不变、来源／分区身份不变及自定义标题序列化保留。对两份实现与两份测试执行 `dart analyze`，无问题；`git diff --check` 通过。
+- 仅为主机单元／组件验证，未进行真实 TV 遥控器验收，未构建 APK 或调整应用版本。
 
 ### 2026-09-24 最近搜索标题同排
 

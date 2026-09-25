@@ -325,6 +325,10 @@ class MainActivity : FlutterActivity() {
                                 NativePlaybackActivity.EXTRA_EPISODE_ACCENT_COLOR,
                                 call.argument<Number>("episodeAccentColor")?.toInt() ?: 0xFF2DD4BF.toInt(),
                             )
+                            putExtra(
+                                NativePlaybackActivity.EXTRA_UI_TEXT_SCALE,
+                                call.argument<Number>("uiTextScale")?.toFloat() ?: 1f,
+                            )
                             putExtra(NativePlaybackActivity.EXTRA_LAUNCH_REQUEST_ID, requestId)
                             putExtra(
                                 NativePlaybackActivity.EXTRA_LAUNCH_RESULT_RECEIVER,

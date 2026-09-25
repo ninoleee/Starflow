@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -274,7 +275,7 @@ class _QuarkDirectoryManagerPageState
         Text(
           '$_driveName目录管理',
           style: const TextStyle(
-            fontSize: 20,
+            fontSize: AppTextSizes.section,
             fontWeight: FontWeight.w700,
           ),
         ),

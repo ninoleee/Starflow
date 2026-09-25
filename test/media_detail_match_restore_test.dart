@@ -16,6 +16,7 @@ import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/details/presentation/media_detail_page.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_hero_section.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_episode_browser.dart';
+import 'package:starflow/features/details/presentation/widgets/detail_overview_section.dart';
 import 'package:starflow/features/library/application/webdav_scrape_progress.dart';
 import 'package:starflow/features/library/data/media_server_client.dart';
 import 'package:starflow/features/library/data/nas_media_index_models.dart';
@@ -53,14 +54,22 @@ void main() {
             const MethodChannel('starflow/platform'), null);
   });
 
-  testWidgets('aggregate entry switches source trees without cache or auto match',
+  testWidgets(
+      'aggregate entry switches source trees without cache or auto match',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    const a = MediaDetailTarget(title: 'Show', posterUrl: '', overview: '',
-        sourceId: 'a', itemId: 'series-a', itemType: 'series',
-        sourceName: 'Source A', sourceKind: MediaSourceKind.emby);
-    final b = a.copyWith(sourceId: 'b', itemId: 'series-b', sourceName: 'Source B');
+    const a = MediaDetailTarget(
+        title: 'Show',
+        posterUrl: '',
+        overview: '',
+        sourceId: 'a',
+        itemId: 'series-a',
+        itemType: 'series',
+        sourceName: 'Source A',
+        sourceKind: MediaSourceKind.emby);
+    final b =
+        a.copyWith(sourceId: 'b', itemId: 'series-b', sourceName: 'Source B');
     final seed = a.copyWith(workResources: [a, b]);
     final browsed = <String>[];
     final cache = _FakeRestoreCacheRepository(cachedState: null);
@@ -68,9 +77,13 @@ void main() {
     await tester.pumpWidget(ProviderScope(overrides: [
       isTelevisionProvider.overrideWith((ref) => false),
       appSettingsProvider.overrideWithValue(AppSettings.fromJson({
-        'mediaSources': const [], 'searchProviders': const [], 'homeModules': const [],
-        'tmdbMetadataMatchEnabled': false, 'wmdbMetadataMatchEnabled': false,
-        'imdbRatingMatchEnabled': false, 'detailAutoLibraryMatchEnabled': false,
+        'mediaSources': const [],
+        'searchProviders': const [],
+        'homeModules': const [],
+        'tmdbMetadataMatchEnabled': false,
+        'wmdbMetadataMatchEnabled': false,
+        'imdbRatingMatchEnabled': false,
+        'detailAutoLibraryMatchEnabled': false,
       })),
       localStorageCacheRepositoryProvider.overrideWithValue(cache),
       enrichedDetailTargetProvider.overrideWith((ref, target) => target),
@@ -89,7 +102,12 @@ void main() {
     await tester.tap(find.text('Source B').last);
     await tester.pumpAndSettle();
     expect(browsed.last, 'b|series-b');
-    expect(tester.widget<DetailHeroSection>(find.byType(DetailHeroSection)).target.sourceId, 'b');
+    expect(
+        tester
+            .widget<DetailHeroSection>(find.byType(DetailHeroSection))
+            .target
+            .sourceId,
+        'b');
     expect(tester.takeException(), isNull);
   });
 
@@ -97,30 +115,60 @@ void main() {
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1200, 1800));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    const playback = PlaybackTarget(title: 'Movie', sourceId: 'a',
-        itemId: 'movie-a', itemType: 'movie', streamUrl: 'https://a/1080',
-        actualAddress: '/1080.mkv', sourceName: 'Source A', sourceKind: MediaSourceKind.nas);
-    const a = MediaDetailTarget(title: 'Movie', posterUrl: '', overview: '',
-        sourceId: 'a', itemId: 'movie-a', itemType: 'movie',
-        sourceName: 'Source A', sourceKind: MediaSourceKind.nas,
+    const playback = PlaybackTarget(
+        title: 'Movie',
+        sourceId: 'a',
+        itemId: 'movie-a',
+        itemType: 'movie',
+        streamUrl: 'https://a/1080',
+        actualAddress: '/1080.mkv',
+        sourceName: 'Source A',
+        sourceKind: MediaSourceKind.nas);
+    const a = MediaDetailTarget(
+        title: 'Movie',
+        posterUrl: '',
+        overview: '',
+        sourceId: 'a',
+        itemId: 'movie-a',
+        itemType: 'movie',
+        sourceName: 'Source A',
+        sourceKind: MediaSourceKind.nas,
         playbackTarget: playback);
-    final a4k = a.copyWith(itemId: 'movie-a-4k', playbackTarget: playback.copyWith(
-        itemId: 'movie-a-4k', streamUrl: 'https://a/4k', actualAddress: '/4k.mkv'));
-    final b = a.copyWith(sourceId: 'b', itemId: 'movie-b', sourceName: 'Source B',
-        playbackTarget: playback.copyWith(sourceId: 'b', itemId: 'movie-b',
-            sourceName: 'Source B', streamUrl: 'https://b/movie'));
+    final a4k = a.copyWith(
+        itemId: 'movie-a-4k',
+        playbackTarget: playback.copyWith(
+            itemId: 'movie-a-4k',
+            streamUrl: 'https://a/4k',
+            actualAddress: '/4k.mkv'));
+    final b = a.copyWith(
+        sourceId: 'b',
+        itemId: 'movie-b',
+        sourceName: 'Source B',
+        playbackTarget: playback.copyWith(
+            sourceId: 'b',
+            itemId: 'movie-b',
+            sourceName: 'Source B',
+            streamUrl: 'https://b/movie'));
     final cache = _FakeRestoreCacheRepository(cachedState: null);
     addTearDown(cache.dispose);
-    await tester.pumpWidget(ProviderScope(overrides: [
-      isTelevisionProvider.overrideWith((ref) => false),
-      appSettingsProvider.overrideWithValue(AppSettings.fromJson({
-        'mediaSources': const [], 'searchProviders': const [], 'homeModules': const [],
-        'tmdbMetadataMatchEnabled': false, 'wmdbMetadataMatchEnabled': false,
-        'imdbRatingMatchEnabled': false, 'detailAutoLibraryMatchEnabled': false,
-      })),
-      localStorageCacheRepositoryProvider.overrideWithValue(cache),
-      enrichedDetailTargetProvider.overrideWith((ref, target) => target),
-    ], child: MaterialApp(home: MediaDetailPage(target: a.copyWith(workResources: [a, a4k, b])))));
+    await tester.pumpWidget(ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+          appSettingsProvider.overrideWithValue(AppSettings.fromJson({
+            'mediaSources': const [],
+            'searchProviders': const [],
+            'homeModules': const [],
+            'tmdbMetadataMatchEnabled': false,
+            'wmdbMetadataMatchEnabled': false,
+            'imdbRatingMatchEnabled': false,
+            'detailAutoLibraryMatchEnabled': false,
+          })),
+          localStorageCacheRepositoryProvider.overrideWithValue(cache),
+          enrichedDetailTargetProvider.overrideWith((ref, target) => target),
+        ],
+        child: MaterialApp(
+            home: MediaDetailPage(
+                target: a.copyWith(workResources: [a, a4k, b])))));
     for (var frame = 0; frame < 8; frame++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
@@ -134,16 +182,26 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Source A · 4k.mkv').last);
     await tester.pumpAndSettle();
-    expect(tester.widget<DetailHeroSection>(find.byType(DetailHeroSection))
-        .target.playbackTarget?.streamUrl, 'https://a/4k');
+    expect(
+        tester
+            .widget<DetailHeroSection>(find.byType(DetailHeroSection))
+            .target
+            .playbackTarget
+            ?.streamUrl,
+        'https://a/4k');
     await tester.ensureVisible(dropdowns.last);
     await tester.pumpAndSettle();
     await tester.tap(dropdowns.last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Source B').last);
     await tester.pumpAndSettle();
-    expect(tester.widget<DetailHeroSection>(find.byType(DetailHeroSection))
-        .target.playbackTarget?.streamUrl, 'https://b/movie');
+    expect(
+        tester
+            .widget<DetailHeroSection>(find.byType(DetailHeroSection))
+            .target
+            .playbackTarget
+            ?.streamUrl,
+        'https://b/movie');
     expect(tester.takeException(), isNull);
   });
 
@@ -271,7 +329,51 @@ void main() {
     expect(find.byType(DetailEpisodeBrowser), findsOneWidget);
     expect(find.text('剧集'), findsNothing);
     expect(tester.widget(find.byType(DetailHeroSection)), same(hero));
-    expect(tester.getSize(find.byType(DetailEpisodeBrowser)).height, 292);
+    expect(tester.getSize(find.byType(DetailEpisodeBrowser)).height, 271.25);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('movie overview title keeps 8dp below the hero', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 1800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const target = MediaDetailTarget(
+      title: 'Movie',
+      posterUrl: '',
+      overview: 'Movie overview',
+      itemType: 'movie',
+    );
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        isTelevisionProvider.overrideWith((ref) => false),
+        appSettingsProvider.overrideWithValue(AppSettings.fromJson({
+          'mediaSources': const [],
+          'searchProviders': const [],
+          'homeModules': const [],
+          'tmdbMetadataMatchEnabled': false,
+          'wmdbMetadataMatchEnabled': false,
+          'imdbRatingMatchEnabled': false,
+          'detailAutoLibraryMatchEnabled': false,
+        })),
+        localStorageCacheRepositoryProvider.overrideWithValue(
+          _FakeRestoreCacheRepository(cachedState: null),
+        ),
+        enrichedDetailTargetProvider.overrideWith((ref, target) => target),
+      ],
+      child: const MaterialApp(home: MediaDetailPage(target: target)),
+    ));
+    for (var frame = 0; frame < 10; frame++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    final title = find.descendant(
+      of: find.byType(DetailOverviewSection),
+      matching: find.text('Movie'),
+    );
+    expect(title, findsOneWidget);
+    expect(
+      tester.getRect(title).top -
+          tester.getRect(find.byType(DetailHeroSection)).bottom,
+      closeTo(8, 0.1),
+    );
     expect(tester.takeException(), isNull);
   });
 

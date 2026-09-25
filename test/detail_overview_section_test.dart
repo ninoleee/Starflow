@@ -6,6 +6,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/app/theme/app_theme.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_overview_section.dart';
@@ -35,7 +37,7 @@ Widget _app(
       )),
     ],
     child: MaterialApp(
-      theme: ThemeData.dark(),
+      theme: AppTheme.dark(),
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context)
             .copyWith(textScaler: TextScaler.linear(textScale)),
@@ -68,6 +70,35 @@ Widget _app(
 }
 
 void main() {
+  for (final television in [false, true]) {
+    for (final scale in [1.0, 1.5, 2.0]) {
+      testWidgets('overview line height TV $television scale $scale',
+          (tester) async {
+        await tester.binding.setSurfaceSize(const Size(390, 844));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(_app(
+          '正文第一行。\n正文第二行。',
+          television: television,
+          textScale: scale,
+        ));
+        await tester.pumpAndSettle();
+        final text = tester.widget<Text>(find.byKey(_textKey));
+        final height = television
+            ? AppLineHeights.televisionOverview
+            : AppLineHeights.overview;
+        expect(text.style!.height, height);
+        expect(tester.getSize(find.byKey(_textKey)).height,
+            closeTo(AppTextSizes.body * height * 2 * scale, 1));
+        expect(
+          tester.getRect(find.text('剧照')).top -
+              tester.getRect(find.byKey(_textKey)).bottom,
+          closeTo(8, 0.1),
+        );
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
   setUpAll(() async {
     if (const bool.fromEnvironment('OVERVIEW_SCREENSHOTS')) {
       final loader = FontLoader('Roboto')

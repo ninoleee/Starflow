@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/app/theme/app_theme.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -61,6 +62,7 @@ void main() {
             )),
           ],
           child: MaterialApp(
+            theme: AppTheme.dark(),
             builder: (context, child) => MediaQuery(
               data: MediaQuery.of(context)
                   .copyWith(textScaler: TextScaler.linear(scale)),

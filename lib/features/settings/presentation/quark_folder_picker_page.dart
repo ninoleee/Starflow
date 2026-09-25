@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
@@ -137,7 +138,7 @@ class _QuarkFolderPickerPageState extends ConsumerState<QuarkFolderPickerPage> {
         const Text(
           '选择保存文件夹',
           style: TextStyle(
-            fontSize: 20,
+            fontSize: AppTextSizes.section,
             fontWeight: FontWeight.w700,
           ),
         ),

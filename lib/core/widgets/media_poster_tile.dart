@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
@@ -193,7 +194,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
                       color: Colors.white,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0,
-                      fontSize: 10,
+                      fontSize: AppTextSizes.caption,
                     ),
                   ),
                 ),
@@ -209,7 +210,7 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
                           color: Colors.white,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0,
-                          fontSize: 10,
+                          fontSize: AppTextSizes.caption,
                         ),
                   ),
                 ),

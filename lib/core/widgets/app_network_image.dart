@@ -62,6 +62,7 @@ class AppNetworkImage extends ConsumerStatefulWidget {
     this.fallbackSources = const [],
     this.cachePolicy = AppNetworkImageCachePolicy.persistent,
     this.throttleOnTelevision = true,
+    this.gaplessPlayback = false,
     this.onImageReady,
   });
 
@@ -80,6 +81,9 @@ class AppNetworkImage extends ConsumerStatefulWidget {
   final List<AppNetworkImageSource> fallbackSources;
   final AppNetworkImageCachePolicy cachePolicy;
   final bool throttleOnTelevision;
+
+  /// Keep the last decoded raster visible while a replacement is loading.
+  final bool gaplessPlayback;
 
   /// Receives the unresized provider after a raster frame has decoded.
   final ValueChanged<ImageProvider<Object>>? onImageReady;
@@ -110,6 +114,7 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   String? _tvRasterLoadIdentity;
   bool _tvRasterLoadSettled = false;
   bool _imageLoaded = false;
+  ImageProvider<Object>? _lastDecodedRasterProvider;
   int _activeCandidateIndex = 0;
   bool _candidateAdvanceScheduled = false;
   Timer? _imageRetryTimer;
@@ -133,13 +138,29 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   @override
   void didUpdateWidget(covariant AppNetworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url.trim() != widget.url.trim() ||
+    final primaryChanged = oldWidget.url.trim() != widget.url.trim() ||
         !_sameHeaders(oldWidget.headers, widget.headers) ||
-        oldWidget.cachePolicy != widget.cachePolicy ||
-        !_sameImageSources(
-          oldWidget.fallbackSources,
-          widget.fallbackSources,
-        )) {
+        oldWidget.cachePolicy != widget.cachePolicy;
+    if (primaryChanged ||
+        !_sameImageSources(oldWidget.fallbackSources, widget.fallbackSources)) {
+      // Enrichment often changes only unused posters/banners. Keep the active
+      // decoded source, including a successful fallback that moved in the list.
+      if (!primaryChanged && _imageLoaded) {
+        final previous = _buildCandidateSources(oldWidget);
+        final active = previous[_activeCandidateIndex];
+        final nextIndex = _buildCandidateSources().indexWhere((source) =>
+            _buildSourceIdentity(source.url, source.headers,
+                cachePolicy: source.cachePolicy) ==
+            _buildSourceIdentity(active.url, active.headers,
+                cachePolicy: active.cachePolicy));
+        if (nextIndex >= 0) {
+          _activeCandidateIndex = nextIndex;
+          return;
+        }
+      }
+      if (!widget.gaplessPlayback) {
+        _lastDecodedRasterProvider = null;
+      }
       _resetCandidateResolution(resetRetryState: true);
     }
   }
@@ -459,6 +480,8 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
         if (wasSynchronouslyLoaded || frame != null) {
           onLoadSettled?.call();
           _markImageLoadSucceeded();
+          _lastDecodedRasterProvider =
+              widget.gaplessPlayback ? rasterImageProvider : null;
           widget.onImageReady?.call(provider);
           return child;
         }
@@ -675,10 +698,25 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
   }
 
   Widget _buildLoading(BuildContext context) {
+    final previous = _lastDecodedRasterProvider;
+    if (widget.gaplessPlayback && previous != null) {
+      return Image(
+        image: previous,
+        width: widget.width,
+        height: widget.height,
+        fit: widget.fit,
+        alignment: widget.alignment,
+        filterQuality: widget.filterQuality,
+        gaplessPlayback: true,
+        errorBuilder: (context, error, stackTrace) =>
+            widget.loadingBuilder?.call(context) ?? const SizedBox.shrink(),
+      );
+    }
     return widget.loadingBuilder?.call(context) ?? const SizedBox.shrink();
   }
 
-  List<AppNetworkImageSource> _buildCandidateSources() {
+  List<AppNetworkImageSource> _buildCandidateSources([AppNetworkImage? image]) {
+    image ??= widget;
     final seen = <String>{};
     final candidates = <AppNetworkImageSource>[];
 
@@ -708,8 +746,8 @@ class _AppNetworkImageState extends ConsumerState<AppNetworkImage> {
       );
     }
 
-    add(widget.url, widget.headers, widget.cachePolicy);
-    for (final source in widget.fallbackSources) {
+    add(image.url, image.headers, image.cachePolicy);
+    for (final source in image.fallbackSources) {
       add(source.url, source.headers, source.cachePolicy);
     }
     return candidates;

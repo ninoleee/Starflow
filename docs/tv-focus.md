@@ -10,6 +10,8 @@
 - `scheduleTvFocusRecovery` 只做一次帧末检查并主动安排帧；页面失活、路由被覆盖、目标卸载／禁用或已有可操作焦点时不抢焦点。
 - `TvTextInputLauncher` 统一松键后打开编辑器，等待／打开期间拒绝重入，松键前移走焦点则取消。输入框只局部处理上下键离开；返回先到有效操作按钮，再次返回关闭。
 - 轻量焦点是绘制与重绘优化，不是全部取消缩放。共享控件自身 State、海报 ValueNotifier 分别更新外观；默认可见性滚动不等同于强制居中。
+- Hero 自动轮播的旧持焦页在交接前通过焦点感知的 keep-alive 保留，避免惰性回收触发 scope 历史焦点恢复到下方模块；交接后释放保留，用户主动移焦仍暂停轮播。回归覆盖先访问下方模块再返回 Hero、五张卡片连续两轮、普通／无边框与动画／简化模式。
+- 2026-09-25 起，共享文字／图标按钮在 TV 的页面与弹层统一使用低亮度主按钮底色，白色描边仅表示焦点；首页编辑的开启状态继续由文字和开关图标表示，避免浅色强调色与焦点混淆。非 TV 配色不变，覆盖入口见 `test/core/widgets/tv_dialog_button_style_test.dart`，主机验证记录见 [performance.md](performance.md)。
 
 ## 页面边界
 
@@ -23,6 +25,7 @@
 | 查看全部／合集／演职员作品 | 常驻页头首焦点，加载／空／失败不依赖海报；迟到结果不竞争首焦点。演职员作品页上方分页按下进入首张作品卡片，下方分页向上返回末张卡片 | `tv_secondary_page_focus_test.dart` |
 | 详情／信息管理 | 续播与主操作焦点、剧集恢复不抢主操作；更新忙碌保焦 | `detail_episode_restore_test.dart`、`metadata_index_management_page_focus_test.dart` |
 | 设置／目录 | 设置入口和编辑弹窗统一；WebDAV／夸克“选这里／选择”常驻首焦点 | `settings_hierarchy_navigation_test.dart`、`webdav_directory_picker_focus_test.dart`、`quark_folder_picker_focus_test.dart` |
+| 设置／日志 | 日志设置保存中保焦且忽略重复确认；预览按日志身份保留焦点，首条上移回“刷新”，末条下移与左右键停留；导出页首焦点落电视导出入口，二维码弹窗首焦点落“关闭服务”，弹窗关闭后回入口；清理确认默认取消 | `logging_settings_page_test.dart`、`log_export_page_test.dart` |
 | 在线字幕 | 关键词入口首焦点；搜索／下载忙碌保焦；结果单一焦点目标 | `subtitle_search_page_test.dart` |
 | MPV 控件／选集 | 页面命令去重；首集／首行上移优先到选季，选季与模式按钮上下连通，下移返回原剧集；跨段导航与入口恢复保留 | `player_small_dialog_focus_test.dart`、`player_episode_picker_dialog_test.dart` |
 | Android 点播 Exo | 原有按压身份去重、控制层焦点超时／取消与弹窗恢复；不作为独立直播视图的焦点证据 | `NativePlaybackRemoteControllerTest.kt`、`NativePlaybackControllerViewTest.kt`、`NativeEpisodePickerNavigationTest.kt` |
@@ -50,6 +53,7 @@ TV 直播文件导入复用配置/日志传输的二维码地址组件，弹窗�
 
 ## 本轮修复
 
+- 2026-09-25 日志页：日志设置保存期间控件保留 TV 焦点并拒绝重复确认；日志预览按内容身份复用焦点节点，新增日志不会把焦点换到下一条，当前项被淘汰时按原位置回退，空列表回“刷新”。预览首条上移回到“刷新”，末条下移和左右键停留；清空全部日志的确认框默认聚焦取消；电视导出页首焦点落“手机导出日志”，二维码弹窗默认聚焦“关闭服务”，关闭后恢复导出入口。相关主机回归见 [performance.md](performance.md#2026-09-25-日志页-tv-焦点)。
 - 2026-09-24 首页 Hero 下移：首个模块横向滚动后，回到 Hero 再按下会恢复该模块最后持焦的可见卡片；若原卡片已被惰性列表卸载或失效，则回退首张卡片，不再对失活目标取焦点作用域或把 Hero 留在屏幕外。相关回归见下方自动化验证。
 - 2026-09-20 订阅表单保存按钮：TV 添加／编辑页显式使用共享 secondary 样式，低亮度中性底色与白色焦点框区分；不扩大公共按钮的弹窗样式规则，非 TV 保留强调色主按钮。保存中保焦与禁止重复提交逻辑不变。
 - 2026-09-20 审查收尾：共享 Chip 的默认高度恢复为 50px，并覆盖大字体/图标/选中/焦点状态稳定性；媒体键独立于确认键，七类共享控件新增鼠标/触摸/禁用状态回归。设置 TV 输入弹窗的控制器及焦点节点等待路由退场完成后释放，避免保存/取消过程中被动画访问。主机组件结果见 [审查收尾记录](reviews/review-closure-2026-09-20.md)，仍需真实遥控器/空鼠/TV IME 验收。后续直播备份入口改为“手机备份/手机恢复”，移除 TV 路径编辑，复用共享二维码弹窗及返回/后台清理；上传后恢复确认默认聚焦取消。

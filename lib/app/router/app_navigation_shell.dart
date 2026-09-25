@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/app/router/home_navigation_tap_coordinator.dart';
 import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/core/platform/application_exit.dart';
@@ -1203,7 +1204,7 @@ class _TelevisionNavigationDestinationState
                           widget.item.label,
                           style: TextStyle(
                             color: accentColors.onPrimary,
-                            fontSize: 16,
+                            fontSize: AppTextSizes.title,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -1302,7 +1303,7 @@ class _FloatingNavigationButton extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: foregroundColor,
-                      fontSize: 11,
+                      fontSize: AppTextSizes.caption,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0,
                     ),
@@ -1335,7 +1336,7 @@ class _FloatingNavigationButton extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: foregroundColor,
-                      fontSize: 11,
+                      fontSize: AppTextSizes.caption,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0,
                     ),

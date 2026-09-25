@@ -69,6 +69,46 @@ void main() {
         isTrue);
   });
 
+  for (final television in [false, true]) {
+    testWidgets('playback actions keep 8dp bottom gap TV $television',
+        (tester) async {
+      await tester.binding.setSurfaceSize(
+          television ? const Size(1280, 720) : const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          appSettingsProvider.overrideWithValue(SeedData.defaultSettings),
+          isTelevisionProvider.overrideWith((ref) => television),
+          playbackMemorySnapshotProvider.overrideWith((ref) async =>
+              PlaybackMemorySnapshot(series: {
+                buildSeriesKeyForMetadata(
+                  sourceId: 'nas', itemId: 'series', title: 'Series', year: 0,
+                ): historyEntry,
+              })),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: ListView(children: [
+              DetailHeroSection(
+                target: seriesTarget,
+                simplifyVisualEffects: television,
+                isTelevision: television,
+              ),
+              const SizedBox(height: 20),
+            ]),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('继续播放'), findsOneWidget);
+      expect(find.text('从头播放'), findsOneWidget);
+      final actions = find.byKey(const ValueKey('detail:hero:playback-actions'));
+      expect(tester.getRect(find.byType(DetailHeroSection)).bottom -
+          tester.getRect(actions).bottom, closeTo(8, 0.1));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   for (final itemType in ['series', 'movie']) {
     for (final historyFails in [false, true]) {
       testWidgets(

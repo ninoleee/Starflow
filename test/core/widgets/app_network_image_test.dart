@@ -9,10 +9,121 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
+import 'package:starflow/features/details/presentation/widgets/detail_hero_section.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_shared_widgets.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_image_preview.dart';
 
 void main() {
+  for (final television in [false, true]) {
+    for (final useFallback in [false, true]) {
+      testWidgets(
+          'candidate updates retain decoded image (TV=$television, fallback=$useFallback)',
+          (tester) async {
+        final requests = <String>[];
+        final server = await _imageServer(tester, (request, bytes) async {
+          requests.add(request.uri.path);
+          if (useFallback && request.uri.path == '/primary') {
+            request.response.statusCode = HttpStatus.notFound;
+          } else {
+            request.response.headers.contentType = ContentType('image', 'png');
+            request.response.add(bytes);
+          }
+          await request.response.close();
+        });
+        final base = 'http://127.0.0.1:${server.port}';
+        Widget build(List<String> fallbacks, {String token = 'original'}) =>
+            ProviderScope(
+              overrides: [
+                isTelevisionProvider.overrideWith((ref) => television),
+              ],
+              child: MaterialApp(
+                home: AppNetworkImage(
+                  '$base/primary',
+                  headers: {'x-image-auth': token},
+                  cachePolicy: AppNetworkImageCachePolicy.networkOnly,
+                  fallbackSources: [
+                    for (final path in fallbacks)
+                      AppNetworkImageSource(
+                        url: '$base/$path',
+                        cachePolicy: AppNetworkImageCachePolicy.networkOnly,
+                      ),
+                  ],
+                ),
+              ),
+            );
+
+        await tester.pumpWidget(build(['fallback']));
+        await _pumpUntil(tester, () => _hasDecodedImage(tester));
+        final state = tester.state(find.byType(Image));
+        final requestCount = requests.length;
+        for (final fallbacks in [
+          ['unused', 'fallback'],
+          ['fallback', 'new-poster'],
+        ]) {
+          await tester.pumpWidget(build(fallbacks));
+          expect(_hasDecodedImage(tester), isTrue);
+          expect(tester.state(find.byType(Image)), same(state));
+          await tester.pump();
+          expect(requests, hasLength(requestCount));
+        }
+
+        // Authentication changes must still resolve a fresh primary source.
+        await tester.pumpWidget(build(['fallback'], token: 'updated'));
+        expect(_hasDecodedImage(tester), isFalse);
+        await _pumpUntil(tester, () => requests.length > requestCount);
+        await _pumpUntil(tester, () => _hasDecodedImage(tester));
+        await tester.pumpWidget(const SizedBox.shrink());
+      });
+    }
+  }
+
+  testWidgets('detail backdrop keeps its decoded frame until replacement loads',
+      (tester) async {
+    final replacementReady = Completer<void>();
+    final requests = <String>[];
+    final server = await _imageServer(tester, (request, bytes) async {
+      requests.add(request.uri.path);
+      if (request.uri.path == '/replacement') {
+        await replacementReady.future;
+      }
+      request.response.headers.contentType = ContentType('image', 'png');
+      request.response.add(bytes);
+      await request.response.close();
+    });
+    addTearDown(() {
+      if (!replacementReady.isCompleted) replacementReady.complete();
+    });
+    Widget build(String path) => ProviderScope(
+          child: MaterialApp(
+            home: DetailBackdropImage(
+              imageUrl: 'http://127.0.0.1:${server.port}/$path',
+              cachePolicy: AppNetworkImageCachePolicy.networkOnly,
+            ),
+          ),
+        );
+    await tester.pumpWidget(build('original'));
+    await _pumpUntil(tester, () => _hasDecodedImage(tester));
+    final originalProvider = tester.widget<Image>(find.byType(Image)).image;
+    await tester.pumpWidget(build('replacement'));
+    expect(_hasDecodedImage(tester), isTrue);
+    await _pumpUntil(tester, () => requests.contains('/replacement'));
+    for (var frame = 0; frame < 5; frame++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(_hasDecodedImage(tester), isTrue);
+    }
+    replacementReady.complete();
+    await _pumpUntil(
+      tester,
+      () =>
+          _hasDecodedImage(tester) &&
+          tester
+              .widgetList<Image>(find.byType(Image))
+              .any((image) => image.image != originalProvider),
+    );
+    expect(requests, ['/original', '/replacement']);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('preview decode failure exposes a fresh network retry',
       (tester) async {
     final server = await _imageServer(tester, (request, bytes) async {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/core/utils/metadata_text.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/details/presentation/widgets/detail_television_picker_dialog.dart';
@@ -213,11 +214,16 @@ class _DetailOverviewSectionState extends State<DetailOverviewSection> {
 
   @override
   Widget build(BuildContext context) {
-    const style =
-        TextStyle(color: Color(0xFFDCE6F8), fontSize: 15, height: 1.7);
+    final style = TextStyle(
+      color: const Color(0xFFDCE6F8),
+      fontSize: AppTextSizes.body,
+      height: widget.isTelevision
+          ? AppLineHeights.televisionOverview
+          : AppLineHeights.overview,
+    );
     final text = _content.text.isEmpty ? '暂无简介' : _content.text;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 26),
+      padding: const EdgeInsets.only(bottom: AppContentSpacing.section),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -244,15 +250,15 @@ class _DetailOverviewSectionState extends State<DetailOverviewSection> {
               ],
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: AppContentSpacing.sectionHeading),
           if (widget.episodeTitle != null) ...[
             Text(
               widget.episodeTitle!,
               style: const TextStyle(
                 color: Color(0xFFF1F5FF),
-                fontSize: 16,
+                fontSize: AppTextSizes.title,
                 fontWeight: FontWeight.w700,
-                height: 1.4,
+                height: AppLineHeights.title,
               ),
             ),
             const SizedBox(height: 10),

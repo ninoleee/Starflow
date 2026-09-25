@@ -558,6 +558,13 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(appAccent: accent));
   }
 
+  Future<void> setUiTextScale(double scale) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(
+      current.copyWith(uiTextScale: normalizeAppTextScale(scale)),
+    );
+  }
+
   Future<void> setLiveNavigationAutoPlayEnabled(bool enabled) async {
     final current = state.value ?? await _repository.load();
     await _persist(current.copyWith(liveNavigationAutoPlayEnabled: enabled));

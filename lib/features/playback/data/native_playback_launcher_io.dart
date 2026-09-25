@@ -168,6 +168,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
               episodeQueue == null ? '' : jsonEncode(episodeQueue.toJson()),
           'episodeAccentColor':
               _ref.read(appSettingsProvider).appAccent.primary.toARGB32(),
+          'uiTextScale': _ref.read(appSettingsProvider).uiTextScale,
         },
       );
       if (launched != true) {

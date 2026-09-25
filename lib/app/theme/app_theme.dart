@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 
 class AppTheme {
   static const String _webFontFamily = 'system-ui';
@@ -78,44 +79,59 @@ class AppTheme {
       splashFactory: InkSparkle.splashFactory,
       textTheme: baseTextTheme.copyWith(
         headlineSmall: baseTextTheme.headlineSmall?.copyWith(
+          fontSize: AppTextSizes.display,
+          height: AppLineHeights.hero,
           fontWeight: FontWeight.w800,
           letterSpacing: 0,
           color: colorScheme.onSurface,
         ),
         titleLarge: baseTextTheme.titleLarge?.copyWith(
+          fontSize: AppTextSizes.display,
+          height: AppLineHeights.title,
           fontWeight: FontWeight.w700,
           letterSpacing: 0,
           color: colorScheme.onSurface,
         ),
         titleMedium: baseTextTheme.titleMedium?.copyWith(
+          fontSize: AppTextSizes.section,
+          height: AppLineHeights.title,
           fontWeight: FontWeight.w700,
           letterSpacing: 0,
           color: colorScheme.onSurface,
         ),
         titleSmall: baseTextTheme.titleSmall?.copyWith(
+          fontSize: AppTextSizes.title,
+          height: AppLineHeights.title,
           fontWeight: FontWeight.w700,
           letterSpacing: 0,
           color: colorScheme.onSurface,
         ),
         bodyLarge: baseTextTheme.bodyLarge?.copyWith(
+          fontSize: AppTextSizes.title,
           color: AppColors.foregroundBody,
-          height: 1.5,
+          height: AppLineHeights.bodyLarge,
         ),
         bodyMedium: baseTextTheme.bodyMedium?.copyWith(
+          fontSize: AppTextSizes.body,
           color: AppColors.foregroundBody,
-          height: 1.45,
+          height: AppLineHeights.body,
         ),
         labelLarge: baseTextTheme.labelLarge?.copyWith(
+          fontSize: AppTextSizes.body,
           color: AppColors.foregroundBody,
           fontWeight: FontWeight.w700,
         ),
         bodySmall: baseTextTheme.bodySmall?.copyWith(
+          fontSize: AppTextSizes.caption,
+          height: AppLineHeights.supporting,
           color: AppColors.foregroundMuted,
         ),
         labelMedium: baseTextTheme.labelMedium?.copyWith(
+          fontSize: AppTextSizes.caption,
           color: AppColors.foregroundMuted,
         ),
         labelSmall: baseTextTheme.labelSmall?.copyWith(
+          fontSize: AppTextSizes.caption,
           color: AppColors.foregroundMuted,
         ),
       ),

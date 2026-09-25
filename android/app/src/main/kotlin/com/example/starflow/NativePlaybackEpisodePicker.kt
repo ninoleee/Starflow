@@ -70,7 +70,7 @@ internal class NativePlaybackEpisodePicker(
         }
         val header = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         if (!television) header.addView(tool(R.drawable.native_player_back_24, "返回") { dismiss() })
-        header.addView(label(target.optString("seriesTitle").ifBlank { "选择剧集" }, 22f).apply {
+        header.addView(label(target.optString("seriesTitle").ifBlank { "选择剧集" }, 24f).apply {
             maxLines = 2; ellipsize = TextUtils.TruncateAt.END
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         listButton = tool(R.drawable.episode_list, "列表") { setGrid(false) }
@@ -78,11 +78,11 @@ internal class NativePlaybackEpisodePicker(
         header.addView(listButton)
         header.addView(gridButton)
         root.addView(header)
-        subtitle.setTextColor(muted); subtitle.textSize = if (television) 13f else 12f
+        subtitle.setTextColor(muted); subtitle.textSize = 12f
         subtitle.maxLines = 1; subtitle.ellipsize = TextUtils.TruncateAt.END
         seasonButton.contentDescription = "选择季"
         styleButton(seasonButton)
-        seasonButton.textSize = if (television) 16f else 14f
+        seasonButton.textSize = 16f
         seasonButton.gravity = Gravity.START or Gravity.CENTER_VERTICAL
         seasonButton.setPadding(0, 0, dp(8), 0)
         seasonButton.maxLines = 1; seasonButton.ellipsize = TextUtils.TruncateAt.END
@@ -96,7 +96,7 @@ internal class NativePlaybackEpisodePicker(
             }
         }
         seasonRow.addView(seasonButton, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        styleButton(rangeButton); rangeButton.textSize = 13f
+        styleButton(rangeButton); rangeButton.textSize = 14f
         rangeButton.setTextColor(muted)
         rangeButton.setPadding(dp(4), 0, 0, 0)
         rangeButton.minWidth = 0; rangeButton.minimumWidth = 0
@@ -116,7 +116,7 @@ internal class NativePlaybackEpisodePicker(
             addView(seasonRow, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
             addView(rangeButton, LinearLayout.LayoutParams(dp(112), ViewGroup.LayoutParams.MATCH_PARENT))
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)))
-        styleButton(status); status.textSize = if (television) 13f else 12f; status.visibility = View.INVISIBLE
+        styleButton(status); status.textSize = 12f; status.visibility = View.INVISIBLE
         status.maxLines = 1; status.ellipsize = TextUtils.TruncateAt.END
         status.gravity = Gravity.START or Gravity.CENTER_VERTICAL; status.setPadding(0, 0, 0, 0)
         status.setTextColor(muted)
@@ -288,12 +288,12 @@ internal class NativePlaybackEpisodePicker(
         val title = entry.title().ifBlank { "第 ${number(index)} 集" }
         content.contentDescription = "第 ${number(index)} 集，$title，$statusText"
         val line = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; orientation = if (grid) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL }
-        line.addView(label(number(index).toString().padStart(2, '0'), if (grid) 22f else 20f).apply {
+        line.addView(label(number(index).toString().padStart(2, '0'), if (grid) 24f else 18f).apply {
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
         }, LinearLayout.LayoutParams(if (grid) ViewGroup.LayoutParams.WRAP_CONTENT else dp(46), ViewGroup.LayoutParams.WRAP_CONTENT))
         val details = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        if (!grid) details.addView(label(title, if (television) 16f else 15f).apply { includeFontPadding = false; maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
-        if (!grid && statusText.isNotBlank()) details.addView(label(statusText, if (television) 13f else 12f).apply { includeFontPadding = false; setTextColor(if (playing) accent else muted); maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
+        if (!grid) details.addView(label(title, 16f).apply { includeFontPadding = false; maxLines = 2; ellipsize = TextUtils.TruncateAt.END })
+        if (!grid && statusText.isNotBlank()) details.addView(label(statusText, 12f).apply { includeFontPadding = false; setTextColor(if (playing) accent else muted); maxLines = 1; ellipsize = TextUtils.TruncateAt.END })
         line.addView(details, if (grid) LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT) else LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (!grid && (playing || watched)) line.addView(ImageView(activity).apply {
             setImageResource(if (playing) R.drawable.episode_play else R.drawable.episode_check)

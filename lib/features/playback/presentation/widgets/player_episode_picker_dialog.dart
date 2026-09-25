@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_menu_style.dart';
@@ -373,7 +374,8 @@ class _PlaybackEpisodePickerDialogState
               child: FittedBox(
             fit: BoxFit.scaleDown,
             child: Text('$number',
-                maxLines: 1, style: const TextStyle(fontSize: 22)),
+                maxLines: 1,
+                style: const TextStyle(fontSize: AppTextSizes.display)),
           ))
         else
           Row(children: [
@@ -381,7 +383,8 @@ class _PlaybackEpisodePickerDialogState
                 width: 42,
                 child: Text(number.toString().padLeft(2, '0'),
                     style: const TextStyle(
-                        fontSize: 20, color: AppColors.foregroundBody))),
+                        fontSize: AppTextSizes.section,
+                        color: AppColors.foregroundBody))),
             const SizedBox(width: 8),
             Expanded(
                 child: Column(
@@ -392,14 +395,14 @@ class _PlaybackEpisodePickerDialogState
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          fontSize: widget.isTelevision ? 16 : 15,
+                          fontSize: AppTextSizes.title,
                           height: 1.2)),
                   if (status.isNotEmpty)
                     Text(status,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                            fontSize: widget.isTelevision ? 13 : 12,
+                            fontSize: AppTextSizes.caption,
                             height: 1.2,
                             color:
                                 playing ? _accent : AppColors.foregroundMuted)),
@@ -546,7 +549,7 @@ class _PlaybackEpisodePickerDialogState
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                    fontSize: 22,
+                                    fontSize: AppTextSizes.display,
                                     fontWeight: FontWeight.w600))),
                         _tool(Icons.view_list_rounded, '列表',
                             _loading ? null : () => _setGrid(false),
@@ -585,11 +588,10 @@ class _PlaybackEpisodePickerDialogState
                                                       maxLines: 1,
                                                       overflow:
                                                           TextOverflow.ellipsis,
-                                                      style: TextStyle(
-                                                          fontSize: widget
-                                                                  .isTelevision
-                                                              ? 16
-                                                              : 14))),
+                                                      style: const TextStyle(
+                                                          fontSize:
+                                                              AppTextSizes
+                                                                  .title))),
                                               if (_seasons.length > 1)
                                                 const Icon(
                                                     Icons.expand_more_rounded,
@@ -627,7 +629,8 @@ class _PlaybackEpisodePickerDialogState
                                                                         .ellipsis,
                                                                 style: const TextStyle(
                                                                     fontSize:
-                                                                        13,
+                                                                        AppTextSizes
+                                                                            .caption,
                                                                     color: AppColors
                                                                         .foregroundMuted))),
                                                         const Icon(
@@ -694,11 +697,9 @@ class _PlaybackEpisodePickerDialogState
                                                     : '共 ${_queue.entries.length} 集',
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
-                                                style: TextStyle(
+                                                style: const TextStyle(
                                                     fontSize:
-                                                        widget.isTelevision
-                                                            ? 13
-                                                            : 12,
+                                                        AppTextSizes.caption,
                                                     color: AppColors
                                                         .foregroundMuted),
                                               ));

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/app/theme/app_theme.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
@@ -45,6 +46,39 @@ const _match = MetadataMatchResult(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  for (final television in [false, true]) {
+    testWidgets('empty result metadata leaves no gap TV $television',
+        (tester) async {
+      final repository = await _repository();
+      addTearDown(repository.dispose);
+      await repository.saveFavoriteResults([
+        SearchResult.fromJson({..._favorite.toJson(), 'providerName': ''}),
+      ]);
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => television),
+          appSettingsProvider.overrideWithValue(_settings),
+          searchPreferencesRepositoryProvider.overrideWithValue(repository),
+          searchFavoriteMetadataServiceProvider.overrideWithValue(
+            SearchFavoriteMetadataService(
+              resolveMatch: ({required settings, required request}) async => null,
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.dark(),
+          home: const SearchPage(favoritesOnly: true),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      final title = find.text('Saved title').first;
+      final content = find.ancestor(of: title, matching: find.byType(Column)).first;
+      expect(tester.widget<Column>(content).children, hasLength(1));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
 
   test('backfills existing TMDB favorite without altering saved metadata',
       () async {

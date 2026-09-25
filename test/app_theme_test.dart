@@ -2,10 +2,46 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/app/theme/app_theme.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  test('content typography has consistent semantic line heights', () {
+    final theme = AppTheme.dark();
+    expect(AppTextSizes.hero, 36);
+    expect(AppTextSizes.display, 24);
+    expect(AppTextSizes.section, 18);
+    expect(AppTextSizes.title, 16);
+    expect(AppTextSizes.body, 14);
+    expect(AppTextSizes.caption, 12);
+    expect(theme.textTheme.headlineSmall!.fontSize, 24);
+    expect(theme.textTheme.titleLarge!.fontSize, 24);
+    expect(theme.textTheme.titleMedium!.fontSize, 18);
+    expect(theme.textTheme.titleSmall!.fontSize, 16);
+    expect(theme.textTheme.bodyLarge!.fontSize, 16);
+    expect(theme.textTheme.bodyMedium!.fontSize, 14);
+    expect(theme.textTheme.bodySmall!.fontSize, 12);
+    expect(theme.textTheme.headlineSmall!.height, AppLineHeights.hero);
+    for (final style in [
+      theme.textTheme.titleLarge!,
+      theme.textTheme.titleMedium!,
+      theme.textTheme.titleSmall!,
+    ]) {
+      expect(style.height, AppLineHeights.title);
+      expect(style.letterSpacing, 0);
+    }
+    expect(theme.textTheme.bodyLarge!.height, AppLineHeights.bodyLarge);
+    expect(theme.textTheme.bodyMedium!.height, AppLineHeights.body);
+    expect(theme.textTheme.bodySmall!.height, AppLineHeights.supporting);
+    expect(theme.filledButtonTheme.style!.padding!.resolve({}),
+        const EdgeInsets.symmetric(horizontal: 18, vertical: 16));
+    expect(AppContentSpacing.sectionHeading, 10);
+    expect(AppContentSpacing.sectionStart, 12);
+    expect(AppContentSpacing.section, 8);
+    expect(AppContentSpacing.listItem, 8);
+  });
+
   test('neutral text is softer without changing white accents', () {
     final theme = AppTheme.dark();
     expect(theme.textTheme.titleLarge!.color, const Color(0xFFE8E8EC));

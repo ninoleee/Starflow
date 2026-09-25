@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 import '../application/live_playback_controller.dart';
@@ -86,7 +87,7 @@ class _LiveNetworkSpeedLabelState extends State<LiveNetworkSpeedLabel> {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 12,
+                  fontSize: AppTextSizes.caption,
                   fontWeight: FontWeight.w600)),
         ),
       );

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_network_image.dart';
@@ -10,7 +11,48 @@ import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
+  testWidgets('detail block title is 10 and bottom spacing is 8',
+      (tester) async {
+    const contentKey = ValueKey('content');
+    const nextKey = ValueKey('next');
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Column(
+          children: [
+            const DetailBlock(
+              title: 'Episodes',
+              child: SizedBox(key: contentKey, height: 100),
+            ),
+            const SizedBox(key: nextKey, height: 20),
+          ],
+        ),
+      ),
+    ));
+    expect(
+        tester.getRect(find.byKey(nextKey)).top -
+            tester.getRect(find.byKey(contentKey)).bottom,
+        8);
+    expect(
+      tester.getRect(find.byKey(contentKey)).top -
+          tester.getRect(find.text('Episodes')).bottom,
+        10,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   group('detail shared widget helpers', () {
+    testWidgets('DetailGroupLabel uses the title text size', (tester) async {
+      await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+          body: DetailGroupLabel('导演'),
+        ),
+      ));
+      final text = tester.widget<Text>(find.text('导演'));
+      expect(text.style!.fontSize, AppTextSizes.title);
+      expect(text.style!.fontWeight, FontWeight.w700);
+      expect(text.style!.height, AppLineHeights.title);
+    });
+
     test('resolveDetailPathTail decodes url and path tails', () {
       expect(
         resolveDetailPathTail(

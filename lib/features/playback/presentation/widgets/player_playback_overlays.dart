@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 
@@ -146,7 +147,7 @@ class _StartupMetricText extends StatelessWidget {
             text: '$label ',
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.72),
-              fontSize: 12,
+              fontSize: AppTextSizes.caption,
               fontWeight: FontWeight.w600,
               shadows: const [
                 Shadow(
@@ -161,7 +162,7 @@ class _StartupMetricText extends StatelessWidget {
             text: value,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 13,
+              fontSize: AppTextSizes.body,
               fontWeight: FontWeight.w700,
               shadows: [
                 Shadow(

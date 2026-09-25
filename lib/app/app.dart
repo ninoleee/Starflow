@@ -26,6 +26,9 @@ class StarflowApp extends ConsumerWidget {
     );
     final theme = AppTheme.dark(accent: accent);
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    final uiTextScale = ref.watch(
+      appSettingsProvider.select((settings) => settings.uiTextScale),
+    );
     return AppRuntimeRecoveryBoundary(
       child: MaterialApp.router(
         title: 'Starflow',
@@ -34,40 +37,59 @@ class StarflowApp extends ConsumerWidget {
         darkTheme: theme,
         themeMode: ThemeMode.dark,
         routerConfig: ref.watch(appRouterProvider),
-        builder: (context, child) => Actions(
-          actions: <Type, Action<Intent>>{
-            DirectionalFocusIntent: _tvSafeDirectionalFocusAction,
-          },
-          child: TvRemoteShortcuts(
-            shortcuts: isTelevision
-                ? const {
-                    SingleActivator(LogicalKeyboardKey.goBack): DismissIntent(),
-                    SingleActivator(LogicalKeyboardKey.escape): DismissIntent(),
-                    SingleActivator(LogicalKeyboardKey.select):
-                        ActivateIntent(),
-                    SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-                    SingleActivator(LogicalKeyboardKey.numpadEnter):
-                        ActivateIntent(),
-                    SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
-                    SingleActivator(LogicalKeyboardKey.gameButtonA):
-                        ActivateIntent(),
-                  }
-                : const {},
-            child: Actions(
-              actions: {
-                if (isTelevision)
-                  DismissIntent: CallbackAction<DismissIntent>(onInvoke: (_) {
-                    final focused = FocusManager.instance.primaryFocus?.context;
-                    if (focused != null) Navigator.maybeOf(focused)?.maybePop();
-                    return null;
-                  }),
-              },
-              child: MobileTextInputDismissal(
-                child: child ?? const SizedBox.shrink(),
+        builder: (context, child) {
+          final appChild = Actions(
+            actions: <Type, Action<Intent>>{
+              DirectionalFocusIntent: _tvSafeDirectionalFocusAction,
+            },
+            child: TvRemoteShortcuts(
+              shortcuts: isTelevision
+                  ? const {
+                      SingleActivator(LogicalKeyboardKey.goBack):
+                          DismissIntent(),
+                      SingleActivator(LogicalKeyboardKey.escape):
+                          DismissIntent(),
+                      SingleActivator(LogicalKeyboardKey.select):
+                          ActivateIntent(),
+                      SingleActivator(LogicalKeyboardKey.enter):
+                          ActivateIntent(),
+                      SingleActivator(LogicalKeyboardKey.numpadEnter):
+                          ActivateIntent(),
+                      SingleActivator(LogicalKeyboardKey.space):
+                          ActivateIntent(),
+                      SingleActivator(LogicalKeyboardKey.gameButtonA):
+                          ActivateIntent(),
+                    }
+                  : const {},
+              child: Actions(
+                actions: {
+                  if (isTelevision)
+                    DismissIntent: CallbackAction<DismissIntent>(onInvoke: (_) {
+                      final focused =
+                          FocusManager.instance.primaryFocus?.context;
+                      if (focused != null) {
+                        Navigator.maybeOf(focused)?.maybePop();
+                      }
+                      return null;
+                    }),
+                },
+                child: MobileTextInputDismissal(
+                  child: child ?? const SizedBox.shrink(),
+                ),
               ),
             ),
-          ),
-        ),
+          );
+          final mediaQuery = MediaQuery.of(context);
+          final systemScale = mediaQuery.textScaler.scale(1);
+          final effectiveScale =
+              (systemScale * uiTextScale).clamp(0.5, 3.0).toDouble();
+          return MediaQuery(
+            data: mediaQuery.copyWith(
+              textScaler: TextScaler.linear(effectiveScale),
+            ),
+            child: appChild,
+          );
+        },
       ),
     );
   }

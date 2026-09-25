@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:starflow/app/theme/app_colors.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:starflow/core/logging/app_logger.dart';
@@ -872,10 +873,16 @@ _StarflowButtonPalette _starflowButtonPalette(
   ThemeData theme, {
   required StarflowButtonVariant variant,
   required bool enabled,
+  required bool isTelevision,
 }) {
   final isDark = theme.brightness == Brightness.dark;
   final actions = AppActionColors.of(theme);
-  final palette = switch (variant) {
+  // Keep the white TV focus outline distinct from primary button fills.
+  final effectiveVariant =
+      isTelevision && variant == StarflowButtonVariant.primary
+          ? StarflowButtonVariant.secondary
+          : variant;
+  final palette = switch (effectiveVariant) {
     StarflowButtonVariant.primary => _StarflowButtonPalette(
         backgroundColor: actions.primary,
         foregroundColor: actions.onPrimary,
@@ -957,18 +964,11 @@ class StarflowButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
-    // Dialog actions need a subdued fill so the white TV focus outline stands out.
-    final isTvPopup = isTelevision &&
-        (context.findAncestorWidgetOfExactType<Dialog>() != null ||
-            context.findAncestorWidgetOfExactType<BottomSheet>() != null);
-    final effectiveVariant =
-        isTvPopup && variant == StarflowButtonVariant.primary
-            ? StarflowButtonVariant.secondary
-            : variant;
     final palette = _starflowButtonPalette(
       Theme.of(context),
-      variant: effectiveVariant,
+      variant: variant,
       enabled: onPressed != null && !loading,
+      isTelevision: isTelevision,
     );
     final radius = BorderRadius.circular(AppRadii.pill);
     final button = DecoratedBox(
@@ -1040,7 +1040,7 @@ class StarflowButton extends ConsumerWidget {
   }
 }
 
-class StarflowIconButton extends StatelessWidget {
+class StarflowIconButton extends ConsumerWidget {
   const StarflowIconButton({
     super.key,
     required this.icon,
@@ -1069,11 +1069,12 @@ class StarflowIconButton extends StatelessWidget {
   final double size;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final palette = _starflowButtonPalette(
       Theme.of(context),
       variant: variant,
       enabled: onPressed != null,
+      isTelevision: ref.watch(isTelevisionProvider).value ?? false,
     );
     final radius = BorderRadius.circular(AppRadii.pill);
     final child = _TvOutlinedFocusableAction(
@@ -1121,6 +1122,7 @@ class StarflowChipButton extends StatefulWidget {
     this.icon,
     this.onFocused,
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
     this.focusNode,
     this.focusId,
     this.accentColor,
@@ -1137,6 +1139,7 @@ class StarflowChipButton extends StatefulWidget {
   final IconData? icon;
   final VoidCallback? onFocused;
   final bool autofocus;
+  final bool focusableWhenDisabled;
   final FocusNode? focusNode;
   final String? focusId;
   final Color? accentColor;
@@ -1148,8 +1151,8 @@ class StarflowChipButton extends StatefulWidget {
 
   /// Includes the thickest focus border; independent of selected/focus state.
   static double minimumHeight(BuildContext context) {
-    final style =
-        Theme.of(context).textTheme.labelLarge ?? const TextStyle(fontSize: 14);
+    final style = Theme.of(context).textTheme.labelLarge ??
+        const TextStyle(fontSize: AppTextSizes.body);
     final painter = TextPainter(
       text: TextSpan(text: 'Mg', style: style.copyWith(height: 1.2)),
       textDirection: Directionality.of(context),
@@ -1250,6 +1253,7 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
     final radius = BorderRadius.circular(AppRadii.pill);
     final chip = TvFocusableAction(
       onPressed: widget.onPressed,
+      focusableWhenDisabled: widget.focusableWhenDisabled,
       onFocused: widget.onFocused,
       autofocus: widget.autofocus,
       focusNode: _effectiveFocusNode,
@@ -1332,6 +1336,7 @@ class StarflowSelectionTile extends StatelessWidget {
     this.leading,
     this.trailing,
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
     this.focusNode,
     this.focusId,
   });
@@ -1343,6 +1348,7 @@ class StarflowSelectionTile extends StatelessWidget {
   final Widget? trailing;
   final VoidCallback? onPressed;
   final bool autofocus;
+  final bool focusableWhenDisabled;
   final FocusNode? focusNode;
   final String? focusId;
 
@@ -1354,6 +1360,7 @@ class StarflowSelectionTile extends StatelessWidget {
     final isDark = theme.brightness == Brightness.dark;
     return _TvOutlinedFocusableAction(
       onPressed: onPressed,
+      focusableWhenDisabled: focusableWhenDisabled,
       autofocus: autofocus,
       focusNode: focusNode,
       focusId: focusId,
@@ -1423,6 +1430,7 @@ class StarflowToggleTile extends StatelessWidget {
     this.focusNode,
     this.focusId,
     this.autofocus = false,
+    this.focusableWhenDisabled = false,
   });
 
   final String title;
@@ -1432,10 +1440,12 @@ class StarflowToggleTile extends StatelessWidget {
   final FocusNode? focusNode;
   final String? focusId;
   final bool autofocus;
+  final bool focusableWhenDisabled;
 
   @override
   Widget build(BuildContext context) {
     return StarflowSelectionTile(
+      focusableWhenDisabled: focusableWhenDisabled,
       title: title,
       subtitle: subtitle,
       value: value ? '已开启' : '已关闭',

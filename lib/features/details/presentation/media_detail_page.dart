@@ -7,6 +7,7 @@ export 'package:starflow/features/details/presentation/detail_page_providers.dar
 import 'package:flutter/foundation.dart';
 import 'package:starflow/features/details/application/detail_metadata_service.dart';
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -1911,13 +1912,13 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         '加载剧集失败：$error',
         style: const TextStyle(
           color: AppColors.foregroundMuted,
-          fontSize: 14,
+          fontSize: AppTextSizes.body,
         ),
       ),
     );
     if (target.hasMatchedResource) {
       return Padding(
-        padding: const EdgeInsets.only(bottom: 26),
+        padding: const EdgeInsets.only(bottom: AppContentSpacing.section),
         child: content,
       );
     }
@@ -2103,6 +2104,14 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                       padding: EdgeInsets.zero,
                       children: [
                         DetailHeroSection(
+                          key: ValueKey((
+                            widget.target.sourceId,
+                            widget.target.itemId,
+                            widget.target.itemType,
+                            widget.target.seasonNumber,
+                            widget.target.episodeNumber,
+                            widget.target.title,
+                          )),
                           target: target,
                           simplifyVisualEffects: slimDetailHeroEnabled,
                           isTelevision: isTelevision,
@@ -2177,6 +2186,12 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                   },
                                 ),
                               if (showDeferredDetailContent)
+                                if (!target.isSeries)
+                                  const SizedBox(
+                                    height:
+                                        AppContentSpacing.heroToDirectContent,
+                                  ),
+                              if (showDeferredDetailContent)
                                 _buildOverviewContent(
                                   target: target,
                                   isTelevision: isTelevision,
@@ -2200,7 +2215,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                     children: [
                                       if (target.resolvedDirectorProfiles
                                           .isNotEmpty) ...[
-                                        const InfoLabel('导演'),
+                                        const DetailGroupLabel('导演'),
                                         const SizedBox(height: 10),
                                         PersonRail(
                                           people:
@@ -2225,7 +2240,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                                         const SizedBox(height: 18),
                                       if (target.resolvedActorProfiles
                                           .isNotEmpty) ...[
-                                        const InfoLabel('演员'),
+                                        const DetailGroupLabel('演员'),
                                         const SizedBox(height: 10),
                                         PersonRail(
                                           people: target.resolvedActorProfiles,

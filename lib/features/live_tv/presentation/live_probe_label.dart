@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:starflow/app/theme/app_typography.dart';
 
 import '../application/live_channel_probe_controller.dart';
 import '../data/live_channel_probe.dart';
@@ -41,7 +42,8 @@ class LiveProbeLabel extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.left,
-                      style: TextStyle(fontSize: 11, color: color))),
+                      style:
+                          TextStyle(fontSize: AppTextSizes.caption, color: color))),
             ]),
           ),
         ),
