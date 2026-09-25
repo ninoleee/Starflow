@@ -121,6 +121,9 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_BUFFERING) {
+                    diagnostics.logPlaybackHealth("buffering")
+                }
                 diagnostics.playbackPerformanceTracker.onBufferingChanged(
                     buffering = playbackState == Player.STATE_BUFFERING,
                     playWhenReady = session.player?.playWhenReady == true,
@@ -382,6 +385,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onPause() {
+        session.frameRate.restore()
         remote.resetInputState()
         controllerView.setFocusRequestsAllowed(false)
         if (externalSubtitles.subtitleSearchActive) {

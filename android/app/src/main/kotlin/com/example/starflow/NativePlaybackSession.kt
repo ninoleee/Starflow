@@ -16,6 +16,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.LoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
@@ -66,6 +67,16 @@ internal class NativePlaybackSession(private val host: Host) {
         private set
 
     private var playbackAllocator: DefaultAllocator? = null
+    private var adaptiveLoadControl: NativePlaybackLoadControl? = null
+    val bufferTargetBytes: Int? get() = adaptiveLoadControl?.currentTargetBytes
+    val frameRate by lazy { NativePlaybackFrameRateController(host.activity) }
+
+    fun onMemoryPressure() { adaptiveLoadControl?.onMemoryPressure() }
+
+    fun updatePlaybackHealth() {
+        val current = player ?: return
+        if (host.isTelevisionDevice) frameRate.update(current)
+    }
     val cachedMediaBytes: Long?
         get() = playbackAllocator?.totalBytesAllocated?.toLong()
 
@@ -483,6 +494,7 @@ internal class NativePlaybackSession(private val host: Host) {
     }
 
     fun releasePlayer() {
+        frameRate.restore()
         host.remote.resetInputState()
         host.controllerView.cancelPendingControllerFocus()
         host.launch.cancelPlaybackLaunchTimeout()
@@ -507,6 +519,7 @@ internal class NativePlaybackSession(private val host: Host) {
         playbackBandwidthMeter = null
         playbackTransferProgress = null
         playbackAllocator = null
+        adaptiveLoadControl = null
         host.diagnostics.latestNetworkBytesPerSecond = 0L
         host.diagnostics.latestNetworkSampleAtMs = 0L
         host.diagnostics.networkSpeedVisible = false
@@ -539,14 +552,14 @@ internal class NativePlaybackSession(private val host: Host) {
         }
     }
 
-    private fun buildLoadControl(): DefaultLoadControl {
+    private fun buildLoadControl(): LoadControl {
         val memoryClassMb =
             (host.activity.getSystemService(Activity.ACTIVITY_SERVICE) as ActivityManager)
                 .memoryClass
         val targetObject = host.target.decodePlaybackTargetObject()
         val width = targetObject.optInt("width", 0)
         val height = targetObject.optInt("height", 0)
-        val bitrate = targetObject.optInt("bitrate", 0)
+        val bitrate = targetObject.optLong("bitrate", 0L)
         val codec = targetObject.optString("videoCodec").trim().lowercase()
         val is4k = width >= 3840 || height >= 2160
         val isHevc = codec == "hevc" || codec == "h265" || codec == "x265"
@@ -591,7 +604,7 @@ internal class NativePlaybackSession(private val host: Host) {
 
         val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
         playbackAllocator = allocator
-        return DefaultLoadControl.Builder()
+        val delegate = DefaultLoadControl.Builder()
             .setAllocator(allocator)
             .setBufferDurationsMs(
                 bufferConfig.minBufferMs,
@@ -602,6 +615,11 @@ internal class NativePlaybackSession(private val host: Host) {
             .setTargetBufferBytes(bufferConfig.targetBufferBytes)
             .setPrioritizeTimeOverSizeThresholds(bufferConfig.prioritizeTimeOverSizeThresholds)
             .build()
+        if (!host.isTelevisionDevice || !NativePlaybackSource.isHttpPlaybackUrl(
+                host.activity.intent.getStringExtra(EXTRA_URL).orEmpty())) return delegate
+        return NativePlaybackLoadControl(delegate, allocator, bufferConfig,
+            NativePlaybackBufferBudget.limit(memoryClassMb), bitrate, playbackTransferProgress)
+            .also { adaptiveLoadControl = it }
     }
 
     internal fun buildExtractorsFactory(audioCodec: String = ""): ExtractorsFactory =

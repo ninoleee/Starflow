@@ -63,6 +63,7 @@ internal class NativePlaybackRuntimeController(
                 persistPlaybackProgress()
                 host.diagnostics.logPlaybackRuntimeIfNeeded()
                 host.session.playbackTransferProgress?.sampleNetworkSpeed()
+                host.session.updatePlaybackHealth()
                 host.diagnostics.updateNetworkSpeedLabelIfVisible()
                 if (playbackRuntimeActive && generation == runtimeGeneration) {
                     playbackRuntimeHandler.postDelayed(this, PLAYBACK_RUNTIME_INTERVAL_MS)

@@ -11,6 +11,11 @@ internal class NativePlaybackTransferProgress(
     private var bytes = 0L
     private var sampledAtMs = now()
     private val speedWindow = PlaybackNetworkSpeedWindow()
+    @Volatile var rawBytesPerSecond: Long? = null
+        private set
+    private var activeTransfers = 0
+    @Volatile var isNetworkTransferActive = false
+        private set
     var networkBytesPerSecond: Long? = null
         private set
 
@@ -19,7 +24,8 @@ internal class NativePlaybackTransferProgress(
         val sampledAt = now()
         val elapsed = sampledAt - sampledAtMs
         if (elapsed < 1_000L) return
-        networkBytesPerSecond = speedWindow.add((bytes.toDouble() * 1_000 / elapsed).toLong())
+        rawBytesPerSecond = (bytes.toDouble() * 1_000 / elapsed).toLong()
+        networkBytesPerSecond = speedWindow.add(rawBytesPerSecond!!)
         bytes = 0L
         sampledAtMs = sampledAt
     }
@@ -30,7 +36,11 @@ internal class NativePlaybackTransferProgress(
 
     override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) = Unit
 
-    override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) = Unit
+    @Synchronized
+    override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {
+        if (isNetwork) activeTransfers++
+        isNetworkTransferActive = activeTransfers > 0
+    }
 
     @Synchronized
     override fun onBytesTransferred(
@@ -45,5 +55,9 @@ internal class NativePlaybackTransferProgress(
         }
     }
 
-    override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) = Unit
+    @Synchronized
+    override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {
+        if (isNetwork) activeTransfers = (activeTransfers - 1).coerceAtLeast(0)
+        isNetworkTransferActive = activeTransfers > 0
+    }
 }

@@ -43,6 +43,29 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
     var playbackLastRuntimeLogAtMs = 0L
     var subtitleLastCueLogAtMs = -1L
     private var lastAudioTracks = ""
+    private val healthPolicy = NativePlaybackHealthPolicy()
+    private var currentVideoDecoder = ""
+    private var currentAudioDecoder = ""
+
+    fun logPlaybackHealth(reason: String, eventCount: Int = 0) {
+        val current = host.session.player ?: return
+        if (!healthPolicy.admit(reason, SystemClock.elapsedRealtime())) return
+        val bufferMs = current.totalBufferedDuration.coerceAtLeast(0L)
+        val transfer = host.session.playbackTransferProgress
+        val buffering = current.playbackState == Player.STATE_BUFFERING
+        val reading = transfer?.isNetworkTransferActive == true
+        NativeAppLogger.info("playback.health", "Playback health engine=exo reason=$reason " +
+            "signal=${NativePlaybackHealthPolicy.classify(bufferMs, reading, buffering)} " +
+            "eventCount=$eventCount positionMs=${current.currentPosition.coerceAtLeast(0)} " +
+            "bufferedMs=$bufferMs cacheBytes=${host.session.cachedMediaBytes ?: -1} " +
+            "targetBytes=${host.session.bufferTargetBytes ?: -1} loading=${current.isLoading} " +
+            "reading=$reading bytesPerSecond=${transfer?.rawBytesPerSecond ?: -1} " +
+            "speed=${current.playbackParameters.speed} " +
+            "videoDecoder=${currentVideoDecoder.ifBlank { "unknown" }} " +
+            "audioDecoder=${currentAudioDecoder.ifBlank { "unknown" }} " +
+            "frameRate=${current.videoFormat?.frameRate ?: -1} " +
+            "width=${current.videoSize.width} height=${current.videoSize.height}")
+    }
 
     fun logSubtitleCues(cueGroup: CueGroup) {
         if (cueGroup.cues.isEmpty()) return
@@ -84,6 +107,8 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
                 initializationDurationMs: Long,
             ) {
                 playbackPerformanceTracker.onVideoDecoder(decoderName)
+                currentVideoDecoder = decoderName
+                logPlaybackHealth("video-decoder")
             }
 
             override fun onAudioDecoderInitialized(
@@ -93,6 +118,7 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
                 initializationDurationMs: Long,
             ) {
                 playbackPerformanceTracker.onAudioDecoder(decoderName)
+                currentAudioDecoder = decoderName
                 NativeAppLogger.info("playback.audio", "Audio decoder initialized name=$decoderName durationMs=$initializationDurationMs")
             }
 
@@ -127,6 +153,7 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
                 elapsedMs: Long,
             ) {
                 playbackPerformanceTracker.onDroppedVideoFrames(droppedFrames)
+                logPlaybackHealth("dropped-frames", droppedFrames)
             }
 
             override fun onAudioUnderrun(
@@ -136,6 +163,7 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
                 elapsedSinceLastFeedMs: Long,
             ) {
                 playbackPerformanceTracker.onAudioUnderrun()
+                logPlaybackHealth("audio-underrun", 1)
             }
         }
 
@@ -282,6 +310,9 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
             }
         playbackPerformanceTracker.begin(sourceBitrate = targetObject.optLong("bitrate", 0L))
         lastAudioTracks = ""
+        healthPolicy.reset()
+        currentVideoDecoder = ""
+        currentAudioDecoder = ""
         bandwidthWarningShown = false
     }
 

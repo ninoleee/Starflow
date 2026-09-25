@@ -36,7 +36,7 @@ object NativePlaybackBufferPolicy {
                 minBufferMs = 20_000,
                 maxBufferMs = 60_000,
                 bufferForPlaybackMs = 1_500,
-                bufferForPlaybackAfterRebufferMs = 4_000,
+                bufferForPlaybackAfterRebufferMs = 2_000,
                 targetBufferBytes = (if (isHeavyPlayback) 48 else 32) * MEBIBYTE,
                 prioritizeTimeOverSizeThresholds = false,
             )
@@ -45,7 +45,7 @@ object NativePlaybackBufferPolicy {
                 minBufferMs = 30_000,
                 maxBufferMs = 90_000,
                 bufferForPlaybackMs = 2_000,
-                bufferForPlaybackAfterRebufferMs = 6_000,
+                bufferForPlaybackAfterRebufferMs = 2_000,
                 targetBufferBytes = (if (isHeavyPlayback) 80 else 64) * MEBIBYTE,
                 prioritizeTimeOverSizeThresholds = false,
             )
@@ -54,7 +54,7 @@ object NativePlaybackBufferPolicy {
                 minBufferMs = 45_000,
                 maxBufferMs = 120_000,
                 bufferForPlaybackMs = 2_500,
-                bufferForPlaybackAfterRebufferMs = 8_000,
+                bufferForPlaybackAfterRebufferMs = 2_000,
                 targetBufferBytes = (if (isHeavyPlayback) 128 else 96) * MEBIBYTE,
                 prioritizeTimeOverSizeThresholds = false,
             )
@@ -71,7 +71,7 @@ object NativePlaybackBufferPolicy {
                     bufferForPlaybackMs = minOf(base.bufferForPlaybackMs, 1_200),
                     bufferForPlaybackAfterRebufferMs = minOf(
                         base.bufferForPlaybackAfterRebufferMs,
-                        3_500,
+                        if (isTelevision) 1_500 else 3_500,
                     ),
                     bandwidthProfile = "fast",
                 )
@@ -82,7 +82,8 @@ object NativePlaybackBufferPolicy {
                     ),
                     bufferForPlaybackAfterRebufferMs = minOf(
                         base.minBufferMs,
-                        base.bufferForPlaybackAfterRebufferMs + 2_000,
+                        base.bufferForPlaybackAfterRebufferMs +
+                            (if (isTelevision) 1_000 else 2_000),
                     ),
                     bandwidthProfile = "constrained",
                 )
@@ -99,15 +100,8 @@ object NativePlaybackBufferPolicy {
             else -> 96 * MEBIBYTE
         }
         return bandwidthAdjusted.copy(
+            // Keep read-ahead capacity independent of startup and resume thresholds.
             minBufferMs = maxOf(bandwidthAdjusted.minBufferMs, 30_000),
-            bufferForPlaybackMs = maxOf(
-                bandwidthAdjusted.bufferForPlaybackMs,
-                6_000,
-            ),
-            bufferForPlaybackAfterRebufferMs = maxOf(
-                bandwidthAdjusted.bufferForPlaybackAfterRebufferMs,
-                12_000,
-            ),
             targetBufferBytes = maxOf(
                 bandwidthAdjusted.targetBufferBytes,
                 episodeTargetBufferBytes,

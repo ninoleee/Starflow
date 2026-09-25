@@ -51,6 +51,17 @@ class NativePlaybackActivity : Activity() {
         super.onDestroy()
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level == TRIM_MEMORY_RUNNING_LOW || level == TRIM_MEMORY_RUNNING_CRITICAL ||
+            level >= TRIM_MEMORY_BACKGROUND) playback.session.onMemoryPressure()
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        playback.session.onMemoryPressure()
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         playback.onWindowFocusChanged(hasFocus)

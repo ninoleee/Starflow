@@ -250,6 +250,8 @@
 
 ### F15：播放缓冲、定位与解码
 
+以下表格保留 2026-09-20 审查时的策略快照。2026-09-25 已调整 TV Exo 恢复门槛并取消切集 `6s / 12s` 等待要求，当前规则见 [播放架构](../architecture.md)；下表旧阈值不代表现行实现。
+
 入口：[Exo 缓冲策略](../../android/app/src/main/kotlin/com/example/starflow/NativePlaybackBufferPolicy.kt#L17)、[MPV 缓冲策略](../../lib/features/playback/application/mpv_tuning_policy.dart#L34)、[TS extractor](../../android/app/src/main/kotlin/com/example/starflow/NativePlaybackExtractorsFactory.kt)。
 
 | 路径 | 当前成本/策略 | 需要验证的取舍 |

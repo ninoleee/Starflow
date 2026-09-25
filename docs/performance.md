@@ -2,6 +2,12 @@
 
 本文负责主机侧 smoke 计时、可重复运行方法及自动化回归证据；验证日期以各节为准。2026-09-24 仅整理章节和归并直播记录，不重跑历史测试。电视、手机和桌面实际界面的测量方法见 [真机性能验证](performance-device.md)，组件关系见 [架构说明](architecture.md)。下文历史代码优化只说明工作量与策略变化，不代表已经测得设备收益。
 
+## 2026-09-25 TV Exo 短缓冲恢复
+
+- 使用 JDK 17，Gradle 的 `local.properties` 与 `.fvm/flutter_sdk` 均指向固定 Flutter 3.38.10，依赖配置为对应 Dart 3.10.9，未切换 SDK。在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativePlaybackBufferPolicyTest' --tests '*NativePlaybackLoadControlTest' --tests '*NativePlaybackWatchdogPolicyTest' --tests '*NativePlaybackEpisodeControllerTest' --console=plain --quiet`，4 类共 **40 项通过，0 失败／错误／跳过**，原生 Kotlin 与测试实际编译。
+- 策略测试覆盖 TV 内存档边界、普通／重型媒体、未知／快／均衡／慢网、首次打开／内部切集，以及手机参数不变。新增 Media3 1.10.1 `DefaultLoadControl` 测试使用远程媒体时间轴，验证尚未达到目标字节量时，起播／恢复阈值前 1ms 不放行、达到阈值即放行且继续后台预读；既有切集和看门狗策略一并回归。首轮新增用例误用空时间轴导致 1 项失败，补齐远程媒体夹具后重跑通过。
+- `git diff --check` 通过。当前规则见 [播放架构](architecture.md)，旧审查表保留为历史快照。这是主机策略／Media3 加载判断测试，不运行真实网络流、ARM 解码或 TV 界面，不代表实际等待时间或连续播放效果；未构建 APK、运行发布预设或递增版本，未重跑 Flutter 全量测试。
+
 ## 2026-09-25 播放器版本选择
 
 - 后续入口消失修复：NAS / WebDAV 索引文件的 `playbackItemId` 可为空，原版本转换只读取该字段，未回退到候选自身的索引 ID，导致切换后入口判定失败。新增电影和单集连续 `A -> B -> A -> B` 测试先复现空 ID，再修复共享转换；同时补齐候选缺失的类型和季集上下文，检查 JSON 往返及 STRM 解析后仍可查询新文件的版本。相同八文件集合重跑 **130 项通过**，定向分析无问题，`git diff --check` 通过。本次未改 Kotlin，未重跑 Android JVM 或做真机验收；下列 128 / 48 项是此前批次，不覆盖当时遗漏的空 ID 场景。
