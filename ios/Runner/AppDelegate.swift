@@ -4,6 +4,7 @@ import AVKit
 import MediaPlayer
 import ObjectiveC.runtime
 import UIKit
+import Photos
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -15,6 +16,7 @@ import UIKit
   )
   private let settingsDocumentExporter = SettingsDocumentExporter()
   private let nativePlaybackStore = NativePlaybackMemoryStore()
+  private weak var activeNativePlaybackController: NativePlaybackViewController?
   private lazy var playbackSystemSessionBridge = PlaybackSystemSessionBridge {
     [weak self] in
     self?.resolveTopViewController()
@@ -72,6 +74,35 @@ import UIKit
     attachSystemVolumeViewIfNeeded()
     channel.setMethodCallHandler { [weak self] call, result in
       switch call.method {
+      case "saveLoginQrImage":
+        guard let bytes = call.arguments as? FlutterStandardTypedData,
+          bytes.data.count <= 1024 * 1024,
+          let image = UIImage(data: bytes.data) else {
+          result(false)
+          return
+        }
+        let save: (PHAuthorizationStatus) -> Void = { status in
+          let hasPhotoAccess: Bool
+          if #available(iOS 14, *) {
+            hasPhotoAccess = status == .authorized || status == .limited
+          } else {
+            hasPhotoAccess = status == .authorized
+          }
+          guard hasPhotoAccess else {
+            DispatchQueue.main.async { result(false) }
+            return
+          }
+          PHPhotoLibrary.shared().performChanges({
+            PHAssetChangeRequest.creationRequestForAsset(from: image)
+          }) { success, _ in
+            DispatchQueue.main.async { result(success) }
+          }
+        }
+        if #available(iOS 14, *) {
+          PHPhotoLibrary.requestAuthorization(for: .addOnly, handler: save)
+        } else {
+          PHPhotoLibrary.requestAuthorization(save)
+        }
       case "readPlaybackMemory":
         NativePlaybackMemoryStore.readShared { result($0) }
       case "compareAndSetPlaybackMemory":
@@ -148,6 +179,55 @@ import UIKit
           defaultSubtitle: defaultSubtitle,
           result: result
         )
+      case "openNativeSubtitleMenu":
+        DispatchQueue.main.async {
+          self?.activeNativePlaybackController?.openExternalSubtitleMenu()
+          result(self?.activeNativePlaybackController != nil)
+        }
+      case "applyNativeExternalSubtitle":
+        let arguments = call.arguments as? [String: Any]
+        let path = (arguments?["path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let displayName = (arguments?["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        DispatchQueue.main.async {
+          guard let controller = self?.activeNativePlaybackController, !path.isEmpty else {
+            result(false)
+            return
+          }
+          controller.applyExternalSubtitlePath(path, displayName: displayName) { result($0) }
+        }
+      case "downloadNativeExternalSubtitle":
+        let arguments = call.arguments as? [String: Any]
+        let url = (arguments?["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let displayName = (arguments?["displayName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "subtitle.srt"
+        let headers = (arguments?["headers"] as? [String: Any] ?? [:]).reduce(into: [String: String]()) {
+          $0[$1.key] = "\($1.value)"
+        }
+        DispatchQueue.main.async {
+          guard let controller = self?.activeNativePlaybackController, !url.isEmpty else {
+            result(false)
+            return
+          }
+          controller.downloadExternalSubtitle(urlString: url, headers: headers, displayName: displayName)
+          result(true)
+        }
+      case "cancelNativeExternalSubtitle":
+        DispatchQueue.main.async {
+          guard let controller = self?.activeNativePlaybackController else {
+            result(false)
+            return
+          }
+          controller.cancelExternalSubtitleOperation(notifyResolver: true)
+          result(true)
+        }
+      case "clearNativeExternalSubtitle":
+        DispatchQueue.main.async {
+          guard let controller = self?.activeNativePlaybackController else {
+            result(false)
+            return
+          }
+          controller.clearExternalSubtitle()
+          result(true)
+        }
       case "launchSystemVideoPlayer":
         let arguments = call.arguments as? [String: Any]
         let rawUrl =
@@ -379,6 +459,7 @@ import UIKit
           FlutterMethodChannel(name: "starflow/native_playback_resolver", binaryMessenger: $0.binaryMessenger)
         }
       )
+      self.activeNativePlaybackController = controller
       controller.modalPresentationStyle = .fullScreen
       presenter.present(controller, animated: true) {
         result(true)

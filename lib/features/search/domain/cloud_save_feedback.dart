@@ -1,5 +1,6 @@
 enum CloudSaveDrive {
   quark('夸克'),
+  aliyun('阿里'),
   cloud115('115');
 
   const CloudSaveDrive(this.label);
@@ -22,16 +23,28 @@ typedef CloudSaveProgressCallback = void Function(CloudSaveProgress progress);
 class CloudSaveProgress {
   const CloudSaveProgress.saving(this.drive)
       : stage = CloudSaveStage.saving,
-        savedCount = 0;
+        savedCount = 0,
+        transferMessage = null;
 
   const CloudSaveProgress.sanitizingNames(this.drive, this.savedCount)
-      : stage = CloudSaveStage.sanitizingNames;
+      : stage = CloudSaveStage.sanitizingNames,
+        transferMessage = null;
+
+  const CloudSaveProgress.transferring(String message)
+      : drive = CloudSaveDrive.cloud115,
+        stage = CloudSaveStage.saving,
+        savedCount = 0,
+        transferMessage = message;
+
+  final String? transferMessage;
 
   final CloudSaveDrive drive;
   final CloudSaveStage stage;
   final int savedCount;
 
-  String get message => switch (stage) {
+  String get message =>
+      transferMessage ??
+      switch (stage) {
         CloudSaveStage.saving => drive.savingMessage,
         CloudSaveStage.sanitizingNames => '已保存 $savedCount 个，名称修改中...',
       };

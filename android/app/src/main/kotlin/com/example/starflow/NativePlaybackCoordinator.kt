@@ -84,6 +84,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     override val playerListener: Player.Listener =
         object : Player.Listener {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                diagnostics.setPlaybackActive(playWhenReady)
                 if (!playWhenReady) episodes.cancelAutomaticAdvance()
             }
 
@@ -153,6 +154,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                     runtime.maybeApplyAutoSkip()
                 }
                 if (playbackState == Player.STATE_ENDED) {
+                    diagnostics.setPlaybackActive(false)
                     runtime.persistPlaybackProgress(force = true)
                 }
                 if (
@@ -215,6 +217,9 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
                 runtime.resetPlaybackWatchdogProgress(newPosition.positionMs)
                 runtime.syncSkipFlagsWithCurrentPosition()
                 if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    session.invalidateMemoryBuffer()
+                    diagnostics.cancelReadAhead()
+                    diagnostics.setPlaybackActive(session.player?.playWhenReady == true)
                     diagnostics.awaitingVideoFrameAfterSeek =
                         session.player?.currentTracks?.groups?.any {
                             it.type == C.TRACK_TYPE_VIDEO && it.isSelected
@@ -363,6 +368,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onResume() {
+        diagnostics.displayActive = true
         session.setDisplayActive(true)
         controllerView.setFocusRequestsAllowed(true)
         controllerView.enterImmersiveMode()
@@ -387,6 +393,7 @@ internal class NativePlaybackCoordinator(override val activity: Activity) :
     }
 
     fun onPause() {
+        diagnostics.displayActive = false
         session.setDisplayActive(false)
         remote.resetInputState()
         controllerView.setFocusRequestsAllowed(false)

@@ -21,6 +21,64 @@ class NativePlaybackSessionTest {
     @get:org.junit.Rule internal val android = AudioAndroidStubs()
 
     @Test
+    fun phoneReadinessRequiresActualHighWaterAndRejectsAllBusyStates() {
+        val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+        val session = NativePlaybackSession(host)
+        val player = mock(ExoPlayer::class.java)
+        session.player = player
+        `when`(player.playWhenReady).thenReturn(true)
+        `when`(player.playbackState).thenReturn(androidx.media3.common.Player.STATE_READY)
+        `when`(player.totalBufferedDuration).thenReturn(119_999L)
+        assertFalse(session.isMemoryBufferReady())
+        `when`(player.totalBufferedDuration).thenReturn(120_000L)
+        assertTrue(session.isMemoryBufferReady())
+        `when`(player.isLoading).thenReturn(true)
+        assertFalse(session.isMemoryBufferReady())
+        `when`(player.isLoading).thenReturn(false)
+        `when`(host.launch.isStartupPending).thenReturn(true)
+        assertFalse(session.isMemoryBufferReady())
+        `when`(host.launch.isStartupPending).thenReturn(false)
+        `when`(host.diagnostics.awaitingVideoFrameAfterSeek).thenReturn(true)
+        assertFalse(session.isMemoryBufferReady())
+        `when`(host.diagnostics.awaitingVideoFrameAfterSeek).thenReturn(false)
+        `when`(player.playbackState).thenReturn(androidx.media3.common.Player.STATE_BUFFERING)
+        assertFalse(session.isMemoryBufferReady())
+        `when`(player.playbackState).thenReturn(androidx.media3.common.Player.STATE_READY)
+        `when`(player.playWhenReady).thenReturn(false)
+        assertFalse(session.isMemoryBufferReady())
+        `when`(player.playWhenReady).thenReturn(true)
+        assertTrue(session.isMemoryBufferReady())
+        session.onMemoryPressure()
+        assertFalse(session.isMemoryBufferReady())
+        session.player = null
+        assertFalse(session.isMemoryBufferReady())
+    }
+
+    @Test
+    fun televisionReadinessRequiresLoadControlStopEvenWithLongBufferedDuration() {
+        val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
+        val session = NativePlaybackSession(host)
+        val player = mock(ExoPlayer::class.java)
+        val control = mock(NativePlaybackLoadControl::class.java)
+        NativePlaybackSession::class.java.getDeclaredField("adaptiveLoadControl").apply {
+            isAccessible = true
+            set(session, control)
+        }
+        session.player = player
+        `when`(player.playWhenReady).thenReturn(true)
+        `when`(player.playbackState).thenReturn(androidx.media3.common.Player.STATE_READY)
+        `when`(player.totalBufferedDuration).thenReturn(12_000L)
+        assertFalse(session.isMemoryBufferReady())
+        `when`(control.isMemoryReady(12_000L)).thenReturn(true)
+        assertTrue(session.isMemoryBufferReady())
+        `when`(player.isLoading).thenReturn(true)
+        assertFalse(session.isMemoryBufferReady())
+        session.invalidateMemoryBuffer()
+        verify(control).invalidateMemoryBuffer()
+        verify(host.diagnostics).reportMemoryBufferState(true, false)
+    }
+
+    @Test
     fun systemDecoderSpeedRoundTripRestoresTemporaryPrecisionLoss() {
         val host = mock(NativePlaybackSession.Host::class.java, RETURNS_DEEP_STUBS)
         val session = spy(NativePlaybackSession(host))

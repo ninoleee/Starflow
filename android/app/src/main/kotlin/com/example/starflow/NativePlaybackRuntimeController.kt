@@ -58,6 +58,7 @@ internal class NativePlaybackRuntimeController(
                     return
                 }
                 val generation = runtimeGeneration
+                host.diagnostics.reportMemoryBufferState()
                 host.episodes.tick()
                 maybeApplyAutoSkip()
                 persistPlaybackProgress()
@@ -103,6 +104,7 @@ internal class NativePlaybackRuntimeController(
         runtimeGeneration += 1L
         playbackRuntimeActive = false
         playbackRuntimeHandler.removeCallbacks(playbackRuntimeRunnable)
+        host.diagnostics.reportMemoryBufferState(forceNotReady = true)
         host.diagnostics.playbackFirstFrameRendered = false
         host.diagnostics.playbackLastRuntimeLogAtMs = 0L
         introSkipApplied = false

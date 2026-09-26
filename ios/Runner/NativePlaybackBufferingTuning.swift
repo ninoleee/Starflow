@@ -1,6 +1,33 @@
 import AVFoundation
 import Foundation
 
+// Permission for speculative disk IO, not a measurement of AVPlayer memory or
+// an instruction to change its loading policy. Unknown evidence fails closed.
+struct NativePlaybackMemoryReadiness {
+  private var previousPosition: Double?
+
+  mutating func invalidate() {
+    previousPosition = nil
+  }
+
+  mutating func sample(position: Double, bufferedAhead: Double?, itemReady: Bool,
+    playing: Bool, startupPending: Bool, bufferEmpty: Bool, bufferFull: Bool,
+    likelyToKeepUp: Bool) -> Bool {
+    guard itemReady, playing, !startupPending, !bufferEmpty,
+      position.isFinite, position >= 0,
+      let bufferedAhead, bufferedAhead.isFinite, bufferedAhead > 0 else {
+      invalidate()
+      return false
+    }
+    let previous = previousPosition
+    previousPosition = position
+    // Require observed forward playback after each invalidation. A configured
+    // duration or likelyToKeepUp alone does not establish the high water mark.
+    guard let previous, position > previous else { return false }
+    return bufferFull && likelyToKeepUp
+  }
+}
+
 enum NativePlaybackBufferingTuning {
   struct Context {
     let url: URL
@@ -64,7 +91,7 @@ enum NativePlaybackBufferingTuning {
       return .passthrough
     }
 
-    let forwardBufferDuration: TimeInterval = context.isLiveStream ? 8 : 24
+    let forwardBufferDuration: TimeInterval = context.isLiveStream ? 8 : 120
     let keepNetworkingWhenPaused = context.isLiveStream
 
     return Configuration(

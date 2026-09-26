@@ -143,16 +143,16 @@ class QuarkSaveWorkflowService {
     void Function(String)? onBackgroundRefreshFailure,
   }) async {
     final cookie = networkStorage.quarkCookie.trim();
+    if (networkStorage.quarkSaveFolderId.isEmpty) {
+      throw const QuarkSaveException('夸克账号已变化，请重新选择保存目录');
+    }
     if (cookie.isEmpty) {
       throw const QuarkSaveException('请先在网盘与转存设置里填写夸克 Cookie');
     }
 
     // Empty unless sanitising is on, so deduplication compares the names the
     // drive will end up with rather than the share's original ones.
-    final sanitizedNameCharacters =
-        networkStorage.quarkSanitizeSavedNamesEnabled
-            ? networkStorage.quarkSanitizedNameCharacters.trim()
-            : '';
+    final sanitizedNameCharacters = networkStorage.effectiveQuarkNameCharacters;
 
     onProgress?.call(const CloudSaveProgress.saving(CloudSaveDrive.quark));
     final saveResult = await _saveShareLink(

@@ -134,7 +134,13 @@ if [[ -n "$SETTINGS_JSON_PATH" ]]; then
 fi
 "$DART" "${VERIFY_ARGS[@]}"
 mkdir -p "$ICLOUD_INSTALLER_DIR"
-cp -f "$SOURCE_APK" "$ICLOUD_INSTALLER_DIR/$TARGET_NAME"
+# SMB-backed destinations can reject macOS extended attributes; the APK
+# content and Android signature do not depend on them.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  cp -X -f "$SOURCE_APK" "$ICLOUD_INSTALLER_DIR/$TARGET_NAME"
+else
+  cp -f "$SOURCE_APK" "$ICLOUD_INSTALLER_DIR/$TARGET_NAME"
+fi
 
 echo "Version=$VERSION"
 echo "BuildDate=$BUILD_DATE"

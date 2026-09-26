@@ -32,13 +32,16 @@ String formatPlaybackBufferDuration(int? durationMs) {
 }
 
 String formatPlaybackMetrics(
-  int? bytesPerSecond,
-  int? cacheBytes,
-  int? bufferDurationMs,
-) {
+    int? bytesPerSecond, int? cacheBytes, int? bufferDurationMs,
+    {int? diskCacheBytes,
+    bool showDiskCache = false,
+    String memoryCacheLabel = ''}) {
+  final cache = diskCacheBytes == null && !showDiskCache
+      ? formatPlaybackCacheBytes(cacheBytes)
+      : '${memoryCacheLabel.isEmpty ? '' : '$memoryCacheLabel '}${formatPlaybackCacheBytes(cacheBytes)} | ${formatPlaybackCacheBytes(diskCacheBytes)}';
   return [
     formatPlaybackNetworkSpeed(bytesPerSecond),
-    formatPlaybackCacheBytes(cacheBytes),
+    cache,
     formatPlaybackBufferDuration(bufferDurationMs),
   ].join(' · ');
 }

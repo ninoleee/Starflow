@@ -878,8 +878,27 @@ const String kDefaultCloudSanitizedNameCharacters =
 const String kDefaultQuarkSanitizedNameCharacters =
     kDefaultCloudSanitizedNameCharacters;
 
+enum AliyunAuthMode { consumer, open }
+
 class NetworkStorageConfig {
   const NetworkStorageConfig({
+    this.localCloudAccounts = const {},
+    this.commonSanitizeSavedNamesEnabled = false,
+    this.commonSanitizedNameCharacters = kDefaultCloudSanitizedNameCharacters,
+    this.quarkUseCommonNameRules = false,
+    this.cloud115UseCommonNameRules = false,
+    this.aliyunUseCommonNameRules = false,
+    this.aliyunRefreshToken = '',
+    this.aliyunOpenRefreshToken = '',
+    this.aliyunAuthMode = AliyunAuthMode.consumer,
+    this.aliyunTo115Enabled = false,
+    this.aliyunSaveFolderId = 'root',
+    this.aliyunSaveFolderPath = '/',
+    this.aliyunSanitizeSavedNamesEnabled = false,
+    this.aliyunSanitizedNameCharacters = kDefaultCloudSanitizedNameCharacters,
+    this.aliyunSmartStrmTaskName = '',
+    this.syncDeleteAliyunEnabled = false,
+    this.syncDeleteAliyunWebDavDirectories = const [],
     this.cloud115Cookie = '',
     this.syncDelete115Enabled = false,
     this.syncDelete115WebDavDirectories = const [],
@@ -902,6 +921,21 @@ class NetworkStorageConfig {
     this.quarkSanitizedNameCharacters = kDefaultQuarkSanitizedNameCharacters,
   });
 
+  /// Device-local credential, excluded from settings JSON.
+  final Map<String, Map<String, dynamic>> localCloudAccounts;
+  final String aliyunRefreshToken;
+
+  /// Device-local AliYun Drive Open OAuth refresh token, excluded from JSON.
+  final String aliyunOpenRefreshToken;
+  final AliyunAuthMode aliyunAuthMode;
+  final bool aliyunTo115Enabled;
+  final String aliyunSaveFolderId;
+  final String aliyunSaveFolderPath;
+  final bool aliyunSanitizeSavedNamesEnabled;
+  final String aliyunSanitizedNameCharacters;
+  final String aliyunSmartStrmTaskName;
+  final bool syncDeleteAliyunEnabled;
+  final List<NetworkStorageWebDavDirectory> syncDeleteAliyunWebDavDirectories;
   final String cloud115Cookie;
   final bool syncDelete115Enabled;
   final List<NetworkStorageWebDavDirectory> syncDelete115WebDavDirectories;
@@ -926,8 +960,42 @@ class NetworkStorageConfig {
   final bool quarkSanitizeSavedNamesEnabled;
   final String quarkSanitizedNameCharacters;
 
+  final bool commonSanitizeSavedNamesEnabled;
+  final String commonSanitizedNameCharacters;
+  // Legacy per-drive flags remain readable for settings compatibility.
+  final bool quarkUseCommonNameRules;
+  final bool cloud115UseCommonNameRules;
+  final bool aliyunUseCommonNameRules;
+
+  String get _effectiveCommonNameCharacters => commonSanitizeSavedNamesEnabled
+      ? commonSanitizedNameCharacters.trim()
+      : '';
+
+  String get effectiveQuarkNameCharacters => _effectiveCommonNameCharacters;
+  String get effective115NameCharacters => _effectiveCommonNameCharacters;
+  String get effectiveAliyunNameCharacters => _effectiveCommonNameCharacters;
+  String get activeAliyunRefreshToken => aliyunAuthMode == AliyunAuthMode.open
+      ? aliyunOpenRefreshToken
+      : aliyunRefreshToken;
+  bool get hasAliyunCredential => activeAliyunRefreshToken.trim().isNotEmpty;
+
   bool get hasAnyConfigured {
-    return cloud115Cookie.trim().isNotEmpty ||
+    return commonSanitizeSavedNamesEnabled ||
+        commonSanitizedNameCharacters != kDefaultCloudSanitizedNameCharacters ||
+        quarkUseCommonNameRules ||
+        cloud115UseCommonNameRules ||
+        aliyunUseCommonNameRules ||
+        aliyunRefreshToken.trim().isNotEmpty ||
+        aliyunOpenRefreshToken.trim().isNotEmpty ||
+        aliyunAuthMode != AliyunAuthMode.consumer ||
+        aliyunTo115Enabled ||
+        aliyunSaveFolderId != 'root' ||
+        aliyunSaveFolderPath != '/' ||
+        aliyunSanitizeSavedNamesEnabled ||
+        aliyunSmartStrmTaskName.trim().isNotEmpty ||
+        syncDeleteAliyunEnabled ||
+        syncDeleteAliyunWebDavDirectories.isNotEmpty ||
+        cloud115Cookie.trim().isNotEmpty ||
         syncDelete115Enabled ||
         syncDelete115WebDavDirectories.isNotEmpty ||
         cloud115SmartStrmTaskName.trim().isNotEmpty ||
@@ -948,6 +1016,23 @@ class NetworkStorageConfig {
   }
 
   NetworkStorageConfig copyWith({
+    Map<String, Map<String, dynamic>>? localCloudAccounts,
+    bool? commonSanitizeSavedNamesEnabled,
+    String? commonSanitizedNameCharacters,
+    bool? quarkUseCommonNameRules,
+    bool? cloud115UseCommonNameRules,
+    bool? aliyunUseCommonNameRules,
+    String? aliyunRefreshToken,
+    String? aliyunOpenRefreshToken,
+    AliyunAuthMode? aliyunAuthMode,
+    bool? aliyunTo115Enabled,
+    String? aliyunSaveFolderId,
+    String? aliyunSaveFolderPath,
+    bool? aliyunSanitizeSavedNamesEnabled,
+    String? aliyunSanitizedNameCharacters,
+    String? aliyunSmartStrmTaskName,
+    bool? syncDeleteAliyunEnabled,
+    List<NetworkStorageWebDavDirectory>? syncDeleteAliyunWebDavDirectories,
     String? cloud115Cookie,
     bool? syncDelete115Enabled,
     List<NetworkStorageWebDavDirectory>? syncDelete115WebDavDirectories,
@@ -970,6 +1055,34 @@ class NetworkStorageConfig {
     String? quarkSanitizedNameCharacters,
   }) {
     return NetworkStorageConfig(
+      localCloudAccounts: localCloudAccounts ?? this.localCloudAccounts,
+      commonSanitizeSavedNamesEnabled: commonSanitizeSavedNamesEnabled ??
+          this.commonSanitizeSavedNamesEnabled,
+      commonSanitizedNameCharacters:
+          commonSanitizedNameCharacters ?? this.commonSanitizedNameCharacters,
+      quarkUseCommonNameRules:
+          quarkUseCommonNameRules ?? this.quarkUseCommonNameRules,
+      cloud115UseCommonNameRules:
+          cloud115UseCommonNameRules ?? this.cloud115UseCommonNameRules,
+      aliyunUseCommonNameRules:
+          aliyunUseCommonNameRules ?? this.aliyunUseCommonNameRules,
+      aliyunRefreshToken: aliyunRefreshToken ?? this.aliyunRefreshToken,
+      aliyunOpenRefreshToken:
+          aliyunOpenRefreshToken ?? this.aliyunOpenRefreshToken,
+      aliyunAuthMode: aliyunAuthMode ?? this.aliyunAuthMode,
+      aliyunTo115Enabled: aliyunTo115Enabled ?? this.aliyunTo115Enabled,
+      aliyunSaveFolderId: aliyunSaveFolderId ?? this.aliyunSaveFolderId,
+      aliyunSaveFolderPath: aliyunSaveFolderPath ?? this.aliyunSaveFolderPath,
+      aliyunSanitizeSavedNamesEnabled: aliyunSanitizeSavedNamesEnabled ??
+          this.aliyunSanitizeSavedNamesEnabled,
+      aliyunSanitizedNameCharacters:
+          aliyunSanitizedNameCharacters ?? this.aliyunSanitizedNameCharacters,
+      aliyunSmartStrmTaskName:
+          aliyunSmartStrmTaskName ?? this.aliyunSmartStrmTaskName,
+      syncDeleteAliyunEnabled:
+          syncDeleteAliyunEnabled ?? this.syncDeleteAliyunEnabled,
+      syncDeleteAliyunWebDavDirectories: syncDeleteAliyunWebDavDirectories ??
+          this.syncDeleteAliyunWebDavDirectories,
       cloud115Cookie: cloud115Cookie ?? this.cloud115Cookie,
       syncDelete115Enabled: syncDelete115Enabled ?? this.syncDelete115Enabled,
       syncDelete115WebDavDirectories:
@@ -1006,6 +1119,22 @@ class NetworkStorageConfig {
 
   Map<String, dynamic> toJson() {
     return {
+      'commonSanitizeSavedNamesEnabled': commonSanitizeSavedNamesEnabled,
+      'commonSanitizedNameCharacters': commonSanitizedNameCharacters,
+      'quarkUseCommonNameRules': quarkUseCommonNameRules,
+      'cloud115UseCommonNameRules': cloud115UseCommonNameRules,
+      'aliyunUseCommonNameRules': aliyunUseCommonNameRules,
+      'aliyunAuthMode': aliyunAuthMode.name,
+      'aliyunTo115Enabled': aliyunTo115Enabled,
+      'aliyunSaveFolderId': aliyunSaveFolderId,
+      'aliyunSaveFolderPath': aliyunSaveFolderPath,
+      'aliyunSanitizeSavedNamesEnabled': aliyunSanitizeSavedNamesEnabled,
+      'aliyunSanitizedNameCharacters': aliyunSanitizedNameCharacters,
+      'aliyunSmartStrmTaskName': aliyunSmartStrmTaskName,
+      'syncDeleteAliyunEnabled': syncDeleteAliyunEnabled,
+      'syncDeleteAliyunWebDavDirectories': syncDeleteAliyunWebDavDirectories
+          .map((item) => item.toJson())
+          .toList(),
       'syncDelete115Enabled': syncDelete115Enabled,
       'syncDelete115WebDavDirectories':
           syncDelete115WebDavDirectories.map((item) => item.toJson()).toList(),
@@ -1014,7 +1143,6 @@ class NetworkStorageConfig {
       'cloud115SaveFolderPath': cloud115SaveFolderPath,
       'cloud115SanitizeSavedNamesEnabled': cloud115SanitizeSavedNamesEnabled,
       'cloud115SanitizedNameCharacters': cloud115SanitizedNameCharacters,
-      'quarkCookie': quarkCookie,
       'quarkSaveFolderId': quarkSaveFolderId,
       'quarkSaveFolderPath': quarkSaveFolderPath,
       'syncDeleteQuarkEnabled': syncDeleteQuarkEnabled,
@@ -1037,7 +1165,38 @@ class NetworkStorageConfig {
     final resolvedSmartStrmDelaySeconds =
         (json['smartStrmDelaySeconds'] as num?)?.toInt() ?? 1;
     return NetworkStorageConfig(
+      commonSanitizeSavedNamesEnabled:
+          json['commonSanitizeSavedNamesEnabled'] as bool? ?? false,
+      commonSanitizedNameCharacters:
+          json['commonSanitizedNameCharacters'] as String? ??
+              kDefaultCloudSanitizedNameCharacters,
+      quarkUseCommonNameRules:
+          json['quarkUseCommonNameRules'] as bool? ?? false,
+      cloud115UseCommonNameRules:
+          json['cloud115UseCommonNameRules'] as bool? ?? false,
+      aliyunUseCommonNameRules:
+          json['aliyunUseCommonNameRules'] as bool? ?? false,
+      aliyunAuthMode: json['aliyunAuthMode'] == AliyunAuthMode.open.name
+          ? AliyunAuthMode.open
+          : AliyunAuthMode.consumer,
       syncDelete115Enabled: json['syncDelete115Enabled'] as bool? ?? false,
+      aliyunTo115Enabled: json['aliyunTo115Enabled'] as bool? ?? false,
+      aliyunSaveFolderId: json['aliyunSaveFolderId'] as String? ?? 'root',
+      aliyunSaveFolderPath: json['aliyunSaveFolderPath'] as String? ?? '/',
+      aliyunSanitizeSavedNamesEnabled:
+          json['aliyunSanitizeSavedNamesEnabled'] as bool? ?? false,
+      aliyunSanitizedNameCharacters:
+          json['aliyunSanitizedNameCharacters'] as String? ??
+              kDefaultCloudSanitizedNameCharacters,
+      aliyunSmartStrmTaskName: json['aliyunSmartStrmTaskName'] as String? ?? '',
+      syncDeleteAliyunEnabled:
+          json['syncDeleteAliyunEnabled'] as bool? ?? false,
+      syncDeleteAliyunWebDavDirectories:
+          (json['syncDeleteAliyunWebDavDirectories'] as List<dynamic>? ??
+                  const [])
+              .map((item) => NetworkStorageWebDavDirectory.fromJson(
+                  item as Map<String, dynamic>))
+              .toList(),
       syncDelete115WebDavDirectories:
           (json['syncDelete115WebDavDirectories'] as List? ?? const [])
               .whereType<Map>()
@@ -1923,6 +2082,20 @@ class AppSettings {
     );
   }
 
+  factory AppSettings.fromCompatibleJson(Map<String, dynamic> json) {
+    final schemaVersion = _readSettingsSchemaVersion(json['schemaVersion']);
+    if (schemaVersion != null && schemaVersion > kAppSettingsSchemaVersion) {
+      throw FormatException(
+        '设置格式来自更新版本：当前版本为 schemaVersion '
+        '$kAppSettingsSchemaVersion，实际为 $schemaVersion，请先升级 App。',
+      );
+    }
+    final normalized = _normalizeCompatibleSettingsJson(json, schemaVersion);
+    final parsed = AppSettings.fromJson(normalized);
+    _validateCompatibleSettingsTypes(normalized, parsed.toJson());
+    return parsed;
+  }
+
   factory AppSettings.fromCurrentJson(Map<String, dynamic> json) {
     final schemaVersion = (json['schemaVersion'] as num?)?.toInt();
     if (schemaVersion != kAppSettingsSchemaVersion) {
@@ -1935,6 +2108,249 @@ class AppSettings {
     _validateCurrentSettingsShape(json, parsed.toJson());
     _validateCurrentSettingsEnums(json);
     return parsed;
+  }
+}
+
+int? _readSettingsSchemaVersion(Object? raw) {
+  if (raw == null) {
+    return null;
+  }
+  if (raw is! num || raw % 1 != 0) {
+    throw const FormatException('settings.schemaVersion 必须是整数');
+  }
+  final version = raw.toInt();
+  if (version < 1) {
+    throw FormatException('不支持的设置格式：schemaVersion $version');
+  }
+  return version;
+}
+
+Map<String, dynamic> _normalizeCompatibleSettingsJson(
+  Map<String, dynamic> source,
+  int? schemaVersion,
+) {
+  final json = Map<String, dynamic>.from(source);
+
+  // These fields were renamed or removed before schema version 3. Keep their
+  // values when an older export still contains them, then let fromJson fill
+  // every field introduced since that export.
+  if (!json.containsKey('taskMaxConcurrency')) {
+    final legacyConcurrency = _maximumNumericValue(json, const [
+      'metadataPrefetchMaxConcurrency',
+      'homeFeedMaxConcurrency',
+      'nasSourceRefreshConcurrency',
+      'nasCollectionRefreshConcurrency',
+      'nasEnrichmentConcurrency',
+    ]);
+    if (legacyConcurrency != null) {
+      json['taskMaxConcurrency'] = legacyConcurrency;
+    }
+  }
+  if (json['highPerformanceModeEnabled'] == true &&
+      !json.containsKey('metadataPrefetchBatchDelayMs') &&
+      _allNumericValuesEqual(
+          json,
+          const [
+            'metadataPrefetchMaxConcurrency',
+            'homeFeedMaxConcurrency',
+            'metadataPrefetchInitialBatchSize',
+            'homeFeedInitialBatchSize',
+          ],
+          1)) {
+    json['taskMaxConcurrency'] = kTaskMaxConcurrencyDefault;
+  }
+
+  if (!json.containsKey('tmdbMetadataMatchEnabled') &&
+      json['imdbAutoMatchEnabled'] is bool) {
+    json['tmdbMetadataMatchEnabled'] = json['imdbAutoMatchEnabled'];
+  }
+
+  if (schemaVersion == null || schemaVersion < kAppSettingsSchemaVersion) {
+    _migrateLegacyNetworkStorageJson(json);
+  }
+
+  if (!json.containsKey('homeHeroDisplayMode') &&
+      json['homeHeroStyle'] is String) {
+    final style = (json['homeHeroStyle'] as String).trim();
+    json['homeHeroDisplayMode'] =
+        style == 'borderless' ? 'borderless' : 'normal';
+  }
+
+  final rawModules = json['homeModules'];
+  final normalizedModules = rawModules is List
+      ? rawModules.map((item) {
+          if (item is! Map) {
+            throw const FormatException('settings.homeModules 必须是对象数组');
+          }
+          return _normalizeCompatibleHomeModule(
+            Map<String, dynamic>.from(item),
+          );
+        }).toList(growable: true)
+      : <Map<String, dynamic>>[];
+  final legacyHeroEnabled = json['homeHeroEnabled'];
+  if (legacyHeroEnabled is bool) {
+    var hasHero = false;
+    for (final module in normalizedModules) {
+      if (module['type'] == 'hero' ||
+          module['id'] == HomeModuleConfig.heroModuleId) {
+        module['type'] = 'hero';
+        module['id'] = HomeModuleConfig.heroModuleId;
+        module['enabled'] = legacyHeroEnabled;
+        hasHero = true;
+      }
+    }
+    if (!hasHero) {
+      normalizedModules.insert(0, {
+        'id': HomeModuleConfig.heroModuleId,
+        'type': 'hero',
+        'title': 'Hero',
+        'enabled': legacyHeroEnabled,
+      });
+    }
+  }
+  if (rawModules is List || legacyHeroEnabled is bool) {
+    json['homeModules'] = normalizedModules;
+  }
+
+  // Unversioned exports and v1/v2 exports are all parsed through the same
+  // field-defaulting path. The emitted payload is always current v3.
+  if (schemaVersion == null || schemaVersion < kAppSettingsSchemaVersion) {
+    json.remove('imdbAutoMatchEnabled');
+    json.remove('homeHeroEnabled');
+    json.remove('metadataPrefetchMaxConcurrency');
+    json.remove('homeFeedMaxConcurrency');
+    json.remove('nasSourceRefreshConcurrency');
+    json.remove('nasCollectionRefreshConcurrency');
+    json.remove('nasEnrichmentConcurrency');
+  }
+  return json;
+}
+
+void _migrateLegacyNetworkStorageJson(Map<String, dynamic> json) {
+  final rawProviders = json['searchProviders'];
+  if (rawProviders is! List) return;
+
+  final networkStorage = json['networkStorage'] is Map
+      ? Map<String, dynamic>.from(json['networkStorage'] as Map)
+      : <String, dynamic>{};
+  final keys = const [
+    'quarkCookie',
+    'quarkSaveFolderId',
+    'quarkSaveFolderPath',
+    'smartStrmWebhookUrl',
+    'smartStrmTaskName',
+  ];
+  for (final rawProvider in rawProviders) {
+    if (rawProvider is! Map) continue;
+    final provider = Map<String, dynamic>.from(rawProvider);
+    final hasLegacyValues = keys.any((key) => provider[key] != null);
+    if (!hasLegacyValues) continue;
+    for (final key in keys) {
+      if (!networkStorage.containsKey(key) && provider[key] != null) {
+        networkStorage[key] = provider[key];
+      }
+    }
+    break;
+  }
+  if (networkStorage.isNotEmpty) {
+    json['networkStorage'] = networkStorage;
+  }
+}
+
+num? _maximumNumericValue(Map<String, dynamic> json, List<String> keys) {
+  num? maximum;
+  for (final key in keys) {
+    final value = json[key];
+    if (value is num) {
+      maximum = maximum == null || value > maximum! ? value : maximum;
+    }
+  }
+  return maximum;
+}
+
+bool _allNumericValuesEqual(
+  Map<String, dynamic> json,
+  List<String> keys,
+  num expected,
+) {
+  return keys.every((key) => json[key] is num && json[key] == expected);
+}
+
+Map<String, dynamic> _normalizeCompatibleHomeModule(
+  Map<String, dynamic> module,
+) {
+  final rawType = module['type'];
+  if (rawType is String) {
+    module['type'] = switch (rawType) {
+      'doubanRecommendations' => 'doubanSuggestion',
+      'doubanWishList' => 'doubanInterest',
+      'embyLibrary' || 'nasLibrary' => 'librarySection',
+      _ => rawType,
+    };
+  }
+  module['displayStyle'] ??= 'poster';
+  module['doubanInterestStatus'] ??= 'mark';
+  module['doubanSuggestionType'] ??= 'movie';
+  module['doubanListUrl'] ??= '';
+  return module;
+}
+
+void _validateCompatibleSettingsTypes(
+  Map<String, dynamic> actual,
+  Map<String, dynamic> expected,
+) {
+  final issues = <String>[];
+  _collectCompatibleSettingsTypeIssues(actual, expected, 'settings', issues);
+  if (issues.isNotEmpty) {
+    throw FormatException('设置字段类型不正确：${issues.first}');
+  }
+}
+
+void _collectCompatibleSettingsTypeIssues(
+  Object? actual,
+  Object? expected,
+  String path,
+  List<String> issues,
+) {
+  if (expected is Map<String, dynamic>) {
+    if (actual is! Map) {
+      issues.add('$path 必须是对象');
+      return;
+    }
+    for (final entry in actual.entries) {
+      final key = '${entry.key}';
+      if (!expected.containsKey(key)) continue;
+      _collectCompatibleSettingsTypeIssues(
+        entry.value,
+        expected[key],
+        '$path.$key',
+        issues,
+      );
+    }
+    return;
+  }
+  if (expected is List<dynamic>) {
+    if (actual is! List) {
+      issues.add('$path 必须是数组');
+      return;
+    }
+    if (expected.isEmpty) return;
+    for (var index = 0; index < actual.length; index++) {
+      _collectCompatibleSettingsTypeIssues(
+        actual[index],
+        expected[index < expected.length ? index : 0],
+        '$path[$index]',
+        issues,
+      );
+    }
+    return;
+  }
+  if (expected is bool && actual is! bool) {
+    issues.add('$path 必须是布尔值');
+  } else if (expected is num && actual is! num) {
+    issues.add('$path 必须是数字');
+  } else if (expected is String && actual is! String) {
+    issues.add('$path 必须是字符串');
   }
 }
 

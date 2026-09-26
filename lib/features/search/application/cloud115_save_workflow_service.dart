@@ -6,6 +6,7 @@ import 'package:starflow/core/logging/app_logger.dart';
 import 'package:starflow/features/library/application/media_refresh_coordinator.dart';
 import 'package:starflow/features/search/application/cloud_saved_name_sanitizer.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
+import 'package:starflow/features/search/data/quark_save_client.dart';
 import 'package:starflow/features/search/data/smart_strm_webhook_client.dart';
 import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -37,11 +38,12 @@ class Cloud115SaveWorkflowService {
       String saveFolderName = '',
       CloudSaveProgressCallback? onProgress,
       void Function(String)? onBackgroundRefreshFailure}) async {
+    if (config.cloud115SaveFolderId.isEmpty) {
+      throw const QuarkSaveException('115 账号已变化，请重新选择保存目录');
+    }
     onProgress?.call(const CloudSaveProgress.saving(CloudSaveDrive.cloud115));
     final stopwatch = Stopwatch()..start();
-    final characters = config.cloud115SanitizeSavedNamesEnabled
-        ? config.cloud115SanitizedNameCharacters.trim()
-        : '';
+    final characters = config.effective115NameCharacters;
     appLogInfo('115.save', '115 share save started');
     late final Cloud115SaveResult result;
     try {
@@ -60,11 +62,23 @@ class Cloud115SaveWorkflowService {
       });
       rethrow;
     }
+    return finishSavedResult(
+        result: result,
+        config: config,
+        onProgress: onProgress,
+        onBackgroundRefreshFailure: onBackgroundRefreshFailure);
+  }
+
+  Future<String> finishSavedResult(
+      {required Cloud115SaveResult result,
+      required NetworkStorageConfig config,
+      CloudSaveProgressCallback? onProgress,
+      void Function(String)? onBackgroundRefreshFailure}) async {
+    final characters = config.effective115NameCharacters;
     final count = result.savedCount;
     appLogInfo('115.save', '115 share save confirmed', fields: {
       'savedCount': count,
       'skippedCount': result.skippedCount,
-      'durationMs': stopwatch.elapsedMilliseconds,
     });
     if (count == 0) {
       return CloudSaveSummary(

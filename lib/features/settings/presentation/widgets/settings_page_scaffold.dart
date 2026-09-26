@@ -6,9 +6,11 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/app_page_background.dart';
+import 'package:starflow/core/widgets/no_animation_page_route.dart';
 import 'package:starflow/core/widgets/overlay_toolbar.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/settings/presentation/settings_version_label.dart';
+import 'package:starflow/features/update/presentation/update_settings_page.dart';
 
 class SettingsPageScaffold extends StatelessWidget {
   const SettingsPageScaffold({
@@ -18,6 +20,7 @@ class SettingsPageScaffold extends StatelessWidget {
     this.trailing,
     this.listPadding,
     this.primary = true,
+    this.enableUpdateNavigation = true,
     this.bottomSpacing = kBottomReservedSpacing,
     this.keyboardDismissBehavior = ScrollViewKeyboardDismissBehavior.onDrag,
   });
@@ -27,6 +30,7 @@ class SettingsPageScaffold extends StatelessWidget {
   final Widget? trailing;
   final EdgeInsets? listPadding;
   final bool primary;
+  final bool enableUpdateNavigation;
   final double bottomSpacing;
   final ScrollViewKeyboardDismissBehavior keyboardDismissBehavior;
 
@@ -44,7 +48,10 @@ class SettingsPageScaffold extends StatelessWidget {
               keyboardDismissBehavior: keyboardDismissBehavior,
               children: [
                 ...children,
-                _SettingsVersionFooter(bottomSpacing: bottomSpacing),
+                _SettingsVersionFooter(
+                  bottomSpacing: bottomSpacing,
+                  enableUpdateNavigation: enableUpdateNavigation,
+                ),
               ],
             ),
             Positioned(
@@ -69,9 +76,11 @@ final Future<PackageInfo> _settingsPackageInfoFuture =
 class _SettingsVersionFooter extends StatelessWidget {
   const _SettingsVersionFooter({
     required this.bottomSpacing,
+    required this.enableUpdateNavigation,
   });
 
   final double bottomSpacing;
+  final bool enableUpdateNavigation;
 
   @override
   Widget build(BuildContext context) {
@@ -109,7 +118,12 @@ class _SettingsVersionFooter extends StatelessWidget {
                 const SizedBox(height: 6),
                 TvFocusableAction(
                   focusId: 'settings-footer:version',
-                  onPressed: () {},
+                  onPressed: enableUpdateNavigation
+                      ? () => Navigator.of(context, rootNavigator: true)
+                          .push<void>(SettingsMaterialPageRoute<void>(
+                            builder: (_) => const UpdateSettingsPage(),
+                          ))
+                      : null,
                   visualStyle: TvFocusVisualStyle.subtle,
                   borderRadius: BorderRadius.circular(AppRadii.sm),
                   child: Padding(

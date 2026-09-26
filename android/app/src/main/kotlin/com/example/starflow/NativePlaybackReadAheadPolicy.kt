@@ -2,9 +2,9 @@ package com.example.starflow
 
 internal object NativePlaybackBufferBudget {
     fun limit(memoryClassMb: Int): Int = when {
-        memoryClassMb <= 256 -> 48
-        memoryClassMb <= 512 -> 80
-        else -> 192
+        memoryClassMb <= 256 -> 64
+        memoryClassMb <= 512 -> 128
+        else -> 256
     } * 1024 * 1024
 
     fun target(baseBytes: Int, limitBytes: Int, bitrate: Long, seconds: Int): Int {
@@ -15,6 +15,34 @@ internal object NativePlaybackBufferBudget {
             base.toDouble(), limitBytes.toDouble(),
         ).toInt()
     }
+}
+
+// Durations are media time: a byte-limited stop can be far below the configured cap.
+internal class NativePlaybackRefillPolicy {
+    var achievedHighWaterMs = 0L
+        private set
+    var loading = true
+        private set
+
+    fun reset() {
+        achievedHighWaterMs = 0L
+        loading = true
+    }
+
+    fun evaluate(bufferedMs: Long, atHighWater: Boolean): Boolean {
+        if (atHighWater) {
+            if (loading || achievedHighWaterMs == 0L) {
+                achievedHighWaterMs = bufferedMs.coerceAtLeast(0L)
+            }
+            loading = false
+        } else if (achievedHighWaterMs == 0L || bufferedMs <= achievedHighWaterMs * 3 / 4) {
+            loading = true
+        }
+        return loading
+    }
+
+    fun memoryReady(bufferedMs: Long): Boolean = !loading && achievedHighWaterMs > 0L &&
+        bufferedMs > achievedHighWaterMs * 3 / 4
 }
 
 // Owned by the playback thread; UI memory-pressure signals enter through the load control.

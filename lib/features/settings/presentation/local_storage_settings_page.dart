@@ -6,6 +6,7 @@ import 'package:starflow/core/widgets/section_panel.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/library/data/nas_media_index_store.dart';
 import 'package:starflow/features/playback/data/online_subtitle_repository.dart';
+import 'package:starflow/features/playback/application/playback_stream_relay_service.dart';
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 import 'package:starflow/features/settings/application/media_source_cache_lifecycle.dart';
@@ -29,6 +30,7 @@ final localStorageSummariesProvider =
   final searchPreferencesSummary =
       await searchPreferencesRepository.inspectSummary();
   final imageSummary = await persistentImageCache.inspect();
+  final playbackDiskSummary = await inspectPlaybackDiskCache();
   return [
     indexSummary,
     embyLibrarySummary,
@@ -37,6 +39,7 @@ final localStorageSummariesProvider =
     playbackSummary,
     searchPreferencesSummary,
     imageSummary,
+    playbackDiskSummary,
   ];
 });
 
@@ -60,6 +63,7 @@ class _LocalStorageSettingsPageState
         LocalStorageCacheType.detailData,
         LocalStorageCacheType.subtitleCache,
         LocalStorageCacheType.images,
+        LocalStorageCacheType.playbackDiskCache,
       ],
     ),
     _LocalStorageGroup(
@@ -260,6 +264,9 @@ class _LocalStorageSettingsPageState
         break;
       case LocalStorageCacheType.images:
         await persistentImageCache.clear();
+        break;
+      case LocalStorageCacheType.playbackDiskCache:
+        await clearPlaybackDiskCache();
         break;
     }
   }

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/features/search/application/aliyun_to115_workflow.dart';
 import 'package:starflow/features/search/application/cloud115_save_workflow_service.dart';
 import 'package:starflow/features/search/application/cloud_save_dispatcher.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
@@ -42,7 +43,7 @@ void main() {
     dispatcher = CloudSaveDispatcher(cloud115: cloud115, quark: quark);
   });
 
-  for (final drive in CloudSaveDrive.values) {
+  for (final drive in [CloudSaveDrive.quark, CloudSaveDrive.cloud115]) {
     test('${drive.name} prepares credentials and forwards only its workflow',
         () async {
       final progress = <CloudSaveProgress>[];
@@ -164,6 +165,94 @@ void main() {
     expect(cloud115.url, isNull);
     expect(quark.url, isNull);
   });
+
+  test('Aliyun requires both accounts and never falls through to 115 share API',
+      () async {
+    final result = _share(CloudSaveDrive.cloud115)
+        .copyWith(resourceUrl: 'https://alipan.com/s/abc');
+    expect(CloudSaveDispatcher.canSave(result, _config), isFalse);
+    final configured =
+        _config.copyWith(aliyunRefreshToken: 'token', aliyunTo115Enabled: true);
+    expect(CloudSaveDispatcher.canSave(result, configured), isTrue);
+    expect(
+        CloudSaveDispatcher.canSave(
+            result, configured.copyWith(cloud115Cookie: '')),
+        isFalse);
+    final response = await dispatcher.save(
+        result: result, networkStorage: configured, saveFolderName: 'Show');
+    expect(response.isSuccess, isFalse);
+    expect(cloud115.url, isNull);
+    expect(quark.url, isNull);
+  });
+
+  test('Aliyun dispatch forwards scoped password and explicit cleanup opt-in',
+      () async {
+    final aliyun = _Aliyun();
+    final dispatch =
+        CloudSaveDispatcher(cloud115: cloud115, quark: quark, aliyun: aliyun);
+    final result = _share(CloudSaveDrive.cloud115).copyWith(
+        resourceUrl: 'https://alipan.com/s/abc/folder/folder1?pwd=code');
+    final outcome = await dispatch.save(
+        result: result,
+        networkStorage: _config.copyWith(
+            aliyunRefreshToken: 'token', aliyunTo115Enabled: true),
+        saveFolderName: 'Show');
+    expect(outcome.isSuccess, isTrue);
+    expect(outcome.message, 'transferred');
+    expect(aliyun.url, result.resourceUrl);
+    expect(aliyun.delete, isTrue);
+    expect(cloud115.url, isNull);
+    expect(quark.url, isNull);
+  });
+
+  test('default Aliyun save needs no 115 account and never requests cleanup',
+      () async {
+    final aliyun = _Aliyun();
+    final dispatch =
+        CloudSaveDispatcher(cloud115: cloud115, quark: quark, aliyun: aliyun);
+    final result = _share(CloudSaveDrive.cloud115)
+        .copyWith(resourceUrl: 'https://alipan.com/s/abc');
+    const config = NetworkStorageConfig(aliyunRefreshToken: 'token');
+    expect(CloudSaveDispatcher.canSave(result, config), isTrue);
+    final outcome = await dispatch.save(
+        result: result, networkStorage: config, saveFolderName: 'Show');
+    expect(outcome.drive, CloudSaveDrive.aliyun);
+    expect(outcome.message, 'saved to Aliyun');
+    expect(aliyun.delete, isNull);
+    expect(cloud115.url, isNull);
+    expect(quark.url, isNull);
+  });
+}
+
+class _Aliyun extends Fake implements AliyunTo115Workflow {
+  String? url;
+  bool? delete;
+  @override
+  Future<String> saveToAliyun(
+      {required String shareUrl,
+      required String password,
+      required NetworkStorageConfig config,
+      required String saveFolderName,
+      CloudSaveProgressCallback? onProgress,
+      void Function(String)? onBackgroundRefreshFailure}) async {
+    url = shareUrl;
+    return 'saved to Aliyun';
+  }
+
+  @override
+  Future<String> save(
+      {required String shareUrl,
+      required String password,
+      required NetworkStorageConfig config,
+      required String saveFolderName,
+      bool deleteAliyunCopies = false,
+      CloudSaveProgressCallback? onProgress,
+      void Function(String)? onBackgroundRefreshFailure}) async {
+    url = shareUrl;
+    delete = deleteAliyunCopies;
+    expect(saveFolderName, 'Show');
+    return 'transferred';
+  }
 }
 
 class _Cloud115 implements Cloud115SaveWorkflowService {

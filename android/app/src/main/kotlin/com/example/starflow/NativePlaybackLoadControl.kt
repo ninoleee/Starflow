@@ -26,6 +26,11 @@ internal class NativePlaybackLoadControl(
     private val baseTargetBytes = config.targetBufferBytes.coerceAtMost(limitBytes)
     private var pressureUntil = 0L
     private var isLoading = false
+    private val refill = NativePlaybackRefillPolicy()
+    private var lastEvaluationAt = -1L
+    private var lastPositionMs = 0L
+    private var lastSpeed = 1f
+    private var lastPlayWhenReady = false
     @Volatile var currentTargetBytes = baseTargetBytes
         private set
 
@@ -42,36 +47,56 @@ internal class NativePlaybackLoadControl(
     @Synchronized
     fun onMemoryPressure() {
         pressureUntil = clock() + 60_000
-        policy.reset()
+        invalidateMemoryBuffer()
         currentTargetBytes = baseTargetBytes
         allocator.setTargetBufferSize(baseTargetBytes)
         allocator.trim()
     }
 
     @Synchronized
+    fun invalidateMemoryBuffer() {
+        policy.reset()
+        refill.reset()
+        isLoading = true
+        lastEvaluationAt = -1L
+    }
+
+    @Synchronized
+    fun isMemoryReady(bufferedMs: Long): Boolean = clock() >= pressureUntil &&
+        refill.memoryReady(bufferedMs)
+
+    @Synchronized
     override fun shouldContinueLoading(parameters: LoadControl.Parameters): Boolean {
         val nowMs = clock()
         val memoryPressure = nowMs < pressureUntil
+        val positionMs = parameters.playbackPositionUs / 1_000
+        if (lastEvaluationAt >= 0 && (nowMs < lastEvaluationAt ||
+                parameters.playbackSpeed != lastSpeed ||
+                parameters.playWhenReady != lastPlayWhenReady ||
+                positionMs < lastPositionMs ||
+                positionMs - lastPositionMs >
+                    (nowMs - lastEvaluationAt) * parameters.playbackSpeed + 2_000)) {
+            invalidateMemoryBuffer()
+        }
+        lastEvaluationAt = nowMs
+        lastPositionMs = positionMs
+        lastSpeed = parameters.playbackSpeed
+        lastPlayWhenReady = parameters.playWhenReady
         val network = transfer?.readAheadSnapshot()
-        val (target, refillMs) = policy.evaluate(
+        val (target, _) = policy.evaluate(
             nowMs, parameters.playbackPositionUs / 1_000,
             parameters.bufferedDurationUs / 1_000, parameters.playbackSpeed,
             parameters.playWhenReady, isLoading && network?.active == true,
             network?.bytesPerSecond, memoryPressure,
         )
+        if (target > currentTargetBytes) refill.reset()
         currentTargetBytes = target
         allocator.setTargetBufferSize(target)
         if (memoryPressure) allocator.trim()
         // Resume thresholds remain owned by Media3; only read-ahead admission changes.
-        if (allocator.totalBytesAllocated >= target ||
-            parameters.bufferedDurationUs >= config.maxBufferMs * 1_000L) {
-            isLoading = false
-        } else {
-            val refillUs = minOf(config.maxBufferMs * 1_000L,
-                (refillMs * 1_000.0 * parameters.playbackSpeed.coerceAtLeast(1f)).toLong())
-            // Keep loading to the upper bound once admitted, even above the delegate's old cap.
-            if (parameters.bufferedDurationUs < refillUs) isLoading = true
-        }
+        isLoading = refill.evaluate(parameters.bufferedDurationUs / 1_000,
+            allocator.totalBytesAllocated >= target ||
+                parameters.bufferedDurationUs >= config.maxBufferMs * 1_000L)
         return isLoading
     }
 
@@ -105,8 +130,8 @@ internal class NativePlaybackLoadControl(
     }
 
     private fun reset() {
-        policy.reset()
-        isLoading = false
+        invalidateMemoryBuffer()
+        pressureUntil = 0L
         currentTargetBytes = baseTargetBytes
     }
 }

@@ -8,9 +8,12 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
+import 'package:starflow/features/search/application/search_share_validator.dart';
+import 'package:starflow/features/search/domain/share_link_validation.dart';
 import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/search/application/cloud115_save_workflow_service.dart';
+import 'package:starflow/features/search/application/aliyun_to115_workflow.dart';
 import 'package:starflow/features/search/application/quark_save_workflow_service.dart';
 import 'package:starflow/features/search/application/search_favorite_metadata_service.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
@@ -250,7 +253,59 @@ class _SaveHarness {
 }
 
 void main() {
-  for (final drive in CloudSaveDrive.values) {
+  for (final enabled in [false, true]) {
+    testWidgets('Aliyun save directly dispatches configured mode: $enabled',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final preferences = SearchPreferencesRepository(
+          preferences:
+              SharedPreferencesStore(await SharedPreferences.getInstance()));
+      addTearDown(preferences.dispose);
+      final aliyun = _AliyunSave();
+      await tester.pumpWidget(ProviderScope(overrides: [
+        searchShareValidatorProvider.overrideWithValue(_ValidAliyunShare()),
+        isTelevisionProvider.overrideWith((ref) => false),
+        aliyunTo115WorkflowProvider.overrideWithValue(aliyun),
+        searchRepositoryProvider.overrideWithValue(_Repository(
+            _result.copyWith(resourceUrl: 'https://alipan.com/s/abc'))),
+        searchPreferencesRepositoryProvider.overrideWithValue(preferences),
+        searchFavoriteMetadataServiceProvider
+            .overrideWithValue(const SearchFavoriteMetadataService()),
+        appSettingsProvider.overrideWithValue(AppSettings(
+            mediaSources: const [],
+            searchProviders: const [
+              SearchProviderConfig(
+                  id: 'online',
+                  name: 'Online',
+                  kind: SearchProviderKind.panSou,
+                  endpoint: 'https://online.test',
+                  enabled: true,
+                  allowedCloudTypes: ['aliyun'])
+            ],
+            doubanAccount: const DoubanAccountConfig(enabled: false),
+            homeModules: const [],
+            networkStorage: NetworkStorageConfig(
+                aliyunRefreshToken: 'token',
+                cloud115Cookie: enabled ? 'cookie' : '',
+                aliyunTo115Enabled: enabled))),
+      ], child: const MaterialApp(home: SearchPage(initialQuery: 'Movie'))));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+      await tester.pumpAndSettle();
+      expect(find.text('Test Movie'), findsWidgets,
+          reason: tester
+              .widgetList<Text>(find.byType(Text))
+              .map((w) => w.data)
+              .join('|'));
+      await tester.tap(find.byTooltip(enabled ? '阿里转 115 并清理副本' : '保存到阿里'));
+      await tester.pumpAndSettle();
+      expect(aliyun.standalone, !enabled);
+      expect(aliyun.cleaned, enabled);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
+  for (final drive in [CloudSaveDrive.quark, CloudSaveDrive.cloud115]) {
     for (final favorites in [false, true]) {
       testWidgets(
           '$drive progress and background refresh, favorites=$favorites',
@@ -323,6 +378,42 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+  }
+}
+
+class _ValidAliyunShare extends Fake implements SearchShareValidator {
+  @override
+  SearchValidationJob? resolve(
+          SearchResult result, NetworkStorageConfig config) =>
+      () async => const ShareLinkValidationResult.valid();
+}
+
+class _AliyunSave extends Fake implements AliyunTo115Workflow {
+  bool standalone = false;
+  bool cleaned = false;
+  @override
+  Future<String> saveToAliyun(
+      {required String shareUrl,
+      required String password,
+      required NetworkStorageConfig config,
+      required String saveFolderName,
+      CloudSaveProgressCallback? onProgress,
+      void Function(String)? onBackgroundRefreshFailure}) async {
+    standalone = true;
+    return 'saved Aliyun';
+  }
+
+  @override
+  Future<String> save(
+      {required String shareUrl,
+      required String password,
+      required NetworkStorageConfig config,
+      required String saveFolderName,
+      bool deleteAliyunCopies = false,
+      CloudSaveProgressCallback? onProgress,
+      void Function(String)? onBackgroundRefreshFailure}) async {
+    cleaned = deleteAliyunCopies;
+    return 'transferred';
   }
 }
 

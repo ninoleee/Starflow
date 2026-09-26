@@ -14,12 +14,18 @@ class QuarkDirectoryManagerPage extends ConsumerStatefulWidget {
     this.initialFid = '0',
     this.initialPath = '/',
     this.cloud115 = false,
+    this.driveName,
+    this.entryLoader,
+    this.deleteEntries,
   });
 
   final String cookie;
   final String initialFid;
   final String initialPath;
   final bool cloud115;
+  final String? driveName;
+  final Future<List<QuarkFileEntry>> Function(String, String)? entryLoader;
+  final Future<void> Function(String, List<String>)? deleteEntries;
 
   @override
   ConsumerState<QuarkDirectoryManagerPage> createState() =>
@@ -33,7 +39,7 @@ class _QuarkDirectoryManagerPageState
   bool _isDeleting = false;
   String? _errorMessage;
   List<QuarkFileEntry> _entries = const [];
-  String get _driveName => widget.cloud115 ? '115' : '夸克';
+  String get _driveName => widget.driveName ?? (widget.cloud115 ? '115' : '夸克');
 
   @override
   void initState() {
@@ -57,15 +63,17 @@ class _QuarkDirectoryManagerPageState
 
     try {
       final current = _breadcrumbs.last;
-      final entries = widget.cloud115
-          ? await ref.read(cloud115SaveClientProvider).listEntries(
-              cookie: widget.cookie,
-              parentFid: current.fid,
-              parentPath: current.path)
-          : await ref.read(quarkSaveClientProvider).listEntries(
-                cookie: widget.cookie,
-                parentFid: current.fid,
-              );
+      final entries = widget.entryLoader != null
+          ? await widget.entryLoader!(current.fid, current.path)
+          : widget.cloud115
+              ? await ref.read(cloud115SaveClientProvider).listEntries(
+                  cookie: widget.cookie,
+                  parentFid: current.fid,
+                  parentPath: current.path)
+              : await ref.read(quarkSaveClientProvider).listEntries(
+                    cookie: widget.cookie,
+                    parentFid: current.fid,
+                  );
       if (!mounted) {
         return;
       }
@@ -155,7 +163,10 @@ class _QuarkDirectoryManagerPageState
   }) async {
     setState(() => _isDeleting = true);
     try {
-      if (widget.cloud115) {
+      if (widget.deleteEntries != null) {
+        await widget.deleteEntries!(
+            _breadcrumbs.last.fid, entries.map((e) => e.fid).toList());
+      } else if (widget.cloud115) {
         await ref.read(cloud115SaveClientProvider).deleteEntries(
             cookie: widget.cookie,
             parentId: _breadcrumbs.last.fid,

@@ -28,8 +28,8 @@ void main() {
 
     expect(profile, isNotNull);
     expect(profile!.cachePauseInitial, 'yes');
-    expect(profile.cacheSecs, '150');
-    expect(profile.demuxerReadaheadSecs, '42');
+    expect(profile.cacheSecs, '120');
+    expect(profile.demuxerReadaheadSecs, '120');
     expect(profile.networkTimeoutSeconds, '32');
   });
 }

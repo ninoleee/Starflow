@@ -10,6 +10,7 @@ import 'package:starflow/features/playback/data/native_playback_memory_preferenc
 import 'package:starflow/features/playback/data/playback_memory_repository.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
+import 'package:starflow/features/settings/data/cloud_credential_store.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/storage/data/local_storage_cache_repository.dart';
 
@@ -22,10 +23,10 @@ void main() {
   test('credential read failure preserves valid settings and credential',
       () async {
     final store = _FailingStore();
-    final repository = LocalAppSettingsRepository(preferences: store);
-    await repository.save(SeedData.defaultSettings.copyWith(
-      networkStorage: const NetworkStorageConfig(cloud115Cookie: 'synthetic'),
-    ));
+    final repository = LocalAppSettingsRepository(
+        preferences: store, credentials: MemoryCloudCredentialStore());
+    store.values[settingsKey] = jsonEncode(SeedData.defaultSettings.toJson());
+    store.values[cookieKey] = 'synthetic';
     final before = Map<String, Object>.from(store.values);
     store.failRead = cookieKey;
     await expectLater(repository.load(), throwsStateError);
@@ -37,7 +38,8 @@ void main() {
   test('reconciliation save failure does not replace settings with defaults',
       () async {
     final store = _FailingStore();
-    final repository = LocalAppSettingsRepository(preferences: store);
+    final repository = LocalAppSettingsRepository(
+        preferences: store, credentials: MemoryCloudCredentialStore());
     await repository.save(SeedData.defaultSettings.copyWith(
       mediaSources: const [],
       libraryMatchSourceIds: const ['deleted'],
@@ -54,7 +56,9 @@ void main() {
     final store = _FailingStore()
       ..values[settingsKey] = '{invalid'
       ..values[cookieKey] = 'synthetic';
-    await LocalAppSettingsRepository(preferences: store).load();
+    await LocalAppSettingsRepository(
+            preferences: store, credentials: MemoryCloudCredentialStore())
+        .load();
     expect(store.values[settingsKey], '{invalid');
     expect(store.values[cookieKey], 'synthetic');
   });

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:starflow/features/playback/application/mpv_memory_priority_policy.dart';
 import 'package:starflow/features/playback/application/playback_control_intents.dart';
 import 'package:starflow/features/playback/application/playback_recovery_intent.dart';
 import 'package:starflow/features/playback/application/playback_seek_coalescer.dart';
@@ -93,6 +94,7 @@ part 'widgets/player_page_startup_mpv_recovery.part.dart';
 part 'widgets/player_page_startup_mpv_launch.part.dart';
 part 'widgets/player_page_startup_mpv_tuning.part.dart';
 part 'widgets/player_page_performance.part.dart';
+part 'widgets/player_page_memory_priority.part.dart';
 part 'widgets/player_page_runtime_actions.part.dart';
 part 'widgets/player_page_controls.part.dart';
 
@@ -169,6 +171,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   VideoController? _videoController;
   MpvPlaybackLifecycle _mpvLifecycle = MpvPlaybackLifecycle();
   final _mpvRelays = <Player, PlaybackStreamRelayService>{};
+  final _mpvRelayUrls = <Player, String>{};
+  final _mpvRelayClosures = Expando<Future<void>>();
   bool _mpvBitmapSubtitle = false;
   PlaybackTarget? _resolvedTarget;
   PlaybackEpisodeQueue? _episodeQueue;
@@ -339,6 +343,10 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
   bool _androidMemoryClassResolved = false;
   PlaybackPerformanceTracker? _mpvPerformanceTracker;
   Timer? _mpvPerformanceSampleTimer;
+  Timer? _mpvMemoryTimer;
+  bool _mpvMemoryBusy = false;
+  int _mpvMemoryEpoch = 0;
+  MpvMemoryPriorityPolicy _mpvMemoryPolicy = MpvMemoryPriorityPolicy();
   bool _mpvPerformanceSampleInProgress = false;
   int _mpvPerformanceSampleGeneration = 0;
   MpvHealthLogGate _mpvHealthLogGate = MpvHealthLogGate();
@@ -426,6 +434,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     _startupGeneration++;
     _startupScope.cancel();
     _stopMpvPerformanceSampling();
+    _stopMpvMemorySampling();
     final player = _player;
     final resourcesClosed =
         _mpvLifecycle.close().catchError((Object error, StackTrace stack) {
@@ -634,7 +643,7 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
       // Abort this owner's transport before libmpv stop/dispose can wait on it.
       // A replacement player has a separate relay and is not affected.
       try {
-        await _mpvRelays.remove(player)?.close();
+        await _closeMpvRelay(player);
       } catch (error, stackTrace) {
         _traceWindowsMpv(
           'windows-mpv.shutdown.relay-error',
@@ -676,6 +685,35 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
     });
     _playerShutdownQueue = shutdown.catchError((_) {});
     await shutdown;
+  }
+
+  Future<void> _closeMpvRelay(Player player) =>
+      _mpvRelayClosures[player] ??= Future<void>.sync(() async {
+        _mpvRelayUrls.remove(player);
+        await _mpvRelays.remove(player)?.close();
+      });
+
+  PlaybackRelayCacheControl? _mpvCacheControl(Player player) {
+    final relay = _mpvRelays[player];
+    return relay is PlaybackRelayCacheControl
+        ? relay as PlaybackRelayCacheControl
+        : null;
+  }
+
+  Future<int?> _readMpvDiskCacheBytes(Player player) async =>
+      _mpvCacheControl(player)
+          ?.cacheSnapshot(url: _mpvRelayUrls[player])
+          ?.storedBytes;
+
+  void _setMpvPlaybackActive(Player player, bool active) {
+    if (!active) _invalidateMpvMemoryReady(player);
+    _mpvCacheControl(player)
+        ?.setPlaybackActive(active, url: _mpvRelayUrls[player]);
+  }
+
+  void _cancelMpvReadAhead(Player player) {
+    _invalidateMpvMemoryReady(player);
+    _mpvCacheControl(player)?.cancelReadAhead(url: _mpvRelayUrls[player]);
   }
 
   Future<void> _stopPlaybackBeforeExit({
@@ -1057,6 +1095,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                   networkSpeed: MpvNetworkSpeedLabel(
                                     player: player,
                                     generation: _startupGeneration,
+                                    readDiskCacheBytes: () =>
+                                        _readMpvDiskCacheBytes(player),
                                   ),
                                   backFocusNode: _tvBackControlFocusNode,
                                   previousEpisodeFocusNode:

@@ -125,7 +125,8 @@ class WebDavSyncSnapshot {
       throw const FormatException('远端收藏无效或超过 200 条');
     }
     return WebDavSyncSnapshot(
-      settings: settings == null ? null : AppSettings.fromCurrentJson(settings),
+      settings:
+          settings == null ? null : AppSettings.fromCompatibleJson(settings),
       favorites: favorites,
     );
   }

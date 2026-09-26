@@ -3,8 +3,12 @@ import AVKit
 import MediaPlayer
 import UIKit
 import Flutter
+import UniformTypeIdentifiers
 
-final class NativePlaybackViewController: AVPlayerViewController {
+final class NativePlaybackViewController: AVPlayerViewController,
+  AVPlayerViewControllerDelegate,
+  UIDocumentPickerDelegate
+{
   private static let persistThresholdMs: Int64 = 10_000
   private static let playbackStartupTimeoutSeconds: TimeInterval = 30
 
@@ -17,6 +21,14 @@ final class NativePlaybackViewController: AVPlayerViewController {
   private let episodeIntent = NativePlaybackEpisodeIntent()
   private var playbackGeneration = 0
   private var playbackSessionClosed = false
+  private var cacheGeneration = 0
+  private var cacheTransportURL: String?
+  private var cachePlaybackActive: Bool?
+  private var cacheMemoryReadiness = NativePlaybackMemoryReadiness()
+  private var cacheMetricsTimer: Timer?
+  private var cacheMetricsVisible = false
+  private var cacheMetricsRequest: Int?
+  private let cacheMetricsLabel = UILabel()
   private var episodeResolutionTimeout: DispatchWorkItem?
   private let isoFormatter = ISO8601DateFormatter()
   private var request: NativePlaybackRequest
@@ -31,6 +43,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
   private var endObserver: NSObjectProtocol?
   private var playbackStateObservation: NSKeyValueObservation?
   private var playbackItemStatusObservation: NSKeyValueObservation?
+  private var playbackBufferEmptyObservation: NSKeyValueObservation?
   private var appObservers: [NSObjectProtocol] = []
   private var lastSavedPositionMs: Int64 = -1
   private var remoteCommandsInstalled = false
@@ -39,6 +52,19 @@ final class NativePlaybackViewController: AVPlayerViewController {
   private var appIsInBackground = false
   private var subtitleSessionPreference: NativeSubtitleSessionPreference?
   private var automaticallyAppliedSubtitlePreference: NativeSubtitleSessionPreference?
+  private var externalSubtitleOverlay: NativeExternalSubtitleOverlay?
+  private(set) var externalSubtitleTrack: NativeExternalSubtitleTrack?
+  private var externalSubtitleTimeObserverToken: Any?
+  private var externalSubtitleDownloadTask: URLSessionDataTask?
+  private var externalSubtitleDownloader: NativeExternalSubtitleDownloader?
+  private var externalSubtitleOperationId = 0
+  private let externalSubtitleWorker = DispatchQueue(label: "starflow.subtitle.parse", qos: .userInitiated)
+  private weak var externalSubtitlePicker: UIDocumentPickerViewController?
+  private var externalSubtitlePickerGeneration = 0
+  private var subtitleSearchEngine: FlutterEngine?
+  private var subtitleSearchChannel: FlutterMethodChannel?
+  private weak var subtitleSearchController: FlutterViewController?
+  private var externalSubtitleIsInPictureInPicture = false
 
   init(
     request: NativePlaybackRequest,
@@ -73,14 +99,25 @@ final class NativePlaybackViewController: AVPlayerViewController {
     view.backgroundColor = .black
     showsPlaybackControls = true
     allowsPictureInPicturePlayback = true
+    delegate = self
     updatesNowPlayingInfoCenter = false
     title = request.title
     cleanupCustomOverlayIfNeeded()
+    installExternalSubtitleControls()
+    installCacheMetricsLabel()
     configurePlayer()
+  }
+
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    cacheMetricsVisible = true
+    startCacheMetrics()
   }
 
   override func viewWillDisappear(_ animated: Bool) {
     super.viewWillDisappear(animated)
+    cacheMetricsVisible = false
+    stopCacheMetrics()
     captureCurrentSubtitleSessionPreference()
     persistPlaybackProgress(force: true)
     if isBeingDismissed || isMovingFromParent || navigationController?.isBeingDismissed == true {
@@ -105,7 +142,11 @@ final class NativePlaybackViewController: AVPlayerViewController {
 
   private func closePlaybackSession() {
     guard !playbackSessionClosed else { return }
+    endCacheTransport()
     playbackSessionClosed = true
+    resolverChannel?.invokeMethod("closeNativePlaybackTransports", arguments: ["resolverSessionId": resolverSessionId])
+    cancelExternalSubtitleOperation(notifyResolver: true)
+    cleanupExternalSubtitleFiles()
     teardownPlayback()
     resolverChannel?.invokeMethod("closeNativeFntvSession", arguments: ["resolverSessionId": resolverSessionId])
   }
@@ -160,6 +201,24 @@ final class NativePlaybackViewController: AVPlayerViewController {
       peakBitRateProfile: .unlimited
     )
     self.player = player
+    cacheTransportURL = request.url.absoluteString
+    cachePlaybackActive = nil
+    invalidateCacheMemoryReadiness()
+    setCachePlaybackActive(true)
+    player.onPlaybackActive = { [weak self, weak player] active in
+      guard let self, let player, self.player === player else { return }
+      self.setCachePlaybackActive(active)
+    }
+    player.onSeek = { [weak self, weak player] in
+      guard let self, let player, self.player === player else { return }
+      self.cancelCacheReadAhead()
+    }
+    startCacheMetrics()
+    updateExternalSubtitleOverlay()
+    let target = playbackStore.decodeTargetJson(request.playbackTargetJson)
+    if let path = target["externalSubtitleFilePath"] as? String, !path.isEmpty {
+      applyExternalSubtitlePath(path, displayName: target["externalSubtitleDisplayName"] as? String ?? "")
+    }
     metricsTracker.attach(player: player, item: item)
 
     installRemoteCommands()
@@ -218,6 +277,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
     ) { [weak self, weak item] in
       DispatchQueue.main.async {
         guard let self, let item, self.player?.currentItem === item,
+          self.externalSubtitleTrack == nil,
           let group = asset.mediaSelectionGroup(forMediaCharacteristic: .legible)
         else {
           return
@@ -270,6 +330,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   private func captureCurrentSubtitleSessionPreference() {
+    guard externalSubtitleTrack == nil else { return }
     guard let item = player?.currentItem,
       let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible)
     else {
@@ -419,6 +480,473 @@ final class NativePlaybackViewController: AVPlayerViewController {
         subview.removeFromSuperview()
       }
     }
+  }
+
+  private func installCacheMetricsLabel() {
+    guard let overlay = contentOverlayView else { return }
+    cacheMetricsLabel.text = "不可用 | --"
+    cacheMetricsLabel.textColor = .white
+    cacheMetricsLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+    cacheMetricsLabel.shadowColor = .black
+    cacheMetricsLabel.shadowOffset = CGSize(width: 0, height: 1)
+    cacheMetricsLabel.numberOfLines = 2
+    cacheMetricsLabel.textAlignment = .right
+    cacheMetricsLabel.adjustsFontSizeToFitWidth = false
+    cacheMetricsLabel.accessibilityIdentifier = "starflow-native-cache-metrics"
+    cacheMetricsLabel.translatesAutoresizingMaskIntoConstraints = false
+    overlay.addSubview(cacheMetricsLabel)
+    NSLayoutConstraint.activate([
+      cacheMetricsLabel.trailingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -72),
+      cacheMetricsLabel.topAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.topAnchor, constant: 16),
+      cacheMetricsLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 230),
+      cacheMetricsLabel.leadingAnchor.constraint(greaterThanOrEqualTo: overlay.safeAreaLayoutGuide.leadingAnchor, constant: 64),
+      cacheMetricsLabel.heightAnchor.constraint(equalToConstant: 36),
+    ])
+  }
+
+  private func cacheArguments(invalidateMetrics: Bool = true) -> [String: Any]? {
+    guard !playbackSessionClosed, !resolverSessionId.isEmpty,
+      let url = cacheTransportURL else { return nil }
+    cacheGeneration += 1
+    if invalidateMetrics { cacheMetricsRequest = nil }
+    return ["resolverSessionId": resolverSessionId, "currentURL": url, "generation": cacheGeneration]
+  }
+
+  private func setCachePlaybackActive(_ active: Bool) {
+    if !active { invalidateCacheMemoryReadiness() }
+    guard cachePlaybackActive != active, var args = cacheArguments() else { return }
+    cachePlaybackActive = active
+    args["active"] = active
+    resolverChannel?.invokeMethod("setNativePlaybackActive", arguments: args)
+  }
+
+  private func cancelCacheReadAhead() {
+    invalidateCacheMemoryReadiness()
+    guard let args = cacheArguments() else { return }
+    resolverChannel?.invokeMethod("cancelNativePlaybackReadAhead", arguments: args)
+  }
+
+  private func reportCacheMemoryReady(_ ready: Bool) {
+    guard var args = cacheArguments(invalidateMetrics: false) else { return }
+    args["memoryReady"] = ready
+    // Main owns the four-second lease; renew even when controls are hidden.
+    resolverChannel?.invokeMethod("setNativePlaybackBufferState", arguments: args)
+  }
+
+  private func invalidateCacheMemoryReadiness() {
+    cacheMemoryReadiness.invalidate()
+    reportCacheMemoryReady(false)
+  }
+
+  private func sampleCacheMemoryReadiness(for player: AVPlayer) {
+    guard let item = player.currentItem else {
+      invalidateCacheMemoryReadiness()
+      return
+    }
+    let position = player.currentTime().seconds
+    // Only the loaded range containing the playhead supplies forward evidence;
+    // disconnected ranges and unknown/live durations are not memory capacity.
+    let bufferedAhead = item.loadedTimeRanges.compactMap { value -> Double? in
+      let range = value.timeRangeValue
+      let start = range.start.seconds
+      let end = CMTimeRangeGetEnd(range).seconds
+      guard start.isFinite, end.isFinite, start <= position, end > position else { return nil }
+      return end - position
+    }.max()
+    let ready = cacheMemoryReadiness.sample(position: position, bufferedAhead: bufferedAhead,
+      itemReady: item.status == .readyToPlay,
+      playing: player.timeControlStatus == .playing && player.rate > 0 && cachePlaybackActive == true,
+      startupPending: startupGate != nil, bufferEmpty: item.isPlaybackBufferEmpty,
+      bufferFull: item.isPlaybackBufferFull, likelyToKeepUp: item.isPlaybackLikelyToKeepUp)
+    reportCacheMemoryReady(ready)
+  }
+
+  private func endCacheTransport() {
+    stopCacheMetrics()
+    setCachePlaybackActive(false)
+    cancelCacheReadAhead()
+    cacheTransportURL = nil
+    cachePlaybackActive = nil
+    cacheMetricsLabel.text = "不可用 | --"
+  }
+
+  private func startCacheMetrics() {
+    guard cacheMetricsVisible, !appIsInBackground, !externalSubtitleIsInPictureInPicture, !playbackSessionClosed,
+      cacheTransportURL != nil, cacheMetricsTimer == nil else { return }
+    cacheMetricsLabel.isHidden = false
+    sampleCacheMetrics()
+    cacheMetricsTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+      self?.sampleCacheMetrics()
+    }
+  }
+
+  private func stopCacheMetrics() {
+    cacheMetricsTimer?.invalidate()
+    cacheMetricsTimer = nil
+    cacheGeneration += 1
+    cacheMetricsRequest = nil
+    cacheMetricsLabel.isHidden = true
+  }
+
+  private func sampleCacheMetrics() {
+    guard cacheMetricsVisible, !appIsInBackground, !cacheMetricsLabel.isHidden,
+      cacheMetricsRequest == nil, let resolverChannel,
+      let args = cacheArguments(), let url = cacheTransportURL else { return }
+    let generation = cacheGeneration
+    cacheMetricsRequest = generation
+    resolverChannel.invokeMethod("nativePlaybackCacheSnapshot", arguments: args) { [weak self] result in
+      guard let self else { return }
+      guard self.cacheMetricsRequest == generation else { return }
+      self.cacheMetricsRequest = nil
+      guard !self.playbackSessionClosed, self.cacheMetricsVisible, !self.appIsInBackground,
+        self.cacheTransportURL == url else { return }
+      guard let value = result as? [String: Any], value["ok"] as? Bool == true,
+        value["resolverSessionId"] as? String == self.resolverSessionId,
+        value["currentURL"] as? String == url,
+        (value["generation"] as? NSNumber)?.intValue == generation else {
+        self.cacheMetricsLabel.text = "不可用 | --"
+        return
+      }
+      let bytes = (value["storedBytes"] as? NSNumber)?.int64Value
+      let disk = bytes.flatMap { $0 >= 0 ? ByteCountFormatter.string(fromByteCount: $0, countStyle: .binary) : nil } ?? "--"
+      self.cacheMetricsLabel.text = "不可用 | \(disk)"
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+      guard let self, self.cacheMetricsRequest == generation else { return }
+      self.cacheMetricsRequest = nil
+      self.cacheGeneration += 1
+      self.cacheMetricsLabel.text = "不可用 | --"
+    }
+  }
+
+  private func installExternalSubtitleControls() {
+    guard let overlay = contentOverlayView else { return }
+    let subtitleButton = UIButton(type: .system)
+    subtitleButton.accessibilityIdentifier = "starflow-native-subtitle-button"
+    subtitleButton.setImage(UIImage(systemName: "captions.bubble"), for: .normal)
+    subtitleButton.accessibilityLabel = "字幕"
+    subtitleButton.setTitleColor(.white, for: .normal)
+    subtitleButton.backgroundColor = UIColor.black.withAlphaComponent(0.58)
+    subtitleButton.layer.cornerRadius = 5
+    subtitleButton.contentEdgeInsets = UIEdgeInsets(top: 7, left: 10, bottom: 7, right: 10)
+    subtitleButton.translatesAutoresizingMaskIntoConstraints = false
+    subtitleButton.addTarget(self, action: #selector(openExternalSubtitleMenu), for: .touchUpInside)
+    view.addSubview(subtitleButton)
+    NSLayoutConstraint.activate([
+      subtitleButton.widthAnchor.constraint(equalToConstant: 44),
+      subtitleButton.heightAnchor.constraint(equalToConstant: 44),
+      subtitleButton.topAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.topAnchor, constant: 16),
+      subtitleButton.trailingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+    ])
+
+    let subtitleOverlay = NativeExternalSubtitleOverlay(frame: .zero)
+    subtitleOverlay.translatesAutoresizingMaskIntoConstraints = false
+    overlay.addSubview(subtitleOverlay)
+    NSLayoutConstraint.activate([
+      subtitleOverlay.leadingAnchor.constraint(equalTo: overlay.leadingAnchor),
+      subtitleOverlay.trailingAnchor.constraint(equalTo: overlay.trailingAnchor),
+      subtitleOverlay.topAnchor.constraint(equalTo: overlay.topAnchor),
+      subtitleOverlay.bottomAnchor.constraint(equalTo: overlay.bottomAnchor),
+    ])
+    self.externalSubtitleOverlay = subtitleOverlay
+    overlay.bringSubviewToFront(subtitleOverlay)
+    view.bringSubviewToFront(subtitleButton)
+  }
+
+  @objc func openExternalSubtitleMenu() {
+    guard viewIfLoaded?.window != nil, presentedViewController == nil else { return }
+    let alert = UIAlertController(title: "外挂字幕", message: nil, preferredStyle: .actionSheet)
+    alert.addAction(UIAlertAction(title: "选择本地字幕", style: .default) { [weak self] _ in
+      self?.presentExternalSubtitlePicker()
+    })
+    alert.addAction(UIAlertAction(title: "在线搜索字幕", style: .default) { [weak self] _ in
+      self?.requestExternalSubtitleSearch()
+    })
+    if externalSubtitleTrack != nil {
+      alert.addAction(UIAlertAction(title: "关闭外挂字幕", style: .destructive) { [weak self] _ in
+        self?.clearExternalSubtitle()
+      })
+      alert.addAction(UIAlertAction(title: "恢复系统字幕", style: .default) { [weak self] _ in
+        guard let self else { return }
+        self.clearExternalSubtitle()
+        if let item = self.player?.currentItem, let asset = item.asset as? AVURLAsset {
+          self.applyAutomaticSubtitleSelection(to: item, asset: asset)
+        }
+      })
+    }
+    if externalSubtitleDownloadTask != nil {
+      alert.addAction(UIAlertAction(title: "取消下载", style: .destructive) { [weak self] _ in
+        self?.cancelExternalSubtitleOperation(notifyResolver: true)
+      })
+    }
+    alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+    if let popover = alert.popoverPresentationController {
+      popover.sourceView = view
+      popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 1, height: 1)
+    }
+    present(alert, animated: true)
+  }
+
+  private func presentExternalSubtitlePicker() {
+    cancelExternalSubtitleOperation(notifyResolver: false)
+    externalSubtitlePickerGeneration = externalSubtitleOperationId
+    let picker: UIDocumentPickerViewController
+    if #available(iOS 14.0, *) {
+      picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: false)
+    } else {
+      picker = UIDocumentPickerViewController(documentTypes: ["public.data"], in: .open)
+    }
+    picker.delegate = self
+    picker.allowsMultipleSelection = false
+    externalSubtitlePicker = picker
+    present(picker, animated: true)
+  }
+
+  func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    guard controller === externalSubtitlePicker,
+      externalSubtitlePickerGeneration == externalSubtitleOperationId,
+      !playbackSessionClosed, let url = urls.first else { return }
+    externalSubtitlePicker = nil
+    applyExternalSubtitleFile(url: url, displayName: url.lastPathComponent)
+  }
+
+  private func requestExternalSubtitleSearch() {
+    guard !playbackSessionClosed, subtitleSearchEngine == nil else { return }
+    cancelExternalSubtitleOperation(notifyResolver: false)
+    let generation = playbackGeneration
+    let target = playbackStore.decodeTargetJson(request.playbackTargetJson)
+    let name = (target["seriesTitle"] as? String)?.nonEmptyTrimmed ?? request.title
+    var route = URLComponents()
+    route.path = "/subtitle-search"
+    route.queryItems = [URLQueryItem(name: "standalone", value: "1"),
+      URLQueryItem(name: "mode", value: "downloadAndApply"),
+      URLQueryItem(name: "q", value: name), URLQueryItem(name: "title", value: name),
+      URLQueryItem(name: "input", value: name)]
+    for (key, queryKey) in [("originalTitle", "originalTitle"), ("year", "year"),
+      ("imdbId", "imdbId"), ("tmdbId", "tmdbId"),
+      ("seasonNumber", "season"), ("episodeNumber", "episode")] {
+      if let value = target[key], !(value is NSNull) {
+        route.queryItems?.append(URLQueryItem(name: queryKey, value: "\(value)"))
+      }
+    }
+    let engine = FlutterEngine(name: "starflow-subtitles-\(UUID().uuidString)", project: nil,
+      allowHeadlessExecution: false)
+    guard engine.run(withEntrypoint: nil, initialRoute: route.string) else {
+      notifyExternalSubtitleError("无法打开字幕搜索")
+      return
+    }
+    GeneratedPluginRegistrant.register(with: engine)
+    let channel = FlutterMethodChannel(name: "starflow/subtitle_search", binaryMessenger: engine.binaryMessenger)
+    subtitleSearchEngine = engine
+    subtitleSearchChannel = channel
+    channel.setMethodCallHandler { [weak self] call, reply in
+      guard let self, !self.playbackSessionClosed,
+        self.playbackGeneration == generation else { reply(false); return }
+      switch call.method {
+      case "finishSubtitleSearch":
+        let args = call.arguments as? [String: Any] ?? [:]
+        let path = args["subtitleFilePath"] as? String ?? ""
+        guard !path.isEmpty else { reply(false); return }
+        self.applyExternalSubtitlePath(path, displayName: args["displayName"] as? String ?? "") { [weak self, weak engine] accepted in
+          NativeExternalSubtitleParser.discardOnlineDownload(path: path)
+          guard let self, let engine, self.subtitleSearchEngine === engine else { return }
+          reply(true)
+          self.closeExternalSubtitleSearch { [weak self] in
+            if !accepted { self?.notifyExternalSubtitleError("此字幕无法挂载，原字幕保持不变。") }
+          }
+        }
+      case "cancelSubtitleSearch":
+        reply(true)
+        self.closeExternalSubtitleSearch()
+      default: reply(FlutterMethodNotImplemented)
+      }
+    }
+    let controller = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
+    controller.modalPresentationStyle = .fullScreen
+    subtitleSearchController = controller
+    present(controller, animated: true)
+  }
+
+  private func closeExternalSubtitleSearch(completion: (() -> Void)? = nil) {
+    if subtitleSearchEngine != nil { cancelExternalSubtitleOperation(notifyResolver: false) }
+    subtitleSearchChannel?.setMethodCallHandler(nil)
+    subtitleSearchChannel = nil
+    let engine = subtitleSearchEngine
+    subtitleSearchEngine = nil
+    if let controller = subtitleSearchController {
+      controller.dismiss(animated: true) {
+        engine?.destroyContext()
+        completion?()
+      }
+    } else {
+      engine?.destroyContext()
+      completion?()
+    }
+    subtitleSearchController = nil
+  }
+
+  func applyExternalSubtitlePath(_ path: String, displayName: String = "",
+    completion: @escaping (Bool) -> Void = { _ in }) {
+    let url = URL(fileURLWithPath: path)
+    applyExternalSubtitleFile(url: url, displayName: displayName.isEmpty ? url.lastPathComponent : displayName,
+      completion: completion)
+  }
+
+  func downloadExternalSubtitle(
+    urlString: String,
+    headers: [String: String] = [:],
+    displayName: String = "subtitle.srt"
+  ) {
+    guard !playbackSessionClosed,
+      let url = URL(string: urlString), url.scheme == "https" || url.scheme == "http" else {
+      notifyExternalSubtitleError("字幕下载地址无效")
+      return
+    }
+    cancelExternalSubtitleOperation(notifyResolver: false)
+    let operationId = externalSubtitleOperationId
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    for (key, value) in headers where !key.isEmpty { request.setValue(value, forHTTPHeaderField: key) }
+    let downloader = NativeExternalSubtitleDownloader { [weak self] result in
+      DispatchQueue.main.async {
+        guard let self, self.externalSubtitleOperationId == operationId, !self.playbackSessionClosed else { return }
+        self.externalSubtitleDownloadTask = nil
+        self.externalSubtitleDownloader = nil
+        switch result {
+        case .success(let data): self.applyExternalSubtitleData(data, fileName: displayName)
+        case .failure(let error):
+          if !(error is CancellationError) { self.notifyExternalSubtitleError(error.localizedDescription) }
+        }
+      }
+    }
+    externalSubtitleDownloader = downloader
+    externalSubtitleDownloadTask = downloader.start(request: request)
+    resolverChannel?.invokeMethod("nativeExternalSubtitleState", arguments: [
+      "resolverSessionId": resolverSessionId, "state": "downloading",
+    ])
+  }
+
+  private func applyExternalSubtitleFile(url: URL, displayName: String,
+    completion: @escaping (Bool) -> Void = { _ in }) {
+    guard !playbackSessionClosed, url.isFileURL else { completion(false); return }
+    cancelExternalSubtitleOperation(notifyResolver: false)
+    let generation = externalSubtitleOperationId
+    externalSubtitleWorker.async { [weak self] in
+      let access = url.startAccessingSecurityScopedResource()
+      defer { if access { url.stopAccessingSecurityScopedResource() } }
+      let result = Result { () throws -> NativeExternalSubtitleTrack in
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data: Data
+        if #available(iOS 13.4, *) {
+          data = try handle.read(upToCount: NativeExternalSubtitleParser.maxBytes + 1) ?? Data()
+        } else {
+          data = handle.readData(ofLength: NativeExternalSubtitleParser.maxBytes + 1)
+        }
+        return try NativeExternalSubtitleParser.parse(data: data, fileName: url.lastPathComponent)
+      }
+      DispatchQueue.main.async {
+        guard let self, !self.playbackSessionClosed,
+          self.externalSubtitleOperationId == generation else { completion(false); return }
+        completion(self.mountExternalSubtitle(result, displayName: displayName))
+      }
+    }
+  }
+
+  private func applyExternalSubtitleData(_ data: Data, fileName: String) {
+    cancelExternalSubtitleOperation(notifyResolver: false)
+    let generation = externalSubtitleOperationId
+    externalSubtitleWorker.async { [weak self] in
+      let result = Result { try NativeExternalSubtitleParser.parse(data: data, fileName: fileName) }
+      DispatchQueue.main.async {
+        guard let self, !self.playbackSessionClosed,
+          self.externalSubtitleOperationId == generation else { return }
+        _ = self.mountExternalSubtitle(result, displayName: fileName)
+      }
+    }
+  }
+
+  private func mountExternalSubtitle(_ result: Result<NativeExternalSubtitleTrack, Error>,
+    displayName: String) -> Bool {
+    switch result {
+    case .success(let parsed):
+      externalSubtitleTrack = NativeExternalSubtitleTrack(
+        format: parsed.format, displayName: displayName, cues: parsed.cues)
+      if let item = player?.currentItem,
+        let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
+        item.select(nil, in: group)
+      }
+      externalSubtitleOverlay?.setTrack(externalSubtitleTrack)
+      externalSubtitleOverlay?.update(time: player?.currentTime().seconds ?? 0)
+      resolverChannel?.invokeMethod("nativeExternalSubtitleState", arguments: [
+        "resolverSessionId": resolverSessionId, "state": "applied", "displayName": displayName,
+      ])
+      return true
+    case .failure(let error):
+      notifyExternalSubtitleError(error.localizedDescription)
+      return false
+    }
+  }
+
+  func clearExternalSubtitle() {
+    cancelExternalSubtitleOperation(notifyResolver: false)
+    externalSubtitleTrack = nil
+    externalSubtitleOverlay?.setTrack(nil)
+    resolverChannel?.invokeMethod("nativeExternalSubtitleState", arguments: [
+      "resolverSessionId": resolverSessionId, "state": "cleared",
+    ])
+  }
+
+  func cancelExternalSubtitleOperation(notifyResolver: Bool) {
+    externalSubtitleOperationId += 1
+    externalSubtitleDownloadTask?.cancel()
+    externalSubtitleDownloader?.cancel()
+    externalSubtitleDownloadTask = nil
+    externalSubtitleDownloader = nil
+    if notifyResolver {
+      resolverChannel?.invokeMethod("nativeExternalSubtitleState", arguments: [
+        "resolverSessionId": resolverSessionId, "state": "cancelled",
+      ])
+    }
+  }
+
+  private func cleanupExternalSubtitleFiles() {
+    externalSubtitleTrack = nil
+    externalSubtitleOverlay?.setTrack(nil)
+  }
+
+  private func updateExternalSubtitleOverlay() {
+    externalSubtitleOverlay?.setTrack(externalSubtitleTrack)
+  }
+
+  private func notifyExternalSubtitleError(_ message: String) {
+    resolverChannel?.invokeMethod("nativeExternalSubtitleState", arguments: [
+      "resolverSessionId": resolverSessionId, "state": "error", "message": message,
+    ])
+    guard !playbackSessionClosed, viewIfLoaded?.window != nil, presentedViewController == nil else { return }
+    let alert = UIAlertController(title: "字幕加载失败", message: message, preferredStyle: .alert)
+    alert.addAction(UIAlertAction(title: "确定", style: .default))
+    present(alert, animated: true)
+  }
+
+  func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
+    stopCacheMetrics()
+    externalSubtitleIsInPictureInPicture = true
+    externalSubtitleOverlay?.setPictureInPictureHidden(true)
+  }
+
+  func playerViewControllerDidStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
+    externalSubtitleIsInPictureInPicture = false
+    startCacheMetrics()
+    externalSubtitleOverlay?.setPictureInPictureHidden(false)
+    externalSubtitleOverlay?.update(time: player?.currentTime().seconds ?? 0)
+  }
+
+  func playerViewController(_ playerViewController: AVPlayerViewController,
+    failedToStartPictureInPictureWithError error: Error) {
+    externalSubtitleIsInPictureInPicture = false
+    startCacheMetrics()
+    externalSubtitleOverlay?.setPictureInPictureHidden(false)
   }
 
   private func configureAudioSession(enabled: Bool) {
@@ -765,6 +1293,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
     ) { [weak self] player, _ in
       DispatchQueue.main.async {
         guard let self, self.player === player else { return }
+        if player.timeControlStatus != .playing { self.invalidateCacheMemoryReadiness() }
         self.syncAudioSessionForPlaybackState(player)
         self.updateNowPlayingInfo()
       }
@@ -786,6 +1315,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
           return
         }
         self.appIsInBackground = true
+        self.stopCacheMetrics()
         self.episodeIntent.cancelAutomatic()
         self.persistPlaybackProgress(force: true)
         if self.backgroundPlaybackEnabled {
@@ -809,6 +1339,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
           return
         }
         self.appIsInBackground = false
+        self.startCacheMetrics()
         self.setBackgroundAudioOnly(false)
         self.installRemoteCommands()
         self.updateNowPlayingInfo()
@@ -938,24 +1469,46 @@ final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   private func installTimeObserver(for player: AVPlayer) {
-    let interval = CMTime(seconds: 2, preferredTimescale: 600)
+    let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
     timeObserverToken = player.addPeriodicTimeObserver(
       forInterval: interval,
       queue: .main
     ) { [weak self, weak player] time in
       guard let self, let player, self.player === player else { return }
+      self.sampleCacheMemoryReadiness(for: player)
       if time.seconds.isFinite && time.seconds > 0 {
         self.markPlaybackFirstFrameReady()
       }
       self.persistPlaybackProgress()
     }
+    externalSubtitleTimeObserverToken = player.addPeriodicTimeObserver(
+      forInterval: CMTime(seconds: 0.1, preferredTimescale: 600),
+      queue: .main
+    ) { [weak self, weak player] time in
+      guard let self, let player, self.player === player else { return }
+      if self.externalSubtitleTrack != nil, let item = player.currentItem,
+        let group = item.asset.mediaSelectionGroup(forMediaCharacteristic: .legible),
+        item.currentMediaSelection.selectedMediaOption(in: group) != nil {
+        self.clearExternalSubtitle()
+      }
+      self.externalSubtitleOverlay?.update(time: time.seconds)
+      self.externalSubtitleOverlay?.setPictureInPictureHidden(self.externalSubtitleIsInPictureInPicture)
+    }
   }
 
   private func installPlaybackItemStatusObserver(for item: AVPlayerItem) {
+    playbackBufferEmptyObservation = item.observe(\.isPlaybackBufferEmpty, options: [.new]) {
+      [weak self] item, _ in
+      DispatchQueue.main.async {
+        guard let self, self.player?.currentItem === item, item.isPlaybackBufferEmpty else { return }
+        self.invalidateCacheMemoryReadiness()
+      }
+    }
     playbackItemStatusObservation = item.observe(\.status, options: [.new]) {
       [weak self] item, _ in
       DispatchQueue.main.async {
         guard let self, let player = self.player, player.currentItem === item else { return }
+        if item.status != .readyToPlay { self.invalidateCacheMemoryReadiness() }
         if item.status == .failed {
           self.showPlaybackFailure(error: item.error)
         } else if item.status == .readyToPlay {
@@ -1033,6 +1586,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
       queue: .main
     ) { [weak self, weak item] _ in
       guard let self, let item, self.player?.currentItem === item else { return }
+      self.setCachePlaybackActive(false)
       if self.advanceToAdjacentEpisode(forward: true, automatic: true) {
         return
       }
@@ -1042,6 +1596,12 @@ final class NativePlaybackViewController: AVPlayerViewController {
   }
 
   private func teardownPlayback() {
+    endCacheTransport()
+    cancelExternalSubtitleOperation(notifyResolver: false)
+    closeExternalSubtitleSearch()
+    externalSubtitlePicker?.dismiss(animated: false)
+    externalSubtitlePicker = nil
+    cleanupExternalSubtitleFiles()
     playbackGeneration += 1
     episodeIntent.cancel()
     episodeResolutionTimeout?.cancel()
@@ -1059,6 +1619,7 @@ final class NativePlaybackViewController: AVPlayerViewController {
     metricsTracker.detach()
     playbackStateObservation = nil
     playbackItemStatusObservation = nil
+    playbackBufferEmptyObservation = nil
 
     if let token = timeObserverToken,
       let currentPlayer = player
@@ -1066,6 +1627,12 @@ final class NativePlaybackViewController: AVPlayerViewController {
       currentPlayer.removeTimeObserver(token)
     }
     timeObserverToken = nil
+    if let token = externalSubtitleTimeObserverToken,
+      let currentPlayer = player
+    {
+      currentPlayer.removeTimeObserver(token)
+    }
+    externalSubtitleTimeObserverToken = nil
 
     if let observer = endObserver {
       NotificationCenter.default.removeObserver(observer)
@@ -1079,6 +1646,8 @@ final class NativePlaybackViewController: AVPlayerViewController {
 
     setBackgroundAudioOnly(false)
     (player as? NativePlaybackIntentPlayer)?.onUserCommand = nil
+    (player as? NativePlaybackIntentPlayer)?.onPlaybackActive = nil
+    (player as? NativePlaybackIntentPlayer)?.onSeek = nil
     player?.pause()
     player = nil
     lastSavedPositionMs = -1

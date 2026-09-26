@@ -10,7 +10,10 @@ internal data class NativeEpisodePreparationKey(
     val sourceMimeType: String,
 )
 
-internal class NativeEpisodeTransition(private val now: () -> Long) {
+internal class NativeEpisodeTransition(
+    private val discard: (NativeEpisodePreparationKey, NativeEpisodeQueueEntry) -> Unit = { _, _ -> },
+    private val now: () -> Long,
+) {
     enum class State {
         IDLE,
         RESOLVING,
@@ -87,6 +90,7 @@ internal class NativeEpisodeTransition(private val now: () -> Long) {
             state = State.SWITCHING
             return Decision.Ready(Destination(cached.entry, reason, prepared = true))
         }
+        cached?.let { discard(it.key, it.entry) }
         val current = pending
         if (current?.key == key && !isExpired(current)) {
             // Reuse the request, but do not spend the foreground wait in the background.
@@ -142,7 +146,7 @@ internal class NativeEpisodeTransition(private val now: () -> Long) {
         state = State.FAILED
         reason = null
         pending = null
-        prepared = null
+        discardPrepared()
     }
 
     fun cancelAutomaticAdvance() {
@@ -158,12 +162,23 @@ internal class NativeEpisodeTransition(private val now: () -> Long) {
         sequence += 1L
         state = State.IDLE
         pending = null
-        prepared = null
+        discardPrepared()
         reason = null
         prefetchAttempt = null
         automaticAttempt = null
         pendingDeadlineMs = 0L
         pendingPromoted = false
+    }
+
+    fun discardExpiredPrepared() {
+        val cached = prepared ?: return
+        if (now() - cached.atMs !in 0 until PREPARED_TTL_MS) discardPrepared()
+    }
+
+    private fun discardPrepared() {
+        val cached = prepared
+        prepared = null
+        cached?.let { discard(it.key, it.entry) }
     }
 
     private fun newRequest(key: NativeEpisodePreparationKey, background: Boolean = false): Request =

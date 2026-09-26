@@ -1549,10 +1549,17 @@ class _SearchResultCard extends ConsumerWidget {
                       height: 32,
                       child: StarflowIconButton(
                         size: 32,
-                        tooltip:
-                            detectSearchCloudTypeFromUrl(result.resourceUrl) ==
-                                    SearchCloudType.cloud115
-                                ? '保存到 115'
+                        tooltip: detectSearchCloudTypeFromUrl(
+                                    result.resourceUrl) ==
+                                SearchCloudType.cloud115
+                            ? '保存到 115'
+                            : detectSearchCloudTypeFromUrl(
+                                        result.resourceUrl) ==
+                                    SearchCloudType.aliyun
+                                ? ref.watch(appSettingsProvider.select((s) =>
+                                        s.networkStorage.aliyunTo115Enabled))
+                                    ? '阿里转 115 并清理副本'
+                                    : '保存到阿里'
                                 : '保存到夸克',
                         variant: StarflowButtonVariant.ghost,
                         onPressed:

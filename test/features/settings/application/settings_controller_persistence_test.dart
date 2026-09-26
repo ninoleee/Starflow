@@ -12,9 +12,110 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/data/webdav_sync_service.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/domain/network_storage_settings_scope.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('scoped storage saves preserve newer common and other drive settings',
+      () async {
+    final repository = _OutOfOrderSettingsRepository(SeedData.defaultSettings);
+    final container = ProviderContainer(overrides: [
+      appSettingsRepositoryProvider.overrideWithValue(repository),
+    ]);
+    addTearDown(container.dispose);
+    await container.read(settingsControllerProvider.future);
+    final controller = container.read(settingsControllerProvider.notifier);
+    final stale = repository.settings.networkStorage;
+    await controller.saveNetworkStorage(stale.copyWith(
+        aliyunRefreshToken: 'rotated',
+        aliyunTo115Enabled: true,
+        cloud115Cookie: 'fresh-115',
+        cloud115SaveFolderId: '15',
+        smartStrmWebhookUrl: 'https://fresh.test',
+        smartStrmDelaySeconds: 10,
+        refreshMediaSourceIds: ['nas'],
+        refreshDelaySeconds: 30));
+    await controller.saveNetworkStorageSection(
+        stale.copyWith(
+            quarkCookie: 'quark-new', quarkSaveFolderId: 'quark-dir'),
+        NetworkStorageSettingsScope.quark);
+    var config = repository.settings.networkStorage;
+    expect(config.smartStrmWebhookUrl, 'https://fresh.test');
+    expect(config.smartStrmDelaySeconds, 10);
+    expect(config.refreshMediaSourceIds, ['nas']);
+    expect(config.cloud115Cookie, 'fresh-115');
+    expect(config.cloud115SaveFolderId, '15');
+    expect(config.aliyunRefreshToken, 'rotated');
+    expect(config.aliyunTo115Enabled, isTrue);
+    await controller.saveNetworkStorageSection(
+        stale.copyWith(
+            smartStrmWebhookUrl: 'https://common.test',
+            smartStrmDelaySeconds: 5,
+            refreshDelaySeconds: 60,
+            refreshMediaSourceIds: ['new-nas']),
+        NetworkStorageSettingsScope.common);
+    config = repository.settings.networkStorage;
+    expect(config.smartStrmWebhookUrl, 'https://common.test');
+    expect(config.smartStrmDelaySeconds, 5);
+    expect(config.refreshDelaySeconds, 60);
+    expect(config.refreshMediaSourceIds, ['new-nas']);
+    expect(config.quarkCookie, 'quark-new');
+    expect(config.quarkSaveFolderId, 'quark-dir');
+    expect(config.cloud115Cookie, 'fresh-115');
+    expect(config.aliyunRefreshToken, 'rotated');
+    await controller.saveNetworkStorageSection(
+        stale.copyWith(cloud115SmartStrmTaskName: '115-task'),
+        NetworkStorageSettingsScope.cloud115);
+    expect(repository.settings.networkStorage.smartStrmWebhookUrl,
+        'https://common.test');
+    expect(repository.settings.networkStorage.quarkCookie, 'quark-new');
+    expect(repository.settings.networkStorage.cloud115SmartStrmTaskName,
+        '115-task');
+  });
+  test('other storage drafts and imports preserve rotated Aliyun credential',
+      () async {
+    final repository =
+        _OutOfOrderSettingsRepository(SeedData.defaultSettings.copyWith(
+      networkStorage: const NetworkStorageConfig(aliyunRefreshToken: 'old'),
+    ));
+    final container = ProviderContainer(overrides: [
+      appSettingsRepositoryProvider.overrideWithValue(repository),
+      mediaSourceCacheLifecycleProvider
+          .overrideWithValue(_RecordingMediaSourceCacheLifecycle()),
+    ]);
+    addTearDown(container.dispose);
+    await container.read(settingsControllerProvider.future);
+    final controller = container.read(settingsControllerProvider.notifier);
+    final draft = container.read(appSettingsProvider).networkStorage;
+    await controller.rotateAliyunCredential('old', 'rotated');
+    await controller.saveNetworkStorage(draft.copyWith(
+        aliyunRefreshToken: 'rotated',
+        aliyunTo115Enabled: true,
+        aliyunSaveFolderId: 'aliFolder',
+        aliyunSmartStrmTaskName: 'ali-task',
+        syncDeleteAliyunEnabled: true,
+        syncDeleteAliyunWebDavDirectories: [
+          const NetworkStorageWebDavDirectory(
+              sourceId: 'nas', directoryId: '/ali')
+        ]));
+    await controller.saveNetworkStorage(
+        draft.copyWith(cloud115SaveFolderId: '12'),
+        preserveAliyunCredential: true);
+    expect(repository.settings.networkStorage.aliyunRefreshToken, 'rotated');
+    expect(repository.settings.networkStorage.aliyunTo115Enabled, isTrue);
+    expect(repository.settings.networkStorage.aliyunSaveFolderId, 'aliFolder');
+    expect(
+        repository.settings.networkStorage.aliyunSmartStrmTaskName, 'ali-task');
+    expect(repository.settings.networkStorage.syncDeleteAliyunEnabled, isTrue);
+    expect(
+        repository.settings.networkStorage.syncDeleteAliyunWebDavDirectories
+            .single.directoryId,
+        '/ali');
+    expect(repository.settings.networkStorage.cloud115SaveFolderId, '12');
+    await controller.replaceAllSettings(SeedData.defaultSettings);
+    expect(repository.settings.networkStorage.aliyunRefreshToken, 'rotated');
+    expect(repository.settings.networkStorage.aliyunTo115Enabled, isFalse);
+  });
   test('navigation order persists through save, export and restart', () async {
     final repository = _OutOfOrderSettingsRepository(SeedData.defaultSettings);
     final container = ProviderContainer(overrides: [
@@ -26,15 +127,19 @@ void main() {
         .read(settingsControllerProvider.notifier)
         .setNavigationDestinationIds(order);
     expect(container.read(appSettingsProvider).navigationDestinationIds, order);
-    expect(AppSettings.fromCurrentJson(repository.settings.toJson())
-        .navigationDestinationIds, order);
+    expect(
+        AppSettings.fromCurrentJson(repository.settings.toJson())
+            .navigationDestinationIds,
+        order);
     container.dispose();
     final restarted = ProviderContainer(overrides: [
       appSettingsRepositoryProvider.overrideWithValue(repository),
     ]);
     addTearDown(restarted.dispose);
-    expect((await restarted.read(settingsControllerProvider.future))
-        .navigationDestinationIds, order);
+    expect(
+        (await restarted.read(settingsControllerProvider.future))
+            .navigationDestinationIds,
+        order);
   });
   test('hero auto play persists independently of simplified visuals', () async {
     final repository = _OutOfOrderSettingsRepository(SeedData.defaultSettings);

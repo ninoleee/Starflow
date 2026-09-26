@@ -6,6 +6,60 @@ import 'package:starflow/features/playback/presentation/widgets/player_playback_
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 
 void main() {
+  for (final showSpinner in [true, false]) {
+    testWidgets('MPV overlay has no metrics or bar ($showSpinner)',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: PlayerStartupOverlay(
+          target: const PlaybackTarget(
+            title: 'Episode',
+            sourceId: 'nas',
+            streamUrl: 'https://example.com/video.mp4',
+            sourceName: 'NAS',
+            sourceKind: MediaSourceKind.nas,
+          ),
+          showMetrics: false,
+          showSpinner: showSpinner,
+        ),
+      ));
+      expect(find.byType(Text), findsNothing);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.byType(CircularProgressIndicator),
+          showSpinner ? findsOneWidget : findsNothing);
+    });
+  }
+
+  for (final showSpinner in [true, false]) {
+    testWidgets(
+        'MPV overlay hides metrics and preserves progress ($showSpinner)',
+        (tester) async {
+      await tester.pumpWidget(MaterialApp(
+        home: PlayerStartupOverlay(
+          target: const PlaybackTarget(
+            title: 'Episode',
+            sourceId: 'nas',
+            streamUrl: 'https://example.com/video.mp4',
+            sourceName: 'NAS',
+            sourceKind: MediaSourceKind.nas,
+          ),
+          networkSpeed: const Text('1.0 KB/s'),
+          showMetrics: false,
+          bufferingProgress: 50,
+          showSpinner: showSpinner,
+        ),
+      ));
+      expect(find.byType(Text), findsNothing);
+      expect(find.byType(CircularProgressIndicator),
+          showSpinner ? findsOneWidget : findsNothing);
+      expect(
+          tester
+              .widget<LinearProgressIndicator>(
+                  find.byType(LinearProgressIndicator))
+              .value,
+          0.5);
+    });
+  }
+
   test('startup format omits source container and bitrate', () {
     expect(
         buildPlaybackStartupFormatValue(const PlaybackTarget(

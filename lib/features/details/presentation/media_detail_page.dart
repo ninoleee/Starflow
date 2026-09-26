@@ -7,6 +7,7 @@ export 'package:starflow/features/details/presentation/detail_page_providers.dar
 import 'package:flutter/foundation.dart';
 import 'package:starflow/features/details/application/detail_metadata_service.dart';
 import 'package:flutter/material.dart';
+import 'package:starflow/features/search/application/aliyun_to115_workflow.dart';
 import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/app/theme/app_colors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -745,7 +746,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                         '${matches[index].drive.label} · ${matches[index].result.title}',
                     subtitle: matches[index].hasConfiguredCookie(networkStorage)
                         ? '保存目录：${matches[index].folderName}'
-                        : '未配置此网盘 Cookie',
+                        : '未配置所需网盘凭据',
                     focusId: 'detail:update-source:$index',
                     icon: Icons.cloud_outlined,
                   ),
@@ -763,6 +764,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         networkStorage: networkStorage,
         quarkSaveClient: ref.read(quarkSaveClientProvider),
         cloud115SaveClient: ref.read(cloud115SaveClientProvider),
+        aliyunWorkflow: ref.read(aliyunTo115WorkflowProvider),
       );
       if (!isCurrent()) return;
       setState(() => _isCheckingOnlineResourceUpdate = false);
@@ -770,7 +772,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
         title: result.hasUpdates ? '发现更新' : '检查更新',
         message: result.buildDialogMessage(),
         canSave: result.hasUpdates,
-        drive: favoriteMatch.drive,
+        drive: result.saveDrive,
       );
       if (!isCurrent() || !shouldSave) {
         return;
@@ -834,7 +836,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                 if (isTelevision)
                   TvAdaptiveButton(
                     label:
-                        '保存到${drive == CloudSaveDrive.cloud115 ? ' 115' : '夸克'}',
+                        '保存到${drive == CloudSaveDrive.cloud115 ? ' 115' : drive.label}',
                     icon: Icons.bookmark_add_rounded,
                     focusNode: saveFocusNode,
                     autofocus: true,
@@ -846,7 +848,7 @@ class _MediaDetailPageState extends ConsumerState<MediaDetailPage>
                     onPressed: () => Navigator.of(dialogContext).pop(true),
                     icon: const Icon(Icons.bookmark_add_rounded),
                     label: Text(
-                        '保存到${drive == CloudSaveDrive.cloud115 ? ' 115' : '夸克'}'),
+                        '保存到${drive == CloudSaveDrive.cloud115 ? ' 115' : drive.label}'),
                   ),
               if (isTelevision)
                 TvAdaptiveButton(

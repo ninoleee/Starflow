@@ -253,9 +253,13 @@ extension _PlayerPageStateStartupMpvOpen on _PlayerPageState {
         diskCacheMiB: ref.read(appSettingsProvider).playbackDiskCacheMiB,
       );
       _mpvRelays[player] = relay;
+      _publishMpvMemoryReady(player, false);
+      _mpvLifecycle.retainCleanup(() => _closeMpvRelay(player));
       final engineTarget =
           await scope.wait(relay.prepareTarget(resolvedTarget));
       ensurePlayerActive();
+      _mpvRelayUrls[player] = engineTarget.streamUrl;
+      _publishMpvMemoryReady(player, false);
       await scope.wait(_applyMpvNetworkProxy(player, engineTarget));
       ensurePlayerActive();
       await scope.wait(_applyMpvPerformanceTuning(player, resolvedTarget));

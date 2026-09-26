@@ -21,6 +21,94 @@ import 'package:starflow/features/settings/presentation/subtitle_settings_page.d
 
 void main() {
   testWidgets(
+      'common page saves only shared fields and drive STRM uses latest shared values',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final initial = SeedData.defaultSettings.copyWith(
+        networkStorage: const NetworkStorageConfig(
+            smartStrmWebhookUrl: 'https://old.test/webhook',
+            smartStrmTaskName: 'quark-task',
+            aliyunRefreshToken: 'token',
+            cloud115Cookie: 'cookie',
+            quarkSaveFolderPath: '/quark'));
+    final repository = _MemorySettingsRepository(initial);
+    final container = ProviderContainer(overrides: [
+      appSettingsRepositoryProvider.overrideWithValue(repository),
+      smartStrmWebhookClientProvider
+          .overrideWithValue(SmartStrmWebhookClient(MockClient((request) async {
+        expect(request.url.host, 'new.test');
+        final body = jsonDecode(request.body) as Map;
+        expect(body['task'], {'name': 'quark-task', 'storage_path': '/quark'});
+        return http.Response('{"success":true}', 200);
+      }))),
+    ]);
+    addTearDown(container.dispose);
+    await container.read(settingsControllerProvider.future);
+    await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+            home: NetworkStorageEditorPage(
+                initial: initial.networkStorage,
+                section: NetworkStorageEditorSection.quark))));
+    await tester.pumpAndSettle();
+    expect(find.text('通用设置'), findsNothing);
+    expect(find.text('Webhook 地址'), findsNothing);
+    await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+            home: NetworkStorageEditorPage(
+                initial: repository.settings.networkStorage,
+                section: NetworkStorageEditorSection.common))));
+    await tester.pumpAndSettle();
+    expect(find.text('SmartStrm'), findsOneWidget);
+    expect(find.text('转存后刷新媒体库'), findsOneWidget);
+    expect(find.text('夸克 SmartStrm 任务名'), findsNothing);
+    final field = tester
+        .widgetList<SettingsTextInputField>(find.byType(SettingsTextInputField))
+        .singleWhere((w) => w.labelText == 'Webhook 地址');
+    field.controller.text = 'https://new.test/webhook';
+    await tester.pump(const Duration(seconds: 1));
+    expect(repository.settings.networkStorage.smartStrmWebhookUrl,
+        'https://new.test/webhook');
+    expect(repository.settings.networkStorage.aliyunRefreshToken, 'token');
+    expect(repository.settings.networkStorage.cloud115Cookie, 'cookie');
+    await tester.ensureVisible(find.text('通用自动修正名称'));
+    await tester.tap(find.text('通用自动修正名称'));
+    await tester.pumpAndSettle();
+    final names = tester
+        .widgetList<SettingsTextInputField>(find.byType(SettingsTextInputField))
+        .singleWhere((w) => w.labelText == '通用移除字符');
+    names.controller.text = '#%';
+    await tester.pump(const Duration(seconds: 1));
+    expect(repository.settings.networkStorage.commonSanitizeSavedNamesEnabled,
+        isTrue);
+    expect(
+        repository.settings.networkStorage.commonSanitizedNameCharacters, '#%');
+    expect(find.text('保存后修正名称'), findsNothing);
+    expect(find.text('使用通用名称规则'), findsNothing);
+    await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+            home: NetworkStorageEditorPage(
+                initial: repository.settings.networkStorage,
+                section: NetworkStorageEditorSection.quark))));
+    await tester.pumpAndSettle();
+    expect(find.text('通用设置'), findsNothing);
+    expect(find.text('Webhook 地址'), findsNothing);
+    await tester.scrollUntilVisible(find.text('测试 夸克 STRM 任务'), -300,
+        scrollable: find.byType(Scrollable).first);
+    await tester.tap(find.text('测试 夸克 STRM 任务'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    expect(repository.settings.networkStorage.smartStrmWebhookUrl,
+        'https://new.test/webhook');
+    expect(tester.takeException(), isNull);
+    expect(
+        repository.settings.networkStorage.commonSanitizedNameCharacters, '#%');
+  });
+
+  testWidgets(
       'playback disk cache capacity saves through the shared settings page',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(1000, 1600));
@@ -108,24 +196,18 @@ void main() {
       expect(requests.map((request) => request['task']), [
         {'name': 'new-task', 'storage_path': is115 ? '/115' : '/quark'},
       ]);
-      await tester.ensureVisible(find.text('转存后自动修正名称'));
-      await tester.tap(find.text('转存后自动修正名称'));
-      await tester.pumpAndSettle();
-      final characters = tester
-          .widgetList<SettingsTextInputField>(
-              find.byType(SettingsTextInputField))
-          .singleWhere((field) => field.labelText == '要去掉的字符');
-      characters.controller.text = '#';
-      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('保存后修正名称'), findsNothing);
+      expect(find.text('使用通用名称规则'), findsNothing);
+      expect(find.text('转存后自动修正名称'), findsNothing);
       expect(
           repository.settings.networkStorage.cloud115SanitizeSavedNamesEnabled,
-          is115);
+          isFalse);
       expect(repository.settings.networkStorage.quarkSanitizeSavedNamesEnabled,
-          !is115);
+          isFalse);
       expect(repository.settings.networkStorage.cloud115SanitizedNameCharacters,
-          is115 ? '#' : kDefaultCloudSanitizedNameCharacters);
+          kDefaultCloudSanitizedNameCharacters);
       expect(repository.settings.networkStorage.quarkSanitizedNameCharacters,
-          is115 ? kDefaultCloudSanitizedNameCharacters : '#');
+          kDefaultQuarkSanitizedNameCharacters);
       await tester.ensureVisible(find.text('同步删除$drive目录'));
       await tester.tap(find.text('同步删除$drive目录'));
       await tester.pump(const Duration(seconds: 1));

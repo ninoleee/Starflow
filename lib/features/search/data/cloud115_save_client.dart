@@ -7,6 +7,7 @@ import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/search/application/cloud_save_planner.dart';
 import 'package:starflow/features/search/application/cloud_saved_name_sanitizer.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/search/domain/cloud_account_auth_exception.dart';
 import 'package:starflow/features/search/domain/cloud_save_rules.dart';
 import 'package:starflow/features/search/domain/share_link_validation.dart';
 
@@ -208,6 +209,35 @@ class Cloud115SaveClient {
     return _parseEntries(rows, parentPath: parentPath);
   }
 
+  Future<String> createDirectory(
+      {required String cookie,
+      required String parentId,
+      required String name}) async {
+    final created = await _request(
+        '/files/add', cookie, {'pid': parentId, 'cname': name},
+        post: true);
+    final id = '${created['cid'] ?? ''}';
+    if (!RegExp(r'^[1-9][0-9]*$').hasMatch(id) || id == parentId) {
+      throw const QuarkSaveException('115 新目录 ID 未确认');
+    }
+    return id;
+  }
+
+  Future<bool> verifyTransferredFile(
+      {required String cookie,
+      required String parentId,
+      required String name,
+      required int size,
+      required String sha1}) async {
+    final rows =
+        await _list('/files', cookie, {'cid': parentId, 'show_dir': '1'});
+    final matches = rows.where((row) => row['n'] == name).toList();
+    return matches.length == 1 &&
+        matches.single['fid'] != null &&
+        int.tryParse('${matches.single['s']}') == size &&
+        '${matches.single['sha'] ?? ''}'.toUpperCase() == sha1.toUpperCase();
+  }
+
   Future<void> deleteEntries(
       {required String cookie,
       required String parentId,
@@ -242,6 +272,7 @@ class Cloud115SaveClient {
       final response = await (() async =>
               http.Response.fromStream(await _client.send(request)))()
           .timeout(const Duration(seconds: 30));
+      if (response.statusCode == 401) throw const CloudAccountAuthException();
       if (response.statusCode != 200) {
         throw QuarkSaveException(_httpFailure(path, response.statusCode));
       }

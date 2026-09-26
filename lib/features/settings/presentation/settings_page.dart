@@ -34,6 +34,7 @@ import 'package:starflow/features/settings/presentation/settings_version_label.d
 import 'package:starflow/features/settings/presentation/subtitle_settings_page.dart';
 import 'package:starflow/features/settings/presentation/task_scheduling_settings_page.dart';
 import 'package:starflow/features/settings/presentation/widgets/navigation_destination_dialog.dart';
+import 'package:starflow/features/update/presentation/update_settings_page.dart';
 
 final Future<PackageInfo> _settingsPagePackageInfoFuture =
     PackageInfo.fromPlatform();
@@ -217,6 +218,15 @@ class SettingsPage extends ConsumerStatefulWidget {
                   title: '数据与维护',
                   child: Column(
                     children: [
+                      _SettingsNavigationTile(
+                        title: '应用更新',
+                        subtitle: '检查版本与下载安装包',
+                        onTap: () => Navigator.of(context, rootNavigator: true)
+                            .push<void>(SettingsMaterialPageRoute<void>(
+                          builder: (_) => const UpdateSettingsPage(),
+                        )),
+                      ),
+                      const SizedBox(height: 10),
                       _SettingsNavigationTile(
                         title: '本地存储',
                         subtitle: '查看分类占用并安全清理缓存',
@@ -435,7 +445,10 @@ class _SettingsPageVersionFooter extends StatelessWidget {
                 const SizedBox(height: 6),
                 TvFocusableAction(
                   focusId: 'settings-root-footer:version',
-                  onPressed: () {},
+                  onPressed: () => Navigator.of(context, rootNavigator: true)
+                      .push<void>(SettingsMaterialPageRoute<void>(
+                    builder: (_) => const UpdateSettingsPage(),
+                  )),
                   visualStyle: TvFocusVisualStyle.subtle,
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(

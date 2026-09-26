@@ -188,6 +188,7 @@ void main() {
   for (final method in [
     'releaseNativePlaybackTransport',
     'closeNativeFntvSession',
+    'closeNativePlaybackTransports',
   ]) {
     test('$method releases only the owning relay and is repeatable', () async {
       expect((await _launch(launcher)).launched, isTrue);
@@ -263,7 +264,7 @@ void main() {
     expect(relay.closeCalls, 1);
     pending.complete(relay.prepared(_target));
     expect((await launching).launched, isFalse);
-    expect(relay.closeCalls, greaterThanOrEqualTo(1));
+    expect(relay.closeCalls, 1);
     expect(launches, isEmpty);
   });
 
@@ -295,7 +296,7 @@ void main() {
     final result = await resolving;
     expect(result['ok'], isFalse);
     expect(result.containsKey('transportUrl'), isFalse);
-    expect(relay.closeCalls, greaterThanOrEqualTo(1));
+    expect(relay.closeCalls, 1);
     expect(launches, hasLength(1));
   });
 
@@ -304,6 +305,73 @@ void main() {
     expect((await _launch(launcher)).launched, isFalse);
     expect(launches, hasLength(1));
     expect(relays.single.closeCalls, 1);
+  });
+
+  test('bypassed transport owner closes immediately instead of surviving exit',
+      () async {
+    makeRelay = () => _FakeRelay(_target.streamUrl);
+    expect((await _launch(launcher)).launched, true);
+    expect(relays.single.closeCalls, 1);
+  });
+
+  test('failed episode prepare releases relay while current playback survives',
+      () async {
+    await _launch(launcher,
+        episodeResolver: (target) async =>
+            NativeResolvedPlaybackTarget(target: target));
+    final args = Map<String, dynamic>.from(launches.single.arguments as Map);
+    final pending = Completer<PlaybackTarget>();
+    final failing =
+        _FakeRelay('http://127.0.0.1/playback-relay/failed', pending: pending);
+    makeRelay = () => failing;
+    final resolving = _nativeCall('resolveNativePlaybackEpisode', {
+      'resolverSessionId': args['resolverSessionId'],
+      'playbackTargetJson': jsonEncode(_target.toJson()),
+    });
+    await failing.started.future;
+    pending.completeError(const PlaybackRelayException());
+    expect((await resolving)['ok'], false);
+    expect(failing.closeCalls, 1);
+    expect(relays.first.closeCalls, 0);
+  });
+
+  test('failed launch invalidates its resolver without closing another session',
+      () async {
+    launchAccepted = false;
+    var resolutions = 0;
+    await _launch(launcher, episodeResolver: (target) async {
+      resolutions++;
+      return NativeResolvedPlaybackTarget(target: target);
+    });
+    final args = Map<String, dynamic>.from(launches.single.arguments as Map);
+    final response = await _nativeCall('resolveNativePlaybackEpisode', {
+      'resolverSessionId': args['resolverSessionId'],
+      'playbackTargetJson': jsonEncode(_target.toJson()),
+    });
+    expect(response['ok'], false);
+    expect(resolutions, 0);
+    expect(relays.single.closeCalls, 1);
+  });
+
+  test('closing old session preserves replacement transport', () async {
+    await _launch(launcher);
+    final old = Map<String, dynamic>.from(launches.single.arguments as Map);
+    await _launch(launcher);
+    final current = relays.last;
+    await _nativeCall('closeNativeFntvSession', {
+      'resolverSessionId': old['resolverSessionId'],
+    });
+    expect(relays.first.closeCalls, 1);
+    expect(current.closeCalls, 0);
+  });
+
+  test('relaunch closes the previous native session before replacing its id',
+      () async {
+    await _launch(launcher);
+    final old = relays.first;
+    await _launch(launcher);
+    expect(old.closeCalls, 1);
+    expect(relays.last.closeCalls, 0);
   });
 
   test(

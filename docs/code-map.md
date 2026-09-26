@@ -1,5 +1,19 @@
 # Starflow 代码地图
 
+内存优先缓存（2026-09-26）：`features/playback/application/mpv_memory_priority_policy.dart` 拥有实际高水位学习与许可判定，`presentation/widgets/player_page_memory_priority.part.dart` 独立采样并探测 MPV 运行时补充选项。`PlaybackRelayBufferControl` 是可选缓存控制契约，原生桥接处理 `setNativePlaybackBufferState`；relay 拥有 4 秒许可、前台接管在途预取，disk cache 拥有游标淘汰／读块保护。Android 对应 `NativePlaybackLoadControl / NativePlaybackReadAheadPolicy / NativePlaybackDiagnostics / NativePlaybackRuntimeController`，iOS 对应 `NativePlaybackBufferingTuning / NativePlaybackViewController`。新增策略回归 `test/mpv_memory_priority_policy_test.dart`、`test/playback_disk_cache_forward_retention_test.dart`；网络竞态与桥接回归扩展 `playback_read_ahead_race_test.dart` 和 `native_playback_cache_bridge_test.dart`。
+
+网盘账号与恢复（2026-09-26）：`features/settings/domain/cloud_account.dart` 定义本机账号状态/指纹，`data/cloud_credential_store.dart` 提供安全存储接口，仓储负责明文迁移与导出隔离，控制器区分账号切换和 Token 轮换；`features/search/data/aliyun_transfer_journal.dart` 保存跨盘任务快照，`presentation/aliyun_transfer_tasks_page.dart`（settings 下）提供恢复/停止/清理。新增回归 `test/cloud_account_security_test.dart`、`test/features/settings/presentation/aliyun_transfer_tasks_page_test.dart`，恢复协议扩展 `aliyun_to115_workflow_test.dart`，并发刷新扩展 `aliyun_transfer_protocol_test.dart`。iPhone QR 相册写入在 `ios/Runner/AppDelegate.swift` 的 `saveLoginQrImage`，仅添加权限。
+
+阿里扫码登录（2026-09-26）：`features/settings/data/aliyun_login_client.dart` 负责官方消费版二维码生成、状态查询与确认凭据解析；`aliyun_open_login_client.dart` 与 `aliyun_open_oauth_config.dart` 负责内置 OpenList 授权入口和 Open OAuth 凭据；两个 presentation 登录页分别处理轮询生命周期、刷新与迟到结果隔离；阿里设置页按 `aliyunAuthMode` 验证后保存对应本机轮换凭据。协议与页面测试为 `test/aliyun_login_client_test.dart`、`test/aliyun_open_login_client_test.dart`、两个登录页测试，接入和凭据保存回归在 `test/aliyun_save_settings_test.dart`。
+
+阿里保存与转 115（2026-09-26）：`features/search/application/aliyun_to115_workflow.dart` 编排两种保存；`data/aliyun_transfer_client.dart`、`cloud115_instant_upload_client.dart`、`cloud115_upload_cipher.dart` 与 `aliyun_transfer_http.dart` 负责协议；`features/settings/presentation/aliyun_transfer_settings_page.dart` 负责本机凭据与独立自动转存开关。无逐次确认弹窗。测试入口 `test/aliyun_to115_workflow_test.dart`、`aliyun_transfer_protocol_test.dart`、`aliyun_save_settings_test.dart`，搜索入口模式回归在 `features/search/presentation/search_page_save_progress_test.dart`，设置回归复用 `app_settings_repository_reconciliation_test.dart`。秒传协议测试覆盖毫秒时间/token 一致性、可选成功字段、异常状态和日志脱敏；工作流测试覆盖缺哈希源快照恢复、副本回执复用与未知上传不重放。
+
+阿里功能对齐：`application/aliyun_sync_delete_service.dart` 处理 WebDAV 相对路径匹配与删除前身份复核，由 `library/data/media_repository.dart` 在 WebDAV 删除确认后执行。`search_share_validator.dart` 接入只读阿里验链；`details/application/detail_online_resource_update_service.dart` 和详情页注入阿里 workflow，按当前目标检查更新。阿里设置页复用目录选择/管理组件，持有独立目录、STRM 和监听配置，名称修正读取通用设置；转 115 后跳转已有 115 设置。
+
+网盘通用设置：`features/settings/presentation/network_storage_settings_page.dart` 的 `NetworkStorageCommonSettingsTile` 是网盘根页唯一入口，`NetworkStorageEditorSection.common` 展示 Webhook、STRM 延迟和媒体库刷新；夸克、115、阿里单项页不重复放置。`domain/network_storage_settings_scope.dart` 定义字段归属和局部合并，控制器在执行保存时应用到最新配置；回归见设置层级导航、自动保存和持久化测试。
+
+名称规则统一：`NetworkStorageConfig.effectiveQuarkNameCharacters / effective115NameCharacters / effectiveAliyunNameCharacters` 都只读取通用启用开关和字符，保存工作流、去重与详情更新预览使用同一结果；旧独立字段保留 JSON 兼容但不参与运行规则。`test/network_storage_name_rules_test.dart` 覆盖旧 JSON、关闭/空字符和字段作用域隔离。
+
 核对日期：2026-09-20。本地图按当前工作区（含既有未提交代码）整理入口、职责、调用链及测试位置，不是逐行缺陷审计或所有平台验收报告。组件设计以 [architecture.md](architecture.md) 为准，用户能力与发布流程见 [README](../README.md)。
 
 ## 推荐阅读顺序
@@ -234,7 +248,8 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 | `NativePlaybackSource / Target / Options` | Dart JSON 契约、媒体源与会话设置 |
 | `NativePlaybackRuntimeController / RecoveryController` 及各 `*Policy` | tick、启动进展、缓冲、恢复、错误、HLS、TV seek 和焦点规则 |
 | `NativePlaybackLoadControl / ReadAheadPolicy / HealthPolicy / FrameRateController` | TV 点播有界动态预读、活动读取采样、卡顿诊断限频与可选 Surface 帧率提示；Session 接入，Runtime 复用每秒循环 |
-| `playback_relay_disk_cache.dart / playback_stream_relay_service_io.dart` | MPV／Exo／iOS 共享的可选临时区间缓存、LRU／低空间保护、HLS 点播分片与 WebVTT、会话撤销和网络回退；本地文件直读，不提供独立下载 |
+| `playback_relay_disk_cache.dart / playback_stream_relay_service_io.dart` | MPV／Exo／iOS 可选临时区间缓存、LRU／512 MiB 最低剩余空间保护、有验证器的滚动前向窗口、HLS VOD 分片与 WebVTT、会话清理和网络回退；本地文件直读，不提供独立下载 |
+| `playback_stream_relay_contract.dart / native_playback_launcher_io.dart` | `PlaybackRelayCacheControl` 可选契约、当前会话磁盘快照及暂停／seek 控制；原生 resolver 通道校验 owner、URL 和 generation，隔离迟到响应 |
 | `NativePlaybackRenderersFactory / AudioPolicy / AudioTracks` | renderer / sink、实际 MIME 输出策略、音轨身份恢复 |
 | `NativeAudioOutputState` | 每个播放器的 sink 输入、decoder 与实际输出观测，供倍速重建判断及输出故障分类；不跨实例复用 |
 | `NativeAudioPrecisionHistory / NativeAudioDecoderPrecisionPolicy` | 当前媒体按源音轨身份记录倍速临时降精度，恢复只尝试一次；FFmpeg float 恢复候选排除固定 PCM16 的 AC-3 |
@@ -256,11 +271,14 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 
 - `ios/Runner/AppDelegate.swift` 承载 Flutter 通道和宿主装配；`NativePlaybackViewController.swift` 管 AVPlayer 容器，`NativePlaybackModels.swift` 管请求、剧集队列及字幕偏好模型，`NativePlaybackMemoryStore.swift` 管播放记忆，`SettingsDocumentExporter.swift` 管文档导出。`PlaybackSystemSessionBridge.swift` 继续管共享音频会话、Now Playing、封面及远程控制。
 - `NativePlaybackStartupGate / BufferingTuning / StallRecovery / Metrics` 分别管 AVPlayer 启动、缓冲、卡顿和指标；`NativeSubtitleLanguagePolicy.swift` 与 Dart / Kotlin 共用语言 fixture。
+- `NativeExternalSubtitle.swift` 提供 iOS 有界文本字幕解析、时间定位、下载及原生文本叠层；`NativePlaybackViewController` 持有文档选择、在线搜索、选轨代次和退出清理。叠层不进入 PiP 视频，能力边界见 [字幕链路](subtitles.md)。
 - `scripts/test_native_playback_startup.swift` 是 AVPlayer 策略主机 runner，验证预热在途、失败/取消和 HLS 分类；不是设备解码或像素首帧测试。iOS Metrics 的 `playingAtIso8601 / playingLatencyMs` 只表示播放状态信号。
 - `ios/Runner/SceneDelegate.swift`、storyboard、Info.plist 和 Xcode 工程属于宿主配置。原生启动页只有深色底，Flutter Logo 是另一层。
 - macOS 的 AppDelegate / MainFlutterWindow、Windows runner、Linux runner 主要负责 Flutter 宿主，不能据目录存在推断有 Android 同等原生播放器或后台会话能力。
 
 ## 工具与发布
+
+2026-09-26 应用更新入口：`lib/features/update/application/update_controller.dart` 持有检查/下载/安装状态，监听 settingsController 的 webDavSync 配置；`domain/update_source.dart` 推导同步目录下 releases 地址并限制认证作用域。`data/update_manifest_client.dart` 有界读取普通 JSON，`update_manifest_parser.dart` 共用清单协议，`update_package_downloader{,_io,_stub}.dart` 持有私有流式下载与清理，`update_install_launcher.dart` 使用 `starflow/update`；`presentation/update_settings_page.dart` 接入设置入口及版本页脚。Android `AndroidUpdateInstaller.kt / AndroidUpdatePolicy.kt` 提供 APK 签名、安装身份校验与 FileProvider 授权，不加入播放通道。`tool/generate_update_manifest.dart` 生成普通 JSON 清单及 staging；清单 seed、公钥构建参数及其校验工具已删除，Android 签名配置不变；`scripts/publish_update_release.sh` 为本地发布准备入口。测试集中在 `test/update_*_test.dart` 与 Android `AndroidUpdate*Test`；上线与迁移步骤见 [应用更新](app-updates.md)。
 
 | 入口 | 作用与注意事项 |
 | --- | --- |

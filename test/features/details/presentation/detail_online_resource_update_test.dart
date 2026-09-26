@@ -316,7 +316,7 @@ class _Harness {
 }
 
 void main() {
-  for (final drive in CloudSaveDrive.values) {
+  for (final drive in [CloudSaveDrive.quark, CloudSaveDrive.cloud115]) {
     testWidgets(
         '$drive only writes after confirmation, then uses its STRM task',
         (tester) async {
@@ -376,7 +376,7 @@ void main() {
     final harness = _Harness(mixed: true, missingCookie: true);
     await harness.pump(tester);
     await harness.check(tester);
-    expect(find.text('未配置此网盘 Cookie'), findsOneWidget);
+    expect(find.text('未配置所需网盘凭据'), findsOneWidget);
     await tester.tap(find.text('115 · Show'));
     await tester.pumpAndSettle();
     expect(find.textContaining('配置115 Cookie'), findsOneWidget);

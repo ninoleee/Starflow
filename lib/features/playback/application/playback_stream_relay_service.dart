@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_contract.dart';
 import 'package:starflow/features/playback/application/playback_stream_relay_service_stub.dart'
     if (dart.library.io) 'package:starflow/features/playback/application/playback_stream_relay_service_io.dart'
@@ -12,6 +13,9 @@ PlaybackStreamRelayService createPlaybackStreamRelayService(
     impl.createPlaybackStreamRelayService(diskCacheMiB: diskCacheMiB);
 
 Future<void> clearPlaybackDiskCache() => impl.clearPlaybackDiskCache();
+Future<void> disablePlaybackDiskCache() => impl.disablePlaybackDiskCache();
+Future<LocalStorageCacheSummary> inspectPlaybackDiskCache() =>
+    impl.inspectPlaybackDiskCache();
 
 final playbackStreamRelayServiceProvider =
     Provider<PlaybackStreamRelayService>((ref) {

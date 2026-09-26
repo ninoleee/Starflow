@@ -385,12 +385,65 @@ class NativeFntvControllerTest {
     }
 
     @Test
+    fun successfulQualitySwitchReleasesOldTransportOnlyAfterReady() {
+        val oldUrl = "http://127.0.0.1/playback-relay/old"
+        val newUrl = "http://127.0.0.1/playback-relay/new"
+        `when`(host.activity.intent.getStringExtra(NativePlaybackActivity.EXTRA_URL)).thenReturn(oldUrl)
+        controller.switchQuality(1)
+        pending!!(mapOf("ok" to true, "playbackTargetJson" to """{"streamUrl":"https://nas/new.mp4"}""",
+            "transportUrl" to newUrl))
+        assertTrue(calls.isEmpty())
+        controller.onReady()
+        controller.onReady()
+        assertEquals(listOf("releaseNativePlaybackTransport"), calls)
+        assertEquals(oldUrl, callArgs.single()["transportUrl"])
+    }
+
+    @Test
+    fun synchronousOpenFailureReleasesNewTransportAndRetainsRollbackTransport() {
+        val oldUrl = "http://127.0.0.1/playback-relay/old"
+        val newUrl = "http://127.0.0.1/playback-relay/new"
+        `when`(host.activity.intent.getStringExtra(NativePlaybackActivity.EXTRA_URL)).thenReturn(oldUrl)
+        val session = host.session
+        doThrow(IllegalStateException("open failed")).doNothing().`when`(session).initializePlayer()
+        controller.switchQuality(1)
+        pending!!(mapOf("ok" to true, "playbackTargetJson" to """{"streamUrl":"https://nas/new.mp4"}""",
+            "transportUrl" to newUrl))
+        assertEquals(listOf("releaseNativePlaybackTransport"), calls)
+        assertEquals(newUrl, callArgs.single()["transportUrl"])
+        verify(host.session, times(2)).initializePlayer()
+        assertFalse(controller.recoverQualityFailure())
+    }
+
+    @Test
+    fun lateQualityTransportUsesOriginalResolverSession() {
+        controller.switchQuality(1)
+        val reply = pending!!
+        controller.invalidateMedia()
+        `when`(host.target.resolverSessionId).thenReturn("replacement")
+        reply(mapOf("ok" to true, "playbackTargetJson" to """{"streamUrl":"https://nas/new.mp4"}""",
+            "transportUrl" to "http://127.0.0.1/playback-relay/late"))
+        assertEquals(listOf("releaseNativePlaybackTransport"), calls)
+        assertEquals("session", callArgs.single()["resolverSessionId"])
+    }
+
+    @Test
+    fun exitReleasesTransportsWithoutWaitingForProgressWriteback() {
+        controller.report(10, 100)
+        val reportReply = pending!!
+        controller.close()
+        assertEquals(listOf("reportNativeFntvProgress", "closeNativePlaybackTransports"), calls)
+        reportReply(mapOf("ok" to true))
+        assertEquals("closeNativeFntvSession", calls.last())
+    }
+
+    @Test
     fun closeIsIdempotentAndDisablesFurtherActions() {
         controller.close()
         controller.close()
         controller.switchQuality(1)
         controller.loadSubtitle(JSONObject("""{"id":"sub"}"""))
-        assertEquals(listOf("closeNativeFntvSession"), calls)
+        assertEquals(listOf("closeNativePlaybackTransports", "closeNativeFntvSession"), calls)
         assertFalse(controller.isSwitching)
     }
 }

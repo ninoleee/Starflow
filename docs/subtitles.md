@@ -1,6 +1,6 @@
 # 字幕链路
 
-核对日期：2026-09-20。本文负责字幕搜索、验证、渲染与生命周期；播放器总边界见 [架构说明](architecture.md)，请求与代理见 [网络说明](development-network.md)，设备显示验收见 [真机性能](performance-device.md)。
+核对日期：2026-09-26。本文负责字幕搜索、验证、渲染与生命周期；播放器总边界见 [架构说明](architecture.md)，请求与代理见 [网络说明](development-network.md)，设备显示验收见 [真机性能](performance-device.md)。
 
 ## 搜索与凭据
 
@@ -34,12 +34,18 @@ IO 仓库并行请求启用的来源，每来源等待上限 30 秒。搜索结�
 | --- | --- | --- | --- | --- |
 | 非 Web MPV | 文本与位图 | 两条独立内封文本轨 | 支持 | 支持 |
 | Android Exo | Media3 支持的文本与位图 | 两条独立文本轨 | 支持 | 外挂文本 |
-| iOS AVPlayer | 系统可用字幕轨 | 回退系统语言 | 尚未完成挂载闭环 | 不支持 |
+| iOS AVPlayer | 系统可用字幕轨 | 回退系统语言 | 支持本地选择、在线结果挂载及 HTTP 下载的 SRT / ASS / SSA / VTT 文本叠层 | 外挂不支持偏移 |
 | Web 仓库 | 取决于播放后端 | 不承诺 | 仓库未实现 | 不承诺 |
 
 MPV 文本使用 Flutter 字幕层，ASS 样式/动画不完整保留；位图使用 MPV 原生显示，不再依赖文本事件。副字幕关闭原生显示，防止与 Flutter 双字幕重叠。
 
 `MpvSubtitleRenderBinding` 同时响应所选轨道、完整轨道列表和原生 `sid` 变化，以最新列表补全 codec/image；`auto` 不当作文本轨。元数据尚未到达时暂保留原生显示，识别出文本后再交给 Flutter。属性写入串行合并，关闭后不提交迟到状态，失败写结构化日志并在下次变化时重试。渲染、双字幕候选、剧集偏好及飞牛外挂拒绝共用位图类型判断，兼容仅有 codec 的轨道。
+
+iOS AVPlayer 不把外部文本伪装成 `AVMediaSelectionOption`。原生控制器使用独立的、不可交互的文本叠层，提供本地文档选择和在线搜索入口；在线搜索以独立 Flutter engine 打开现有 `SubtitleSearchPage`，复用来源凭据、下载、ZIP 校验和取消流程，经 `starflow/subtitle_search` 返回验证后的文件。另提供 `starflow/platform` 的文件挂载及受 16 MiB 上限、30 秒超时保护的 HTTP 文本下载接口，原生 HTTP 接口不处理 ZIP。后台队列完成有界文件读取和解析，成功挂载才替换当前字幕；加载失败保留旧轨，原生挂载失败关闭搜索页并提示，来源下载失败仍由搜索页展示。选择系统字幕会关闭外挂叠层，菜单也提供恢复系统字幕。
+
+外挂 cue 仅存于内存，不再创建原生磁盘副本。在线搜索文件移交后，无论成功、失败或迟到，都只删除本次 `starflow/online_subtitles/download-*` 目录，本地用户文件不删除。关闭外挂、换集和退出使迟到结果失效；换集/退出取消原生下载，销毁搜索页 engine，并移除时间观察器与 cue 引用。正在执行的有界后台解析不强制终止，但不会重新挂载。独立搜索页在关闭时销毁，其未完成网络请求随 engine 终止；异常退出遗留的在线下载仍由仓库七天保留策略回收。
+
+支持的外挂格式是 SRT、ASS、SSA 和 WebVTT；本地文本识别 UTF-8、带 BOM 的 UTF-16、GB18030/GBK，在线文本先由既有 Dart 管线规范化。ASS 仅保留可读文本，绘图 cue 跳过，不承诺样式、动画、定位或字体效果；WebVTT 不承诺样式、区域、滚动或 HLS 时间戳映射。文本叠层不进入 PiP 或 AirPlay 视频输出；PiP 启动时隐藏、退出或启动失败后恢复，不冒充原生字幕轨。外部字幕显示、系统选轨切换和 PiP 恢复仍需真机验收。
 
 2026-09-20 组件整理后，`MpvSubtitleSession` 统一持有该绑定、轨道订阅和原生 sid 观察器，并归属于单实例的 `MpvPlaybackLifecycle`。detach 先关闭旧所有者，新实例使用新所有者；旧 sid 注册迟到仍需完成反注册，清理不转而操作新实例。选轨规则、字幕解码和渲染策略不因所有权拆分改变。iOS 的字幕偏好模型移到 `NativePlaybackModels.swift`，实际 AVPlayer 选轨仍在 `NativePlaybackViewController.swift`。
 
@@ -88,3 +94,10 @@ xcrun swiftc ios/Runner/NativeSubtitleLanguagePolicy.swift scripts/test_subtitle
 ```
 
 2026-09-20 本机 Swift 契约检查 16 项通过；它只验证语言匹配策略，不编译 AVPlayer 容器，也不是 iOS 字幕显示验收。
+
+2026-09-26 新增外挂解析主机策略检查，覆盖 SRT / VTT / ASS、重叠、seek 时间查询、UTF-16、大小、非法内容、在线目录删除和本地原文件保留，共 15 项通过；iOS Debug `build-for-testing`、Swift 类型检查通过，iPhone 17 模拟器三项 XCTest（格式解析、非法/超大输入、关闭/退出后的迟到解析隔离）通过。这不替代真实字幕源、播放器 UI、PiP/AirPlay 和真机显示验收。可独立运行：
+
+```sh
+xcrun swiftc ios/Runner/NativeExternalSubtitle.swift ios/RunnerTests/ExternalSubtitleStrategyChecks.swift -o /tmp/starflow-external-subtitle-checks
+/tmp/starflow-external-subtitle-checks
+```

@@ -12,19 +12,30 @@ void main() {
       var refreshed = false;
       final service = QuarkSaveWorkflowService(
         saveShareLink: (
-                {required String shareUrl,
-                required String cookie,
-                String toPdirFid = '0',
-                String toPdirPath = '/',
-                String saveFolderName = '',
-                String sanitizedNameCharacters = ''}) async =>
-            const QuarkSaveResult(
-                taskId: 'saved', savedCount: 1, targetFolderPath: '/Film'),
+            {required String shareUrl,
+            required String cookie,
+            String toPdirFid = '0',
+            String toPdirPath = '/',
+            String saveFolderName = '',
+            String sanitizedNameCharacters = ''}) async {
+          expect(sanitizedNameCharacters, '#');
+          return const QuarkSaveResult(
+              taskId: 'saved',
+              savedCount: 1,
+              targetFolderPath: '/Film',
+              savedEntriesSettled: true,
+              savedEntries: [
+                QuarkSavedEntry(
+                    parentFid: '0', name: '#film.mkv', previousFids: {})
+              ]);
+        },
         sanitizeSavedNames: (
-                {required String cookie,
-                required List<QuarkSavedEntry> savedEntries,
-                required String characters}) async =>
-            const QuarkNameSanitizeResult(),
+            {required String cookie,
+            required List<QuarkSavedEntry> savedEntries,
+            required String characters}) async {
+          expect(characters, '#');
+          return const QuarkNameSanitizeResult();
+        },
         triggerSmartStrm: (
                 {required String webhookUrl,
                 required String taskName,
@@ -46,6 +57,8 @@ void main() {
           shareUrl: 'https://pan.quark.cn/s/test',
           saveFolderName: 'Film',
           networkStorage: const NetworkStorageConfig(
+              commonSanitizeSavedNamesEnabled: true,
+              commonSanitizedNameCharacters: '#',
               quarkCookie: 'test',
               smartStrmWebhookUrl: 'https://strm.test/hook',
               smartStrmTaskName: 'test'));

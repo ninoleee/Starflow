@@ -42,12 +42,16 @@ internal class NativeFntvController(
     private var restoreTracks: (() -> Unit)? = null
     private var initialAudioAppliedTo: androidx.media3.exoplayer.ExoPlayer? = null
     private var rollbackJson: String? = null
+    private var rollbackTransportUrl: String? = null
+    private var pendingTransportUrl: String? = null
+    private var pendingPlaybackJson: String? = null
     private var closed = false
     private var loadedSubtitleId = ""
     private var loadedSubtitleUri = ""
     private var pendingSubtitleRevision: Long? = null
     private var automaticSubtitleLoadingAllowed = true
     private var versionPickerLoading = false
+    private var resolutionTimeout: Runnable? = null
 
     fun cancelSubtitleLoad() {
         pendingSubtitleRevision = null
@@ -163,16 +167,24 @@ internal class NativeFntvController(
         closed = true
         invalidateMedia(release = false)
         val session = host.target.resolverSessionId
+        invoke("closeNativePlaybackTransports", mapOf("resolverSessionId" to session)) {}
         progress.finish {
             invoke("closeNativeFntvSession", mapOf("resolverSessionId" to session)) {}
         }
     }
 
     fun invalidateMedia(release: Boolean = true) {
+        resolutionTimeout?.let { host.playerView.removeCallbacks(it) }
+        resolutionTimeout = null
         if (release) {
             releasePlayback(host.target.playbackTargetJson)
-            rollbackJson?.let(::releasePlayback)
+            rollbackJson?.let { releasePlayback(it) }
         }
+        releaseTransport(rollbackTransportUrl)
+        releaseTransport(pendingTransportUrl)
+        rollbackTransportUrl = null
+        pendingTransportUrl = null
+        pendingPlaybackJson = null
         rollbackJson = null
         generation++
         busy = false
@@ -185,10 +197,28 @@ internal class NativeFntvController(
         automaticSubtitleLoadingAllowed = true
     }
 
-    private fun releasePlayback(json: String) {
+    private fun releasePlayback(json: String, sessionId: String = host.target.resolverSessionId) {
         val value = runCatching { JSONObject(json) }.getOrNull() ?: return
         if (value.optString("fntvSessionLink").isBlank()) return
-        invoke("releaseNativeFntvPlayback", args(json)) {}
+        invoke("releaseNativeFntvPlayback", mapOf(
+            "resolverSessionId" to sessionId, "playbackTargetJson" to json,
+        )) {}
+    }
+
+    private fun releaseTransport(url: String?, sessionId: String = host.target.resolverSessionId) {
+        val transportUrl = url?.trim().orEmpty()
+        if (!transportUrl.contains("/playback-relay/")) return
+        invoke(
+            "releaseNativePlaybackTransport",
+            mapOf(
+                "resolverSessionId" to sessionId,
+                "transportUrl" to transportUrl,
+            ),
+        ) {}
+    }
+
+    private fun releaseResolvedTransport(result: Map<String, Any?>, sessionId: String) {
+        releaseTransport(result["transportUrl"]?.toString(), sessionId)
     }
 
     fun unavailableAudioStreams(): List<JSONObject> {
@@ -344,6 +374,7 @@ internal class NativeFntvController(
         if (isSwitching || host.episodes.isSwitching) return
         val oldPlayer = host.session.player ?: return
         val oldJson = host.target.playbackTargetJson
+        val resolverSessionId = host.target.resolverSessionId
         val subtitleRevision = host.subtitles.subtitleSelectionRevision
         if (!switchingVersion) request.put("streamUrl", "").put("headers", JSONObject())
             .put("fntvSessionLink", "")
@@ -354,18 +385,22 @@ internal class NativeFntvController(
         host.showToast("正在解析播放设置")
         val timeout = Runnable {
             if (token == generation && busy) {
+                resolutionTimeout = null
                 generation++
                 busy = false
                 host.showToast("播放设置解析超时，已保留当前播放")
             }
         }
+        resolutionTimeout = timeout
         host.playerView.postDelayed(timeout, 45_000)
         val dispatched = resolve(
-            host.target.resolverSessionId, request.toString(),
+            resolverSessionId, request.toString(),
         ) callback@{ result ->
             host.playerView.removeCallbacks(timeout)
+            if (resolutionTimeout === timeout) resolutionTimeout = null
             if (token != generation) {
-                releasePlayback(result["playbackTargetJson"]?.toString().orEmpty())
+                releasePlayback(result["playbackTargetJson"]?.toString().orEmpty(), resolverSessionId)
+                releaseResolvedTransport(result, resolverSessionId)
                 return@callback
             }
             busy = false
@@ -373,12 +408,15 @@ internal class NativeFntvController(
                 host.session.player !== oldPlayer || host.target.playbackTargetJson != oldJson ||
                 subtitleRevision != host.subtitles.subtitleSelectionRevision ||
                 host.episodes.isSwitching) {
-                releasePlayback(result["playbackTargetJson"]?.toString().orEmpty())
+                releasePlayback(result["playbackTargetJson"]?.toString().orEmpty(), resolverSessionId)
+                releaseResolvedTransport(result, resolverSessionId)
                 return@callback
             }
             val json = result["playbackTargetJson"]?.toString().orEmpty()
             val next = runCatching { JSONObject(json) }.getOrNull()
             if (result["ok"] != true || next == null || next.optString("streamUrl").isBlank()) {
+                releasePlayback(json, resolverSessionId)
+                releaseResolvedTransport(result, resolverSessionId)
                 host.showToast("播放设置解析失败，已保留当前播放")
                 return@callback
             }
@@ -409,14 +447,13 @@ internal class NativeFntvController(
             val oldExternal = host.externalSubtitles.externalSubtitleSource
             host.runtime.persistPlaybackProgress(force = true)
             host.episodes.invalidateResolution()
-            fun open(targetJson: String, mime: String) {
+            fun open(targetJson: String, mime: String, restoring: Boolean = false) {
                 host.session.releasePlayer()
                 loadedSubtitleId = ""
                 loadedSubtitleUri = ""
                 pendingSubtitleRevision = null
                 automaticSubtitleLoadingAllowed = true
                 val value = JSONObject(targetJson)
-                val restoring = targetJson == oldJson
                 if (switchingVersion) {
                     val itemKey = if (restoring) oldKey else result["playbackItemKey"]?.toString() ?: oldKey
                     val seriesKey = if (restoring) oldSeriesKey else result["seriesKey"]?.toString() ?: oldSeriesKey
@@ -432,7 +469,7 @@ internal class NativeFntvController(
                     host.activity.intent.putExtra(EXTRA_TITLE, value.optString("title"))
                     host.runtime.resetForNewMedia()
                 }
-                host.externalSubtitles.externalSubtitleSource = if (targetJson == oldJson) oldExternal else null
+                host.externalSubtitles.externalSubtitleSource = if (restoring) oldExternal else null
                 host.target.playbackTargetJson = targetJson
                 host.activity.intent.putExtra(EXTRA_PLAYBACK_TARGET_JSON, targetJson)
                 val transportUrl = if (restoring) oldTransportUrl else result["transportUrl"]?.toString().orEmpty()
@@ -474,6 +511,7 @@ internal class NativeFntvController(
                 }
                 if (switchingVersion && !restoring) restoreTracks = null
                 host.session.stagePlaybackParameters(speed)
+                pendingTransportUrl = if (restoring) null else transportUrl
                 host.session.initializePlayer()
                 host.subtitles.subtitleSessionPreference = when {
                     switchingVersion && !restoring -> null
@@ -486,8 +524,11 @@ internal class NativeFntvController(
                 host.subtitles.pendingExternalSubtitleSelection = false
                 host.subtitles.automaticSubtitleSelectionApplied = false
             }
-            rollback = { open(oldJson, oldMime) }
+            rollback = { open(oldJson, oldMime, restoring = true) }
             rollbackJson = oldJson
+            rollbackTransportUrl = oldTransportUrl
+            pendingTransportUrl = result["transportUrl"]?.toString()
+            pendingPlaybackJson = json
             try {
                 open(json, result["mediaMimeType"]?.toString().orEmpty())
             } catch (_: Exception) {
@@ -496,6 +537,7 @@ internal class NativeFntvController(
         }
         if (!dispatched) {
             host.playerView.removeCallbacks(timeout)
+            if (resolutionTimeout === timeout) resolutionTimeout = null
             busy = false
             host.showToast("播放器解析服务未就绪")
         }
@@ -504,8 +546,12 @@ internal class NativeFntvController(
     fun onReady() {
         if (rollback != null) {
             rollback = null
-            rollbackJson?.let(::releasePlayback)
+            rollbackJson?.let { releasePlayback(it) }
             rollbackJson = null
+            if (rollbackTransportUrl != pendingTransportUrl) releaseTransport(rollbackTransportUrl)
+            rollbackTransportUrl = null
+            pendingTransportUrl = null
+            pendingPlaybackJson = null
             host.showToast("播放设置已切换")
         }
         if (isTranscoding() && !busy && automaticSubtitleLoadingAllowed && pendingSubtitleRevision == null) {
@@ -537,8 +583,12 @@ internal class NativeFntvController(
     fun recoverQualityFailure(): Boolean {
         val restore = rollback ?: return false
         rollback = null
-        releasePlayback(host.target.playbackTargetJson)
+        pendingPlaybackJson?.let { releasePlayback(it) }
+        pendingPlaybackJson = null
+        if (pendingTransportUrl != rollbackTransportUrl) releaseTransport(pendingTransportUrl)
+        pendingTransportUrl = null
         rollbackJson = null
+        rollbackTransportUrl = null
         host.showToast("画质播放失败，正在恢复原画质")
         try {
             restore()

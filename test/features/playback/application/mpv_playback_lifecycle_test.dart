@@ -6,6 +6,34 @@ import 'package:starflow/features/playback/application/mpv_playback_lifecycle.da
 import 'package:starflow/features/playback/application/mpv_subtitle_render_binding.dart';
 
 void main() {
+  test('transport closes immediately while subscription cancellation waits',
+      () async {
+    final cancellation = Completer<void>();
+    final events = StreamController<int>(onCancel: () => cancellation.future);
+    final lifecycle = MpvPlaybackLifecycle();
+    var transportCloses = 0;
+    lifecycle.retain(events.stream.listen((_) {}));
+    lifecycle.retainCleanup(() async {
+      transportCloses++;
+    });
+    final closing = lifecycle.close();
+    expect(transportCloses, 1);
+    expect(identical(closing, lifecycle.close()), isTrue);
+    cancellation.complete();
+    await closing;
+    expect(transportCloses, 1);
+    await events.close();
+  });
+
+  test('late cleanup runs after lifecycle has closed', () async {
+    final lifecycle = MpvPlaybackLifecycle();
+    await lifecycle.close();
+    var transportCloses = 0;
+    lifecycle.retainCleanup(() async {
+      transportCloses++;
+    });
+    expect(transportCloses, 1);
+  });
   test(
       'closing an old player suppresses events without closing its replacement',
       () async {

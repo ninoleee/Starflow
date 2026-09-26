@@ -104,7 +104,7 @@ class _Drive {
           cloud115Cookie: 'cookie',
           cloud115SaveFolderId: '10',
           cloud115SaveFolderPath: '/115/Show',
-          cloud115SanitizeSavedNamesEnabled: enabled,
+          commonSanitizeSavedNamesEnabled: enabled,
           smartStrmWebhookUrl: 'https://strm.test/webhook',
           cloud115SmartStrmTaskName: '115-task',
           smartStrmTaskName: 'quark-task',
@@ -114,6 +114,17 @@ class _Drive {
 }
 
 void main() {
+  test('common rules rename new content and deduplicate later saves', () async {
+    final drive = _Drive();
+    await drive.run();
+    expect(drive.renames, hasLength(3));
+    expect(drive.events,
+        ['save', 'rename', 'rename', 'rename', 'strm', 'refresh']);
+    drive.events.clear();
+    final repeated = await drive.run();
+    expect(drive.events, isEmpty);
+    expect(repeated, contains('保存 0 个'));
+  });
   test(
       '115 saves, renames only new content, verifies names, then triggers STRM',
       () async {
@@ -172,21 +183,25 @@ void main() {
     }
   });
 
-  test('name settings serialize independently and default is disabled', () {
+  test('legacy per-drive settings serialize but common rules control behavior',
+      () {
     final old =
         NetworkStorageConfig.fromJson({'quarkSanitizeSavedNamesEnabled': true});
     expect(old.cloud115SanitizeSavedNamesEnabled, isFalse);
     final config = old.copyWith(
         cloud115SanitizeSavedNamesEnabled: true,
-        cloud115SanitizedNameCharacters: '#');
+        cloud115SanitizedNameCharacters: '#',
+        commonSanitizeSavedNamesEnabled: true,
+        commonSanitizedNameCharacters: '%');
     final restored = NetworkStorageConfig.fromJson(config.toJson());
     expect(restored.cloud115SanitizeSavedNamesEnabled, isTrue);
     expect(restored.cloud115SanitizedNameCharacters, '#');
     expect(restored.quarkSanitizedNameCharacters, '#%?');
+    expect(restored.effective115NameCharacters, '%');
     expect(
         restored
-            .copyWith(quarkSanitizeSavedNamesEnabled: false)
-            .cloud115SanitizeSavedNamesEnabled,
-        isTrue);
+            .copyWith(commonSanitizeSavedNamesEnabled: false)
+            .effective115NameCharacters,
+        isEmpty);
   });
 }

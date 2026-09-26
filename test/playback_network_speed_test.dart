@@ -8,6 +8,9 @@ void main() {
   test('buffer duration and compact first line', () {
     expect(formatPlaybackMetrics(2048, 33554432, 18000),
         '2.0 KB/s · 32.0 MB · 18s');
+    expect(
+        formatPlaybackMetrics(2048, 33554432, 18000, diskCacheBytes: 100663296),
+        '2.0 KB/s · 32.0 MB | 96.0 MB · 18s');
     expect(formatPlaybackMetrics(null, null, null), '-- · -- · --');
     expect(formatPlaybackBufferDuration(59999), '1m 0s');
     expect(formatPlaybackBufferDuration(3600000), '1h 0m');

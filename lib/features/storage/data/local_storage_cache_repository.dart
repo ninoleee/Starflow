@@ -224,6 +224,7 @@ class LocalStorageCacheRepository {
       case LocalStorageCacheType.playbackMemory:
       case LocalStorageCacheType.televisionSearchPreferences:
       case LocalStorageCacheType.images:
+      case LocalStorageCacheType.playbackDiskCache:
         return;
       case LocalStorageCacheType.embyLibraryCache:
         await clearAllEmbyLibrarySnapshots();

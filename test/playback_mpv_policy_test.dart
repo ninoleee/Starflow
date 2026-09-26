@@ -71,8 +71,8 @@ void main() {
       expect(profile, isNotNull);
       expect(profile!.lowLatency, isFalse);
       expect(profile.cacheOnDisk, 'no');
-      expect(profile.cacheSecs, '150');
-      expect(profile.demuxerReadaheadSecs, '42');
+      expect(profile.cacheSecs, '120');
+      expect(profile.demuxerReadaheadSecs, '120');
       expect(profile.demuxerHysteresisSecs, '20');
       expect(profile.cachePauseWait, '2.0');
       expect(profile.networkTimeoutSeconds, '32');
@@ -98,8 +98,8 @@ void main() {
       expect(isLikelyQuarkPlaybackTarget(target), isTrue);
       expect(profile!.lowLatency, isFalse);
       expect(profile.cacheOnDisk, 'no');
-      expect(profile.cacheSecs, '150');
-      expect(profile.demuxerReadaheadSecs, '42');
+      expect(profile.cacheSecs, '120');
+      expect(profile.demuxerReadaheadSecs, '120');
       expect(profile.cachePauseWait, '2.0');
       expect(profile.cachePauseInitial, 'yes');
       expect(profile.networkTimeoutSeconds, '32');
@@ -123,7 +123,7 @@ void main() {
         memoryClassMb: 192,
       );
 
-      expect(budget.forwardBytes, 96 * 1024 * 1024);
+      expect(budget.forwardBytes, 112 * 1024 * 1024);
       expect(budget.backBytes, 16 * 1024 * 1024);
       expect(budget.memoryCapApplied, isTrue);
     });
@@ -198,8 +198,8 @@ void main() {
       expect(profile?.networkTimeoutSeconds, '24');
       expect(profile?.cachePauseInitial, 'yes');
       expect(profile?.cachePauseWait, '2.0');
-      expect(profile?.cacheSecs, '90');
-      expect(profile?.demuxerReadaheadSecs, '28');
+      expect(profile?.cacheSecs, '120');
+      expect(profile?.demuxerReadaheadSecs, '120');
     });
 
     test('uses fast-start profile when cached throughput beats bitrate', () {
@@ -222,7 +222,8 @@ void main() {
 
       expect(profile?.name, 'fast-start');
       expect(profile?.cachePauseInitial, 'no');
-      expect(profile?.demuxerReadaheadSecs, '12');
+      expect(profile?.cacheSecs, '120');
+      expect(profile?.demuxerReadaheadSecs, '120');
       expect(profile?.cachePauseWait, '1.2');
     });
 
@@ -243,8 +244,8 @@ void main() {
       );
 
       expect(profile, isNotNull);
-      expect(profile!.cacheSecs, '150');
-      expect(profile.demuxerReadaheadSecs, '42');
+      expect(profile!.cacheSecs, '120');
+      expect(profile.demuxerReadaheadSecs, '120');
       expect(profile.demuxerHysteresisSecs, '20');
       expect(profile.cachePauseWait, '2.0');
       expect(profile.networkTimeoutSeconds, '32');
@@ -270,7 +271,7 @@ void main() {
       expect(profile?.name, 'buffered-high-risk');
       expect(profile?.cachePauseInitial, 'yes');
       expect(profile?.cachePauseWait, '2.0');
-      expect(profile?.demuxerReadaheadSecs, '42');
+      expect(profile?.demuxerReadaheadSecs, '120');
     });
 
     test('keeps remote quark tuning after stream url is wrapped by relay', () {
@@ -293,7 +294,7 @@ void main() {
       expect(isLikelyRemotePlaybackTargetTransport(target), isTrue);
       expect(isLikelyQuarkPlaybackTarget(target), isTrue);
       expect(profile, isNotNull);
-      expect(profile!.cacheSecs, '150');
+      expect(profile!.cacheSecs, '120');
       expect(profile.cachePauseInitial, 'yes');
     });
 
@@ -387,8 +388,8 @@ void main() {
           expect(profile.name, 'buffered-high-risk');
           expect(profile.cachePauseInitial, 'yes');
           expect(profile.cachePauseWait, '2.0');
-          expect(profile.cacheSecs, '150');
-          expect(profile.demuxerReadaheadSecs, '42');
+          expect(profile.cacheSecs, '120');
+          expect(profile.demuxerReadaheadSecs, '120');
         }
       }
     });
@@ -404,8 +405,8 @@ void main() {
         )!;
         expect(profile.cachePauseWait, '3.0');
         expect(profile.cachePauseInitial, 'yes');
-        expect(profile.cacheSecs, '150');
-        expect(profile.demuxerReadaheadSecs, '42');
+        expect(profile.cacheSecs, '120');
+        expect(profile.demuxerReadaheadSecs, '120');
       }
     });
 
@@ -464,13 +465,13 @@ void main() {
         isTelevision: true,
         memoryClassMb: 1024,
       );
-      expect(budget.forwardBytes, 120000000);
-      expect(budget.backBytes, 30000000);
+      expect(budget.forwardBytes, 144 * mib);
+      expect(budget.backBytes, 32 * mib);
       expect(budget.memoryCapApplied, isFalse);
 
       for (final (source, aggressive, expected) in [
-        (MediaSourceKind.nas, false, 96),
-        (MediaSourceKind.nas, true, 128),
+        (MediaSourceKind.nas, false, 144),
+        (MediaSourceKind.nas, true, 176),
         (MediaSourceKind.quark, false, 192),
         (MediaSourceKind.quark, true, 256),
       ]) {
@@ -486,9 +487,9 @@ void main() {
 
     test('keeps low and medium memory caps after bitrate sizing', () {
       for (final (memory, bitrate, expected, back) in [
-        (256, 20000000, 64, 16),
-        (256, 160000000, 96, 16),
-        (512, 160000000, 160, 32),
+        (256, 20000000, 80, 16),
+        (256, 160000000, 112, 16),
+        (512, 160000000, 176, 32),
       ]) {
         final budget = resolveMpvBufferBudget(
           target: target.copyWith(bitrate: bitrate),
@@ -519,10 +520,10 @@ void main() {
     test('unknown bitrate leaves original TV budgets unchanged', () {
       for (final bitrate in [null, 0, -1]) {
         for (final (memory, expected, capped) in [
-          (null, 96, false),
-          (256, 64, true),
-          (512, 96, false),
-          (1024, 96, false),
+          (null, 144, false),
+          (256, 80, true),
+          (512, 144, false),
+          (1024, 144, false),
         ]) {
           final budget = resolveMpvBufferBudget(
             target: target.copyWith(bitrate: bitrate),

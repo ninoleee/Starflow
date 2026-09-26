@@ -16,7 +16,8 @@ import 'package:starflow/features/playback/application/playback_variant_resolver
 import 'package:starflow/features/playback/application/playback_episode_queue_resolver.dart';
 import 'package:starflow/features/playback/application/subtitle_content_decoder.dart';
 import 'package:starflow/features/playback/data/native_playback_launcher.dart';
-import 'package:starflow/features/playback/data/playback_memory_repository.dart';
+import 'package:starflow/features/playback/data/playback_memory_repository.dart'
+    hide isLoopbackPlaybackRelayUrl;
 import 'package:starflow/features/playback/domain/playback_episode_queue.dart';
 import 'package:starflow/features/playback/domain/playback_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -40,6 +41,10 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
     _resolverChannel.setMethodCallHandler(_handleResolverMethodCall);
     _ref.onDispose(() {
       _resolverSessionId = '';
+      for (final service in _fntvSessions.values) {
+        unawaited(service.close());
+      }
+      _fntvSessions.clear();
       for (final sessionId in _transports.keys.toList()) {
         unawaited(_closeTransports(sessionId));
       }
@@ -56,17 +61,24 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   String _resolverSessionId = '';
   final Map<String, NativeFntvService> _fntvSessions = {};
   final Map<String, Map<String, PlaybackStreamRelayService>> _transports = {};
+  final _transportUrls = <String, Set<String>>{};
+  final _cacheCursors = <String, ({int generation, String url})>{};
+  final _relayClosures = Expando<Future<void>>();
   int _nextTransport = 0;
   PlaybackEpisodeBrowser? _episodeBrowser;
 
+  Future<void> _closeRelay(PlaybackStreamRelayService relay) =>
+      _relayClosures[relay] ??= Future<void>.sync(relay.close);
+
   Future<PlaybackTarget> _prepareTransport(
       String sessionId, PlaybackTarget target) async {
-    final diskCache = _ref.read(appSettingsProvider).playbackDiskCacheMiB > 0;
-    if (!diskCache && (!_isIOS || !requiresPlaybackStreamRelay(target))) {
-      return target;
-    }
     final transports = _transports[sessionId];
     if (transports == null) throw const PlaybackRelayException();
+    final diskCache = _ref.read(appSettingsProvider).playbackDiskCacheMiB > 0;
+    if (!diskCache && (!_isIOS || !requiresPlaybackStreamRelay(target))) {
+      _transportUrls[sessionId]?.add(target.streamUrl);
+      return target;
+    }
     final relay = _relayFactory();
     final pendingKey = 'pending:${++_nextTransport}';
     transports[pendingKey] = relay;
@@ -75,10 +87,23 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       if (!identical(_transports[sessionId], transports)) {
         throw const PlaybackRelayException();
       }
+      if (!isLoopbackPlaybackRelayUrl(prepared.streamUrl)) {
+        await _closeRelay(relay);
+        _transportUrls[sessionId]?.add(prepared.streamUrl);
+        return prepared;
+      }
+      final previous = transports[prepared.streamUrl];
+      if (previous != null && !identical(previous, relay)) {
+        await _closeRelay(previous);
+        if (!identical(_transports[sessionId], transports)) {
+          throw const PlaybackRelayException();
+        }
+      }
       transports[prepared.streamUrl] = relay;
+      _transportUrls[sessionId]?.add(prepared.streamUrl);
       return prepared;
     } catch (_) {
-      await relay.close();
+      await _closeRelay(relay);
       rethrow;
     } finally {
       transports.remove(pendingKey);
@@ -86,10 +111,27 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   }
 
   Future<void> _closeTransports(String sessionId) async {
+    _transportUrls.remove(sessionId);
+    _cacheCursors.remove(sessionId);
     final transports = _transports.remove(sessionId);
     if (transports != null) {
-      await Future.wait(transports.values.map((relay) => relay.close()));
+      final relays = <PlaybackStreamRelayService>{...transports.values};
+      transports.clear();
+      await Future.wait(relays.map(_closeRelay));
     }
+  }
+
+  Future<void> _closeSession(String sessionId) async {
+    if (_resolverSessionId == sessionId) {
+      _resolverSessionId = '';
+      _episodeResolver = null;
+      _episodeBrowser = null;
+    }
+    final service = _fntvSessions.remove(sessionId);
+    await Future.wait<void>([
+      _closeTransports(sessionId),
+      if (service != null) service.close(),
+    ]);
   }
 
   @override
@@ -126,6 +168,13 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       );
     }
 
+    // The launcher owns one native container at a time. A fast reopen can
+    // otherwise replace the active session id before the old controller sends
+    // its close callback, leaving its relay and FNTV session alive.
+    final previousSession = _resolverSessionId;
+    if (previousSession.isNotEmpty) {
+      await _closeSession(previousSession);
+    }
     _episodeResolver = episodeResolver;
     _episodeBrowser = PlaybackEpisodeBrowser(
       resolver: PlaybackEpisodeQueueResolver(read: _ref.read),
@@ -134,6 +183,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
     _resolverSessionId = DateTime.now().microsecondsSinceEpoch.toString();
     final sessionId = _resolverSessionId;
     _transports[sessionId] = {};
+    _transportUrls[sessionId] = {};
     try {
       if (target.sourceKind == MediaSourceKind.fntv) {
         final source = _ref
@@ -147,6 +197,10 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         await _fntvSessions[sessionId]!.sessions.retain(target);
       }
       final transport = await _prepareTransport(sessionId, target);
+      if (_resolverSessionId != sessionId ||
+          !_transports.containsKey(sessionId)) {
+        throw const PlaybackRelayException();
+      }
       final launched = await _platformChannel.invokeMethod<bool>(
         'launchNativePlaybackContainer',
         {
@@ -182,16 +236,14 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         },
       );
       if (launched != true) {
-        await _fntvSessions.remove(sessionId)?.close();
-        await _closeTransports(sessionId);
+        await _closeSession(sessionId);
       }
       return NativePlaybackLaunchResult(
         launched: launched == true,
         message: launched == true ? '' : '原生播放器启动失败。',
       );
     } catch (error, stackTrace) {
-      await _fntvSessions.remove(sessionId)?.close();
-      await _closeTransports(sessionId);
+      await _closeSession(sessionId);
       _traceQuarkNativeLaunch(
         'quark.native-launch.invoke.failed',
         target: target,
@@ -210,11 +262,26 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
   }
 
   Future<Object?> _handleResolverMethodCall(MethodCall call) async {
+    if (const {
+      'nativePlaybackCacheSnapshot',
+      'setNativePlaybackActive',
+      'setNativePlaybackBufferState',
+      'cancelNativePlaybackReadAhead',
+    }.contains(call.method)) {
+      return _handleCacheMethodCall(call);
+    }
+    if (call.method == 'closeNativePlaybackTransports') {
+      final args = Map<String, dynamic>.from(call.arguments as Map);
+      await _closeTransports(args['resolverSessionId'] as String? ?? '');
+      return {'ok': true};
+    }
     if (call.method == 'releaseNativePlaybackTransport') {
       final args = Map<String, dynamic>.from(call.arguments as Map);
       final sessionId = args['resolverSessionId'] as String? ?? '';
       final url = args['transportUrl'] as String? ?? '';
-      await _transports[sessionId]?.remove(url)?.close();
+      _transportUrls[sessionId]?.remove(url);
+      final relay = _transports[sessionId]?.remove(url);
+      if (relay != null) await _closeRelay(relay);
       return {'ok': true};
     }
     if (call.method == 'nativePlaybackMemoryChanged') {
@@ -230,8 +297,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         _episodeBrowser = null;
         _resolverSessionId = '';
       }
-      await _fntvSessions.remove(sessionId)?.close();
-      await _closeTransports(sessionId);
+      await _closeSession(sessionId);
       return {'ok': true};
     }
     if (const [
@@ -323,6 +389,9 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         'message': '原生播放会话已变化，请重新选择剧集。',
       };
     }
+    PlaybackTarget? retainedTarget;
+    String? preparedTransportUrl;
+    NativeFntvService? retainedService;
     try {
       final target = PlaybackTarget.fromJson(
         Map<String, dynamic>.from(jsonDecode(rawTargetJson) as Map),
@@ -378,6 +447,8 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         return {'ok': false, 'message': '飞牛播放会话已失效'};
       }
       final resolved = await resolver(target);
+      retainedTarget = resolved.target;
+      retainedService = fntv;
       await fntv?.sessions.retain(resolved.target);
       if (resolverSessionId != _resolverSessionId ||
           (fntv != null &&
@@ -388,13 +459,21 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       final resolvedPlaybackItemKey = buildPlaybackItemKey(resolved.target);
       final transport =
           await _prepareTransport(resolverSessionId, resolved.target);
-      if (resolverSessionId != _resolverSessionId) {
-        await _transports[resolverSessionId]
-            ?.remove(transport.streamUrl)
-            ?.close();
+      preparedTransportUrl = transport.streamUrl;
+      if (resolverSessionId != _resolverSessionId ||
+          !_transports.containsKey(resolverSessionId)) {
+        final relay =
+            _transports[resolverSessionId]?.remove(transport.streamUrl);
+        if (relay != null) await _closeRelay(relay);
         await fntv?.sessions.release(resolved.target);
+        retainedTarget = null;
+        retainedService = null;
+        preparedTransportUrl = null;
         return {'ok': false, 'message': '播放会话已失效'};
       }
+      retainedTarget = null;
+      retainedService = null;
+      preparedTransportUrl = null;
       return <String, Object?>{
         'ok': true,
         'playbackTargetJson': jsonEncode(resolved.target.toJson()),
@@ -407,11 +486,78 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
         'transportHeaders': transport.headers,
       };
     } catch (error) {
+      if (preparedTransportUrl != null) {
+        final relay =
+            _transports[resolverSessionId]?.remove(preparedTransportUrl);
+        if (relay != null) await _closeRelay(relay);
+      }
+      if (retainedTarget != null) {
+        await retainedService?.sessions.release(retainedTarget);
+      }
       return <String, Object?>{
         'ok': false,
         'message': '解析剧集失败：$error',
       };
     }
+  }
+
+  Map<String, Object?> _handleCacheMethodCall(MethodCall call) {
+    final args = Map<String, Object?>.from(call.arguments as Map? ?? const {});
+    final sessionId = args['resolverSessionId'];
+    final url = args['currentURL'];
+    final generation = args['generation'];
+    if (sessionId is! String ||
+        sessionId.isEmpty ||
+        sessionId != _resolverSessionId ||
+        url is! String ||
+        generation is! int ||
+        generation < 0 ||
+        _transportUrls[sessionId]?.contains(url) != true) {
+      return const {'ok': false};
+    }
+    final previous = _cacheCursors[sessionId];
+    if (previous != null &&
+        (generation < previous.generation ||
+            (generation == previous.generation && url != previous.url))) {
+      return const {'ok': false};
+    }
+    if (call.method == 'setNativePlaybackActive' && args['active'] is! bool) {
+      return const {'ok': false};
+    }
+    if (call.method == 'setNativePlaybackBufferState' &&
+        args['memoryReady'] is! bool) {
+      return const {'ok': false};
+    }
+    _cacheCursors[sessionId] = (generation: generation, url: url);
+    final service = _transports[sessionId]?[url];
+    final control = service is PlaybackRelayCacheControl
+        ? service as PlaybackRelayCacheControl
+        : null;
+    // Local metadata only: never probe a transport URL to obtain a metric.
+    if (call.method == 'setNativePlaybackActive') {
+      control?.setPlaybackActive(args['active'] as bool, url: url);
+    } else if (call.method == 'setNativePlaybackBufferState') {
+      if (service is PlaybackRelayBufferControl) {
+        (service as PlaybackRelayBufferControl).updateBufferState(
+            memoryReady: args['memoryReady'] as bool, url: url);
+      }
+    } else if (call.method == 'cancelNativePlaybackReadAhead') {
+      control?.cancelReadAhead(url: url);
+    }
+    final snapshot = call.method == 'nativePlaybackCacheSnapshot'
+        ? control?.cacheSnapshot(url: url)
+        : null;
+    return {
+      'ok': true,
+      'resolverSessionId': sessionId,
+      'currentURL': url,
+      'generation': generation,
+      if (snapshot != null) 'storedBytes': snapshot.storedBytes,
+      if (snapshot?.forwardBytes != null)
+        'forwardBytes': snapshot!.forwardBytes,
+      if (snapshot?.disabledReason != null)
+        'disabledReason': snapshot!.disabledReason,
+    };
   }
 }
 

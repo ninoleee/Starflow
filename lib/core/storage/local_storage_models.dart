@@ -6,6 +6,7 @@ enum LocalStorageCacheType {
   playbackMemory,
   televisionSearchPreferences,
   images,
+  playbackDiskCache,
 }
 
 extension LocalStorageCacheTypeX on LocalStorageCacheType {
@@ -25,6 +26,8 @@ extension LocalStorageCacheTypeX on LocalStorageCacheType {
         return '搜索历史与来源记忆';
       case LocalStorageCacheType.images:
         return '图片缓存';
+      case LocalStorageCacheType.playbackDiskCache:
+        return '播放器磁盘缓存';
     }
   }
 
@@ -44,6 +47,8 @@ extension LocalStorageCacheTypeX on LocalStorageCacheType {
         return '最近搜索词和搜索来源选择记忆，当前主要用于 TV';
       case LocalStorageCacheType.images:
         return '详情页、首页、豆瓣等图片的本地缓存';
+      case LocalStorageCacheType.playbackDiskCache:
+        return '播放器为远程点播临时保存的视频区间，不包含播放记录或本地文件';
     }
   }
 }

@@ -43,11 +43,15 @@ MpvBufferBudget resolveMpvBufferBudget({
   var forwardBytes = switch ((quark, aggressiveTuning, remote, heavy)) {
     (true, true, _, _) => 256 * _mib,
     (true, false, _, _) => 192 * _mib,
+    (false, true, _, _) when isTelevision => 176 * _mib,
     (false, true, _, _) => 128 * _mib,
-    (false, false, true, _) when isTelevision => 96 * _mib,
+    (false, false, true, _) when isTelevision => 144 * _mib,
+    (false, false, _, true) when isTelevision => 144 * _mib,
     (false, false, _, true) => 96 * _mib,
     (false, false, true, false) => 64 * _mib,
-    _ => 32 * _mib,
+    // Keep local/unknown TV sources above the old 32 MiB stop point while
+    // retaining the smaller non-TV fallback.
+    _ => isTelevision ? 64 * _mib : 32 * _mib,
   };
   var backCapBytes = quark ? 64 * _mib : 32 * _mib;
   if (isTelevision && (target.bitrate ?? 0) > 0) {
@@ -58,16 +62,16 @@ MpvBufferBudget resolveMpvBufferBudget({
 
   // Bitrate may enlarge the TV budget, but never past the largest existing
   // TV budget, even when the device's memory class is unavailable.
-  if (isTelevision) forwardBytes = forwardBytes.clamp(32 * _mib, 256 * _mib);
+  if (isTelevision) forwardBytes = forwardBytes.clamp(48 * _mib, 256 * _mib);
   if (isTelevision && memoryClassMb != null && memoryClassMb > 0) {
     if (memoryClassMb <= 256) {
       forwardBytes = forwardBytes.clamp(
-        32 * _mib,
-        (quark || heavy) ? 96 * _mib : 64 * _mib,
+        48 * _mib,
+        (quark || heavy) ? 112 * _mib : 80 * _mib,
       );
       backCapBytes = 16 * _mib;
     } else if (memoryClassMb <= 512) {
-      forwardBytes = forwardBytes.clamp(32 * _mib, 160 * _mib);
+      forwardBytes = forwardBytes.clamp(48 * _mib, 176 * _mib);
       backCapBytes = 32 * _mib;
     }
   }
@@ -425,8 +429,8 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
         name: 'fast-start',
         networkTimeoutSeconds: '16',
         cacheOnDisk: 'no',
-        cacheSecs: '45',
-        demuxerReadaheadSecs: '12',
+        cacheSecs: '120',
+        demuxerReadaheadSecs: '120',
         demuxerHysteresisSecs: '5',
         cachePauseWait: '1.2',
         cachePauseInitial: 'no',
@@ -438,8 +442,8 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
         name: 'buffered-high-risk',
         networkTimeoutSeconds: '32',
         cacheOnDisk: 'no',
-        cacheSecs: '150',
-        demuxerReadaheadSecs: '42',
+        cacheSecs: '120',
+        demuxerReadaheadSecs: '120',
         demuxerHysteresisSecs: '20',
         cachePauseWait: lowStartupSpeed ? '3.0' : '2.0',
         cachePauseInitial: 'yes',
@@ -450,8 +454,8 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
       name: 'buffered-standard',
       networkTimeoutSeconds: '24',
       cacheOnDisk: 'no',
-      cacheSecs: '90',
-      demuxerReadaheadSecs: '28',
+      cacheSecs: '120',
+      demuxerReadaheadSecs: '120',
       demuxerHysteresisSecs: '12',
       cachePauseWait: '2.0',
       cachePauseInitial: 'yes',

@@ -5,12 +5,44 @@ import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/utils/seed_data.dart';
 import 'package:starflow/features/library/domain/media_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
+import 'package:starflow/features/settings/data/cloud_credential_store.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
 void main() {
+  test('Aliyun refresh token stays local, rotates and can be cleared',
+      () async {
+    final preferences = _MemoryPreferencesStore();
+    final repository = LocalAppSettingsRepository(
+        preferences: preferences, credentials: MemoryCloudCredentialStore());
+    final settings = SeedData.defaultSettings.copyWith(
+      networkStorage:
+          const NetworkStorageConfig(aliyunRefreshToken: 'secret-token'),
+    );
+    await repository.save(settings);
+    expect((await repository.load()).networkStorage.aliyunRefreshToken,
+        'secret-token');
+    expect(await preferences.getString('starflow.settings.v3'),
+        isNot(contains('secret-token')));
+    expect(
+        NetworkStorageConfig.fromJson({'aliyunRefreshToken': 'imported'})
+            .aliyunRefreshToken,
+        isEmpty);
+    await repository.save(settings.copyWith(
+        networkStorage: settings.networkStorage
+            .copyWith(aliyunRefreshToken: 'rotated-token')));
+    expect((await repository.load()).networkStorage.aliyunRefreshToken,
+        'rotated-token');
+    await repository.save(settings.copyWith(
+        networkStorage:
+            settings.networkStorage.copyWith(aliyunRefreshToken: '')));
+    expect(
+        (await repository.load()).networkStorage.aliyunRefreshToken, isEmpty);
+  });
   test('keeps the 115 cookie outside the settings JSON', () async {
     final preferences = _MemoryPreferencesStore();
-    final repository = LocalAppSettingsRepository(preferences: preferences);
+    final secure = MemoryCloudCredentialStore();
+    final repository = LocalAppSettingsRepository(
+        preferences: preferences, credentials: secure);
     final settings = SeedData.defaultSettings.copyWith(
       networkStorage: const NetworkStorageConfig(
         cloud115Cookie: 'UID=current; CID=current; SEID=current',
@@ -35,9 +67,10 @@ void main() {
       await preferences.getString(
         'starflow.local-credentials.cloud115-cookie.v1',
       ),
-      loaded.networkStorage.cloud115Cookie,
+      isNull,
     );
     expect(jsonEncode(loaded.toJson()), isNot(contains('UID=current')));
+    expect(secure.value, contains('UID=current'));
   });
 
   test('reconciles old WebDAV references to the current media source root', () {
@@ -64,6 +97,12 @@ void main() {
         ),
       ],
       networkStorage: const NetworkStorageConfig(
+        syncDeleteAliyunWebDavDirectories: [
+          NetworkStorageWebDavDirectory(
+              sourceId: 'nas-main',
+              sourceName: 'NAS',
+              directoryId: 'https://webdav.example.com/movies/strm/aliyun/'),
+        ],
         syncDeleteQuarkWebDavDirectories: [
           NetworkStorageWebDavDirectory(
             sourceId: 'nas-main',
@@ -75,6 +114,11 @@ void main() {
     );
 
     final reconciled = reconcileSettingsMediaSourceReferences(settings);
+
+    expect(
+        reconciled.networkStorage.syncDeleteAliyunWebDavDirectories.single
+            .directoryId,
+        'https://openlist.example.com/dav/strm/aliyun/');
 
     expect(
       reconciled.homeModules.single.sectionId,

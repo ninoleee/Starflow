@@ -18,6 +18,8 @@ import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_URL
 internal class NativePlaybackEpisodeController(
     private val host: Host,
     private val now: () -> Long = SystemClock::elapsedRealtime,
+    private val invoke: (String, Map<String, Any?>, (Map<String, Any?>) -> Unit) -> Unit =
+        MainActivity::invokeNativeFntv,
     private val resolveEpisode: (String, String, (Map<String, Any?>) -> Unit) -> Boolean =
         MainActivity::resolveNativePlaybackEpisode,
 ) {
@@ -42,7 +44,12 @@ internal class NativePlaybackEpisodeController(
     }
 
     var episodeQueue: NativeEpisodeQueue? = null
-    private val transition = NativeEpisodeTransition(now)
+    private val transition = NativeEpisodeTransition(now = now, discard = { key, entry ->
+        releaseResolvedTransport(key.resolverSessionId, mapOf(
+            "transportUrl" to entry.transportUrl,
+            "playbackTargetJson" to entry.playbackTargetJson,
+        ))
+    })
     private var preparedRetryEntry: NativeEpisodeQueueEntry? = null
     private var retryPositionMs = 0L
     private var transitionStartedAtMs = 0L
@@ -116,6 +123,7 @@ internal class NativePlaybackEpisodeController(
 
     // Runs on the existing runtime loop, including while paused or at natural end.
     fun tick() {
+        transition.discardExpiredPrepared()
         transition.expiredRequest()?.let { failResolution(it, "解析剧集超时，请手动重试。") }
         val request = transition.pending
         if (request != null && preparationKey(request.key.index) != request.key) {
@@ -182,8 +190,12 @@ internal class NativePlaybackEpisodeController(
         val dispatched =
             resolveEpisode(request.key.resolverSessionId, entry.playbackTargetJson) { result ->
                 host.activity.runOnUiThread {
-                    if (transition.pending != request) return@runOnUiThread
+                    if (transition.pending != request) {
+                        releaseResolvedTransport(request.key.resolverSessionId, result)
+                        return@runOnUiThread
+                    }
                     if (transition.isExpired(request)) {
+                        releaseResolvedTransport(request.key.resolverSessionId, result)
                         failResolution(request, "解析剧集超时，请手动重试。")
                         return@runOnUiThread
                     }
@@ -192,6 +204,7 @@ internal class NativePlaybackEpisodeController(
                             host.activity.isDestroyed ||
                             preparationKey(request.key.index) != request.key
                     ) {
+                        releaseResolvedTransport(request.key.resolverSessionId, result)
                         transition.reset()
                         selectedSeasonQueue = null
                         return@runOnUiThread
@@ -225,6 +238,7 @@ internal class NativePlaybackEpisodeController(
                             resolvedEntry.url().isBlank() ||
                             resolvedEntry.needsResolution()
                     ) {
+                        releaseResolvedTransport(request.key.resolverSessionId, result)
                         failResolution(
                             request,
                             result["message"]?.toString()?.trim().orEmpty().ifEmpty { "没有取得可播放地址。" },
@@ -240,6 +254,25 @@ internal class NativePlaybackEpisodeController(
                 }
             }
         if (!dispatched) failResolution(request, "播放器解析服务未就绪，请重新打开播放页。")
+    }
+
+    private fun releaseResolvedTransport(sessionId: String, result: Map<String, Any?>) {
+        val transportUrl = result["transportUrl"]?.toString()?.trim().orEmpty()
+        if (transportUrl.contains("/playback-relay/")) invoke(
+            "releaseNativePlaybackTransport",
+            mapOf(
+                "resolverSessionId" to sessionId,
+                "transportUrl" to transportUrl,
+            ),
+        ) {}
+        val json = result["playbackTargetJson"]?.toString().orEmpty()
+        val target = runCatching { org.json.JSONObject(json) }.getOrNull()
+        if (!target?.optString("fntvSessionLink").isNullOrBlank()) {
+            invoke("releaseNativeFntvPlayback", mapOf(
+                "resolverSessionId" to sessionId,
+                "playbackTargetJson" to json,
+            )) {}
+        }
     }
 
     private fun failResolution(request: NativeEpisodeTransition.Request, message: String) {
@@ -267,6 +300,10 @@ internal class NativePlaybackEpisodeController(
                 host.activity.isFinishing ||
                 host.activity.isDestroyed
         ) {
+            releaseResolvedTransport(key.resolverSessionId, mapOf(
+                "transportUrl" to destination.entry.transportUrl,
+                "playbackTargetJson" to destination.entry.playbackTargetJson,
+            ))
             transition.reset()
             return
         }
@@ -276,12 +313,12 @@ internal class NativePlaybackEpisodeController(
         if (!isAddressRetry) host.launch.resetStartupDeadline()
         if (reason == "outro") host.runtime.markAutoSkipCompleted()
         else host.runtime.persistPlaybackProgress(force = true)
-        host.fntv.invalidateMedia()
         host.diagnostics.finishPlaybackPerformanceSession("episode-switch")
         host.session.releasePlayer()
+        host.fntv.invalidateMedia()
         val oldTransport = host.activity.intent.getStringExtra(EXTRA_URL).orEmpty()
         if (oldTransport.contains("/playback-relay/") && oldTransport != nextEntry.transportUrl) {
-            MainActivity.invokeNativeFntv("releaseNativePlaybackTransport", mapOf(
+            invoke("releaseNativePlaybackTransport", mapOf(
                 "resolverSessionId" to host.target.resolverSessionId,
                 "transportUrl" to oldTransport,
             )) {}

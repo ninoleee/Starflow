@@ -167,7 +167,7 @@ void main() {
     final restored = NetworkStorageConfig.fromJson(config.toJson());
     expect(restored.cloud115SaveFolderId, '42');
     expect(restored.cloud115Cookie, isEmpty);
-    expect(restored.quarkCookie, 'quark');
+    expect(restored.quarkCookie, isEmpty);
     expect(restored.cloud115SmartStrmTaskName, '115-movies');
     expect(
         restored

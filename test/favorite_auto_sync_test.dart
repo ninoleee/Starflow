@@ -19,6 +19,7 @@ import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
+import 'package:starflow/features/settings/data/cloud_credential_store.dart';
 import 'package:starflow/features/settings/data/webdav_sync_service.dart';
 
 SearchResult favorite(String id) => SearchResult(
@@ -154,8 +155,9 @@ void main() {
     );
     final server = Server();
     final container = ProviderContainer(overrides: [
-      appSettingsRepositoryProvider
-          .overrideWithValue(LocalAppSettingsRepository(preferences: store)),
+      appSettingsRepositoryProvider.overrideWithValue(
+          LocalAppSettingsRepository(
+              preferences: store, credentials: MemoryCloudCredentialStore())),
       webDavSyncServiceProvider
           .overrideWithValue(WebDavSyncService(MockClient(server.respond))),
       searchPreferencesRepositoryProvider

@@ -15,8 +15,11 @@ class NativePlaybackEpisodeControllerTest {
     private var time = 100_000L
     private val callbacks = mutableListOf<(Map<String, Any?>) -> Unit>()
     private val requestedTargets = mutableListOf<String>()
+    private val released = mutableListOf<Pair<String, Map<String, Any?>>>()
     private val controller =
-        NativePlaybackEpisodeController(host, { time }) { _, target, callback ->
+        NativePlaybackEpisodeController(host, { time }, invoke = { method, args, _ ->
+            released += method to args
+        }) { _, target, callback ->
             requestedTargets += target
             callbacks += callback
             true
@@ -55,6 +58,35 @@ class NativePlaybackEpisodeControllerTest {
             }
             .`when`(activity)
             .runOnUiThread(any(Runnable::class.java))
+    }
+
+    @Test
+    fun lateResultUsesOriginalResolverAndReleasesTransport() {
+        controller.tick()
+        `when`(host.target.resolverSessionId).thenReturn("replacement")
+        callbacks.single()(resolved + mapOf("transportUrl" to "http://127.0.0.1/playback-relay/late"))
+        assertEquals("resolver", released.single().second["resolverSessionId"])
+        assertEquals("releaseNativePlaybackTransport", released.single().first)
+    }
+
+    @Test
+    fun cachedEpisodeIsReleasedOnExpiryAndInvalidation() {
+        controller.tick()
+        callbacks.single()(resolved + mapOf("transportUrl" to "http://127.0.0.1/playback-relay/cached"))
+        assertTrue(released.isEmpty())
+        time += 60_000L
+        controller.tick()
+        controller.invalidateResolution()
+        assertEquals(1, released.size)
+    }
+
+    @Test
+    fun cachedEpisodeIsReleasedImmediatelyOnInvalidation() {
+        controller.tick()
+        callbacks.single()(resolved + mapOf("transportUrl" to "http://127.0.0.1/playback-relay/cached"))
+        controller.invalidateResolution()
+        controller.invalidateResolution()
+        assertEquals(1, released.size)
     }
 
     @Test

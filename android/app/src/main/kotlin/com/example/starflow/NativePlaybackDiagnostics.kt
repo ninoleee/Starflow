@@ -18,9 +18,20 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.upstream.BandwidthMeter
 import com.example.starflow.NativePlaybackActivity.Companion.EXTRA_URL
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 import org.json.JSONObject
 
-internal class NativePlaybackDiagnostics(private val host: Host) {
+internal class NativePlaybackDiagnostics(
+    private val host: Host,
+    private val invokeResolver: (String, Map<String, Any?>, (Map<String, Any?>) -> Unit) -> Unit =
+        MainActivity::invokeNativeFntv,
+    private val now: () -> Long = SystemClock::elapsedRealtime,
+) {
+    private companion object {
+        // Activity recreation may retain the Flutter resolver session.
+        val nextCacheGeneration = AtomicLong()
+    }
+
     interface Host {
         val session: NativePlaybackSession
         val target: NativePlaybackTarget
@@ -32,6 +43,117 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
     var latestNetworkSampleAtMs = 0L
 
     var networkSpeedVisible = false
+        set(value) {
+            if (field != value) invalidateCacheSample()
+            field = value
+        }
+
+    var displayActive = true
+        set(value) {
+            if (field != value) invalidateCacheSample()
+            field = value
+        }
+
+    private var cacheGeneration = 0L
+    private var cacheSession = ""
+    private var cacheURL = ""
+    private var cacheSampleAt: Long? = null
+    private var pendingCacheGeneration: Long? = null
+    private var bufferPlayer: Player? = null
+    private var bufferReportedAt: Long? = null
+    private var bufferReportedReady = false
+    internal var relayStoredBytes: Long? = null
+        private set
+
+    private fun invalidateCacheSample() {
+        cacheGeneration = nextCacheGeneration.incrementAndGet()
+        pendingCacheGeneration = null
+        cacheSampleAt = null
+        relayStoredBytes = null
+    }
+
+    fun beginCacheTransport(url: String, active: Boolean) {
+        if (cacheURL.isNotBlank()) reportMemoryBufferState(forceNotReady = true, force = true)
+        cacheSession = host.target.resolverSessionId
+        cacheURL = url
+        bufferPlayer = host.session.player
+        bufferReportedAt = null
+        invalidateCacheSample()
+        setPlaybackActive(active)
+        reportMemoryBufferState(forceNotReady = true, force = true)
+    }
+
+    fun endCacheTransport() {
+        reportMemoryBufferState(forceNotReady = true, force = true)
+        setPlaybackActive(false)
+        cancelReadAhead()
+        cacheURL = ""
+        cacheSession = ""
+        bufferPlayer = null
+        bufferReportedAt = null
+        invalidateCacheSample()
+    }
+
+    // Independent of diagnostics visibility. Main expires this readiness lease after four seconds.
+    internal fun reportMemoryBufferState(forceNotReady: Boolean = false, force: Boolean = false) {
+        if (cacheURL.isBlank() || cacheSession.isBlank()) return
+        val timestamp = now()
+        val ready = !forceNotReady && bufferPlayer != null &&
+            bufferPlayer === host.session.player && host.session.isMemoryBufferReady()
+        val age = bufferReportedAt?.let { timestamp - it }
+        if (!force && ready == bufferReportedReady && age != null && age in 0 until 1_000L) return
+        bufferReportedReady = ready
+        bufferReportedAt = timestamp
+        // Do not invalidate the separate UI snapshot or consume any asynchronous reply.
+        val args = cacheArguments() + mapOf(
+            "generation" to nextCacheGeneration.incrementAndGet(), "memoryReady" to ready,
+        )
+        invokeResolver("setNativePlaybackBufferState", args) {}
+    }
+
+    private fun cacheArguments(): Map<String, Any?> = mapOf(
+        "resolverSessionId" to cacheSession,
+        "currentURL" to cacheURL,
+        "generation" to cacheGeneration,
+    )
+
+    fun setPlaybackActive(active: Boolean) {
+        if (cacheURL.isBlank() || cacheSession.isBlank()) return
+        invalidateCacheSample()
+        invokeResolver("setNativePlaybackActive", cacheArguments() + ("active" to active)) {}
+    }
+
+    fun cancelReadAhead() {
+        if (cacheURL.isBlank() || cacheSession.isBlank()) return
+        invalidateCacheSample()
+        invokeResolver("cancelNativePlaybackReadAhead", cacheArguments()) {}
+    }
+
+    internal fun sampleRelayCacheIfVisible() {
+        if (!networkSpeedVisible || !displayActive || cacheURL.isBlank() || cacheSession.isBlank()) return
+        val timestamp = now()
+        if (cacheSampleAt?.let { timestamp - it < 2_000L } == true) return
+        if (pendingCacheGeneration != null) invalidateCacheSample()
+        cacheSampleAt = timestamp
+        val generation = nextCacheGeneration.incrementAndGet()
+        cacheGeneration = generation
+        val args = cacheArguments()
+        pendingCacheGeneration = generation
+        invokeResolver("nativePlaybackCacheSnapshot", args) { result ->
+            if (pendingCacheGeneration != generation) return@invokeResolver
+            if (pendingCacheGeneration == generation) pendingCacheGeneration = null
+            if (!networkSpeedVisible || !displayActive || generation != cacheGeneration) return@invokeResolver
+            relayStoredBytes = null
+            if (now() - timestamp >= 2_000L) {
+                invalidateCacheSample()
+                return@invokeResolver
+            }
+            if (result["resolverSessionId"] != cacheSession || result["currentURL"] != cacheURL ||
+                (result["generation"] as? Number)?.toLong() != generation) return@invokeResolver
+            relayStoredBytes = if (result["ok"] == true)
+                (result["storedBytes"] as? Number)?.toLong()?.takeIf { it >= 0L } else null
+        }
+    }
 
     var bandwidthWarningShown = false
 
@@ -283,19 +405,21 @@ internal class NativePlaybackDiagnostics(private val host: Host) {
     }
 
     fun updateNetworkSpeedLabelIfVisible() {
-        if (!networkSpeedVisible) {
+        if (!networkSpeedVisible || !displayActive) {
             return
         }
+        sampleRelayCacheIfVisible()
         val label = host.activity.findViewById<TextView?>(R.id.native_network_speed) ?: return
         val current = host.session.player
         val bufferDurationMs = current?.let {
             (it.bufferedPosition - it.currentPosition).coerceAtLeast(0L)
         }
-        val text = NativePlaybackFormatting.formatPlaybackMetrics(
-            host.session.playbackTransferProgress?.networkBytesPerSecond,
-            host.session.cachedMediaBytes,
-            bufferDurationMs,
-        ) + "\n" + (NativePlaybackFormatting.formatVideoFormat(
+        val text = listOf(
+            NativePlaybackFormatting.formatNetworkSpeed(host.session.playbackTransferProgress?.networkBytesPerSecond),
+            NativePlaybackFormatting.formatCacheBytes(host.session.cachedMediaBytes) + " | " +
+                NativePlaybackFormatting.formatCacheBytes(relayStoredBytes),
+            NativePlaybackFormatting.formatBufferDuration(bufferDurationMs),
+        ).joinToString(" · ") + "\n" + (NativePlaybackFormatting.formatVideoFormat(
             current?.videoFormat, current?.audioFormat,
         ) ?: "识别中")
         if (label.text.toString() != text) label.text = text

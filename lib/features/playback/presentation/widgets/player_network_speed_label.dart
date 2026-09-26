@@ -12,11 +12,13 @@ class MpvNetworkSpeedLabel extends StatelessWidget {
     required this.player,
     this.generation = 0,
     this.visible = true,
+    this.readDiskCacheBytes,
   });
 
   final Player player;
   final int generation;
   final bool visible;
+  final Future<int?> Function()? readDiskCacheBytes;
 
   Future<int?> _readSpeed() async {
     final native = player.platform;
@@ -48,6 +50,8 @@ class MpvNetworkSpeedLabel extends StatelessWidget {
       sampleKey: (player, generation),
       readSpeed: _readSpeed,
       readCacheBytes: _readCacheBytes,
+      memoryCacheLabel: '前向包约',
+      readDiskCacheBytes: readDiskCacheBytes,
       readBufferDurationMs: _readBufferDurationMs,
       readFormat: () async {
         final native = player.platform;

@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:starflow/features/search/application/aliyun_to115_workflow.dart';
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/library/domain/media_naming.dart';
 import 'package:starflow/features/library/domain/tmdb_media_identity.dart';
@@ -29,15 +30,19 @@ class DetailFavoriteSearchResourceMatch {
       switch (detectSearchCloudTypeFromUrl(result.resourceUrl)) {
         SearchCloudType.quark => CloudSaveDrive.quark,
         SearchCloudType.cloud115 => CloudSaveDrive.cloud115,
+        SearchCloudType.aliyun => CloudSaveDrive.aliyun,
         _ => throw const CloudSaveException('此网盘暂不支持检查更新'),
       };
 
   bool hasConfiguredCookie(NetworkStorageConfig config) =>
-      (drive == CloudSaveDrive.cloud115
-              ? config.cloud115Cookie
-              : config.quarkCookie)
-          .trim()
-          .isNotEmpty;
+      drive == CloudSaveDrive.aliyun
+          ? config.hasAliyunCredential &&
+              (!config.aliyunTo115Enabled || config.cloud115Cookie.isNotEmpty)
+          : (drive == CloudSaveDrive.cloud115
+                  ? config.cloud115Cookie
+                  : config.quarkCookie)
+              .trim()
+              .isNotEmpty;
 }
 
 class DetailOnlineResourceUpdateResult {
@@ -48,6 +53,7 @@ class DetailOnlineResourceUpdateResult {
     required this.onlineVideoCount,
     required this.localVideoCount,
     required this.localFolderExists,
+    this.destinationDrive,
   });
 
   final DetailFavoriteSearchResourceMatch favoriteMatch;
@@ -56,6 +62,8 @@ class DetailOnlineResourceUpdateResult {
   final int onlineVideoCount;
   final int localVideoCount;
   final bool localFolderExists;
+  final CloudSaveDrive? destinationDrive;
+  CloudSaveDrive get saveDrive => destinationDrive ?? favoriteMatch.drive;
 
   bool get hasUpdates => updatedEpisodeLabels.isNotEmpty;
 
@@ -63,14 +71,13 @@ class DetailOnlineResourceUpdateResult {
     final lines = <String>[
       if (favoriteMatch.result.providerName.trim().isNotEmpty)
         '来源：${favoriteMatch.result.providerName.trim()}',
-      '${favoriteMatch.drive.label}目录：$targetFolderPath',
+      '${saveDrive.label}目录：$targetFolderPath',
       '在线视频：$onlineVideoCount',
       '本地视频：$localVideoCount',
     ];
     if (!hasUpdates) {
-      lines.add(localFolderExists
-          ? '没有更新。'
-          : '${favoriteMatch.drive.label}目录不存在，分享中没有可保存的视频。');
+      lines.add(
+          localFolderExists ? '没有更新。' : '${saveDrive.label}目录不存在，分享中没有可保存的视频。');
       return lines.join('\n');
     }
     lines.add('发现更新 ${updatedEpisodeLabels.length} 条：');
@@ -123,8 +130,11 @@ class DetailOnlineResourceUpdateService {
       if (favorite.detailTarget != null) {
         continue;
       }
-      if (!const {SearchCloudType.quark, SearchCloudType.cloud115}
-          .contains(detectSearchCloudTypeFromUrl(favorite.resourceUrl))) {
+      if (!const {
+        SearchCloudType.quark,
+        SearchCloudType.cloud115,
+        SearchCloudType.aliyun
+      }.contains(detectSearchCloudTypeFromUrl(favorite.resourceUrl))) {
         continue;
       }
       final score = _scoreFavorite(
@@ -156,14 +166,24 @@ class DetailOnlineResourceUpdateService {
     required NetworkStorageConfig networkStorage,
     required QuarkSaveClient quarkSaveClient,
     Cloud115SaveClient? cloud115SaveClient,
+    AliyunTo115Workflow? aliyunWorkflow,
   }) async {
     final drive = favoriteMatch.drive;
     if (!favoriteMatch.hasConfiguredCookie(networkStorage)) {
-      throw CloudSaveException('请先在网盘与转存设置中配置${drive.label} Cookie');
+      throw CloudSaveException(drive == CloudSaveDrive.aliyun
+          ? '请先配置阿里 Refresh Token${networkStorage.aliyunTo115Enabled ? ' 和 115 Cookie' : ''}'
+          : '请先在网盘与转存设置中配置${drive.label} Cookie');
     }
     final share = prepareSearchResultShareCredentials(favoriteMatch.result);
     final CloudSavePreview preview;
-    if (drive == CloudSaveDrive.cloud115) {
+    if (drive == CloudSaveDrive.aliyun) {
+      if (aliyunWorkflow == null) throw const CloudSaveException('阿里更新客户端未配置');
+      preview = await aliyunWorkflow.preview(
+          shareUrl: share.resourceUrl,
+          password: searchResultSharePassword(share),
+          config: networkStorage,
+          saveFolderName: favoriteMatch.folderName);
+    } else if (drive == CloudSaveDrive.cloud115) {
       if (cloud115SaveClient == null) {
         throw const CloudSaveException('115 更新客户端未配置');
       }
@@ -174,10 +194,7 @@ class DetailOnlineResourceUpdateService {
         folderId: networkStorage.cloud115SaveFolderId,
         folderPath: networkStorage.cloud115SaveFolderPath,
         saveFolderName: favoriteMatch.folderName,
-        sanitizedNameCharacters:
-            networkStorage.cloud115SanitizeSavedNamesEnabled
-                ? networkStorage.cloud115SanitizedNameCharacters
-                : '',
+        sanitizedNameCharacters: networkStorage.effective115NameCharacters,
       );
     } else {
       preview = await quarkSaveClient.previewSave(
@@ -186,14 +203,16 @@ class DetailOnlineResourceUpdateService {
         folderId: networkStorage.quarkSaveFolderId,
         folderPath: networkStorage.quarkSaveFolderPath,
         saveFolderName: favoriteMatch.folderName,
-        sanitizedNameCharacters: networkStorage.quarkSanitizeSavedNamesEnabled
-            ? networkStorage.quarkSanitizedNameCharacters
-            : '',
+        sanitizedNameCharacters: networkStorage.effectiveQuarkNameCharacters,
       );
     }
 
     return DetailOnlineResourceUpdateResult(
       favoriteMatch: favoriteMatch,
+      destinationDrive:
+          drive == CloudSaveDrive.aliyun && networkStorage.aliyunTo115Enabled
+              ? CloudSaveDrive.cloud115
+              : drive,
       targetFolderPath: preview.targetFolderPath,
       updatedEpisodeLabels: preview.missingVideos
           .map((entry) => entry.relativePath)

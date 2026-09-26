@@ -204,6 +204,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       lifecycle.listen(playback.player.stream.playing, (
         playing,
       ) {
+        _setMpvPlaybackActive(playback.player, playing);
         if (_isTelevisionPlaybackDevice && _shouldUpdatePlaybackVisualState) {
           _updateTvPlaybackState(playing: playing);
         }
@@ -290,6 +291,7 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       _startMpvStallWatchdog(playback.player, resolvedTarget);
       unawaited(_prepareOptionalStartupTracks(playback.player, resolvedTarget));
       _startMpvPerformanceSampling(playback.player, resolvedTarget);
+      _startMpvMemorySampling(playback.player);
       unawaited(_syncBackgroundPlayback(enabled: true));
       unawaited(_bindPlaybackSystemSession());
       if (!_playbackPageInForeground) {
@@ -323,14 +325,15 @@ extension _PlayerPageStateStartupMpv on _PlayerPageState {
       if (!mounted) {
         return;
       }
-      await _finishMpvPerformanceSession(
-        reason: 'failed',
-        player: _player,
+      final detached = _detachActivePlayerState();
+      final failedGeneration = _startupGeneration;
+      await _shutdownDetachedPlayer(
+        detached,
+        reason: 'mpv-startup-failed',
+        persistProgress: false,
+        teardownPlatformState: true,
       );
-      if (!_fntvSwitchInProgress && _resolvedTarget != null) {
-        await _fntvSessions.release(_resolvedTarget!);
-      }
-      if (!_isCurrentStartup(generation)) {
+      if (!_isCurrentStartup(failedGeneration)) {
         return;
       }
       _adaptiveTopChromeController.setVisible(true);

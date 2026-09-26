@@ -633,7 +633,8 @@ void main() {
       quarkCookie: 'cookie',
       smartStrmWebhookUrl: 'https://strm.example/webhook',
       smartStrmTaskName: 'tv',
-      quarkSanitizeSavedNamesEnabled: true,
+      commonSanitizeSavedNamesEnabled: true,
+      commonSanitizedNameCharacters: kDefaultQuarkSanitizedNameCharacters,
     );
 
     test('sanitises before triggering SmartStrm', () async {

@@ -26,6 +26,8 @@ import java.lang.ref.WeakReference
 import java.util.UUID
 
 class MainActivity : FlutterActivity() {
+    private var updateChannel: MethodChannel? = null
+    private var updateInstaller: AndroidUpdateInstaller? = null
     private var platformChannel: MethodChannel? = null
     private var nativePlaybackResolverChannel: MethodChannel? = null
     private var playbackSessionChannel: MethodChannel? = null
@@ -76,6 +78,10 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        updateInstaller?.close()
+        updateInstaller = AndroidUpdateInstaller(this)
+        updateChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "starflow/update")
+        updateChannel?.setMethodCallHandler(updateInstaller)
         flutterEngine.platformViewsController.registry.registerViewFactory(
             "starflow/live_tv", LiveTvViewFactory(flutterEngine.dartExecutor.binaryMessenger, lifecycle)
         )
@@ -435,6 +441,10 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        updateChannel?.setMethodCallHandler(null)
+        updateInstaller?.close()
+        updateInstaller = null
+        updateChannel = null
         applicationExitHandler.removeCallbacksAndMessages(null)
         pressedKeyCodes.clear()
         completeNativePlaybackLaunch(false)

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:starflow/features/search/application/aliyun_to115_workflow.dart';
+import 'package:starflow/features/search/application/aliyun_sync_delete_service.dart';
 import 'package:starflow/features/search/application/cloud115_sync_delete_service.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
 
@@ -512,6 +514,15 @@ class AppMediaRepository implements MediaRepository {
         : normalizedResourcePath;
     final cloud115DeleteService =
         Cloud115SyncDeleteService(ref.read(cloud115SaveClientProvider));
+    final aliyunDeleteService =
+        AliyunSyncDeleteService(ref.read(aliyunTo115WorkflowProvider));
+    final aliyunDeletePlan = await aliyunDeleteService.prepare(
+        config: ref.read(appSettingsProvider).networkStorage,
+        sourceId: source.id,
+        resourcePath: _webDavNasClient
+            .resolveResourceUri(source,
+                resourcePath: normalizedResourcePath, sectionId: sectionId)
+            .toString());
     final cloud115DeletePlan = await cloud115DeleteService.prepare(
       config: ref.read(appSettingsProvider).networkStorage,
       sourceId: source.id,
@@ -530,8 +541,11 @@ class AppMediaRepository implements MediaRepository {
       sectionId: sectionId,
     );
 
-    if (cloud115DeletePlan != null && quarkDeletePlan != null) {
-      throw const QuarkSaveException('夸克与 115 删除监听范围重叠，未执行删除');
+    if ([cloud115DeletePlan, quarkDeletePlan, aliyunDeletePlan]
+            .where((p) => p != null)
+            .length >
+        1) {
+      throw const QuarkSaveException('多个网盘删除监听范围重叠，未执行删除');
     }
 
     var quarkDeleteCompleted = false;
@@ -568,6 +582,13 @@ class AppMediaRepository implements MediaRepository {
         await cloud115DeleteService.execute(cloud115DeletePlan);
       } catch (_) {
         throw const QuarkSaveException('WebDAV 已删除，但 115 删除未确认，请检查网盘；本地索引暂未清理');
+      }
+    }
+    if (aliyunDeletePlan != null) {
+      try {
+        await aliyunDeleteService.execute(aliyunDeletePlan);
+      } catch (_) {
+        throw const QuarkSaveException('WebDAV 已删除，但阿里删除未确认，请检查网盘；本地索引暂未清理');
       }
     }
     await _nasMediaIndexer.removeResourceScope(

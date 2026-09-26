@@ -264,12 +264,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     if (player == null || videoController == null) {
       final startupOverlay = PlayerStartupOverlay(
         target: _resolvedTarget ?? widget.target,
-        networkSpeed: player == null
-            ? null
-            : MpvNetworkSpeedLabel(
-                player: player,
-                generation: _startupGeneration,
-              ),
+        showMetrics: false,
       );
       if (isTelevision) {
         return startupOverlay;
@@ -356,22 +351,12 @@ extension _PlayerPageStateControls on _PlayerPageState {
           if (!phase.showsLoading) {
             return const SizedBox.shrink();
           }
-          return StreamBuilder<double>(
-            stream: player.stream.bufferingPercentage,
-            initialData: player.state.bufferingPercentage,
-            builder: (context, progressSnapshot) {
-              return IgnorePointer(
-                child: PlayerStartupOverlay(
-                  target: _resolvedTarget ?? widget.target,
-                  networkSpeed: MpvNetworkSpeedLabel(
-                    player: player,
-                    generation: _startupGeneration,
-                  ),
-                  bufferingProgress: progressSnapshot.data,
-                  showSpinner: isTelevision,
-                ),
-              );
-            },
+          return IgnorePointer(
+            child: PlayerStartupOverlay(
+              target: _resolvedTarget ?? widget.target,
+              showMetrics: false,
+              showSpinner: isTelevision,
+            ),
           );
         },
       );
@@ -403,10 +388,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
                 ignoring: !isTelevision,
                 child: PlayerStartupOverlay(
                   target: _resolvedTarget ?? widget.target,
-                  networkSpeed: MpvNetworkSpeedLabel(
-                    player: player,
-                    generation: _startupGeneration,
-                  ),
+                  showMetrics: false,
                   showSpinner: isTelevision,
                 ),
               ),
@@ -714,6 +696,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
       MpvNetworkSpeedLabel(
         player: state.widget.controller.player,
         generation: _startupGeneration,
+        readDiskCacheBytes: () =>
+            _readMpvDiskCacheBytes(state.widget.controller.player),
       ),
       const Spacer(),
       if (_hasPlaybackEpisodeQueue)
@@ -761,6 +745,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
       MpvNetworkSpeedLabel(
         player: state.widget.controller.player,
         generation: _startupGeneration,
+        readDiskCacheBytes: () =>
+            _readMpvDiskCacheBytes(state.widget.controller.player),
       ),
       const Spacer(),
       if (_hasPlaybackEpisodeQueue)

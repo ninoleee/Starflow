@@ -58,6 +58,7 @@ void main() {
             : int.parse(match[2]!).clamp(0, data.length - 1);
         request.response.statusCode = match == null ? 200 : 206;
         request.response.headers.contentType = ContentType.binary;
+        request.response.headers.set('etag', '"stable"');
         request.response.contentLength = end - start + 1;
         if (match != null) {
           request.response.headers
@@ -81,6 +82,7 @@ void main() {
       final prepared = await relay.prepareTarget(target);
       expect(prepared.streamUrl, isNot(target.streamUrl));
       expect(await get(prepared.streamUrl), data);
+      await cache.flushWrites();
       final afterFirst = reads;
       expect(await get(prepared.streamUrl, range: 'bytes=16-31'),
           data.sublist(16, 32));
@@ -119,11 +121,11 @@ void main() {
       request.response.add(bytes);
       await request.response.close();
     });
-    final relay = createPlaybackStreamRelayService(
-        diskCache: PlaybackRelayDiskCache(
-            capacityBytes: 2048,
-            directoryProvider: () => root.createTemp(),
-            freeBytes: () async => 1024 * 1024 * 1024));
+    final cache = PlaybackRelayDiskCache(
+        capacityBytes: 2048,
+        directoryProvider: () => root.createTemp(),
+        freeBytes: () async => 1024 * 1024 * 1024);
+    final relay = createPlaybackStreamRelayService(diskCache: cache);
     addTearDown(relay.close);
     final prepared = await relay.prepareTarget(PlaybackTarget(
         title: 'test',
@@ -139,6 +141,7 @@ void main() {
     expect(urls.length, 3);
     for (final url in urls) {
       await get(url);
+      await cache.flushWrites();
       await get(url);
     }
     await get(prepared.streamUrl);
@@ -188,6 +191,7 @@ void main() {
     Future<void> write(String key) async {
       final writer = cache.writer(key, 200, response.headers)!;
       await writer.add(List.filled(8, 7));
+      await cache.flushWrites();
     }
 
     await write('a');
@@ -214,6 +218,7 @@ void main() {
             throw const FileSystemException('unwritable'),
         freeBytes: () async => 1024 * 1024 * 1024);
     await badCache.writer('a', 200, response.headers)!.add(List.filled(8, 7));
+    await badCache.flushWrites();
     expect(badCache.disabled, true);
     expect(await badCache.read('a', null), isNull);
     await badCache.close();

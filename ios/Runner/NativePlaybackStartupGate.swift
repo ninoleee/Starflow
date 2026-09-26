@@ -5,7 +5,10 @@ import Foundation
 /// Startup commands bypass it; state/KVO notifications are not user commands.
 class NativePlaybackIntentPlayer: AVPlayer {
   var onUserCommand: (() -> Void)?
+  var onPlaybackActive: ((Bool) -> Void)?
+  var onSeek: (() -> Void)?
   private var automaticDepth = 0
+  private var transportDepth = 0
 
   func automatically(_ action: () -> Void) {
     automaticDepth += 1
@@ -13,46 +16,53 @@ class NativePlaybackIntentPlayer: AVPlayer {
     action()
   }
 
-  private func command(_ action: () -> Void) {
+  private func command(active: Bool? = nil, seeking: Bool = false, _ action: () -> Void) {
+    let notifyTransport = transportDepth == 0
+    transportDepth += 1
+    defer { transportDepth -= 1 }
+    if notifyTransport {
+      if let active { onPlaybackActive?(active) }
+      if seeking { onSeek?() }
+    }
     if automaticDepth == 0 { onUserCommand?() }
     automatically(action)
   }
 
   override var rate: Float {
     get { super.rate }
-    set { command { super.rate = newValue } }
+    set { command(active: newValue != 0) { super.rate = newValue } }
   }
 
-  override func play() { command { super.play() } }
-  override func pause() { command { super.pause() } }
+  override func play() { command(active: true) { super.play() } }
+  override func pause() { command(active: false) { super.pause() } }
 
   override func playImmediately(atRate rate: Float) {
-    command { super.playImmediately(atRate: rate) }
+    command(active: rate != 0) { super.playImmediately(atRate: rate) }
   }
 
   override func seek(to date: Date) {
-    command { super.seek(to: date) }
+    command(seeking: true) { super.seek(to: date) }
   }
 
   override func seek(to date: Date, completionHandler: @escaping (Bool) -> Void) {
-    command { super.seek(to: date, completionHandler: completionHandler) }
+    command(seeking: true) { super.seek(to: date, completionHandler: completionHandler) }
   }
 
   override func seek(to time: CMTime) {
-    command { super.seek(to: time) }
+    command(seeking: true) { super.seek(to: time) }
   }
 
   override func seek(to time: CMTime, completionHandler: @escaping (Bool) -> Void) {
-    command { super.seek(to: time, completionHandler: completionHandler) }
+    command(seeking: true) { super.seek(to: time, completionHandler: completionHandler) }
   }
 
   override func seek(to time: CMTime, toleranceBefore: CMTime, toleranceAfter: CMTime) {
-    command { super.seek(to: time, toleranceBefore: toleranceBefore, toleranceAfter: toleranceAfter) }
+    command(seeking: true) { super.seek(to: time, toleranceBefore: toleranceBefore, toleranceAfter: toleranceAfter) }
   }
 
   override func seek(to time: CMTime, toleranceBefore: CMTime, toleranceAfter: CMTime,
     completionHandler: @escaping (Bool) -> Void) {
-    command {
+    command(seeking: true) {
       super.seek(to: time, toleranceBefore: toleranceBefore, toleranceAfter: toleranceAfter,
         completionHandler: completionHandler)
     }

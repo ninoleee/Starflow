@@ -21,6 +21,8 @@ import 'package:starflow/features/home/application/home_feed_load_scheduler.dart
 import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/settings/data/app_settings_repository.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
+import 'package:starflow/features/settings/domain/cloud_account.dart';
+import 'package:starflow/features/settings/domain/network_storage_settings_scope.dart';
 import 'package:starflow/features/settings/domain/webdav_sync_config.dart';
 import 'package:starflow/features/settings/application/media_source_cache_lifecycle.dart';
 
@@ -172,9 +174,173 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     await _persist(current.copyWith(doubanAccount: config));
   }
 
-  Future<void> saveNetworkStorage(NetworkStorageConfig config) async {
+  Future<void> saveNetworkStorageSection(
+      NetworkStorageConfig draft, NetworkStorageSettingsScope scope,
+      {bool preserveCredentials = false}) async {
     final current = state.value ?? await _repository.load();
+    if (preserveCredentials) {
+      draft = draft.copyWith(
+          quarkCookie: current.networkStorage.quarkCookie,
+          cloud115Cookie: current.networkStorage.cloud115Cookie);
+    }
+    await _persist(current.copyWith(
+        networkStorage: _guardCredentials(current.networkStorage,
+            scope.merge(current.networkStorage, draft))));
+  }
+
+  NetworkStorageConfig _guardCredentials(
+      NetworkStorageConfig previous, NetworkStorageConfig next) {
+    for (final drive in CloudAccountDrive.values) {
+      if (next.account(drive).directoryPending) {
+        next = next.invalidateDirectory(drive);
+      }
+      if (previous.credential(drive) == next.credential(drive)) continue;
+      final old = previous.account(drive);
+      final verified = next.account(drive);
+      if (verified.verified &&
+          verified.fingerprint ==
+              credentialFingerprint(next.credential(drive))) {
+        continue;
+      }
+      next = next.withAccount(
+          drive,
+          CloudAccount(
+              id: old.id,
+              fingerprint: credentialFingerprint(next.credential(drive)),
+              directoryPending: previous.credential(drive).isNotEmpty ||
+                  old.directoryPending));
+      if (previous.credential(drive).isNotEmpty || old.directoryPending) {
+        next = next.invalidateDirectory(drive);
+      }
+    }
+    return next;
+  }
+
+  Future<void> acceptCloudAccount(CloudAccountDrive drive, String previous,
+      String credential, String accountId,
+      {AliyunAuthMode? aliyunAuthMode}) async {
+    final current = state.value ?? await _repository.load();
+    final config = aliyunAuthMode == null
+        ? current.networkStorage
+        : current.networkStorage.copyWith(aliyunAuthMode: aliyunAuthMode);
+    if (config.credential(drive) != previous) {
+      throw StateError('Account changed during verification');
+    }
+    final old = config.account(drive);
+    final changed = old.id.isNotEmpty && old.id != accountId;
+    final unknownReplacement =
+        old.id.isEmpty && previous.isNotEmpty && previous != credential;
+    var next = config.withCredential(drive, credential).withAccount(
+        drive,
+        CloudAccount(
+            id: accountId,
+            fingerprint: credentialFingerprint(credential),
+            verified: true,
+            directoryPending:
+                old.directoryPending || changed || unknownReplacement));
+    if (changed || unknownReplacement) next = next.invalidateDirectory(drive);
+    try {
+      await _persist(current.copyWith(networkStorage: next));
+    } catch (_) {
+      final active = state.value;
+      if (active != null &&
+          active.networkStorage.credential(drive) == credential) {
+        state = AsyncData(active.copyWith(networkStorage: config));
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> markCloudAccountInvalid(
+      CloudAccountDrive drive, String credential) async {
+    final current = state.value ?? await _repository.load();
+    final config = current.networkStorage;
+    if (config.credential(drive) != credential) return;
+    final old = config.account(drive);
+    await _persist(current.copyWith(
+        networkStorage: config.withAccount(
+            drive,
+            CloudAccount(
+                id: old.id,
+                fingerprint: credentialFingerprint(credential),
+                directoryPending: old.directoryPending,
+                invalid: true))));
+  }
+
+  Future<void> confirmCloudDirectory(CloudAccountDrive drive,
+      {required String id,
+      required String path,
+      required String credential}) async {
+    final current = state.value ?? await _repository.load();
+    if (current.networkStorage.credential(drive) != credential || id.isEmpty) {
+      throw StateError('Directory account changed');
+    }
+    var config = current.networkStorage.withAccount(
+        drive, current.networkStorage.account(drive).withDirectoryConfirmed());
+    config = switch (drive) {
+      CloudAccountDrive.aliyun =>
+        config.copyWith(aliyunSaveFolderId: id, aliyunSaveFolderPath: path),
+      CloudAccountDrive.cloud115 =>
+        config.copyWith(cloud115SaveFolderId: id, cloud115SaveFolderPath: path),
+      CloudAccountDrive.quark =>
+        config.copyWith(quarkSaveFolderId: id, quarkSaveFolderPath: path),
+    };
     await _persist(current.copyWith(networkStorage: config));
+  }
+
+  Future<void> rotateAliyunCredential(String previous, String next) async {
+    final current = state.value ?? await _repository.load();
+    final config = current.networkStorage;
+    if (config.activeAliyunRefreshToken != previous) {
+      if (config.activeAliyunRefreshToken == next) return;
+      throw StateError('Account changed during refresh');
+    }
+    final old = config.account(CloudAccountDrive.aliyun);
+    final updated = config.aliyunAuthMode == AliyunAuthMode.open
+        ? config.copyWith(aliyunOpenRefreshToken: next)
+        : config.copyWith(aliyunRefreshToken: next);
+    await _persist(current.copyWith(
+        networkStorage: updated.withAccount(
+            CloudAccountDrive.aliyun,
+            CloudAccount(
+                id: old.id,
+                fingerprint: credentialFingerprint(next),
+                verified: old.verified,
+                directoryPending: old.directoryPending))));
+  }
+
+  Future<void> saveNetworkStorage(NetworkStorageConfig config,
+      {bool preserveAliyunCredential = false}) async {
+    final current = state.value ?? await _repository.load();
+    await _persist(current.copyWith(
+        networkStorage: preserveAliyunCredential
+            ? config
+                .copyWith(
+                    aliyunRefreshToken:
+                        current.networkStorage.aliyunRefreshToken,
+                    aliyunOpenRefreshToken:
+                        current.networkStorage.aliyunOpenRefreshToken,
+                    aliyunAuthMode: current.networkStorage.aliyunAuthMode,
+                    aliyunTo115Enabled:
+                        current.networkStorage.aliyunTo115Enabled)
+                .copyWith(
+                    aliyunSaveFolderId:
+                        current.networkStorage.aliyunSaveFolderId,
+                    aliyunUseCommonNameRules:
+                        current.networkStorage.aliyunUseCommonNameRules,
+                    aliyunSaveFolderPath:
+                        current.networkStorage.aliyunSaveFolderPath,
+                    aliyunSanitizeSavedNamesEnabled:
+                        current.networkStorage.aliyunSanitizeSavedNamesEnabled,
+                    aliyunSanitizedNameCharacters:
+                        current.networkStorage.aliyunSanitizedNameCharacters,
+                    aliyunSmartStrmTaskName:
+                        current.networkStorage.aliyunSmartStrmTaskName,
+                    syncDeleteAliyunEnabled:
+                        current.networkStorage.syncDeleteAliyunEnabled,
+                    syncDeleteAliyunWebDavDirectories: current
+                        .networkStorage.syncDeleteAliyunWebDavDirectories)
+            : _guardCredentials(current.networkStorage, config)));
   }
 
   Future<void> saveNetworkProxy(NetworkProxyConfig config) async {
@@ -417,10 +583,18 @@ class SettingsController extends AsyncNotifier<AppSettings> {
     final current = state.value ?? await _repository.load();
     final reconciledSettings = reconcileSettingsMediaSourceReferences(
       settings.copyWith(
-        networkStorage: settings.networkStorage.copyWith(
-          // 115 login credentials belong to this device, never to an import.
-          cloud115Cookie: current.networkStorage.cloud115Cookie,
-        ),
+        networkStorage: _guardCredentials(
+            current.networkStorage,
+            settings.networkStorage.copyWith(
+              // Cloud login credentials belong to this device, never to an import.
+              cloud115Cookie: current.networkStorage.cloud115Cookie,
+              aliyunRefreshToken: current.networkStorage.aliyunRefreshToken,
+              aliyunOpenRefreshToken:
+                  current.networkStorage.aliyunOpenRefreshToken,
+              aliyunAuthMode: current.networkStorage.aliyunAuthMode,
+              quarkCookie: current.networkStorage.quarkCookie,
+              localCloudAccounts: current.networkStorage.localCloudAccounts,
+            )),
       ),
     );
     final nextSourceById = <String, MediaSourceConfig>{
@@ -823,6 +997,10 @@ AppSettings _removeMediaSourceReferences(AppSettings settings, String rawId) {
         )
         .toList(growable: false),
     networkStorage: settings.networkStorage.copyWith(
+      syncDeleteAliyunWebDavDirectories: settings
+          .networkStorage.syncDeleteAliyunWebDavDirectories
+          .where((directory) => directory.sourceId.trim() != sourceId)
+          .toList(growable: false),
       syncDelete115WebDavDirectories: settings
           .networkStorage.syncDelete115WebDavDirectories
           .where((directory) => directory.sourceId.trim() != sourceId)
@@ -891,6 +1069,8 @@ AppSettings _reconcileMediaSourceReferences(
           settings.networkStorage.syncDeleteQuarkWebDavDirectories),
       syncDelete115WebDavDirectories: remapDirectories(
           settings.networkStorage.syncDelete115WebDavDirectories),
+      syncDeleteAliyunWebDavDirectories: remapDirectories(
+          settings.networkStorage.syncDeleteAliyunWebDavDirectories),
     ),
   );
 }

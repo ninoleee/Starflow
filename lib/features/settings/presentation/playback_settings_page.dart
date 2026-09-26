@@ -294,7 +294,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     if (value == null || !mounted) return;
     setState(() => _draftDiskCacheMiB = value);
     _scheduleAutoSave();
-    await clearPlaybackDiskCache();
+    await disablePlaybackDiskCache();
   }
 
   Future<void> _openSpeedPicker() async {

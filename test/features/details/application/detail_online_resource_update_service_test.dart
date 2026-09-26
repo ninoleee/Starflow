@@ -7,6 +7,8 @@ import 'package:starflow/features/details/application/detail_online_resource_upd
 import 'package:starflow/features/details/domain/media_detail_models.dart';
 import 'package:starflow/features/search/data/cloud115_save_client.dart';
 import 'package:starflow/features/search/data/quark_save_client.dart';
+import 'package:starflow/features/search/application/aliyun_to115_workflow.dart';
+import 'package:starflow/features/search/domain/cloud_save_rules.dart';
 import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
@@ -48,6 +50,35 @@ void main() {
         password: 'abcd',
         favoriteFolderName: 'Show',
         metadataMediaType: 'series');
+
+    for (final to115 in [false, true]) {
+      test('Aliyun updates use configured destination: $to115', () async {
+        const service = DetailOnlineResourceUpdateService();
+        final match = service.resolveFavoriteMatch(
+            target: target115,
+            favorites: [
+              favorite115.copyWith(resourceUrl: 'https://alipan.com/s/abc')
+            ])!;
+        final config = NetworkStorageConfig(
+            aliyunRefreshToken: 'token',
+            aliyunTo115Enabled: to115,
+            cloud115Cookie: to115 ? '115-cookie' : '');
+        expect(match.hasConfiguredCookie(config), isTrue);
+        final workflow = _AliyunPreview();
+        final result = await service.checkForUpdates(
+            target: target115,
+            favoriteMatch: match,
+            networkStorage: config,
+            aliyunWorkflow: workflow,
+            quarkSaveClient: QuarkSaveClient(
+                MockClient((_) async => fail('No Quark requests'))));
+        expect(workflow.config, same(config));
+        expect(result.saveDrive,
+            to115 ? CloudSaveDrive.cloud115 : CloudSaveDrive.aliyun);
+        expect(result.buildDialogMessage(), contains(to115 ? '115目录' : '阿里目录'));
+        expect(result.updatedEpisodeLabels, ['new.mkv']);
+      });
+    }
 
     test(
         'mixed online matches are stable and exclude local or unsupported favorites',
@@ -116,8 +147,8 @@ void main() {
           cloud115Cookie: '115-cookie',
           cloud115SaveFolderId: '42',
           cloud115SaveFolderPath: '/115/Show',
-          cloud115SanitizeSavedNamesEnabled: true,
-          cloud115SanitizedNameCharacters: '#',
+          commonSanitizeSavedNamesEnabled: true,
+          commonSanitizedNameCharacters: '#',
           quarkSaveFolderId: 'unused',
           quarkSaveFolderPath: '/quark');
       final result = await service.checkForUpdates(
@@ -133,7 +164,7 @@ void main() {
           target: target115,
           favoriteMatch: match,
           networkStorage:
-              config.copyWith(cloud115SanitizeSavedNamesEnabled: false),
+              config.copyWith(commonSanitizeSavedNamesEnabled: false),
           quarkSaveClient: quark,
           cloud115SaveClient: cloud115);
       expect(uncleaned.updatedEpisodeLabels, ['#E01.mkv', '#E02.mkv']);
@@ -430,4 +461,26 @@ void main() {
       expect(result.updatedEpisodeLabels, ['三体.S01E02.mkv']);
     });
   });
+}
+
+class _AliyunPreview extends Fake implements AliyunTo115Workflow {
+  NetworkStorageConfig? config;
+  @override
+  Future<CloudSavePreview> preview(
+      {required String shareUrl,
+      required String password,
+      required NetworkStorageConfig config,
+      required String saveFolderName}) async {
+    this.config = config;
+    return const CloudSavePreview(
+        targetFolderPath: '/Show',
+        localFolderExists: true,
+        onlineEntries: [
+          CloudSavePreviewEntry(
+              name: 'new.mkv', relativePath: 'new.mkv', isDirectory: false)
+        ],
+        localEntries: [],
+        sanitizedNameCharacters: '',
+        deduplicate: true);
+  }
 }

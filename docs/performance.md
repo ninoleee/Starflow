@@ -1,8 +1,167 @@
 # 主机性能与回归验证
 
+## 2026-09-26 点播内存时长统一 120 秒
+
+- Exo 各内存档／手机最大时长统一 120 秒；MPV buffered 三档 cache 与 readahead 时长统一 120 秒；AVPlayer 远程点播偏好改为 120 秒，非硬上限。原有字节预算、起播／恢复门槛和专用直播／低延迟策略不变，实际高水位仍可受字节限制。当前行为见 [播放架构](architecture.md)。
+- 固定 Flutter 3.38.10 / Dart 3.10.9，`playback_mpv_policy_test.dart` 与 `mpv_memory_priority_policy_test.dart` 联合 **36 项通过**，`mpv_tuning_policy_aggressive_downgrade_test.dart` **1 项通过**；相关 3 份 Dart 文件分析无问题。
+- JDK 17，`:app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true` 定向 BufferPolicy／LoadControl／ReadAheadPolicy／Session 四类，最终 **53 项通过，0 失败／错误／跳过**。首轮发现手机 readiness 测试仍断言旧 90 秒，更新为 119999／120000ms 边界后重跑通过。
+- `swiftc -O` 编译并运行 `NativePlaybackStartupGate.swift`、`NativePlaybackBufferingTuning.swift` 与 `scripts/test_native_playback_startup.swift`，主机策略检查通过，包含点播 120 秒及直播 8 秒配置。`git diff --check` 通过。未做真机峰值内存／长播测量，未打包或修改版本；这些结果与上次集合重叠，不相加为全仓计数。
+
+## 2026-09-26 内存优先与磁盘协同
+
+- 在下节即时交付修正之上，增加独立内存高水位许可与 4 秒失效保护；TV Exo 按实际高水位的 75% 补充，MPV 独立探测秒数／字节 hysteresis 选项，AVPlayer 保持系统补充策略。前台可接管匹配的在途渐进式预取，磁盘淘汰优先保护游标附近前向数据，写入移除中间字节副本。行为与边界以 [播放架构](architecture.md) 为准。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，`flutter test --no-pub` 联合运行原 15 文件，加 `playback_disk_cache_forward_retention_test.dart`、`mpv_memory_priority_policy_test.dart`、`playback_mpv_policy_test.dart`，18 文件 **221 项通过**。新增许可闸门、4 秒过期、在途流式接管、前向保留／读块保护与 MPV 水位策略覆盖；与历史集合重叠，不累加为全仓通过数。
+- Android 使用 JDK 17、固定 Flutter 配置，Gradle `:app:testDebugUnitTest` 定向 6 类 **72 项通过，0 失败／错误／跳过**，覆盖 LoadControl、ReadAheadPolicy、CacheDiagnostics、RuntimeController、Session 及相邻缓冲策略。Swift readiness／startup 主机策略检查及 12 份源码与 XCTest 的解析／类型检查通过，未执行设备 XCTest。
+- 随后补充“短 Range 接管不等待未使用源站余段”闸门，`playback_read_ahead_race_test.dart` 单文件 **14 项通过**（包含前述集合内场景，不与 221 累加）。13 份相关 Dart 源码／测试定向分析无问题，`git diff --check` 通过。
+- 未进行 TV／iPhone 真机长播、慢闪存、PSS 或重缓冲对照，未构建 APK／IPA、未运行发布预设或修改版本。MPV 选项在具体设备内核上的生效情况和 AVPlayer 实际停读行为待设备确认，见 [真机清单](performance-device.md#内存优先与磁盘协同待验收2026-09-26)。
+
+## 2026-09-26 磁盘缓存交付阻塞修正
+
+- 用户导出的 `15:51:39`、`15:56:13` 日志属于修复前设备样本。第一段 Exo 缓冲从约 60 秒消耗至 23ms，`15:51:01.328` 至 `15:51:13.043` 重缓冲约 11.7 秒；磁盘累计写入 151182241 字节、命中 2097104 字节。第二段多次 seek 后记录 `activeRequests=7`。两段磁盘均未报告低空间停用或队列丢弃；日志未记录连续前向字节，不能把磁盘总占用都视为待播数据，也不能仅凭累计写盘时间排除设备瞬时 IO 抖动。
+- 主机闸门先复现三项缺陷：源站已送出 64 KiB 但前台等待攒满 2 MiB；已命中磁盘的后续区间等待无关预读；客户端断开后仍继续请求余下七个源站区间。修正为即时输出、磁盘命中优先、缺失立即抢占预读，以及请求级上游取消。另将播放器背压与源站超时分开，保留前台最多一个 2 MiB 区间、8 MiB 写队列及原有验证器／范围完整性边界；未调整内存预算和起播／恢复阈值。
+- 使用固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，`flutter test --no-pub --reporter expanded` 联合运行下方“滚动磁盘预读与会话指标补强”列出的同一 15 文件，**168 项通过**。新增五个场景还覆盖客户端停读超过源站超时后完整读取 180 MiB、磁盘命中大于 32 MiB 且不重复下载、背压中退出清空队列／目录，以及断开旧请求后新游标仍能预读。两份源码和两份修改测试定向 `dart analyze` 无问题，`git diff --check` 通过。该集合与历史结果重叠，不累加为全仓计数。
+- `playback.cache` 预读诊断新增前向连续字节、前台网络请求数和实际源站吞吐，辅助区分留存数据与可接续数据，不记录 URL／鉴权。未运行 Android JVM、Swift 或真机播放对照；本次是共享 Dart relay 的真实本机 HTTP／临时文件验证，不代表低端 TV 的卡顿改善已测得。未构建 APK／IPA、递增版本或改动安装包。设备复测见 [设备性能验收](performance-device.md)。
+
+## 2026-09-26 阿里开放平台扫码与 openFile 路由
+
+- 用户提供的 `15:34:01` 日志来自 `1.9.257`，115 仍返回 `status=4/statuscode=400`；说明仅补齐 `userkey` 并未通过真实账号验证，现有阿里暂存副本保持不删。开放平台 OAuth 是独立登录改造，不把该错误解释为消费版或开放版账号选择问题。
+- 新增 `AliyunOpenLoginClient`，通过 OpenList 官方 `api.oplist.org/alicloud2/generate_qr`、`check_login`、`get_user_info`、`logout`、`renewapi` 完成内置扫码，并在全球站网络失败时回退 `api.oplist.org.cn` 的同名端点，不把服务端 Client Secret 写入客户端。`open` 会话的目录、建目录、下载和回收站请求路由到 `openapi.alipan.com/adrive/v1.0/openFile/*`，分享接收走官方 PDS `POST /v2/file/copy` 并同时携带 Open Access Token 与 `x-share-token`。
+- 消费版 Refresh Token 与 Open Refresh Token 分槽保存在本机安全存储；`aliyunAuthMode` 只记录当前模式并参与设置 JSON，两种 Token 都不导出。设置页按模式切换扫码和手动凭据，账号状态、目录、转存和同步删除都读取当前模式的凭据。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10，联合运行开放登录、阿里协议、工作流和阿里设置测试 **83 项通过**，覆盖二维码状态、全球/大陆授权服务回退、凭据返回、JWT 刷新、模式持久化、Token 不导出、`openFile/list`、Open 分享复制、消费版回归和缺 SHA1 恢复。更宽的设置/账号集合运行 **156 项通过、1 项失败**；失败仍是既有 `app_settings_test` 期待把 `quarkCookie` 写入普通 JSON，与当前“凭据不导出”实现冲突，不是本次开放登录路径失败。相关源码和测试定向分析无新增问题。
+- 验证仅使用 Mock HTTP 和公开匿名协议，没有使用真实阿里开放平台账号完成扫码、复制或删除。未构建发布包、未递增版本、未覆盖 iCloud 安装包；OpenList 公共授权服务可用性、真实 Open Token 和 PDS 分享复制仍需设备联调。
+
+## 2026-09-26 115 签名拒绝定位
+
+- 新日志 `15:18:09` 来自 `1.9.256`：阿里暂存与副本 SHA1 已完成，115 返回 `status=4/statuscode=400`、目标字段存在且匹配、证明轮次为 0；因此不是目标目录或缺 SHA1，服务端拒绝了初始签名请求。
+- 对照当前 `p115client` 的 `make_upload_payload`，v4 加密表单除 `userid` 外还需要提交 `userkey`。Starflow 原先只用 `userkey` 计算 `sig`，未将其放入密文表单，已补齐；不会记录该字段。此前毫秒时间、token、`k_ec` 和 `topupload` 修正继续保留。
+- 已补充协议断言并更新四份行为/架构文档。真实账号仍需使用包含本次修改的新包复测；本次不自动重放旧任务、不删除现有阿里暂存副本。
+
+## 2026-09-26 TV 低／中内存播放缓存上调
+
+- Android TV Exo 低档基础目标调整为 `64 MiB`，中档调整为普通 `96 MiB`、重型／切集 `112 MiB`；相应动态上限为 `64 / 128 MiB`，高档维持本轮既有 `160 MiB` 基础和 `256 MiB` 上限。MPV TV 低档普通／重型最高为 `80 / 112 MiB`，中档最高 `176 MiB`；非 TV MPV 缓冲未调整。
+- 起播与重缓冲门槛保持原策略；内存压力仍使 Exo 回到当前档基础目标。更新 README、架构、开发网络和真机验收基线。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10：`test/playback_mpv_policy_test.dart` **30 项通过**；MPV 策略源码与测试定向 analyze 无问题。JDK 17 下 Android `NativePlaybackBufferPolicyTest`、`NativePlaybackReadAheadPolicyTest`、`NativePlaybackLoadControlTest` 共 **31 项通过**（13 / 9 / 9）。`git diff --check` 通过。
+- 仅为主机 Dart/JVM 策略验证，不代表进程峰值内存或实际卡顿有所改善；低内存 API 23 TV、不同码率长播和内存压力下的 PSS/GC/重缓冲对照仍待真机验收。未运行发布构建或递增版本。
+
+## 2026-09-26 115 秒传响应与缺哈希任务恢复
+
+- 用户提供的 `14:26:41` 导出日志在 `14:26:32` 报“115 未确认秒传成功”，按抛错路径已越过阿里暂存、SHA1 读取和响应解密；115 已确认 0 个、阿里已清理 0 个。日志未包含服务端 `status/statuscode`，不能据此断言是签名拒绝、未命中或成功回执误判。
+- 对照公开 `115driver` 固定版本 `542720cb0034954750454e89f32b4852add6e2a9`，请求时间从秒改为毫秒，保持表单 `t`、MD5 token 与 `k_ec` 时间一致并补齐 `topupload=true`。成功回执允许省略可选字段，但拒绝显式异常错误码或冲突目标；实际 115 文件内容核验与删除前复核不变。补充白名单数值/布尔日志，错误提示保留状态码，不回显远端正文。
+- 恢复测试复现源分享快照缺 SHA1 时再次报“数据不完整”，修正源/拥有者快照解析边界，并兼容旧记录的空哈希加 `sha1` 标记。只有源可缺哈希，副本哈希、父目录和大小仍严格检查；已清理副本的回执可继续用于目标核验。未知上传且目标未出现时依旧停止，目标已出现且校验一致才继续。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10，`flutter test --no-pub --reporter expanded` 在协议、工作流、保存分发和任务页四文件联合 **85 项通过**。新增失败用例先在旧实现复现，修复后覆盖毫秒与低 32 位编码、token 一致性、可选回执、矛盾/未知状态、日志导出不泄露正文、缺哈希恢复/仅清理/重复清理、损坏副本记录和不重复上传。相关 7 个源码/测试文件定向分析无问题。
+- 本次只运行主机模拟与公开源码核对，没有使用真实网盘凭据、提交真实秒传或删除文件。未递增版本、构建发布包或覆盖 iCloud 安装包；仍需包含这些修改的新包验证真实 115 响应。此前 50 项测试结果为历史集合，不是本次真实账号成功证明。
+
+## 2026-09-26 阿里分享授权失败分类
+
+- 附件日志的两次阿里失败都停在 `POST api.alipan.com/v2/share_link/get_share_token`，HTTP `400`；没有出现阿里账号登录、目录读取、115 秒传或清理请求，因此本次不是账号或 115 阶段失败。
+- 客户端现在读取该 `400` 的安全 JSON 错误码：已知 `ShareLink.* / ShareLinkPwdInvalid` 按分享失效或提取码错误处理，搜索阶段排除，保存阶段明确提示重新搜索。无密码分享不再发送空 `share_pwd`，与当前公开实现的兼容写法一致。
+- 修正搜索日志把阿里结果标成 115 的标签错误。固定 `.fvm/flutter_sdk` 下，阿里协议与搜索会话两文件 **31 项通过**，定向分析无问题；未使用真实账号重试该分享，也未构建发布包。
+- 第二份日志没有任何阿里、115 或转存请求，确认另一次“失败”被网络前的前置条件拦截，旧日志没有记录原因。`CloudSaveDispatcher` 现记录 unsupported、凭据/账号前置检查、开始、完成和失败阶段，不记录分享链接或凭据；相关分发测试 14 项通过。下一次日志可直接区分未登录、账号不完整、目录待重选、分享失效、协议失败和网络失败。
+- “阿里文件元数据不完整”根因是分享目录请求未带 `fields=*`，且公开分享文件结构可能只有 `content_hash`、没有 `content_hash_name`。后续日志和三个公开样例确认 v2/v3 列表及分享详情都可能完全不返回 SHA1；现已允许分享文件暂缺哈希，先复制到用户阿里暂存盘，再使用拥有者副本元数据中的 SHA1 提交和核验 115 秒传。阿里协议与工作流复测 **50 项通过**；公开样例只验证匿名授权/列表，未使用用户账号执行真实复制。未构建发布包。
+
+## 2026-09-26 网盘名称修正统一
+
+- 名称修正收敛为“通用设置”唯一规则：夸克、115 和阿里单项页移除“使用通用名称规则”、独立开关与独立字符控件；`effective*NameCharacters` 只读取公共启用状态和公共字符。旧 JSON 单项字段继续读取、导出和同步以避免配置兼容问题，但不再参与实际改名。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 下，名称规则、夸克保存与改名、115 保存与改名、详情检查更新、阿里工作流、设置自动保存和阿里设置共 9 文件 **87 项主机测试通过**。随后扩展账号安全、设置仓库、登录、任务恢复、同步与保存相关集合到 24 文件，**297 项通过**；两批重叠且不累加为全仓通过数。
+- 覆盖旧独立字段不再生效、公共关闭/空字符不改名、夸克和 115 保存去重、详情缺失比较、阿里转 115 一次改名及单项页无名称控件。
+- 相关源码和测试定向分析无新增问题，`git diff --check` 通过。仅主机模拟测试，未使用真实账号、未发生真实改名或构建发布包。此前同日的“名称规则继承”和“网盘通用设置”记录保留为历史快照。
+
+## 2026-09-26 网盘通用设置入口收敛（历史快照）
+
+- 公共 Webhook、STRM 延迟和媒体库刷新配置现在只从“网盘与转存 → 通用设置”进入；移除夸克、115 编辑页和阿里设置页底部的重复入口。单项页仍保留自身账号、目录、STRM 任务名、名称规则和同步删除范围。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 下，设置自动保存、设置层级导航和阿里保存设置三文件 **29 项主机测试通过**。测试直接确认夸克、115、阿里单项页不再出现“通用设置”或“Webhook 地址”，公共页修改后单项 STRM 测试仍读取最新公共配置；相关源码和测试定向分析无问题，`git diff --check` 通过。
+- 本次为设置信息层级调整，不改变 JSON 字段、导入导出、保存、名称规则、同步删除或转存协议。没有运行真机流程或发布构建。
+
+## 2026-09-26 网盘账号安全与转存恢复
+
+- 使用固定 `.fvm/flutter_sdk` Flutter 3.38.10 完成依赖解析，21 个文件联合 **262 项主机测试通过**。集合包括账号安全、阿里工作流/协议/登录客户端/登录页面/保存设置/任务页面、设置层级导航/自动保存/持久化、通用名称规则、WebDAV 同步、保存分发、设置仓库归并/损坏恢复、115 登录客户端/页面/保存客户端/命名保存、夸克保存及收藏自动同步。与历史批次重叠，不累加为全仓通过数。
+- 覆盖安全存储迁移失败保留明文原值、成功后移除旧项、三盘导出隔离、同账号轮换与跨账号目录解绑、旧草稿不能恢复待绑定目录、迟到验证隔离、扫码前后台和弹窗返回、有限重试、任务持久化恢复/停止/账号不符/未知写入不重放、目标整批校验后只清理记录副本，以及手机/TV 任务入口。旧 115 设置测试仍期待导出夸克 Cookie，已更新为凭据不导出的现行约束。
+- 最后补充轮换后 Token 加入在途设备会话的测试，协议与扫码页面两文件复测 **33 项通过**，与上方集合重叠。新旧 Token 并发只刷新一次，加入者仍执行自身的持久化回调；扫码覆盖层期间的正常/失败响应均可在关闭覆盖层后继续轮询。
+- 相关设置、协议、工作流及测试定向分析只剩既有 `app_settings.dart:2254` 的 `unnecessary_non_null_assertion` 警告，没有新增诊断。`AppDelegate.swift` 通过 `swiftc -frontend -parse`，iOS Info.plist 与 macOS 两份 Keychain entitlements 通过 `plutil -lint`；语法检查不等于原生编译、链接或运行。差异空白检查通过。
+- 未使用真实账号执行转存/删除，未验证设备 Keychain/Keystore、相册权限或阿里 App 相册扫码兼容性。任务历史保存在普通本机偏好，含私有分享地址/提取码，不应误称全部敏感数据已加密。没有后台保活或普通上传续传。未运行发布预设、修改版本、生成 APK/IPA 或覆盖 iCloud 安装包。行为和待验收项分别见 [阿里保存与转 115](aliyun-to115.md) 与 [真机验证](performance-device.md)。
+
+## 2026-09-26 滚动磁盘预读与会话指标补强
+
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，最终执行 `flutter test --no-pub --reporter expanded`，15 文件 **161 项通过**：`playback_rolling_read_ahead_test.dart`、`playback_read_ahead_race_test.dart`、`playback_cache_lifecycle_test.dart`、`playback_relay_integrity_test.dart`、`playback_stream_relay_service_test.dart`、`playback_stream_relay_security_test.dart`、`playback_hls_relay_test.dart`、`playback_relay_disk_cache_test.dart`、`playback_disk_cache_reserve_test.dart`、`native_playback_cache_bridge_test.dart`、`playback_cache_metrics_label_test.dart`、`playback_network_speed_test.dart`、`playback_network_speed_label_test.dart`、`native_playback_transport_test.dart`、`features/playback/application/mpv_playback_lifecycle_test.dart`（均在 `test/` 下）。与下方历史集合重叠，不累加为全仓通过数。
+- 真实本机 HTTP 闸门和临时文件覆盖：单一开放到 EOF 响应消费预读块且不二次下载、超过 32 MiB 后继续补至 128 MiB 前向窗口、消费后补齐；暂停／seek／清理／退出取消；慢源站停止扩张；512 MiB 最低剩余空间、LRU 和当前所有者字节统计；清理／截断后 ETag 或 Last-Modified 改变不能静默拼接同尺寸资源；无验证器探测后不交付混合版本；慢目录初始化时取消预读不阻塞前台；旧前台响应不能复活预读或覆盖新游标。退出用例检查写队列、文件和连接，不是设备文件系统时延保证。
+- 联合回归曾发现旧夹具未提供验证器却仍期望范围拼接命中，已给稳定资源夹具补 ETag，并独立验证无验证器的单响应保守路径；定向分析最初两处测试单行 if 风格提示已修正。最终 18 个相关 Dart 源码／测试文件定向分析无问题，`git diff --check` 通过。
+- Android 使用固定 SDK 配置执行 `./gradlew :app:testDebugUnitTest -Pandroid-skip-build-dependency-validation=true -x :app:compileFlutterBuildDebug -x :app:copyFlutterAssetsDebug`，分别指定 `*NativePlaybackCacheDiagnosticsTest`、`*NativePlaybackBufferPolicyTest`、`*NativePlaybackLoadControlTest`、`*NativePlaybackEpisodeControllerTest`、`*NativeFntvControllerTest`。Kotlin 与测试实际编译，5 类 **76 项通过，0 失败／错误／跳过**；包含新指标超时、同 URL 重建、隐藏恢复与迟到响应隔离。不执行 ARM 解码或真实 TV 网络。
+- iOS 新 `PlaybackCacheLifecycleTests.swift` 已登记 RunnerTests Sources；三个相关 Swift 文件语法检查通过。独立 DerivedData 的 simulator `xcodebuild build-for-testing` 因缺失 `ios/Pods/Manifest.lock` 在 Runner 编译前失败（exit 65），XCTest 未执行。随后以 `x86_64-apple-ios13.0-simulator`、本机 SDK 和缓存 Flutter framework 独立 `swiftc -typecheck`，12 个原生播放／支持文件通过并在 `/tmp` 生成可测试 Runner 模块，新增测试也通过类型检查；修正测试中被选为 async 的 `seek(to:)` 调用，显式使用 completion-handler 重载。类型检查不等同链接／运行；没有改写 Pods、运行 Flutter assemble、启动模拟器或安装设备。
+- 未进行 TV/iPhone 真机、NAS 长播、重缓冲对照、后台／PiP 存活和慢闪存测量；未生成 APK／IPA、运行发布预设或修改版本。当前行为见 [播放架构](architecture.md)，设备验收项见 [真机性能验证](performance-device.md)。磁盘指标为当前会话留存量，不是全部前向数据；内存和磁盘不能相加，iOS 不伪造内存字节。
+
+## 2026-09-26 移除更新清单密钥
+
+- 更新清单改为普通 JSON；移除 Ed25519 客户端验签、构建公钥、seed 发布参数、专用配置校验工具及 `cryptography` 依赖。保留 HTTPS 证书/来源/鉴权边界、APK SHA-256、版本/包名及 Android APK 签名校验，不修改原生安装器。
+- 固定 `.fvm/flutter_sdk` 执行 `flutter pub get` 后，`flutter test --no-pub --reporter expanded` 联合 **356 项通过**：`update_controller_test.dart`、`update_install_launcher_test.dart`、`update_manifest_test.dart`、`update_settings_page_test.dart`、`update_release_tool_test.dart`、`update_package_downloader_test.dart`、`update_source_test.dart`、`tv_release_verification_test.dart`、`release_version_test.dart`、`webdav_sync_service_test.dart`、`features/settings/presentation/webdav_sync_settings_page_test.dart`。首轮 309 项为重叠集合，不累加。
+- 覆盖无需构建公钥即可检查、普通 JSON 生成/客户端读取、旧签名包装拒绝、256 KiB UTF-8 与末尾换行边界、过时密钥 CLI 参数拒绝、TV 构建脚本不转发公钥、发布回读和不可变版本目录，以及既有 HTTPS/WebDAV/下载/安装桥接与 TV 布局回归。相关 Dart 定向分析无问题，Bash 语法与差异空白检查通过。
+- 本轮没有构建或发布 APK，没有修改 NAS 的旧 APK/签名清单，也未删除本机旧 seed；新流程不再使用该文件，保留以免提前丢失旧发布链恢复能力。没有真机或带凭据 WebDAV 联调，未重跑未修改的原生安装器 JVM 集合。旧模块与新 JSON 不兼容，需手动覆盖安装新模块后再切换发布文件；安全边界及迁移见 [应用更新](app-updates.md)。
+
+## 2026-09-26 阿里扫码登录
+
+- 新增官方消费端二维码客户端和手机/TV 登录页面，阿里设置保留手动 Refresh Token；扫码设备会话验证成功后仅替换本机轮换凭据，取消、失败、旧二维码结果和账号变化不覆盖原值。未修改发布版本或 iCloud 中的 1.9.250 安装包。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 完成依赖解析，`flutter test --no-pub --reporter expanded` 联合 **124 项通过**：`aliyun_login_client_test.dart`、`features/settings/presentation/aliyun_login_page_test.dart`、`aliyun_save_settings_test.dart`、`aliyun_transfer_protocol_test.dart`、`aliyun_to115_workflow_test.dart`、`cloud115_login_client_test.dart`、`features/settings/presentation/cloud115_login_page_test.dart`、`settings_hierarchy_navigation_test.dart`（同 presentation 目录）、`features/settings/application/settings_controller_persistence_test.dart`、`app_settings_repository_reconciliation_test.dart`。
+- 覆盖官方固定主机/表单与禁止重定向、QR URL/字段校验、UTF-8/GBK 确认正文、状态映射、错误脱敏、刷新/退出隔离、手机/TV 布局、验证失败保留原账号、轮换凭据保存、手动登录及其他设置保留。页面接入使用登录客户端替身，真实设备签名/轮换协议由独立 Mock HTTP 测试覆盖；不是实机网络链路验证。新增与修改源码/测试定向分析无问题，差异空白检查通过。
+- 读取 aligo 公开协议，并向官方匿名接口验证二维码生成及 `NEW` 状态查询；未展示或保存探测二维码、未使用真实账号、未确认扫码、未发生转存或删除。手机确认、消费端风控、设备授权和安装后可用性仍待真实账号联调；说明见 [阿里保存与转 115](aliyun-to115.md)。
+
+## 2026-09-26 iOS 与 TV 1.9.250 交付
+
+- 使用固定 Flutter 3.38.10 执行 `scripts/build_ios_then_tv_to_icloud.sh`，串行构建，版本由 1.9.249 递增到 1.9.250，两端共用该版本；未内嵌设置。产物写入本机 iCloud Drive `Installers`，未确认云端上传状态。
+- iOS Release 未签名 IPA 约 28 MiB，Xcode 编译 113.2 秒，设备 framework 平台检查通过。文件 `starflow_v1.9.250_unsigned.ipa`，SHA-256 `5bc186b5204349521ee220e5ccc12e479646666c5caadce21f182e59678ed65d`。
+- TV Release APK 约 87 MiB，Gradle 构建 232.9 秒，通过版本、双 ARM ABI、无内嵌设置、固定 v1/v2 签名和 API 23 原生静态检查。文件 `starflow-tv-1.9.250.apk`，SHA-256 `92ee74fc28bc9cf5b961402d939523905541714f76b152547438724a7a548f29`。
+- 两份 iCloud 目录副本与本机构建产物校验值一致。未进行设备安装/播放测试；IPA 仍需后续签名，TV API 23 真机兼容性不能由静态检查代替。本次 TV 未提供更新验签公钥，应用内更新渠道未启用。
+
+## 2026-09-26 名称规则继承（历史快照）
+
+- 通用名称开关/字符与各网盘独立继承开关接入保存、去重、名称后处理和更新预览；旧 JSON 默认独立规则，切回不丢弃原值。阿里转 115 使用目标规则并禁止二次改名。回归发现并修复阿里无资源子目录名时预览未去重的问题，与实际保存一致。
+- 固定 `.fvm/flutter_sdk` 执行 `flutter test --no-pub --reporter expanded`，**110 项通过**：`network_storage_name_rules_test.dart`、`aliyun_to115_workflow_test.dart`、`aliyun_save_settings_test.dart`、`quark_save_workflow_service_test.dart`、`quark_save_name_sanitize_test.dart`、`features/search/data/cloud115_name_sanitize_test.dart`、`quark_save_preview_test.dart`（同 data 目录）、`features/details/application/detail_online_resource_update_service_test.dart`、`features/settings/presentation/settings_hierarchy_navigation_test.dart`、`settings_page_auto_save_test.dart`（同 presentation 目录）、`features/settings/application/settings_controller_persistence_test.dart`、`app_settings_repository_reconciliation_test.dart`。
+- 覆盖旧配置/JSON 往返、通用关闭/空字符/独立恢复、作用域隔离、阿里和 115 继承后保存与去重、夸克规则传递、预览一致性及手机/TV 开关。修改工作流、设置页面、作用域与测试定向分析无问题，差异空白检查通过。仅主机模拟测试，未操作真实账号或构建 APK。
+
+## 2026-09-26 网盘通用设置（历史快照）
+
+- 集中“通用设置”入口：公共 SmartStrm Webhook、触发延迟、媒体库刷新来源与延迟；保留各网盘账号、目录、任务名、名称规则与删除范围。新增字段作用域合并，延迟草稿只更新所属字段；不修改 JSON 格式、发布版本或网盘协议。
+- 固定 `.fvm/flutter_sdk` 执行 `flutter test --no-pub --reporter expanded`，**76 项通过**：`features/settings/presentation/settings_hierarchy_navigation_test.dart`、`settings_page_auto_save_test.dart`、`cloud115_sync_delete_settings_test.dart`（后两者同 presentation 目录）、`features/settings/application/settings_controller_persistence_test.dart`、`aliyun_save_settings_test.dart`、`aliyun_to115_workflow_test.dart`、`features/search/application/cloud115_named_save_workflow_test.dart`、`cloud115_save_client_test.dart`。
+- 覆盖手机/TV 入口与焦点、公共页不包含网盘凭据/任务名、跨页面修改 Webhook 后 STRM 使用最新配置、旧草稿不覆盖公共/其他网盘字段，以及原保存、后处理、删除配置回归。修改源码和测试定向分析无问题，差异空白检查通过。仅主机测试，未做真实账号或设备验证，未构建 APK。
+
+## 2026-09-26 阿里保存与可选转 115
+
+- 使用固定 `.fvm/flutter_sdk` Flutter 3.38.10 完成 `flutter pub get`，新增 PointyCastle 和 dart_lz4；未运行发布预设、递增版本或生成 APK。
+- `flutter test --no-pub --reporter expanded` 联合集合 **201 项通过**：`aliyun_transfer_protocol_test.dart`、`aliyun_to115_workflow_test.dart`、`aliyun_save_settings_test.dart`、`app_settings_repository_reconciliation_test.dart`、`features/search/application/cloud_save_dispatcher_test.dart`、`cloud115_named_save_workflow_test.dart`（同 application 目录）、`cloud115_save_client_test.dart`、`cloud_save_feedback_test.dart`、`features/search/presentation/search_page_save_progress_test.dart`、`search_page_focus_test.dart`、`search_page_share_validation_test.dart`、`cloud_save_feedback_controller_test.dart`（后三者同 presentation 目录）、`features/settings/application/settings_controller_persistence_test.dart`、`features/settings/presentation/cloud115_sync_delete_settings_test.dart`、`features/details/application/detail_online_resource_update_service_test.dart`、`features/details/presentation/detail_online_resource_update_test.dart`、`cloud115_sync_delete_test.dart`、`features/library/data/series_directory_sync_delete_test.dart`。此前集合重叠，不累加。
+- 覆盖 P-224/AES/LZ4 互通、秒传二次证明、范围凭据隔离、分页、复制不重试、HTTP 204/202 清理区分、部分失败保留副本、同名冲突、目标双重复核、清理警告、阿里单独保存/STRM、目标目录与名称规则切换、阿里只读验链/更新预览、同步删除作用域/歧义/身份变化，以及 390×844 手机和 1920×1080 TV 的独立开关布局。不是两种平台真机测试。
+- 验链接入后旧保存 UI 测试未等待协议流完成，拆分为保存界面替身与真实客户端模拟协议测试；详情提示预期更新后，上述联合回归通过。搜索/详情/媒体仓库、阿里设置页、设置控制器和新增协议测试定向分析无问题。全设置模型分析仍有既有 `unnecessary_non_null_assertion` 警告，未改动该无关代码。`git diff --check` 通过。
+- 收尾增加 Token 轮换后设置页保存回归、阿里监听目录随 WebDAV 来源地址修复断言；`aliyun_save_settings_test.dart`、`app_settings_repository_reconciliation_test.dart`、`features/settings/application/settings_controller_persistence_test.dart` 联合复测 **22 项通过**，与 201 项集合重叠。仓库和保存界面测试定向分析无问题。
+- 没有使用真实账号、未发生真实转存/删除，没有 Android/iOS/桌面实机验收。消费端接口兼容性、账号风控和大目录长任务仍需真实样本联调；当前仅秒传、无后台队列，详见 [阿里转 115](aliyun-to115.md)。
+
+## 2026-09-26 更新源复用 WebDAV 同步（移除清单密钥前快照）
+
+以下记录对应此前的签名清单协议，不代表当前普通 JSON 协议仍要求公钥。当前行为与迁移步骤见 [应用更新](app-updates.md)。
+
+- 更新地址改为已保存 webDavSync 的同步目录下 `releases/latest.json`，公钥仍为构建参数。UpdateSource 将 Basic 认证限定到同源 releases 子目录；清单与 APK 每个跳转均验证作用域，跨域/跨目录直接拒绝。保存新同步配置会替换并释放旧更新控制器，不修改配置/收藏同步协议。
+- 固定 `.fvm/flutter_sdk` 执行 `flutter test --no-pub --reporter expanded`：`update_source_test.dart`、`update_controller_test.dart`、`update_manifest_test.dart`、`update_package_downloader_test.dart`、`update_settings_page_test.dart`、`update_build_config_test.dart`、`update_release_tool_test.dart`、`webdav_sync_service_test.dart`、`features/settings/presentation/webdav_sync_settings_page_test.dart`、`tv_release_verification_test.dart`，**365 项通过**。覆盖签名清单与 APK 同账号 GET、中文/嵌套目录、端口与编码路径隔离、重定向无凭据外发、401/403/404、配置切换释放和原同步回归。与前一批集合重叠，不累加为全仓通过数。
+- 初轮控制器缺 Riverpod select 扩展导入导致两测试文件编译失败，补齐后联合集合通过；移除测试对受保护 hasListeners 成员的访问，保留旧控制器失效行为断言。更新源码/测试与工具定向分析无问题，Bash 语法及差异空白检查通过。
+- 没有访问或写入真实 WebDAV、上传安装包、调用发布预设、递增版本或执行设备安装。未改 Kotlin，不重跑此前 JVM 集合；仍须验证服务器直读/鉴权、实际文件发布和覆盖安装数据保留。部署方式见 [应用更新](app-updates.md)。
+
+## 2026-09-26 应用内更新与发布清单（移除清单密钥前快照）
+
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10，使用该 SDK 完成新增 `cryptography` 依赖解析；未调用 release 预设或递增版本。最终 `flutter test --no-pub --reporter expanded` 运行 `update_controller_test.dart`、`update_install_launcher_test.dart`、`update_build_config_test.dart`、`update_manifest_test.dart`、`update_settings_page_test.dart`、`update_release_tool_test.dart`、`update_package_downloader_test.dart`、`tv_release_verification_test.dart`、`release_version_test.dart` 和 `features/settings/presentation/settings_hierarchy_navigation_test.dart`，**316 项全部通过**。此前 311 项集合与 82 项定向复测有重叠，不累加。
+- 覆盖 Ed25519 原始字节验签、256 KiB 清单边界、HTTPS 逐跳与总期限、512 MiB APK 流式边界/长度/哈希、取消/迟到/临时文件清理、跨年数字版本比较、权限返回不自动安装、320px/TV 焦点，以及发布工具生成清单到客户端验签。发布 staging 改用实际 versionCode 目录，同显示版本跨年可并存；普通包和内嵌配置包分流保持原契约。
+- JDK 17.0.18 与固定 Flutter 配置下 Android `AndroidUpdatePolicyTest / AndroidUpdateInstallerTest` **27 项 JVM 测试通过**，XML 报告为 17 + 10，0 失败/错误/跳过。实际编译 Kotlin 并验证 API 分支、路径/签名/包名/数字版本/哈希、验证副本边界及前台授权；跳过 Flutter 打包，不是 Android 系统安装器真机运行。
+- 更新模块、设置入口、两个新工具及对应测试定向 Dart 分析无问题；`bash -n` 验证 TV Bash 预设与本地发布入口，`git diff --check` 通过。PowerShell 预设只做源码回归，未实际运行构建。
+- 集成期间修复 UI 测试替身缺少 busy getter、TV 构建 mock 未接新配置校验器及原始 HTTPS 空 userinfo 被 URI 归一化后漏检，最终集合重跑通过。工作区其他并行改动不由本结果背书。
+- 未配置或部署公网地址/生产密钥，未上传清单/APK，未构建 APK/IPA，未做 API 23 ARM32/现代 ARM64 真机覆盖安装、真实慢网/空间不足或升级数据保留验收。当前功能和上线步骤见 [应用更新与发布](app-updates.md)，待验项见 [设备清单](performance-device.md)。
+
 本文负责主机侧 smoke 计时、可重复运行方法及自动化回归证据；验证日期以各节为准。2026-09-24 仅整理章节和归并直播记录，不重跑历史测试。电视、手机和桌面实际界面的测量方法见 [真机性能验证](performance-device.md)，组件关系见 [架构说明](architecture.md)。下文历史代码优化只说明工作量与策略变化，不代表已经测得设备收益。
 
+## 2026-09-26 MPV 缓冲叠层精简
+
+- MPV 画面内启动／缓冲叠层不再显示网速、缓存和格式，也不再创建独立指标采样组件；同时移除缓冲进度条及其进度订阅，保留既有加载圆圈逻辑，控制栏信息不变。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10，移除缓冲条后重新运行 `player_startup_overlay_test.dart`、`player_adaptive_controls_layout_test.dart`、`player_tv_playback_widgets_test.dart`，共 26 项主机测试通过；播放器入口和新增测试定向静态分析无问题。未构建 APK，未做真机视觉或性能验证。
+
 ## 2026-09-26 内置内核共享磁盘缓存
+
+- 后续补强验证：在同一固定 SDK 下，原 7 个测试文件加 `test/playback_cache_lifecycle_test.dart` 与 `test/features/playback/application/mpv_playback_lifecycle_test.dart`，最终 **114 项通过**。新增覆盖开放式 Range 的部分命中／多空洞拼接、忽略 Range 的 200 回退、缓存文件截断、资源验证器变化拒绝拼接、慢空间查询不阻塞转发、全 writer 队列上限、清空后重新缓存、边读边清理、共享所有者退出隔离、退出撤销迟到写入／预读，以及 HLS 只提前取两个点播分片。6 个本轮缓存相关文件定向分析无问题。该结果为主机 HTTP／临时文件／mock 通道测试，不代表低端 TV 或 iPhone 已测得卡顿改善；不是全仓测试总数。
+- 2026-09-26 大范围命中补强：固定 `.fvm/flutter_sdk` Flutter 3.38.10，联合缓存、HLS、代理安全、原生传输、设置及 MPV 生命周期的 9 个测试文件共 **119 项通过**。新增覆盖超过 32 MiB 的缓存按有限文件句柄分段读取、源站忽略 Range 时不覆盖后段缓存、重叠 Range 写入保留已有块，以及退出时活动 relay 请求的收尾；相关 3 个 Dart 文件定向分析无问题。该结果仍是主机 HTTP／临时文件／mock 通道测试，不代表低端 TV 或 iPhone 已测得卡顿改善；不作为全仓测试总数。
+- 生命周期补强：Android `NativePlaybackEpisodeControllerTest / NativeFntvControllerTest / NativeEpisodeTransitionTest` **62 项 JVM 测试通过**，实际编译 Kotlin，覆盖过期／晚到解析结果释放、预解析弃用、切画质成功释放旧代理和失败回滚释放新代理；MPV 退出不再等待字幕解绑／进度保存才关闭代理，原生 transport 关闭不等待服务端最终回写。独立 Flutter 生命周期回归 48 项与上述最终集合有重叠，不累加。
+- iOS 外挂补强：Debug 测试目标编译通过，**15 项 Swift 主机策略检查、3 项模拟器 XCTest 通过**，覆盖文本格式、编码、时间定位、大小上限、下载文件安全清理和关闭后迟到解析隔离；最终 Swift 类型检查及 Dart bridge 分析通过。不是实际字幕来源账号或真机播放器入口、后台、PiP／AirPlay 显示验收。后续对齐退出入口即时撤销 transport，并禁止原生字幕 HTTP 跳转从 HTTPS 降级。
 
 - 固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，执行 `flutter test --no-pub --reporter expanded`：`test/playback_relay_disk_cache_test.dart`、`test/playback_stream_relay_service_test.dart`、`test/playback_stream_relay_security_test.dart`、`test/playback_hls_relay_test.dart`、`test/native_playback_transport_test.dart`、`test/app_settings_test.dart`、`test/features/settings/presentation/settings_page_auto_save_test.dart` 共 **88 项通过**。覆盖真实本机 HTTP／文件缓存、未知扩展名、区间命中、低空间／写失败回退、缺失文件、LRU、本地文件直读、HLS 点播分片／WebVTT 命中与清单／密钥实时读取，以及设置持久化、界面自动保存、原始身份隔离和既有代理安全回归。
 - Android 使用 JDK 17 与同一 Flutter 配置，执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativePlaybackEpisodeControllerTest' --tests '*NativeFntvControllerTest' --tests '*NativePlaybackSessionTest' --tests '*NativePlaybackSettingsAppearanceTest' --tests '*NativePlaybackHttpDataSourceTest' --console=plain --quiet`，5 类 **77 项通过，0 失败／错误／跳过**；编译原生修改并回归切集／画质／会话行为，不执行 ARM 播放器。

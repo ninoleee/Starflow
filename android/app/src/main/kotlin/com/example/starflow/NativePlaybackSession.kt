@@ -69,6 +69,26 @@ internal class NativePlaybackSession(private val host: Host) {
 
     private var playbackAllocator: DefaultAllocator? = null
     private var adaptiveLoadControl: NativePlaybackLoadControl? = null
+    private var bufferStateListener: Player.Listener? = null
+    private var fallbackHighWaterMs = 120_000L
+    private var memoryPressureUntilMs = 0L
+
+    fun isMemoryBufferReady(): Boolean {
+        val current = player ?: return false
+        if (host.launch.isStartupPending || !current.playWhenReady ||
+            current.playbackState != Player.STATE_READY || current.isLoading ||
+            host.diagnostics.awaitingVideoFrameAfterSeek ||
+            android.os.SystemClock.elapsedRealtime() < memoryPressureUntilMs) return false
+        val bufferedMs = current.totalBufferedDuration.coerceAtLeast(0L)
+        // Without our load control, idle alone is not proof of a full memory buffer.
+        return adaptiveLoadControl?.isMemoryReady(bufferedMs)
+            ?: (bufferedMs >= fallbackHighWaterMs)
+    }
+
+    fun invalidateMemoryBuffer() {
+        adaptiveLoadControl?.invalidateMemoryBuffer()
+        host.diagnostics.reportMemoryBufferState(forceNotReady = true)
+    }
     val bufferTargetBytes: Int? get() = adaptiveLoadControl?.currentTargetBytes
     val frameRate by lazy { NativePlaybackFrameRateController(host.activity) }
     val supportsFrameRateMatching: Boolean
@@ -93,7 +113,11 @@ internal class NativePlaybackSession(private val host: Host) {
         if (!active) frameRate.restore() else updatePlaybackHealth()
     }
 
-    fun onMemoryPressure() { adaptiveLoadControl?.onMemoryPressure() }
+    fun onMemoryPressure() {
+        memoryPressureUntilMs = android.os.SystemClock.elapsedRealtime() + 60_000L
+        adaptiveLoadControl?.onMemoryPressure()
+        host.diagnostics.reportMemoryBufferState(forceNotReady = true)
+    }
 
     fun updatePlaybackHealth() {
         val current = player ?: return
@@ -427,6 +451,29 @@ internal class NativePlaybackSession(private val host: Host) {
                     .build()
         }
         player = exoPlayer
+        bufferStateListener = object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (this@NativePlaybackSession.player !== exoPlayer) return
+                host.diagnostics.reportMemoryBufferState()
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int,
+            ) {
+                if (player !== exoPlayer) return
+                invalidateMemoryBuffer()
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (player !== exoPlayer) return
+                invalidateMemoryBuffer()
+            }
+
+            override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
+                if (player !== exoPlayer) return
+                invalidateMemoryBuffer()
+            }
+        }.also(exoPlayer::addListener)
         if (frameRateMatchingEnabled) {
             exoPlayer.setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
         }
@@ -492,6 +539,7 @@ internal class NativePlaybackSession(private val host: Host) {
         if (initialPlayWhenReady) {
             host.systemSession.playbackSystemSessionManager.prepareForPlayback()
         }
+        host.diagnostics.beginCacheTransport(url, initialPlayWhenReady)
         exoPlayer.apply {
             playWhenReady = initialPlayWhenReady
             repeatMode = Player.REPEAT_MODE_OFF
@@ -524,6 +572,7 @@ internal class NativePlaybackSession(private val host: Host) {
     }
 
     fun releasePlayer() {
+        host.diagnostics.endCacheTransport()
         frameRate.restore()
         host.remote.resetInputState()
         host.controllerView.cancelPendingControllerFocus()
@@ -537,6 +586,8 @@ internal class NativePlaybackSession(private val host: Host) {
         host.runtime.stopPlaybackRuntimeLoop()
         host.playerView.player = null
         player?.removeListener(host.playerListener)
+        bufferStateListener?.let { player?.removeListener(it) }
+        bufferStateListener = null
         audioParametersListener?.let { player?.removeListener(it) }
         audioParametersListener = null
         player?.removeAnalyticsListener(host.diagnostics.playbackPerformanceAnalyticsListener)
@@ -633,6 +684,7 @@ internal class NativePlaybackSession(private val host: Host) {
         }
 
         val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
+        fallbackHighWaterMs = bufferConfig.maxBufferMs.toLong()
         playbackAllocator = allocator
         val delegate = DefaultLoadControl.Builder()
             .setAllocator(allocator)

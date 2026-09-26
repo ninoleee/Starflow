@@ -12,6 +12,7 @@ class PlayerStartupOverlay extends StatelessWidget {
     this.networkSpeed,
     this.bufferingProgress,
     this.showSpinner = true,
+    this.showMetrics = true,
   });
 
   final PlaybackTarget target;
@@ -19,6 +20,7 @@ class PlayerStartupOverlay extends StatelessWidget {
   final Widget? networkSpeed;
   final double? bufferingProgress;
   final bool showSpinner;
+  final bool showMetrics;
 
   @override
   Widget build(BuildContext context) {
@@ -42,21 +44,23 @@ class PlayerStartupOverlay extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              networkSpeed ??
-                  SizedBox(
-                    width: 160,
-                    height: 36,
-                    child: Column(
-                      children: [
-                        _StartupMetricText(
-                          value: '${speedLabel.isEmpty ? '--' : speedLabel} · -- · --',
-                        ),
-                        _StartupMetricText(
-                          value: buildPlaybackStartupFormatValue(target),
-                        ),
-                      ],
+              if (showMetrics)
+                networkSpeed ??
+                    SizedBox(
+                      width: 160,
+                      height: 36,
+                      child: Column(
+                        children: [
+                          _StartupMetricText(
+                            value:
+                                '${speedLabel.isEmpty ? '--' : speedLabel} · -- · --',
+                          ),
+                          _StartupMetricText(
+                            value: buildPlaybackStartupFormatValue(target),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
               if (_normalizeBufferProgress(bufferingProgress)
                   case final progress?)
                 Padding(

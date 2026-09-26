@@ -13,6 +13,31 @@ class NativePlaybackRuntimeControllerTest {
     private val runtime = NativePlaybackRuntimeController(host, NativePlaybackWatchdogPolicy { time })
     private var position = 60_000L
 
+    @Test
+    fun runtimeReportsMemoryEverySecondAndRevokesOnStopWithoutVisibleUi() {
+        mockStatic(android.os.Looper::class.java).use {
+            mockConstruction(android.os.Handler::class.java).use { handlers ->
+                `when`(host.diagnostics.networkSpeedVisible).thenReturn(false)
+                `when`(host.diagnostics.displayActive).thenReturn(false)
+                runtime.startPlaybackRuntimeLoop()
+                val handler = handlers.constructed().single()
+                val runnable = org.mockito.ArgumentCaptor.forClass(Runnable::class.java)
+                verify(handler).postDelayed(runnable.capture(), eq(500L))
+                runnable.value.run()
+                verify(host.diagnostics).reportMemoryBufferState(false, false)
+                verify(handler).postDelayed(runnable.value, 1_000L)
+                clearInvocations(host.diagnostics)
+                runnable.value.run()
+                verify(host.diagnostics).reportMemoryBufferState(false, false)
+                runtime.stopPlaybackRuntimeLoop()
+                verify(host.diagnostics).reportMemoryBufferState(true, false)
+                clearInvocations(host.diagnostics)
+                runnable.value.run()
+                verifyNoInteractions(host.diagnostics)
+            }
+        }
+    }
+
     @Before
     fun setup() {
         `when`(host.session.player!!.playWhenReady).thenReturn(true)

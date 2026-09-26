@@ -105,6 +105,47 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(NativeSubtitleSessionPreference(json: ["mode": "dual"]))
   }
 
+  func testExternalSubtitleParserSupportsSrtVttAndAss() throws {
+    let srt = #"""
+1
+00:00:01,000 --> 00:00:03,500
+Hello <i>world</i>
+"""#.data(using: .utf8)!
+    let srtTrack = try NativeExternalSubtitleParser.parse(data: srt, fileName: "sample.srt")
+    XCTAssertEqual(srtTrack.format, "srt")
+    XCTAssertEqual(srtTrack.cues, [NativeExternalSubtitleCue(start: 1, end: 3.5, text: "Hello world")])
+
+    let vtt = #"""
+WEBVTT
+
+00:00:04.000 --> 00:00:06.000
+VTT text
+"""#.data(using: .utf8)!
+    let vttTrack = try NativeExternalSubtitleParser.parse(data: vtt, fileName: "sample.vtt")
+    XCTAssertEqual(vttTrack.cue(at: 4.5)?.text, "VTT text")
+
+    let ass = #"""
+[Script Info]
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:07.00,0:00:09.00,Default,,0,0,0,,Line 1\NLine 2
+"""#.data(using: .utf8)!
+    let assTrack = try NativeExternalSubtitleParser.parse(data: ass, fileName: "sample.ass")
+    XCTAssertEqual(assTrack.cues.first?.text, "Line 1\nLine 2")
+  }
+
+  func testExternalSubtitleParserRejectsOversizedAndUnsupportedInput() {
+    XCTAssertThrowsError(try NativeExternalSubtitleParser.parse(
+      data: Data(repeating: 0, count: NativeExternalSubtitleParser.maxBytes + 1),
+      fileName: "large.srt")) { error in
+      XCTAssertEqual(error as? NativeExternalSubtitleError, .tooLarge)
+    }
+    XCTAssertThrowsError(try NativeExternalSubtitleParser.parse(
+      data: Data("not a subtitle".utf8), fileName: "sample.txt")) { error in
+      XCTAssertEqual(error as? NativeExternalSubtitleError, .unsupportedFormat)
+    }
+  }
+
   func testStoreReadsExternalChangesAndClear() {
     let suite = "starflow.runner.tests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suite)!
@@ -118,6 +159,32 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(store.loadResumePositionMs(itemKey: "item"), 20_000)
     defaults.removeObject(forKey: key)
     XCTAssertEqual(store.loadResumePositionMs(itemKey: "item"), 0)
+  }
+
+  @MainActor
+  func testExternalSubtitleLateParseCannotMountAfterClearOrExit() async throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).srt")
+    try "1\n00:00:01,000 --> 00:00:02,000\nTest".write(to: file, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: file) }
+    for close in [false, true] {
+      let suite = "starflow.subtitle.tests.\(UUID().uuidString)"
+      let defaults = UserDefaults(suiteName: suite)!
+      defer { defaults.removePersistentDomain(forName: suite) }
+      let request = NativePlaybackRequest(url: URL(fileURLWithPath: "/tmp/video.mp4"),
+        title: "", headers: [:], playbackTargetJson: "{}", playbackItemKey: "item", seriesKey: "")
+      let controller = NativePlaybackViewController(request: request, episodeQueue: nil,
+        backgroundPlaybackEnabled: false, subtitlePreference: "off", defaultSubtitle: "",
+        playbackStore: NativePlaybackMemoryStore(userDefaults: defaults))
+      let done = expectation(description: "stale subtitle rejected")
+      controller.applyExternalSubtitlePath(file.path) { accepted in
+        XCTAssertFalse(accepted)
+        done.fulfill()
+      }
+      if close { controller.dismiss(animated: false) } else { controller.clearExternalSubtitle() }
+      await fulfillment(of: [done], timeout: 3)
+      XCTAssertNil(controller.externalSubtitleTrack)
+      XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+    }
   }
 
 }

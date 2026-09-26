@@ -255,7 +255,7 @@ class SettingsLanTransferService {
         if (decoded is! Map) {
           throw const FormatException('配置内容不是合法的 JSON 对象。');
         }
-        final imported = AppSettings.fromCurrentJson(
+        final imported = AppSettings.fromCompatibleJson(
           Map<String, dynamic>.from(decoded),
         );
         if (!state.active) throw const _LanRequestException(HttpStatus.gone);

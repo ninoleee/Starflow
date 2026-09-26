@@ -121,9 +121,12 @@ class CloudSavePlanner<T extends CloudSaveEntry> {
     required String folderPath,
     required String saveFolderName,
     String sanitizedNameCharacters = '',
+    bool flattenTopDirectory = true,
   }) async {
     final name = sanitizeCloudDirectoryName(saveFolderName);
-    if (name.isNotEmpty) entries = await flattenTopDirectory(entries);
+    if (name.isNotEmpty && flattenTopDirectory) {
+      entries = await this.flattenTopDirectory(entries);
+    }
     final target = await _resolveTarget(folderId, folderPath, name,
         createIfMissing: false);
 

@@ -201,7 +201,11 @@ class SearchSession {
   void _logValidation(SearchResult item, ShareLinkValidationResult validation) {
     final type = detectSearchCloudTypeFromUrl(item.resourceUrl);
     if (type == null || validation.isValid) return;
-    final label = type == SearchCloudType.quark ? 'Quark' : '115';
+    final label = switch (type) {
+      SearchCloudType.quark => 'Quark',
+      SearchCloudType.aliyun => 'Aliyun',
+      _ => '115',
+    };
     final fields = {'providerId': item.providerId, 'reason': validation.reason};
     if (validation.isInvalid) {
       appLogInfo('search.${type.code}-validation',

@@ -9,6 +9,7 @@ import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/search/application/cloud_save_planner.dart';
 import 'package:starflow/features/search/application/cloud_saved_name_sanitizer.dart';
 import 'package:starflow/features/search/domain/cloud_save_rules.dart';
+import 'package:starflow/features/search/domain/cloud_account_auth_exception.dart';
 
 final quarkSaveClientProvider = Provider<QuarkSaveClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
@@ -360,6 +361,7 @@ class QuarkSaveClient {
       ),
       headers: _headers(trimmedCookie),
     );
+    if (response.statusCode == 401) throw const CloudAccountAuthException();
     final payload = _decode(response);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw QuarkSaveException(

@@ -69,19 +69,21 @@ class NativePlaybackLoadControlTest {
             f.allocate((boostedTarget - f.normalTarget) / C.DEFAULT_BUFFER_SEGMENT_SIZE)
             assertFalse(f.control.shouldContinueLoading(f.parameters(25_000)))
             f.releaseAll()
-            assertFalse(f.control.shouldContinueLoading(f.parameters(45_000)))
-            assertTrue(f.control.shouldContinueLoading(f.parameters(44_999)))
+            assertFalse(f.control.shouldContinueLoading(f.parameters(18_751)))
+            assertTrue(f.control.shouldContinueLoading(f.parameters(18_750)))
             assertTrue(f.control.shouldContinueLoading(f.parameters(59_999)))
             assertFalse(f.control.shouldContinueLoading(f.parameters(60_000)))
-            assertFalse(f.control.shouldContinueLoading(f.parameters(45_000)))
+            assertFalse(f.control.shouldContinueLoading(f.parameters(45_001)))
+            assertTrue(f.control.shouldContinueLoading(f.parameters(45_000)))
         }
     }
 
     @Test
-    fun higherPlaybackSpeedRefillsEarlierButNeverBeyondTheMaximumDuration() {
+    fun refillUsesAchievedMediaDurationAtHigherPlaybackSpeed() {
         Fixture().use { f ->
             assertFalse(f.control.shouldContinueLoading(f.parameters(60_000, speed = 4f)))
-            assertTrue(f.control.shouldContinueLoading(f.parameters(59_999, speed = 4f)))
+            assertFalse(f.control.shouldContinueLoading(f.parameters(45_001, speed = 4f)))
+            assertTrue(f.control.shouldContinueLoading(f.parameters(45_000, speed = 4f)))
             assertFalse(f.control.shouldContinueLoading(f.parameters(60_000, speed = 4f)))
         }
     }
@@ -92,7 +94,7 @@ class NativePlaybackLoadControlTest {
             f.transfer.onTransferStart(f.source, f.spec, true)
             assertTrue(f.control.shouldContinueLoading(f.parameters(19_000)))
             assertFalse(f.control.shouldContinueLoading(f.parameters(60_000)))
-            for (bufferMs in listOf(59_000L, 58_000L, 40_000L)) {
+            for (bufferMs in listOf(59_000L, 58_000L, 46_000L)) {
                 f.time += 1_000L
                 assertFalse(f.control.shouldContinueLoading(f.parameters(bufferMs)))
                 assertEquals(f.normalTarget, f.control.currentTargetBytes)
@@ -171,8 +173,49 @@ class NativePlaybackLoadControlTest {
                 if (release) f.control.onReleased(PlayerId.UNSET) else f.control.onStopped(PlayerId.UNSET)
                 assertEquals(f.config.targetBufferBytes, f.control.currentTargetBytes)
                 f.control.onPrepared(PlayerId.UNSET)
-                assertFalse(f.control.shouldContinueLoading(f.parameters(40_000)))
+                assertTrue(f.control.shouldContinueLoading(f.parameters(40_000)))
                 assertEquals(f.normalTarget, f.control.currentTargetBytes)
+            }
+        }
+    }
+
+    @Test
+    fun byteLimitedHighWaterRefillsAtSeventyFivePercentAndCannotAdvertiseWhileRefilling() {
+        Fixture().use { f ->
+            assertTrue(f.control.shouldContinueLoading(f.parameters(1_000)))
+            assertFalse(f.control.isMemoryReady(1_000))
+            f.allocate(f.normalTarget / C.DEFAULT_BUFFER_SEGMENT_SIZE)
+            assertFalse(f.control.shouldContinueLoading(f.parameters(12_000)))
+            assertTrue(f.control.isMemoryReady(12_000))
+            f.releaseAll()
+            assertFalse(f.control.shouldContinueLoading(f.parameters(9_001)))
+            assertTrue(f.control.isMemoryReady(9_001))
+            assertFalse(f.control.isMemoryReady(9_000))
+            assertTrue(f.control.shouldContinueLoading(f.parameters(9_000)))
+            assertTrue(f.control.shouldContinueLoading(f.parameters(11_000)))
+            assertFalse(f.control.isMemoryReady(11_000))
+            f.allocate(f.normalTarget / C.DEFAULT_BUFFER_SEGMENT_SIZE)
+            assertFalse(f.control.shouldContinueLoading(f.parameters(14_000)))
+            assertTrue(f.control.isMemoryReady(14_000))
+            f.releaseAll()
+            assertTrue(f.control.shouldContinueLoading(f.parameters(10_500)))
+        }
+    }
+
+    @Test
+    fun seekSpeedPauseAndPressureInvalidateReadiness() {
+        for (scenario in listOf("seek", "speed", "pause", "pressure")) {
+            Fixture().use { f ->
+                assertFalse(f.control.shouldContinueLoading(f.parameters(60_000)))
+                assertTrue(f.control.isMemoryReady(60_000))
+                when (scenario) {
+                    "seek" -> f.control.invalidateMemoryBuffer()
+                    "pressure" -> f.control.onMemoryPressure()
+                    "speed" -> f.control.shouldContinueLoading(f.parameters(50_000, speed = 2f))
+                    else -> f.control.shouldContinueLoading(f.parameters(50_000, playWhenReady = false))
+                }
+                assertFalse(scenario, f.control.isMemoryReady(50_000))
+                assertPlaybackThresholds(f)
             }
         }
     }

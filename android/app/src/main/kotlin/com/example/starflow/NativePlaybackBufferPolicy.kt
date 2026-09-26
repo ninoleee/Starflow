@@ -25,7 +25,7 @@ object NativePlaybackBufferPolicy {
         val base = if (!isTelevision) {
             NativePlaybackBufferConfig(
                 minBufferMs = 50_000,
-                maxBufferMs = 90_000,
+                maxBufferMs = 120_000,
                 bufferForPlaybackMs = 2_500,
                 bufferForPlaybackAfterRebufferMs = 5_000,
                 targetBufferBytes = -1,
@@ -34,19 +34,19 @@ object NativePlaybackBufferPolicy {
         } else when {
             memoryClassMb <= 256 -> NativePlaybackBufferConfig(
                 minBufferMs = 20_000,
-                maxBufferMs = 60_000,
+                maxBufferMs = 120_000,
                 bufferForPlaybackMs = 1_500,
                 bufferForPlaybackAfterRebufferMs = 2_000,
-                targetBufferBytes = (if (isHeavyPlayback) 48 else 32) * MEBIBYTE,
+                targetBufferBytes = 64 * MEBIBYTE,
                 prioritizeTimeOverSizeThresholds = false,
             )
 
             memoryClassMb <= 512 -> NativePlaybackBufferConfig(
                 minBufferMs = 30_000,
-                maxBufferMs = 90_000,
+                maxBufferMs = 120_000,
                 bufferForPlaybackMs = 2_000,
                 bufferForPlaybackAfterRebufferMs = 2_000,
-                targetBufferBytes = (if (isHeavyPlayback) 80 else 64) * MEBIBYTE,
+                targetBufferBytes = (if (isHeavyPlayback) 112 else 96) * MEBIBYTE,
                 prioritizeTimeOverSizeThresholds = false,
             )
 
@@ -55,7 +55,7 @@ object NativePlaybackBufferPolicy {
                 maxBufferMs = 120_000,
                 bufferForPlaybackMs = 2_500,
                 bufferForPlaybackAfterRebufferMs = 2_000,
-                targetBufferBytes = 128 * MEBIBYTE,
+                targetBufferBytes = 160 * MEBIBYTE,
                 prioritizeTimeOverSizeThresholds = false,
             )
         }
@@ -95,9 +95,9 @@ object NativePlaybackBufferPolicy {
             return bandwidthAdjusted
         }
         val episodeTargetBufferBytes = when {
-            memoryClassMb <= 256 -> 48 * MEBIBYTE
-            memoryClassMb <= 512 -> 80 * MEBIBYTE
-            else -> 128 * MEBIBYTE
+            memoryClassMb <= 256 -> 64 * MEBIBYTE
+            memoryClassMb <= 512 -> 112 * MEBIBYTE
+            else -> 160 * MEBIBYTE
         }
         return bandwidthAdjusted.copy(
             // Keep read-ahead capacity independent of startup and resume thresholds.

@@ -30,6 +30,30 @@ abstract class PlaybackStreamRelayService {
   Future<void> close();
 }
 
+class PlaybackRelayCacheSnapshot {
+  const PlaybackRelayCacheSnapshot({
+    required this.storedBytes,
+    this.forwardBytes,
+    this.disabledReason,
+  });
+
+  final int storedBytes;
+  // Contiguous bytes ahead of the relay read cursor, not decoded play time.
+  final int? forwardBytes;
+  final String? disabledReason;
+}
+
+abstract interface class PlaybackRelayCacheControl {
+  PlaybackRelayCacheSnapshot? cacheSnapshot({String? url});
+  void setPlaybackActive(bool active, {String? url});
+  void cancelReadAhead({String? url});
+}
+
+/// A short-lived permission from the current decoder buffer, not UI visibility.
+abstract interface class PlaybackRelayBufferControl {
+  void updateBufferState({required bool memoryReady, String? url});
+}
+
 bool isLoopbackPlaybackRelayUrl(String url) {
   final uri = Uri.tryParse(url.trim());
   if (uri == null) {

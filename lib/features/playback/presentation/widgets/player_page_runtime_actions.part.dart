@@ -10,12 +10,14 @@ class _ServerSubtitleSelection {
 
 extension _PlayerPageStateRuntimeActions on _PlayerPageState {
   Future<void> _seekPlayerAutomatically(Player player, Duration position) {
+    _cancelMpvReadAhead(player);
     return player is PlaybackInteractionPlayer
         ? player.seekAutomatically(position)
         : player.seek(position);
   }
 
   Future<void> _playPlayerAutomatically(Player player) {
+    _setMpvPlaybackActive(player, true);
     return player is PlaybackInteractionPlayer
         ? player.playAutomatically()
         : player.play();
@@ -27,12 +29,14 @@ extension _PlayerPageStateRuntimeActions on _PlayerPageState {
       configuration: configuration,
       onUserSeek: (position) {
         if (mounted && identical(_player, player)) {
+          _cancelMpvReadAhead(player);
           _recoveryIntent.invalidate();
           _syncSkipFlagsAfterUserSeek(position);
         }
       },
       onUserPlaybackIntent: (playing) {
         if (!mounted || !identical(_player, player)) return;
+        _setMpvPlaybackActive(player, playing);
         _recoveryIntent.playback(playing);
         if (!playing) _cancelPendingAutomaticAdvance();
       },

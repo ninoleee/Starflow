@@ -235,7 +235,7 @@ enum NativePlaybackStartupTests {
     let url = URL(string: "https://live.example.test/vod/movie.m3u8?live=1")!
     let vod = NativePlaybackBufferingTuning.Context(url: url)
     precondition(!vod.isLiveStream)
-    precondition(NativePlaybackBufferingTuning.makeConfiguration(context: vod).preferredForwardBufferDuration == 24)
+    precondition(NativePlaybackBufferingTuning.makeConfiguration(context: vod).preferredForwardBufferDuration == 120)
     let live = NativePlaybackBufferingTuning.Context(url: url, isLiveStream: true)
     precondition(NativePlaybackBufferingTuning.makeConfiguration(context: live).preferredForwardBufferDuration == 8)
     print("Native startup: preroll success/interruption/failure/cancel, cancel-before-start, resume-seek/keep-up cancellation, cleanup ordering, all 10 user command entry points, automatic/manual resolver supersession, timeout/exit and HLS policies passed (host strategy checks only)")

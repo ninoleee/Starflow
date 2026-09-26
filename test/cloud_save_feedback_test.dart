@@ -3,13 +3,16 @@ import 'package:starflow/features/search/domain/cloud_save_feedback.dart';
 
 void main() {
   for (final drive in CloudSaveDrive.values) {
-    final name = drive == CloudSaveDrive.quark ? '夸克' : ' 115';
+    final name = drive == CloudSaveDrive.cloud115 ? ' 115' : drive.label;
 
     test('$drive uses the same concise progress and summary format', () {
       final progress = CloudSaveProgress.saving(drive);
       expect(progress.stage, CloudSaveStage.saving);
-      expect(progress.message,
-          drive == CloudSaveDrive.quark ? '夸克保存中...' : '115 保存中...');
+      expect(
+          progress.message,
+          drive == CloudSaveDrive.cloud115
+              ? '115 保存中...'
+              : '${drive.label}保存中...');
       final renaming = CloudSaveProgress.sanitizingNames(drive, 3);
       expect(renaming.stage, CloudSaveStage.sanitizingNames);
       expect(renaming.message, '已保存 3 个，名称修改中...');

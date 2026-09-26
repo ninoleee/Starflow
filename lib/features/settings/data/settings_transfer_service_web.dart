@@ -56,7 +56,7 @@ class WebSettingsTransferService implements SettingsTransferService {
     final token =
         'web-import:${DateTime.now().microsecondsSinceEpoch}:${file.name}';
     _pendingImports[token] =
-        AppSettings.fromCurrentJson(Map<String, dynamic>.from(decoded));
+        AppSettings.fromCompatibleJson(Map<String, dynamic>.from(decoded));
     return token;
   }
 

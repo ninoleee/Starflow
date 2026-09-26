@@ -27,10 +27,12 @@ void main() {
         await tester.pumpWidget(ProviderScope(
           overrides: [
             isTelevisionProvider.overrideWith((ref) => detected.future),
-            settingsControllerProvider.overrideWith(_LoadedSettingsController.new),
+            settingsControllerProvider
+                .overrideWith(_LoadedSettingsController.new),
             appSettingsProvider.overrideWithValue(_settings),
           ],
-          child: MaterialApp(home: Focus(
+          child: MaterialApp(
+              home: Focus(
             focusNode: otherFocus,
             child: TickerMode(enabled: !hidden, child: const SettingsPage()),
           )),
@@ -53,7 +55,8 @@ void main() {
   }
 
   for (final keepFocus in [false, true]) {
-    testWidgets('idle settings activation restores only missing focus: $keepFocus',
+    testWidgets(
+        'idle settings activation restores only missing focus: $keepFocus',
         (tester) async {
       await tester.binding.setSurfaceSize(const Size(1920, 1080));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -62,7 +65,8 @@ void main() {
       await tester.pumpWidget(ProviderScope(
         overrides: [
           isTelevisionProvider.overrideWith((ref) => true),
-          settingsControllerProvider.overrideWith(_LoadedSettingsController.new),
+          settingsControllerProvider
+              .overrideWith(_LoadedSettingsController.new),
           appSettingsProvider.overrideWithValue(_settings),
         ],
         child: MaterialApp(
@@ -174,19 +178,18 @@ void main() {
     await _pumpSettingsPage(tester, const NetworkStorageSettingsPage());
     expect(find.text('网盘与转存'), findsOneWidget);
     expect(find.text('网盘账号'), findsOneWidget);
-    expect(find.text('转存后处理'), findsOneWidget);
+    expect(find.text('公共配置'), findsOneWidget);
     expect(find.text('夸克云盘'), findsOneWidget);
     expect(find.text('115 网盘'), findsOneWidget);
-    expect(find.text('SmartStrm'), findsOneWidget);
-    expect(find.text('转存后刷新媒体库'), findsOneWidget);
+    expect(find.text('通用设置'), findsOneWidget);
     expect(find.text('同步与索引刷新'), findsNothing);
     expect(
       tester.getTopLeft(find.text('115 网盘')).dy,
-      lessThan(tester.getTopLeft(find.text('转存后处理')).dy),
+      lessThan(tester.getTopLeft(find.text('公共配置')).dy),
     );
     expect(
-      tester.getTopLeft(find.text('转存后处理')).dy,
-      lessThan(tester.getTopLeft(find.text('SmartStrm')).dy),
+      tester.getTopLeft(find.text('公共配置')).dy,
+      lessThan(tester.getTopLeft(find.text('通用设置')).dy),
     );
     expect(
       _focusAction(tester, 'network-storage:quark').focusNode!.hasFocus,
@@ -211,18 +214,11 @@ void main() {
       focusId: 'network-storage-quark:cookie',
     ),
     (
-      title: 'SmartStrm',
-      section: NetworkStorageEditorSection.smartStrm,
-      entryFocusId: 'network-storage:smart-strm',
+      title: '通用设置',
+      section: NetworkStorageEditorSection.common,
+      entryFocusId: 'network-storage:common',
       field: 'Webhook 地址',
       focusId: 'network-storage-smart-strm:webhook',
-    ),
-    (
-      title: '转存后刷新媒体库',
-      section: NetworkStorageEditorSection.synchronization,
-      entryFocusId: 'network-storage:synchronization',
-      field: '索引刷新等待时间',
-      focusId: 'network-storage-refresh:delay',
     ),
   ]) {
     testWidgets('TV cloud storage opens scoped editor: ${entry.title}',
@@ -242,6 +238,9 @@ void main() {
       );
       expect(find.text(entry.field), findsOneWidget);
       expect(_focusAction(tester, entry.focusId).focusNode!.hasFocus, isTrue);
+      if (entry.section != NetworkStorageEditorSection.common) {
+        expect(find.text('通用设置'), findsNothing);
+      }
       if (entry.section != NetworkStorageEditorSection.cloud115) {
         expect(find.text('同步删除夸克目录'), findsNothing);
         expect(find.text('同步删除115目录'), findsNothing);
@@ -270,10 +269,10 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Webhook 已配置 · 等待 3 秒'), findsOneWidget);
+    expect(find.text('通用设置'), findsOneWidget);
     expect(find.textContaining('quark-task'), findsNothing);
-    await tester.ensureVisible(find.text('转存后刷新媒体库'));
-    await tester.tap(find.text('转存后刷新媒体库'));
+    await tester.ensureVisible(find.text('通用设置'));
+    await tester.tap(find.text('通用设置'));
     await tester.pumpAndSettle();
     expect(find.text('索引刷新等待时间'), findsOneWidget);
     expect(find.text('10 秒'), findsOneWidget);
