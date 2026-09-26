@@ -148,17 +148,20 @@ internal class NativePlaybackRecoveryController(
         }
 
         transcodedVideoFallbackAttempted = true
-        host.diagnostics.playbackPerformanceTracker.onRecovery()
         val currentPlayer = host.session.player ?: return
+        val target = runCatching { org.json.JSONObject(host.activity.intent.getStringExtra(
+            NativePlaybackActivity.EXTRA_PLAYBACK_TARGET_JSON).orEmpty()) }.getOrNull()
         val fallbackUrl =
             NativePlaybackSource.buildTranscodedVideoFallbackUrl(
-                host.activity.intent.getStringExtra(EXTRA_URL)?.trim().orEmpty()
+                host.activity.intent.getStringExtra(EXTRA_URL)?.trim().orEmpty(),
+                target?.optString("sourceKind").orEmpty(),
             )
         if (fallbackUrl == null) {
             NativePlaybackFormatting.logPlayback("native.video.unsupported-no-transcode-fallback")
             return
         }
 
+        host.diagnostics.playbackPerformanceTracker.onRecovery()
         host.session.pendingResumePositionOverrideMs =
             currentPlayer.currentPosition.coerceAtLeast(0L)
         host.session.nextInitializePlayWhenReady = currentPlayer.playWhenReady

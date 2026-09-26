@@ -21,6 +21,7 @@ object NativePlaybackBufferPolicy {
         cachedBandwidthBytesPerSecond: Long = 0L,
         sourceBitrate: Long = 0L,
         isRemoteEpisodeSwitch: Boolean = false,
+        memoryCacheMiB: Int = 0,
     ): NativePlaybackBufferConfig {
         val base = if (!isTelevision) {
             NativePlaybackBufferConfig(
@@ -91,22 +92,30 @@ object NativePlaybackBufferPolicy {
             }
         }
 
-        if (!isTelevision || !isRemoteEpisodeSwitch) {
-            return bandwidthAdjusted
-        }
+        val manualBytes = manualTargetBytes(memoryCacheMiB, memoryClassMb)
+        val selected = if (manualBytes > 0) bandwidthAdjusted.copy(
+            targetBufferBytes = manualBytes,
+            prioritizeTimeOverSizeThresholds = false,
+        ) else bandwidthAdjusted
+        if (!isTelevision || !isRemoteEpisodeSwitch) return selected
         val episodeTargetBufferBytes = when {
             memoryClassMb <= 256 -> 64 * MEBIBYTE
             memoryClassMb <= 512 -> 112 * MEBIBYTE
             else -> 160 * MEBIBYTE
         }
-        return bandwidthAdjusted.copy(
+        return selected.copy(
             // Keep read-ahead capacity independent of startup and resume thresholds.
             minBufferMs = maxOf(bandwidthAdjusted.minBufferMs, 30_000),
-            targetBufferBytes = maxOf(
+            targetBufferBytes = if (manualBytes > 0) manualBytes else maxOf(
                 bandwidthAdjusted.targetBufferBytes,
                 episodeTargetBufferBytes,
             ),
             episodeSwitchWarmup = true,
         )
     }
+
+    fun manualTargetBytes(memoryCacheMiB: Int, memoryClassMb: Int): Int =
+        if (memoryCacheMiB in listOf(64, 128, 256, 512))
+            minOf(memoryCacheMiB * MEBIBYTE, NativePlaybackBufferBudget.limit(memoryClassMb))
+        else 0
 }

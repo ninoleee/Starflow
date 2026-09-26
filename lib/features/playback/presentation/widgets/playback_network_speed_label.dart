@@ -14,6 +14,8 @@ class PlaybackNetworkSpeedLabel extends StatefulWidget {
     this.readFormat,
     this.memoryCacheLabel = '',
     this.visible = true,
+    this.showFormat = true,
+    this.formatOnly = false,
   });
 
   final Object sampleKey;
@@ -24,6 +26,8 @@ class PlaybackNetworkSpeedLabel extends StatefulWidget {
   final Future<String?> Function()? readFormat;
   final String memoryCacheLabel;
   final bool visible;
+  final bool showFormat;
+  final bool formatOnly;
 
   @override
   State<PlaybackNetworkSpeedLabel> createState() =>
@@ -32,7 +36,7 @@ class PlaybackNetworkSpeedLabel extends StatefulWidget {
 
 class _PlaybackNetworkSpeedLabelState extends State<PlaybackNetworkSpeedLabel>
     with WidgetsBindingObserver {
-  static const double _metricsWidth = 160;
+  static const double _metricsWidth = 480;
   static const double _metricsFontSize = 10;
 
   bool _foreground = true;
@@ -176,37 +180,27 @@ class _PlaybackNetworkSpeedLabelState extends State<PlaybackNetworkSpeedLabel>
   Widget build(BuildContext context) {
     if (!widget.visible) return const SizedBox.shrink();
     return Semantics(
-      label: '网速、缓存和视频格式',
+      label: widget.formatOnly ? '视频格式' : '网速和缓存',
       child: SizedBox(
-        width: _metricsWidth,
+        width:
+            (MediaQuery.sizeOf(context).width - 160).clamp(0.0, _metricsWidth),
         height: 36,
         child: DefaultTextStyle(
           style: _metricsTextStyle(),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                  child: Center(
-                      child: Text(
-                _label,
-                style: _metricsTextStyle(),
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.fade,
-                textAlign: TextAlign.center,
-              ))),
-              Expanded(
-                  child: Center(
-                      child: Text(
-                _format,
-                style: _metricsTextStyle(),
-                maxLines: 1,
-                softWrap: false,
-                overflow: TextOverflow.fade,
-                textAlign: TextAlign.center,
-              ))),
-            ],
+          child: Align(
+            alignment: widget.formatOnly
+                ? Alignment.centerLeft
+                : Alignment.centerRight,
+            child: Text(
+              widget.formatOnly
+                  ? _format
+                  : (widget.showFormat ? '$_label · $_format' : _label),
+              style: _metricsTextStyle(),
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+              textAlign: widget.formatOnly ? TextAlign.left : TextAlign.right,
+            ),
           ),
         ),
       ),

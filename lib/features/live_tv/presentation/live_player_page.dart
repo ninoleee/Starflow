@@ -778,10 +778,13 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                                                   child: Text(
                                                       _guide ? '节目单' : '频道')),
                                               if (_guide || fullWidthOverlay)
-                                                Padding(
+                                                Flexible(
+                                                  flex: 3,
+                                                  child: Padding(
                                                   padding:
                                                       const EdgeInsets.all(12),
                                                   child: speedLabel(),
+                                                  ),
                                                 ),
                                             ]),
                                           Expanded(

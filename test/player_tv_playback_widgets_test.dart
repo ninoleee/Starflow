@@ -130,7 +130,7 @@ void main() {
     expect(find.byIcon(Icons.playlist_play_rounded), findsNothing);
   });
 
-  testWidgets('TV chrome starts with Back and places network speed after it',
+  testWidgets('TV chrome places network speed on the header right',
       (tester) async {
     tester.view
       ..physicalSize = const Size(1280, 720)
@@ -194,7 +194,9 @@ void main() {
     final backRect = tester.getRect(backButton);
     final networkRect = tester.getRect(find.byKey(networkSpeedKey));
     expect(backRect.left, 0);
-    expect(networkRect.left, backRect.right);
+    expect(networkRect.right, 1280 - 16);
+    expect(networkRect.center.dy, backRect.center.dy);
+    expect(tester.takeException(), isNull);
   });
 }
 

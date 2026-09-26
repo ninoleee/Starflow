@@ -36,6 +36,7 @@ MpvBufferBudget resolveMpvBufferBudget({
   required bool aggressiveTuning,
   required bool isTelevision,
   int? memoryClassMb,
+  int memoryCacheMiB = 0,
 }) {
   final remote = isLikelyRemotePlaybackTargetTransport(target);
   final heavy = isHeavyPlaybackTargetMetadata(target);
@@ -77,6 +78,25 @@ MpvBufferBudget resolveMpvBufferBudget({
   }
 
   final backBytes = (forwardBytes ~/ 4).clamp(8 * _mib, backCapBytes);
+  if (const [64, 128, 256, 512].contains(memoryCacheMiB)) {
+    final requested = memoryCacheMiB * _mib;
+    final safetyCap = !isTelevision
+        ? 512 * _mib
+        : (memoryClassMb != null && memoryClassMb > 0 && memoryClassMb <= 256)
+            ? ((quark || heavy) ? 112 : 80) * _mib + 16 * _mib
+            : (memoryClassMb != null &&
+                    memoryClassMb > 0 &&
+                    memoryClassMb <= 512)
+                ? 208 * _mib
+                : 256 * _mib + backCapBytes;
+    final total = requested.clamp(0, safetyCap);
+    final back = (total ~/ 5).clamp(8 * _mib, backCapBytes);
+    return MpvBufferBudget(
+      forwardBytes: total - back,
+      backBytes: back,
+      memoryCapApplied: total < requested,
+    );
+  }
   return MpvBufferBudget(
     forwardBytes: forwardBytes,
     backBytes: backBytes,

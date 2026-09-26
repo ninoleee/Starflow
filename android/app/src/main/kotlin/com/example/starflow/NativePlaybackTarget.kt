@@ -26,11 +26,15 @@ internal class NativePlaybackTarget(private val currentTitle: () -> String) {
         val title = currentTitle().trim()
         val seriesTitle = targetObject.optString("seriesTitle").trim()
         val itemType = targetObject.optString("itemType").trim().lowercase()
-        return when {
+        val name = when {
             itemType == "episode" && seriesTitle.isNotEmpty() -> seriesTitle
             title.isNotEmpty() -> title
             else -> "Starflow"
         }
+        val episode = targetObject.optInt("episodeNumber", 0)
+        if (episode <= 0) return name
+        val marker = Regex("第\\s*0?$episode\\s*集|\\b(?:s\\d+)?e0?$episode\\b", RegexOption.IGNORE_CASE)
+        return if (marker.containsMatchIn(name)) name else "$name · 第 $episode 集"
     }
 
     fun buildPlaybackPageSecondaryTitle(): String {

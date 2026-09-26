@@ -91,6 +91,7 @@ class NativePlaybackActivity : Activity() {
         const val EXTRA_HEADERS_JSON = "headersJson"
         const val EXTRA_DECODE_MODE = "decodeMode"
         const val EXTRA_AUDIO_OUTPUT_MODE = "audioOutputMode"
+        const val EXTRA_MEMORY_CACHE_MIB = "memoryCacheMiB"
         const val EXTRA_SUBTITLE_SCALE = "subtitleScale"
         const val EXTRA_PRIMARY_SUBTITLE_POSITION = "primarySubtitlePosition"
         const val EXTRA_SECONDARY_SUBTITLE_POSITION = "secondarySubtitlePosition"

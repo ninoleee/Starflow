@@ -43,6 +43,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
   late PlaybackDecodeMode _draftPlaybackDecodeMode;
   late NativeAudioOutputMode _draftNativeAudioOutputMode;
   late int _draftDiskCacheMiB;
+  late int _draftMemoryCacheMiB;
   final SettingsAutoSaveCoordinator _autoSave = SettingsAutoSaveCoordinator();
 
   @override
@@ -61,6 +62,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     _draftPlaybackDecodeMode = widget.initialPlaybackDecodeMode;
     _draftNativeAudioOutputMode = widget.initialNativeAudioOutputMode;
     _draftDiskCacheMiB = ref.read(appSettingsProvider).playbackDiskCacheMiB;
+    _draftMemoryCacheMiB = ref.read(appSettingsProvider).playbackMemoryCacheMiB;
     _autoSave.markCurrentAsSaved(_draftFingerprint());
   }
 
@@ -84,6 +86,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         _draftPlaybackDecodeMode.name,
         _draftNativeAudioOutputMode.name,
         _draftDiskCacheMiB,
+        _draftMemoryCacheMiB,
       ].join('|');
 
   void _scheduleAutoSave() {
@@ -98,6 +101,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     final playbackDecodeMode = _draftPlaybackDecodeMode;
     final nativeAudioOutputMode = _draftNativeAudioOutputMode;
     final diskCacheMiB = _draftDiskCacheMiB;
+    final memoryCacheMiB = _draftMemoryCacheMiB;
     _autoSave.schedule(
       fingerprint: _draftFingerprint(),
       save: () => controller.savePlaybackPreferences(
@@ -108,6 +112,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         playbackDecodeMode: playbackDecodeMode,
         nativeAudioOutputMode: nativeAudioOutputMode,
         diskCacheMiB: diskCacheMiB,
+        memoryCacheMiB: memoryCacheMiB,
       ),
     );
   }
@@ -124,6 +129,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     final playbackDecodeMode = _draftPlaybackDecodeMode;
     final nativeAudioOutputMode = _draftNativeAudioOutputMode;
     final diskCacheMiB = _draftDiskCacheMiB;
+    final memoryCacheMiB = _draftMemoryCacheMiB;
     _autoSave.flush(
       fingerprint: _draftFingerprint(),
       save: () => controller.savePlaybackPreferences(
@@ -134,6 +140,7 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
         playbackDecodeMode: playbackDecodeMode,
         nativeAudioOutputMode: nativeAudioOutputMode,
         diskCacheMiB: diskCacheMiB,
+        memoryCacheMiB: memoryCacheMiB,
       ),
     );
   }
@@ -241,6 +248,16 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
           if (!kIsWeb) ...[
             const SizedBox(height: 18),
             SettingsSelectionTile(
+              title: '内存缓存大小',
+              value: _memoryCacheSupported
+                  ? (_draftMemoryCacheMiB == 0
+                      ? '自动'
+                      : '$_draftMemoryCacheMiB MiB')
+                  : '系统管理',
+              onPressed: _memoryCacheSupported ? _openMemoryCachePicker : null,
+            ),
+            const SizedBox(height: 18),
+            SettingsSelectionTile(
               title: '播放磁盘缓存',
               value: _draftDiskCacheMiB == 0 ? '关闭' : '$_draftDiskCacheMiB MiB',
               onPressed: _openDiskCachePicker,
@@ -280,6 +297,24 @@ class _PlaybackSettingsPageState extends ConsumerState<PlaybackSettingsPage> {
     setState(() {
       _timeoutController.text = '$selection';
     });
+    _scheduleAutoSave();
+  }
+
+  bool get _memoryCacheSupported =>
+      _draftPlaybackEngine == PlaybackEngine.embeddedMpv ||
+      (_draftPlaybackEngine == PlaybackEngine.nativeContainer &&
+          defaultTargetPlatform == TargetPlatform.android);
+
+  Future<void> _openMemoryCachePicker() async {
+    final value = await showSettingsOptionDialog<int>(
+      context: context,
+      title: '内存缓存大小',
+      options: const [0, 64, 128, 256, 512],
+      currentValue: _draftMemoryCacheMiB,
+      labelBuilder: (value) => value == 0 ? '自动' : '$value MiB',
+    );
+    if (value == null || !mounted) return;
+    setState(() => _draftMemoryCacheMiB = value);
     _scheduleAutoSave();
   }
 

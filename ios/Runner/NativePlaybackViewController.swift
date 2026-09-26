@@ -29,6 +29,7 @@ final class NativePlaybackViewController: AVPlayerViewController,
   private var cacheMetricsVisible = false
   private var cacheMetricsRequest: Int?
   private let cacheMetricsLabel = UILabel()
+  private var showDiskCache = false
   private var episodeResolutionTimeout: DispatchWorkItem?
   private let isoFormatter = ISO8601DateFormatter()
   private var request: NativePlaybackRequest
@@ -484,12 +485,13 @@ final class NativePlaybackViewController: AVPlayerViewController,
 
   private func installCacheMetricsLabel() {
     guard let overlay = contentOverlayView else { return }
-    cacheMetricsLabel.text = "不可用 | --"
+    cacheMetricsLabel.text = "不可用"
     cacheMetricsLabel.textColor = .white
     cacheMetricsLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
     cacheMetricsLabel.shadowColor = .black
     cacheMetricsLabel.shadowOffset = CGSize(width: 0, height: 1)
-    cacheMetricsLabel.numberOfLines = 2
+    cacheMetricsLabel.numberOfLines = 1
+    cacheMetricsLabel.lineBreakMode = .byTruncatingTail
     cacheMetricsLabel.textAlignment = .right
     cacheMetricsLabel.adjustsFontSizeToFitWidth = false
     cacheMetricsLabel.accessibilityIdentifier = "starflow-native-cache-metrics"
@@ -567,7 +569,8 @@ final class NativePlaybackViewController: AVPlayerViewController,
     cancelCacheReadAhead()
     cacheTransportURL = nil
     cachePlaybackActive = nil
-    cacheMetricsLabel.text = "不可用 | --"
+    showDiskCache = false
+    cacheMetricsLabel.text = "不可用"
   }
 
   private func startCacheMetrics() {
@@ -604,18 +607,19 @@ final class NativePlaybackViewController: AVPlayerViewController,
         value["resolverSessionId"] as? String == self.resolverSessionId,
         value["currentURL"] as? String == url,
         (value["generation"] as? NSNumber)?.intValue == generation else {
-        self.cacheMetricsLabel.text = "不可用 | --"
+        self.cacheMetricsLabel.text = self.showDiskCache ? "不可用 | --" : "不可用"
         return
       }
       let bytes = (value["storedBytes"] as? NSNumber)?.int64Value
+      self.showDiskCache = value["showDiskCache"] as? Bool == true
       let disk = bytes.flatMap { $0 >= 0 ? ByteCountFormatter.string(fromByteCount: $0, countStyle: .binary) : nil } ?? "--"
-      self.cacheMetricsLabel.text = "不可用 | \(disk)"
+      self.cacheMetricsLabel.text = self.showDiskCache ? "不可用 | \(disk)" : "不可用"
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
       guard let self, self.cacheMetricsRequest == generation else { return }
       self.cacheMetricsRequest = nil
       self.cacheGeneration += 1
-      self.cacheMetricsLabel.text = "不可用 | --"
+      self.cacheMetricsLabel.text = self.showDiskCache ? "不可用 | --" : "不可用"
     }
   }
 

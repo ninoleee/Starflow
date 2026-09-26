@@ -645,11 +645,15 @@ internal class NativePlaybackSession(private val host: Host) {
         val is4k = width >= 3840 || height >= 2160
         val isHevc = codec == "hevc" || codec == "h265" || codec == "x265"
         val isHeavyPlayback = is4k || bitrate >= 25_000_000 || (isHevc && bitrate >= 18_000_000)
+        val memoryCacheMiB = host.activity.intent.getIntExtra(
+            NativePlaybackActivity.EXTRA_MEMORY_CACHE_MIB, 0)
+        val manualBytes = NativePlaybackBufferPolicy.manualTargetBytes(memoryCacheMiB, memoryClassMb)
         val bufferConfig =
             NativePlaybackBufferPolicy.resolve(
                 isTelevision = host.isTelevisionDevice,
                 memoryClassMb = memoryClassMb,
                 isHeavyPlayback = isHeavyPlayback,
+                memoryCacheMiB = memoryCacheMiB,
                 cachedBandwidthBytesPerSecond =
                     host.diagnostics.playbackHostBandwidthCache.resolve(
                         host.diagnostics.currentPlaybackHost()
@@ -697,10 +701,11 @@ internal class NativePlaybackSession(private val host: Host) {
             .setTargetBufferBytes(bufferConfig.targetBufferBytes)
             .setPrioritizeTimeOverSizeThresholds(bufferConfig.prioritizeTimeOverSizeThresholds)
             .build()
-        if (!host.isTelevisionDevice || !NativePlaybackSource.isHttpPlaybackUrl(
+        if ((!host.isTelevisionDevice && manualBytes == 0) || !NativePlaybackSource.isHttpPlaybackUrl(
                 host.activity.intent.getStringExtra(EXTRA_URL).orEmpty())) return delegate
         return NativePlaybackLoadControl(delegate, allocator, bufferConfig,
-            NativePlaybackBufferBudget.limit(memoryClassMb), bitrate, playbackTransferProgress)
+            if (manualBytes > 0) manualBytes else NativePlaybackBufferBudget.limit(memoryClassMb),
+            bitrate, playbackTransferProgress)
             .also { adaptiveLoadControl = it }
     }
 

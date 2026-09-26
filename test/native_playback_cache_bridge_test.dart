@@ -135,6 +135,7 @@ void main() {
     });
     final first = await _call('nativePlaybackCacheSnapshot', args(1));
     expect(first['storedBytes'], 1024);
+    expect(first['showDiskCache'], true);
     expect(first['forwardBytes'], 512);
     expect(first['currentURL'], launch['url']);
     expect(relays.last.calls, isEmpty);
@@ -148,6 +149,17 @@ void main() {
     expect((await _call('nativePlaybackCacheSnapshot', args(2)))['ok'], false);
     expect(relays.first.calls, [('snapshot', launch['url'])]);
   });
+  test('snapshot follows disabled setting even with retained transport bytes',
+      () async {
+    container.updateOverrides([
+      appSettingsProvider.overrideWithValue(AppSettings.fromJson(const {})),
+    ]);
+    final snapshot = await _call('nativePlaybackCacheSnapshot', args(1));
+    expect(snapshot['ok'], true);
+    expect(snapshot['showDiskCache'], false);
+    expect(snapshot['storedBytes'], 1024);
+  });
+
   test('pause resume and seek preserve ownership and reject stale commands',
       () async {
     await _call('setNativePlaybackActive', {...args(10), 'active': false});

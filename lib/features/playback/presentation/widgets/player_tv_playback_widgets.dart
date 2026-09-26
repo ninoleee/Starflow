@@ -63,6 +63,7 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
     required this.onOpenAudio,
     required this.onOpenOptions,
     this.networkSpeed,
+    this.videoFormat,
   });
 
   final String title;
@@ -88,6 +89,7 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
   final VoidCallback onOpenAudio;
   final VoidCallback onOpenOptions;
   final Widget? networkSpeed;
+  final Widget? videoFormat;
 
   @override
   Widget build(BuildContext context) {
@@ -118,29 +120,45 @@ class PlayerTvPlaybackChrome extends StatelessWidget {
                   playPauseFocusNode,
                 );
               },
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  StarflowIconButton(
-                    icon: Icons.arrow_back_rounded,
-                    tooltip: '返回',
-                    variant: StarflowButtonVariant.ghost,
-                    focusNode: backFocusNode,
-                    onPressed: onBack,
-                  ),
-                  if (networkSpeed != null) networkSpeed!,
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      titleText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: AppTextSizes.body,
-                        fontWeight: FontWeight.w600,
+                  Row(
+                    children: [
+                      StarflowIconButton(
+                        icon: Icons.arrow_back_rounded,
+                        tooltip: '返回',
+                        variant: StarflowButtonVariant.ghost,
+                        focusNode: backFocusNode,
+                        onPressed: onBack,
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          titleText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: AppTextSizes.body,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (networkSpeed != null)
+                        Expanded(
+                            child: Align(
+                                alignment: Alignment.centerRight,
+                                child: networkSpeed!)),
+                    ],
                   ),
+                  if (videoFormat != null)
+                    Padding(
+                        padding: const EdgeInsets.only(left: 60),
+                        child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: videoFormat!)),
                 ],
               ),
             ),

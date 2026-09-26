@@ -121,7 +121,9 @@ class _IoPlaybackStreamRelayService
     for (final session in _selectedSessions(url)) {
       session.bufferLease?.cancel();
       session.bufferLease = null;
-      session.memoryReady = memoryReady && session.playbackActive;
+      session.memoryReady = memoryReady &&
+          session.playbackActive &&
+          session.foregroundNetwork == 0;
       if (!session.memoryReady) {
         _stopPrefetch(session, 'memory_refill');
         continue;
@@ -168,6 +170,7 @@ class _IoPlaybackStreamRelayService
   @override
   void cancelReadAhead({String? url}) {
     for (final session in _selectedSessions(url)) {
+      _stopPrefetch(session, 'foreground');
       _revokeBufferPermission(session);
       session.prefetchCandidate = null;
       diskCache?.clearReadCursor(session.path);
@@ -801,6 +804,10 @@ class _IoPlaybackStreamRelayService
       PlaybackCacheWriter? writer;
       var networkCounted = false;
       try {
+        // A source-backed foreground read means memory needs delivery now.
+        // Drop stale high-water permission before opening another connection.
+        _stopPrefetch(session, 'foreground_network');
+        _revokeBufferPermission(session);
         session.foregroundNetwork++;
         networkCounted = true;
         final transferWatch = Stopwatch()..start();
@@ -1062,7 +1069,12 @@ class _IoPlaybackStreamRelayService
             resource: target,
             prefetchEpoch: epoch);
         session.prefetchClient = opened.client;
-        if (session.prefetchEpoch != epoch || session.closed) return;
+        if (session.prefetchEpoch != epoch ||
+            session.closed ||
+            !session.memoryReady ||
+            session.foregroundNetwork > 0) {
+          return;
+        }
         if (end >= 0 &&
             (opened.response.statusCode != 206 ||
                 opened.response.headers.value('content-range') !=

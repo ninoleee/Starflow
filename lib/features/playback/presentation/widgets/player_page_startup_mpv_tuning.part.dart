@@ -210,6 +210,7 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
       aggressiveTuning: _shouldUseAggressiveMpvTuning(target),
       isTelevision: _isTelevisionPlaybackDevice,
       memoryClassMb: _androidMemoryClassMb,
+      memoryCacheMiB: _playbackSettings.playbackMemoryCacheMiB,
     );
   }
 

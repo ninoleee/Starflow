@@ -20,6 +20,36 @@ import 'package:starflow/features/settings/presentation/playback_settings_page.d
 import 'package:starflow/features/settings/presentation/subtitle_settings_page.dart';
 
 void main() {
+  testWidgets('iOS native memory capacity stays system managed',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final initial = SeedData.defaultSettings.copyWith(
+        playbackEngine: PlaybackEngine.nativeContainer,
+        playbackMemoryCacheMiB: 128);
+    final repository = _MemorySettingsRepository(initial);
+    await tester.pumpWidget(ProviderScope(
+        overrides: [
+          appSettingsRepositoryProvider.overrideWithValue(repository),
+          appSettingsProvider.overrideWithValue(initial),
+        ],
+        child: MaterialApp(
+            home: PlaybackSettingsPage(
+          initialTimeoutSeconds: initial.playbackOpenTimeoutSeconds,
+          initialDefaultSpeed: initial.playbackDefaultSpeed,
+          initialBackgroundPlaybackEnabled:
+              initial.playbackBackgroundPlaybackEnabled,
+          initialPlaybackEngine: initial.playbackEngine,
+          initialPlaybackDecodeMode: initial.playbackDecodeMode,
+          initialNativeAudioOutputMode: initial.nativeAudioOutputMode,
+        ))));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('内存缓存大小'));
+    expect(find.text('系统管理'), findsOneWidget);
+    expect(repository.settings.playbackMemoryCacheMiB, 128);
+    expect(tester.takeException(), isNull);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
   testWidgets(
       'common page saves only shared fields and drive STRM uses latest shared values',
       (tester) async {
@@ -137,6 +167,14 @@ void main() {
     await tester.tap(find.text('512 MiB'));
     await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 1));
+    expect(repository.settings.playbackDiskCacheMiB, 512);
+    await tester.ensureVisible(find.text('内存缓存大小'));
+    await tester.tap(find.text('内存缓存大小'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('128 MiB'));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 1));
+    expect(repository.settings.playbackMemoryCacheMiB, 128);
     expect(repository.settings.playbackDiskCacheMiB, 512);
     expect(tester.takeException(), isNull);
   });

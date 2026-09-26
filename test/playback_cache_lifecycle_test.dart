@@ -284,8 +284,8 @@ void main() {
     final relay = createPlaybackStreamRelayService(diskCache: fixture.cache);
     addTearDown(relay.close);
     final target = await relay.prepareTarget(fixture.target);
-    (relay as PlaybackRelayBufferControl).updateBufferState(memoryReady: true);
     await fixture.get(target.streamUrl, 'bytes=0-511');
+    (relay as PlaybackRelayBufferControl).updateBufferState(memoryReady: true);
     await Future<void>.delayed(const Duration(milliseconds: 700));
     await fixture.cache.flushWrites();
     expect(fixture.ranges, contains('bytes=512-4095'));
@@ -348,8 +348,8 @@ void main() {
         await (await client.getUrl(Uri.parse(target.streamUrl))).close();
     final manifest = await manifestResponse.transform(utf8.decoder).join();
     final first = RegExp(r'http://[^\s]+').firstMatch(manifest)![0]!;
-    (relay as PlaybackRelayBufferControl).updateBufferState(memoryReady: true);
     await (await (await client.getUrl(Uri.parse(first))).close()).drain<void>();
+    (relay as PlaybackRelayBufferControl).updateBufferState(memoryReady: true);
     await Future<void>.delayed(const Duration(milliseconds: 700));
     await cache.flushWrites();
     expect(requests.where((p) => p.endsWith('.vtt')),

@@ -281,6 +281,7 @@ void main() {
     expect((await _get(first.streamUrl, method: 'HEAD')).$1, 200);
     expect((await _get('${first.streamUrl}/segment.ts')).$1, 404);
     expect((await _get('${first.streamUrl}?url=https://other.test')).$1, 404);
+    expect((await _get('${first.streamUrl}?static=false')).$1, 404);
     expect((await _get(second.streamUrl)).$2, _mp4);
     await relay.clear();
     expect((await _get(first.streamUrl)).$1, 404);

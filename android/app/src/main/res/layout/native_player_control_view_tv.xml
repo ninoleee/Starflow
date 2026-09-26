@@ -64,10 +64,10 @@
 
         <androidx.appcompat.widget.AppCompatTextView
             android:id="@+id/native_network_speed"
-            android:layout_width="160dp"
+            android:layout_width="wrap_content"
             android:layout_height="40dp"
-            android:gravity="center"
-            android:lines="2"
+            android:gravity="end|center_vertical"
+            android:singleLine="true"
             android:ellipsize="end"
             android:fontFeatureSettings="tnum"
             android:layout_marginStart="16dp"

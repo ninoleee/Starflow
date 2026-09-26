@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:starflow/app/theme/app_typography.dart';
 import 'package:starflow/features/playback/application/mpv_memory_priority_policy.dart';
 import 'package:starflow/features/playback/application/playback_control_intents.dart';
 import 'package:starflow/features/playback/application/playback_recovery_intent.dart';
@@ -79,6 +80,7 @@ import 'package:starflow/features/playback/presentation/widgets/mpv_stall_watchd
 import 'package:starflow/features/playback/presentation/widgets/player_adaptive_top_chrome.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_episode_picker_dialog.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_network_speed_label.dart';
+import 'package:starflow/features/playback/presentation/widgets/player_title.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_dialogs.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_formatters.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_playback_options_dialog.dart';
@@ -1084,8 +1086,8 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                         episodeQueue.entries.isNotEmpty &&
                                         episodeQueue.hasCurrent;
                                 return PlayerTvPlaybackChrome(
-                                  title:
-                                      (_resolvedTarget ?? widget.target).title,
+                                  title: playerTitle(
+                                      _resolvedTarget ?? widget.target),
                                   position: resolvedPosition,
                                   duration: resolvedDuration,
                                   playing:
@@ -1095,8 +1097,16 @@ class _PlayerPageState extends ConsumerState<PlayerPage>
                                   networkSpeed: MpvNetworkSpeedLabel(
                                     player: player,
                                     generation: _startupGeneration,
-                                    readDiskCacheBytes: () =>
-                                        _readMpvDiskCacheBytes(player),
+                                    readDiskCacheBytes: playbackSettings
+                                                .playbackDiskCacheMiB >
+                                            0
+                                        ? () => _readMpvDiskCacheBytes(player)
+                                        : null,
+                                  ),
+                                  videoFormat: MpvNetworkSpeedLabel(
+                                    player: player,
+                                    generation: _startupGeneration,
+                                    formatOnly: true,
                                   ),
                                   backFocusNode: _tvBackControlFocusNode,
                                   previousEpisodeFocusNode:

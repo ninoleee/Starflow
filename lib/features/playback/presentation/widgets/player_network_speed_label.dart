@@ -13,12 +13,14 @@ class MpvNetworkSpeedLabel extends StatelessWidget {
     this.generation = 0,
     this.visible = true,
     this.readDiskCacheBytes,
+    this.formatOnly = false,
   });
 
   final Player player;
   final int generation;
   final bool visible;
   final Future<int?> Function()? readDiskCacheBytes;
+  final bool formatOnly;
 
   Future<int?> _readSpeed() async {
     final native = player.platform;
@@ -48,17 +50,21 @@ class MpvNetworkSpeedLabel extends StatelessWidget {
     if (kIsWeb) return const SizedBox.shrink();
     return PlaybackNetworkSpeedLabel(
       sampleKey: (player, generation),
-      readSpeed: _readSpeed,
-      readCacheBytes: _readCacheBytes,
+      showFormat: false,
+      formatOnly: formatOnly,
+      readSpeed: formatOnly ? () async => null : _readSpeed,
+      readCacheBytes: formatOnly ? null : _readCacheBytes,
       memoryCacheLabel: '前向包约',
-      readDiskCacheBytes: readDiskCacheBytes,
-      readBufferDurationMs: _readBufferDurationMs,
-      readFormat: () async {
-        final native = player.platform;
-        return native is NativePlayer
-            ? readMpvPlaybackFormat(native.getProperty)
-            : null;
-      },
+      readDiskCacheBytes: formatOnly ? null : readDiskCacheBytes,
+      readBufferDurationMs: formatOnly ? null : _readBufferDurationMs,
+      readFormat: !formatOnly
+          ? null
+          : () async {
+              final native = player.platform;
+              return native is NativePlayer
+                  ? readMpvPlaybackFormat(native.getProperty)
+                  : null;
+            },
       visible: visible,
     );
   }

@@ -154,8 +154,8 @@ void main() {
       () async {
     container.dispose();
     container = ProviderContainer(overrides: [
-      appSettingsProvider.overrideWithValue(
-          AppSettings.fromJson(const {}).copyWith(playbackDiskCacheMiB: 512)),
+      appSettingsProvider.overrideWithValue(AppSettings.fromJson(const {})
+          .copyWith(playbackDiskCacheMiB: 512, playbackMemoryCacheMiB: 128)),
     ]);
     final provider = Provider<PlatformNativePlaybackLauncher>((ref) =>
         PlatformNativePlaybackLauncher(ref, isIOS: true, relayFactory: () {
@@ -169,6 +169,7 @@ void main() {
     expect(relays.single.targets.single, ordinary);
     final args = Map<String, dynamic>.from(launches.single.arguments as Map);
     expect(args['url'], relays.single.url);
+    expect(args['memoryCacheMiB'], 128);
     _expectOriginalIdentity(args, ordinary);
   });
 

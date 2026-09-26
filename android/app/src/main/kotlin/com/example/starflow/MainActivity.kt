@@ -288,6 +288,8 @@ class MainActivity : FlutterActivity() {
                             putExtra(NativePlaybackActivity.EXTRA_TITLE, title)
                             putExtra(NativePlaybackActivity.EXTRA_HEADERS_JSON, headersJson)
                             putExtra(NativePlaybackActivity.EXTRA_DECODE_MODE, decodeMode)
+                            putExtra(NativePlaybackActivity.EXTRA_MEMORY_CACHE_MIB,
+                                call.argument<Int>("memoryCacheMiB") ?: 0)
                             putExtra(
                                 NativePlaybackActivity.EXTRA_AUDIO_OUTPUT_MODE,
                                 audioOutputMode,

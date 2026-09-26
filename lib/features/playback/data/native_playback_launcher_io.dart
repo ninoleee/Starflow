@@ -209,6 +209,7 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
           'headersJson': jsonEncode(transport.headers),
           'decodeMode': decodeMode.name,
           'audioOutputMode': audioOutputMode.name,
+          'memoryCacheMiB': _ref.read(appSettingsProvider).playbackMemoryCacheMiB,
           'subtitleScale': clampPlaybackSubtitleScale(subtitleScale),
           'primarySubtitlePosition':
               clampPlaybackSubtitlePosition(primarySubtitlePosition),
@@ -552,6 +553,8 @@ class PlatformNativePlaybackLauncher implements NativePlaybackLauncher {
       'resolverSessionId': sessionId,
       'currentURL': url,
       'generation': generation,
+      'showDiskCache':
+          _ref.read(appSettingsProvider).playbackDiskCacheMiB > 0,
       if (snapshot != null) 'storedBytes': snapshot.storedBytes,
       if (snapshot?.forwardBytes != null)
         'forwardBytes': snapshot!.forwardBytes,

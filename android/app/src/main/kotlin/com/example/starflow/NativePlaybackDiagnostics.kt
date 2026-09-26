@@ -26,6 +26,7 @@ internal class NativePlaybackDiagnostics(
     private val invokeResolver: (String, Map<String, Any?>, (Map<String, Any?>) -> Unit) -> Unit =
         MainActivity::invokeNativeFntv,
     private val now: () -> Long = SystemClock::elapsedRealtime,
+    private val logVideoDiagnostic: (String) -> Unit = { NativePlaybackFormatting.logPlayback(it) },
 ) {
     private companion object {
         // Activity recreation may retain the Flutter resolver session.
@@ -64,6 +65,8 @@ internal class NativePlaybackDiagnostics(
     private var bufferReportedReady = false
     internal var relayStoredBytes: Long? = null
         private set
+    internal var showDiskCache = false
+        private set
 
     private fun invalidateCacheSample() {
         cacheGeneration = nextCacheGeneration.incrementAndGet()
@@ -76,6 +79,7 @@ internal class NativePlaybackDiagnostics(
         if (cacheURL.isNotBlank()) reportMemoryBufferState(forceNotReady = true, force = true)
         cacheSession = host.target.resolverSessionId
         cacheURL = url
+        showDiskCache = false
         bufferPlayer = host.session.player
         bufferReportedAt = null
         invalidateCacheSample()
@@ -88,6 +92,7 @@ internal class NativePlaybackDiagnostics(
         setPlaybackActive(false)
         cancelReadAhead()
         cacheURL = ""
+        showDiskCache = false
         cacheSession = ""
         bufferPlayer = null
         bufferReportedAt = null
@@ -150,6 +155,7 @@ internal class NativePlaybackDiagnostics(
             }
             if (result["resolverSessionId"] != cacheSession || result["currentURL"] != cacheURL ||
                 (result["generation"] as? Number)?.toLong() != generation) return@invokeResolver
+            if (result["ok"] == true) showDiskCache = result["showDiskCache"] == true
             relayStoredBytes = if (result["ok"] == true)
                 (result["storedBytes"] as? Number)?.toLong()?.takeIf { it >= 0L } else null
         }
@@ -240,7 +246,20 @@ internal class NativePlaybackDiagnostics(
             ) {
                 playbackPerformanceTracker.onVideoDecoder(decoderName)
                 currentVideoDecoder = decoderName
+                logVideoDiagnostic("native.video.decoder.initialized name=$decoderName " +
+                    "durationMs=$initializationDurationMs")
                 logPlaybackHealth("video-decoder")
+            }
+
+            override fun onVideoDecoderReleased(eventTime: AnalyticsListener.EventTime, decoderName: String) {
+                logVideoDiagnostic("native.video.decoder.released name=$decoderName")
+                if (currentVideoDecoder == decoderName) currentVideoDecoder = ""
+            }
+
+            override fun onVideoCodecError(eventTime: AnalyticsListener.EventTime, error: Exception) {
+                // Exception messages can contain source URLs; record the type only.
+                logVideoDiagnostic("native.video.decoder.error name=${currentVideoDecoder.ifBlank { "unknown" }} " +
+                    "type=${error.javaClass.simpleName}")
             }
 
             override fun onAudioDecoderInitialized(
@@ -329,24 +348,28 @@ internal class NativePlaybackDiagnostics(
     fun logVideoTracks(tracks: Tracks) {
         val groups = tracks.groups.filter { it.type == C.TRACK_TYPE_VIDEO }
         if (groups.isEmpty()) {
-            NativePlaybackFormatting.logPlayback("native.video.tracks none")
+            logVideoDiagnostic("native.video.tracks none")
             return
         }
         val summaries =
             groups.flatMapIndexed { groupIndex, group ->
                 (0 until group.length).map { trackIndex ->
                     val format = group.getTrackFormat(trackIndex)
+                    val support = group.getTrackSupport(trackIndex)
                     "g$groupIndex:t$trackIndex" +
                         ":mime=${format.sampleMimeType ?: "-"}" +
                         ":codecs=${format.codecs ?: "-"}" +
                         ":width=${format.width}" +
                         ":height=${format.height}" +
+                        ":frameRate=${format.frameRate}" +
                         ":color=${format.colorInfo?.toString() ?: "-"}" +
                         ":supported=${group.isTrackSupported(trackIndex)}" +
+                        ":supportCode=$support" +
+                        ":support=${NativePlaybackFormatting.formatTrackSupport(support)}" +
                         ":selected=${group.isTrackSelected(trackIndex)}"
                 }
             }
-        NativePlaybackFormatting.logPlayback("native.video.tracks ${summaries.joinToString("|")}")
+        logVideoDiagnostic("native.video.tracks ${summaries.joinToString("|")}")
     }
 
     fun logSubtitleTracks(tracks: Tracks) {
@@ -410,18 +433,25 @@ internal class NativePlaybackDiagnostics(
         }
         sampleRelayCacheIfVisible()
         val label = host.activity.findViewById<TextView?>(R.id.native_network_speed) ?: return
+        val metrics = host.activity.resources.displayMetrics
+        label.maxWidth = (metrics.widthPixels - 120 * metrics.density).toInt().coerceAtLeast(0)
         val current = host.session.player
         val bufferDurationMs = current?.let {
             (it.bufferedPosition - it.currentPosition).coerceAtLeast(0L)
         }
         val text = listOf(
             NativePlaybackFormatting.formatNetworkSpeed(host.session.playbackTransferProgress?.networkBytesPerSecond),
-            NativePlaybackFormatting.formatCacheBytes(host.session.cachedMediaBytes) + " | " +
-                NativePlaybackFormatting.formatCacheBytes(relayStoredBytes),
+            NativePlaybackFormatting.formatCacheBytes(host.session.cachedMediaBytes) +
+                if (showDiskCache) " | " + NativePlaybackFormatting.formatCacheBytes(relayStoredBytes) else "",
             NativePlaybackFormatting.formatBufferDuration(bufferDurationMs),
-        ).joinToString(" · ") + "\n" + (NativePlaybackFormatting.formatVideoFormat(
+        ).joinToString(" · ")
+        val format = NativePlaybackFormatting.formatVideoFormat(
             current?.videoFormat, current?.audioFormat,
-        ) ?: "识别中")
+        ) ?: "识别中"
+        host.activity.findViewById<TextView?>(R.id.native_title_secondary)?.apply {
+            if (this.text.toString() != format) this.text = format
+            visibility = View.VISIBLE
+        }
         if (label.text.toString() != text) label.text = text
         label.visibility = View.VISIBLE
     }

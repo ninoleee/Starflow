@@ -23,6 +23,24 @@ class NativePlaybackCacheDiagnosticsTest {
     }
 
     @Test
+    fun diskVisibilityFollowsValidatedSnapshotAndResetsOnTransportChange() {
+        assertFalse(diagnostics.showDiskCache)
+        diagnostics.sampleRelayCacheIfVisible()
+        val enabled = calls.last()
+        enabled.reply(enabled.args + mapOf("ok" to true, "showDiskCache" to true, "storedBytes" to 2048L))
+        assertTrue(diagnostics.showDiskCache)
+        time += 2000
+        diagnostics.sampleRelayCacheIfVisible()
+        val disabled = calls.last()
+        disabled.reply(disabled.args + mapOf("ok" to true, "showDiskCache" to false, "storedBytes" to 2048L))
+        assertFalse(diagnostics.showDiskCache)
+        enabled.reply(enabled.args + mapOf("ok" to true, "showDiskCache" to true))
+        assertFalse(diagnostics.showDiskCache)
+        diagnostics.beginCacheTransport("https://example.test/direct.mp4", true)
+        assertFalse(diagnostics.showDiskCache)
+    }
+
+    @Test
     fun visibleSamplingIsLocalSingleFlightAndLowFrequency() {
         diagnostics.sampleRelayCacheIfVisible()
         repeat(5) { diagnostics.sampleRelayCacheIfVisible() }

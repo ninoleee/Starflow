@@ -12,8 +12,12 @@ void main() {
         formatPlaybackMetrics(2048, 33554432, 18000, diskCacheBytes: 100663296),
         '2.0 KB/s · 32.0 MB | 96.0 MB · 18s');
     expect(formatPlaybackMetrics(null, null, null), '-- · -- · --');
-    expect(formatPlaybackBufferDuration(59999), '1m 0s');
-    expect(formatPlaybackBufferDuration(3600000), '1h 0m');
+    expect(formatPlaybackBufferDuration(0), '0s');
+    expect(formatPlaybackBufferDuration(59999), '60s');
+    expect(formatPlaybackBufferDuration(90000), '90s');
+    expect(formatPlaybackBufferDuration(120000), '120s');
+    expect(formatPlaybackBufferDuration(3600000), '3600s');
+    expect(formatPlaybackBufferDuration(null), '--');
     expect(formatPlaybackBufferDuration(-1), '--');
     expect(parsePlaybackDurationMilliseconds('18.5'), 18500);
     expect(parsePlaybackDurationMilliseconds('1e308'), isNull);

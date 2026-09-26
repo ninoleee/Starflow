@@ -49,7 +49,7 @@ internal class NativePlaybackControllerView(
             }
         }
         val primaryTitle = host.target.buildPlaybackPagePrimaryTitle()
-        val secondaryTitle = host.target.buildPlaybackPageSecondaryTitle()
+        val secondaryTitle = "识别中"
         host.activity.findViewById<TextView?>(R.id.native_title)?.text = primaryTitle
         host.activity.findViewById<TextView?>(R.id.native_title_secondary)?.apply {
             if (secondaryTitle.isBlank()) {

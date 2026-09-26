@@ -543,7 +543,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
         ),
       ],
       topButtonBar: materialTopButtonBar,
-      topButtonBarMargin: padding.copyWith(bottom: 0),
+      topButtonBarMargin: padding.copyWith(bottom: 36),
       bottomButtonBarMargin: padding.copyWith(top: 0),
       seekBarMargin: padding.copyWith(top: 0) + playbackSeekBarMargin,
     );
@@ -564,7 +564,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
       padding: EdgeInsets.zero,
       buttonBarHeight: playbackButtonBarHeight,
       topButtonBar: desktopTopButtonBar,
-      topButtonBarMargin: padding.copyWith(bottom: 0),
+      topButtonBarMargin: padding.copyWith(bottom: 36),
       bottomButtonBarMargin: padding.copyWith(top: 0),
       bottomButtonBar: _buildAdaptiveDesktopBottomButtonBar(),
       seekBarMargin: EdgeInsets.only(left: padding.left, right: padding.right) +
@@ -683,7 +683,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
     VideoState state, {
     required AppSettings settings,
   }) {
-    return [
+    return _buildMpvTopBarWithMetrics(state, settings, [
       Tooltip(
         message: '返回',
         child: MaterialCustomButton(
@@ -693,13 +693,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
           },
         ),
       ),
-      MpvNetworkSpeedLabel(
-        player: state.widget.controller.player,
-        generation: _startupGeneration,
-        readDiskCacheBytes: () =>
-            _readMpvDiskCacheBytes(state.widget.controller.player),
-      ),
-      const Spacer(),
+      _buildMpvTopBarTitle(),
       if (_hasPlaybackEpisodeQueue)
         Tooltip(
           message: '选集',
@@ -725,14 +719,14 @@ extension _PlayerPageStateControls on _PlayerPageState {
           },
         ),
       ),
-    ];
+    ]);
   }
 
   List<Widget> _buildAdaptiveDesktopTopButtonBar(
     VideoState state, {
     required AppSettings settings,
   }) {
-    return [
+    return _buildMpvTopBarWithMetrics(state, settings, [
       Tooltip(
         message: '返回',
         child: MaterialDesktopCustomButton(
@@ -742,13 +736,7 @@ extension _PlayerPageStateControls on _PlayerPageState {
           },
         ),
       ),
-      MpvNetworkSpeedLabel(
-        player: state.widget.controller.player,
-        generation: _startupGeneration,
-        readDiskCacheBytes: () =>
-            _readMpvDiskCacheBytes(state.widget.controller.player),
-      ),
-      const Spacer(),
+      _buildMpvTopBarTitle(),
       if (_hasPlaybackEpisodeQueue)
         Tooltip(
           message: '选集',
@@ -774,7 +762,72 @@ extension _PlayerPageStateControls on _PlayerPageState {
           },
         ),
       ),
+    ]);
+  }
+
+  List<Widget> _buildMpvTopBarWithMetrics(
+    VideoState state,
+    AppSettings settings,
+    List<Widget> buttons,
+  ) {
+    return [
+      Expanded(
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            SizedBox(
+              height: playbackButtonBarHeight,
+              child: Row(children: [
+                ...buttons.take(2),
+                Flexible(
+                    child: MpvNetworkSpeedLabel(
+                  player: state.widget.controller.player,
+                  generation: _startupGeneration,
+                  readDiskCacheBytes: settings.playbackDiskCacheMiB > 0
+                      ? () =>
+                          _readMpvDiskCacheBytes(state.widget.controller.player)
+                      : null,
+                )),
+                ...buttons.skip(2),
+              ]),
+            ),
+            Positioned(
+              top: playbackButtonBarHeight,
+              left: 48,
+              right: 0,
+              child: Row(children: [
+                Expanded(
+                    child: MpvNetworkSpeedLabel(
+                  player: state.widget.controller.player,
+                  generation: _startupGeneration,
+                  formatOnly: true,
+                )),
+              ]),
+            ),
+          ],
+        ),
+      ),
     ];
+  }
+
+  Widget _buildMpvTopBarTitle() {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Text(
+          playerTitle(_resolvedTarget ?? widget.target),
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.left,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: AppTextSizes.body,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
   }
 
   bool get _hasPlaybackEpisodeQueue {
@@ -1087,11 +1140,11 @@ extension _PlayerPageStateControls on _PlayerPageState {
           onConfigureSeriesSkip: () => _configureSeriesSkipPreference(player),
           onSelectVersion:
               supportsPlaybackVariants(_resolvedTarget ?? widget.target)
-              ? () async {
-                  Navigator.of(context).pop();
-                  await _selectPlaybackVersion(player, isTelevision);
-                }
-              : null,
+                  ? () async {
+                      Navigator.of(context).pop();
+                      await _selectPlaybackVersion(player, isTelevision);
+                    }
+                  : null,
           onSelectQuality: (quality) => _switchFntvPlaybackQuality(
             player,
             quality,
@@ -1171,7 +1224,9 @@ extension _PlayerPageStateControls on _PlayerPageState {
   ) async {
     final revision = ++_manualTrackRevision;
     bool isCurrent() =>
-        mounted && identical(_player, player) && revision == _manualTrackRevision;
+        mounted &&
+        identical(_player, player) &&
+        revision == _manualTrackRevision;
     final target = _resolvedTarget ?? widget.target;
     if (target.isFntvTranscoding) {
       final selected = await showPlaybackMenuDialog<String>(

@@ -52,6 +52,30 @@ void main() {
     expect(f.requests.length, stopped);
   });
 
+  test('foreground network revokes speculation until a fresh ready report',
+      () async {
+    final f = await _Fixture.create(autoReady: false);
+    addTearDown(f.close);
+    _expectComplete(await f.read(0, 511), 512);
+    final speculation = f.holdNext(start: 512);
+    f.reportReady();
+    await speculation.entered.future.timeout(_wait);
+    try {
+      _expectComplete(await f.read(4 * _mib, 4 * _mib + 511), 512);
+    } finally {
+      speculation.release();
+    }
+    final afterForeground = f.requests.length;
+    await Future<void>.delayed(const Duration(milliseconds: 650));
+    expect(f.requests.length, afterForeground,
+        reason:
+            'A high-water report from before foreground networking is stale.');
+    final resumed = f.holdNext(start: 4 * _mib + 512);
+    f.reportReady();
+    await resumed.entered.future.timeout(_wait);
+    resumed.release();
+  });
+
   test('foreground adopts an in-flight range before it finishes or writes',
       () async {
     final f = await _Fixture.create(autoReady: false);

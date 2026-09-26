@@ -7,6 +7,45 @@ import 'package:starflow/features/playback/application/playback_stream_relay_con
 import 'package:starflow/features/playback/domain/playback_models.dart';
 
 void main() {
+  test('manual memory capacity includes forward and back caches with TV caps',
+      () {
+    const target = PlaybackTarget(
+      title: 'Movie',
+      sourceId: 'nas',
+      sourceName: 'NAS',
+      sourceKind: MediaSourceKind.nas,
+      streamUrl: 'https://example.com/movie.mp4',
+      bitrate: 160000000,
+    );
+    const mib = 1024 * 1024;
+    for (final selected in [64, 128, 256, 512]) {
+      final budget = resolveMpvBufferBudget(
+          target: target,
+          aggressiveTuning: true,
+          isTelevision: false,
+          memoryCacheMiB: selected);
+      expect(budget.forwardBytes + budget.backBytes, selected * mib);
+      expect(budget.backBytes, greaterThan(0));
+    }
+    for (final (memory, cap) in [(256, 128), (512, 208), (1024, 288)]) {
+      final budget = resolveMpvBufferBudget(
+          target: target,
+          aggressiveTuning: true,
+          isTelevision: true,
+          memoryClassMb: memory,
+          memoryCacheMiB: 512);
+      expect(budget.forwardBytes + budget.backBytes, cap * mib);
+      expect(budget.memoryCapApplied, isTrue);
+    }
+    final small = resolveMpvBufferBudget(
+        target: target,
+        aggressiveTuning: true,
+        isTelevision: true,
+        memoryClassMb: 256,
+        memoryCacheMiB: 64);
+    expect(small.forwardBytes + small.backBytes, 64 * mib);
+  });
+
   group('MPV playback policy', () {
     test('detects remote and live playback urls', () {
       expect(

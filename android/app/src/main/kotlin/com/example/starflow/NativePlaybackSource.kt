@@ -3,6 +3,7 @@ package com.example.starflow
 import android.net.Uri
 import androidx.media3.common.MimeTypes
 import java.util.Locale
+import java.net.URI
 import org.json.JSONObject
 
 internal object NativePlaybackSource {
@@ -85,7 +86,21 @@ internal object NativePlaybackSource {
         }
     }
 
-    fun buildTranscodedVideoFallbackUrl(rawUrl: String): String? {
+    fun supportsVideoTranscodeFallback(rawUrl: String, sourceKind: String): Boolean {
+        if (sourceKind != "emby") return false
+        val uri = runCatching { URI(rawUrl.trim()) }.getOrNull() ?: return false
+        if (uri.scheme?.lowercase(Locale.US) !in setOf("http", "https") ||
+            uri.host.isNullOrBlank()) return false
+        // Only the media server's direct-stream endpoint accepts this switch.
+        // Relay URLs are opaque capabilities, never transcode endpoints.
+        val path = uri.path.orEmpty()
+        if (path.contains("/playback-relay/", ignoreCase = true)) return false
+        return Regex("(?:^|/)Videos/[^/]+/stream(?:\\.[a-zA-Z0-9]+)?$",
+            RegexOption.IGNORE_CASE).containsMatchIn(path)
+    }
+
+    fun buildTranscodedVideoFallbackUrl(rawUrl: String, sourceKind: String): String? {
+        if (!supportsVideoTranscodeFallback(rawUrl, sourceKind)) return null
         val uri = Uri.parse(rawUrl.trim())
         if (!uri.isAbsolute || uri.host.isNullOrBlank()) {
             return null
@@ -94,6 +109,7 @@ internal object NativePlaybackSource {
         for (name in uri.queryParameterNames) {
             queryParameters[name] = uri.getQueryParameter(name).orEmpty()
         }
+        if (queryParameters["static"].equals("false", ignoreCase = true)) return null
         queryParameters["static"] = "false"
         val builder = uri.buildUpon().clearQuery()
         for ((name, value) in queryParameters) {

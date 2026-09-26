@@ -23,12 +23,7 @@ String formatPlaybackCacheBytes(int? bytes) {
 String formatPlaybackBufferDuration(int? durationMs) {
   if (durationMs == null || durationMs < 0) return '--';
   final totalSeconds = (durationMs / 1000).round();
-  final hours = totalSeconds ~/ 3600;
-  final minutes = (totalSeconds % 3600) ~/ 60;
-  final seconds = totalSeconds % 60;
-  if (hours > 0) return '${hours}h ${minutes}m';
-  if (minutes > 0) return '${minutes}m ${seconds}s';
-  return '${seconds}s';
+  return '${totalSeconds}s';
 }
 
 String formatPlaybackMetrics(

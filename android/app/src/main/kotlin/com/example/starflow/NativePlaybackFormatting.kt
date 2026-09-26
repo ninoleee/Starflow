@@ -1,6 +1,7 @@
 package com.example.starflow
 
 import androidx.media3.common.Player
+import androidx.media3.common.C
 import androidx.media3.common.Format
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -9,6 +10,15 @@ import java.util.TimeZone
 import org.json.JSONObject
 
 internal object NativePlaybackFormatting {
+    fun formatTrackSupport(support: Int): String = when (support) {
+        C.FORMAT_HANDLED -> "handled"
+        C.FORMAT_EXCEEDS_CAPABILITIES -> "exceeds-capabilities"
+        C.FORMAT_UNSUPPORTED_DRM -> "unsupported-drm"
+        C.FORMAT_UNSUPPORTED_SUBTYPE -> "unsupported-subtype"
+        C.FORMAT_UNSUPPORTED_TYPE -> "unsupported-type"
+        else -> "unknown"
+    }
+
     fun formatSubtitleScaleLabel(value: Double): String {
         return "${value.toInt()}号"
     }
@@ -51,14 +61,7 @@ internal object NativePlaybackFormatting {
     fun formatBufferDuration(durationMs: Long?): String {
         if (durationMs == null || durationMs < 0L) return "--"
         val totalSeconds = durationMs / 1_000L + if (durationMs % 1_000L >= 500L) 1L else 0L
-        val hours = totalSeconds / 3_600L
-        val minutes = (totalSeconds % 3_600L) / 60L
-        val seconds = totalSeconds % 60L
-        return when {
-            hours > 0L -> "${hours}h ${minutes}m"
-            minutes > 0L -> "${minutes}m ${seconds}s"
-            else -> "${seconds}s"
-        }
+        return "${totalSeconds}s"
     }
 
     fun formatPlaybackMetrics(

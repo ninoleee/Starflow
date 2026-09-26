@@ -5,6 +5,42 @@ import 'package:starflow/features/playback/domain/playback_network_speed.dart';
 import 'package:starflow/features/playback/presentation/widgets/playback_network_speed_label.dart';
 
 void main() {
+  testWidgets('disabling disk metrics drops late values and stops disk reads',
+      (tester) async {
+    final pending = Completer<int?>();
+    var diskReads = 0;
+    Widget label(bool enabled) => MaterialApp(
+          home: PlaybackNetworkSpeedLabel(
+            sampleKey: 1,
+            readSpeed: () async => 1024,
+            readCacheBytes: () async => 2048,
+            readDiskCacheBytes: enabled
+                ? () {
+                    diskReads++;
+                    return diskReads == 1 ? pending.future : Future.value(4096);
+                  }
+                : null,
+            readBufferDurationMs: () async => 3000,
+            readFormat: () async => '1920x1080 · H264 · AAC',
+          ),
+        );
+    await tester.pumpWidget(label(true));
+    await tester.pumpWidget(label(false));
+    await tester.pump();
+    pending.complete(999999);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 3));
+    expect(diskReads, 1);
+    expect(find.textContaining('1.0 KB/s · 2.0 KB · 3s'), findsOneWidget);
+    expect(find.textContaining('1920x1080 · H264 · AAC'), findsOneWidget);
+    expect(find.textContaining('|'), findsNothing);
+    await tester.pumpWidget(label(true));
+    await tester.pump();
+    expect(
+        find.textContaining('1.0 KB/s · 2.0 KB | 4.0 KB · 3s'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   test('cache metrics omit memory and disk labels', () {
     expect(
         formatPlaybackMetrics(1024, 2048, 3000,
@@ -87,19 +123,21 @@ void main() {
     await tester.pumpWidget(
         label(1, 10 * 1024 * 1024, 512 * 1024 * 1024, 1024 * 1024 * 1024));
     await tester.pump();
-    final longLabel = find.text('10.0 MB/s · 前向包约 512.0 MB | 1.0 GB · 59m 59s');
+    final longLabel =
+        find.textContaining('10.0 MB/s · 前向包约 512.0 MB | 1.0 GB · 3599s');
     expect(longLabel, findsOneWidget);
     expect(tester.widget<Text>(longLabel).style!.fontSize, 10);
     expect(
         tester
-            .widget<Text>(find.text('3840x2160 · HEVC · EAC3'))
+            .widget<Text>(find.textContaining('3840x2160 · HEVC · EAC3'))
             .style!
             .fontSize,
         10);
 
     await tester.pumpWidget(label(2, 1024, 1024, 1024));
     await tester.pump();
-    final shortLabel = find.text('1.0 KB/s · 前向包约 1.0 KB | 1.0 KB · 59m 59s');
+    final shortLabel =
+        find.textContaining('1.0 KB/s · 前向包约 1.0 KB | 1.0 KB · 3599s');
     expect(shortLabel, findsOneWidget);
     expect(tester.widget<Text>(shortLabel).style!.fontSize, 10);
     await tester.pumpWidget(const SizedBox());

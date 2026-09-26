@@ -160,8 +160,8 @@ void main() {
       expect(_icon('播放设置'), findsNothing);
       expect(find.byType(LiveNetworkSpeedLabel), findsOneWidget);
       await tester.pump();
-      expect(find.text('2.0 KB/s · 32.0 MB · 18s'), findsOneWidget);
-      expect(find.text('1920x1080 · HEVC · AAC'), findsOneWidget);
+      expect(find.textContaining('2.0 KB/s · 32.0 MB · 18s'), findsOneWidget);
+      expect(find.textContaining('1920x1080 · HEVC · AAC'), findsOneWidget);
       expect(tester.getTopRight(find.byType(LiveNetworkSpeedLabel)).dx,
           closeTo(size.width - 12, 1));
       await _capture(tester, capture, 'player-${size.width.toInt()}');

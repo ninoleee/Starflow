@@ -7,6 +7,27 @@ import org.junit.Test
 
 class NativePlaybackBufferPolicyTest {
     @Test
+    fun manualCapacityIsBoundedAndSurvivesEpisodeAndBandwidthOverrides() {
+        for (tv in listOf(false, true)) {
+            for (switch in listOf(false, true)) {
+                for ((memory, cap) in listOf(256 to 64, 512 to 128, 1024 to 256)) {
+                    for (requested in listOf(64, 128, 256, 512)) {
+                        val config = NativePlaybackBufferPolicy.resolve(tv, memory, true,
+                            cachedBandwidthBytesPerSecond = 50_000_000,
+                            sourceBitrate = 160_000_000,
+                            isRemoteEpisodeSwitch = switch, memoryCacheMiB = requested)
+                        assertEquals(minOf(requested, cap) * 1024 * 1024, config.targetBufferBytes)
+                        assertEquals(120_000, config.maxBufferMs)
+                        assertFalse(config.prioritizeTimeOverSizeThresholds)
+                    }
+                }
+            }
+        }
+        assertEquals(0, NativePlaybackBufferPolicy.manualTargetBytes(-1, 1024))
+        assertEquals(0, NativePlaybackBufferPolicy.manualTargetBytes(1024, 1024))
+    }
+
+    @Test
     fun lowMemoryTelevisionUsesSmallBoundedBuffer() {
         val config = NativePlaybackBufferPolicy.resolve(
             isTelevision = true,

@@ -1,5 +1,46 @@
 # 主机性能与回归验证
 
+## 2026-09-26 前台补数据期间禁止额外预取
+
+- 修复“前台向源站补内存／补缺口时，磁盘预取仍抢网络”的调度竞态。进入 `foregroundNetwork` 路径先停止预取并撤销旧高水位；前台网络读取存在期间，心跳即使报告 ready 也不能授权；本次请求结束后，下一次独立心跳才恢复。磁盘回读和已被前台接管的同一在途区间不套用该限制。
+- 固定 Flutter 3.38.10 / Dart 3.10.9，`flutter test --no-pub` 联合运行本页“内存优先与磁盘协同”的 18 文件，再加 `playback_memory_cache_settings_test.dart`，**223 项通过**。其中 4 个核心文件竞态专项 **57 项通过**；新增“前台网络撤销预取且必须等新心跳”和后置授权场景。集合重叠，不累加为全仓结果。
+- 3 份相关 Dart 源码／测试定向分析无问题，`git diff --check` 通过。未改原生策略，未做真机吞吐或卡顿对照；此修复已纳入随后生成的 iOS／TV 包，但设备效果仍需日志复核。
+
+## 2026-09-26 Exo 视频能力诊断细分
+
+- 视频轨道日志增加 Media3 原始支持状态、分类和帧率，实际视频解码器初始化／释放／错误独立记录；不再仅凭 `supported=false` 区分硬件能力，不调整解码或回退逻辑。错误事件省略异常消息，避免复制源 URL。字段契约见 [播放架构](architecture.md)。
+- 固定 Flutter 3.38.10 Android 配置与 JDK 17，Gradle `:app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true` 定向 VideoDiagnostics／CacheDiagnostics／TranscodeFallback／PlaybackNetworkSpeed，**19 项通过，0 失败／错误／跳过**。新增 2 项覆盖五类能力状态、空轨道、未知代码、独立初始化事件、释放名称隔离及异常消息不泄露；与历史集合重叠，不相加为全仓结果。
+- `git diff --check` 通过。未运行 Flutter 测试、未打包、未修改版本，也未验证设备是否能解码原 4K AVC 片源；此结果仅为 Kotlin 编译和主机诊断回归。
+
+## 2026-09-26 播放信息单行右对齐
+
+- 最终布局改为 MPV／Exo 左上角剧名集数、下一行左对齐格式，右上角仅网络指标。固定 SDK 执行 `player_adaptive_controls_layout_test.dart`、`player_tv_playback_widgets_test.dart`、`playback_network_speed_label_test.dart`、`playback_cache_metrics_label_test.dart`，30 项通过；修复 TV 网络区域未贴右边界的问题。相关 Dart 静态检查通过。以下按钮下方方案为本轮早期布局，已被最终方案替代；未完成原生编译、真机验收或 APK 构建。
+- 后续 MPV 位置调整：信息移到右上角按钮栏下方，TV 位于顶部返回／标题行下方。`player_adaptive_controls_layout_test.dart`、`player_tv_playback_widgets_test.dart`、`playback_network_speed_label_test.dart` 共 24 项主机测试通过，TV 新增右侧边界和位于返回按钮下方的断言；相关 Dart 静态检查通过，未做真机视觉验收。
+- 网速、缓存和视频格式合并为单行右对齐，向左使用可用空间；Android 原生按内容扩展并限制最大宽度，Flutter 顶栏与节目单侧栏约束宽度，极窄空间末尾省略而不换行。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10，运行 `flutter test --no-pub --reporter expanded test/playback_network_speed_label_test.dart test/playback_cache_metrics_label_test.dart test/live_network_speed_label_test.dart test/live_tv_page_test.dart`，28 项通过。覆盖单行文本、窄宽度、双倍字号、手机／TV 控制栏和节目单侧栏，以及采样生命周期。
+- 这是主机组件回归，未做 Android／iOS 原生编译或真机视觉验收，未构建 APK 或递增版本。
+
+## 2026-09-26 不支持轨道时误改代理 URL
+
+- 用户 `18:42:40` 导出日志为修复前设备样本：18:42:15.210 记录 3840×2160 AVC `avc1.640034`、`supported=false`，随后执行 unsupported-fallback，18:42:15.670 本地 relay 返回 404。源码确认旧回退对任意绝对 URL 附加 `static=false`，而 relay 拒绝 query；磁盘仅写入 2 MiB、未报告禁用或丢弃，不能将本次失败解释为 120 秒缓存耗尽。
+- 限定直接 Emby stream 接口才可 URL 转码回退，NAS／夸克／代理不改写、不为无效回退重建播放器。代理 query 安全规则不放宽，不声称修复设备解码能力，设备补验见 [真机清单](performance-device.md)。
+- 固定 Flutter 3.38.10，`flutter test --no-pub test/playback_stream_relay_security_test.dart` **16 项通过**，新增 `static=false` 仍拒绝。JDK 17，Gradle `:app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true` 定向 TranscodeFallback／AudioRecovery／HlsFallbackPolicy **29 项通过，0 失败／错误／跳过**，包含同类 4K 超能力轨道不重建／不改 URL 的主机回归。
+- `git diff --check` 通过。未打包或执行设备解码测试，未改版本、未复制用户原始日志入仓库。
+
+## 2026-09-26 内存缓存容量设置
+
+- 增加独立 MiB 容量设置与持久化，接入 MPV 前向／回退预算和 Android 原生加载控制；iOS AVPlayer 显示系统管理。默认自动，120 秒及 75% 不开放设置，设备限制和生效时机见 [播放架构](architecture.md)。
+- 固定 Flutter 3.38.10，`flutter test --no-pub` 联合运行 `playback_memory_cache_settings_test.dart`、`playback_mpv_policy_test.dart`、`native_playback_transport_test.dart`、`features/settings/presentation/settings_page_auto_save_test.dart`、`features/settings/application/settings_controller_persistence_test.dart`，**71 项通过**。随后补 iOS 系统管理界面场景，该页面文件 **9 项通过**，与联合集合重叠不累加。首轮新增 UI 测试因手动平台 override 清理时机失败，改用 `TargetPlatformVariant` 后通过。
+- JDK 17、`:app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true`，BufferPolicy／LoadControl／ReadAheadPolicy／Session 四类 **54 项通过，0 失败／错误／跳过**。覆盖手动容量在 TV／手机、切集、高码率和不同内存档下的安全限制。
+- 定向 Dart 分析仅有 `app_settings.dart` 原有 `_maximumNumericValue` 的 `unnecessary_non_null_assertion` 警告，新改动未新增分析问题。`git diff --check` 通过。未打包、未修改版本，未测真机峰值内存或长播表现。
+
+## 2026-09-26 关闭磁盘缓存时隐藏指标
+
+- MPV 手机／桌面／TV 及 Android、iOS 原生标签按磁盘缓存设置隐藏磁盘项与分隔符，行为见 [播放架构](architecture.md)。不改变缓存容量、预读或缓冲策略。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10，运行 `flutter test test/playback_cache_metrics_label_test.dart test/playback_network_speed_label_test.dart test/playback_network_speed_test.dart test/native_playback_cache_bridge_test.dart`，**21 项通过**；覆盖开关切换、迟到结果、关闭后停止 MPV 磁盘读取、原生快照标记及原有采样规则。相关 5 份 Dart 源码／测试定向 `flutter analyze --no-pub` 无问题。
+- Android 在 `android/` 运行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --tests '*NativePlaybackCacheDiagnosticsTest' --console=plain`，Kotlin 编译成功，**10 项通过，0 失败／错误／跳过**。
+- `swiftc -frontend -parse ios/Runner/NativePlaybackViewController.swift` 和 `git diff --check` 通过。Swift 仅语法检查，未做 iOS 链接构建或真机 UI 验证；未生成 APK／IPA，未递增版本。这些定向测试不代表全仓或设备验收。
+
 ## 2026-09-26 点播内存时长统一 120 秒
 
 - Exo 各内存档／手机最大时长统一 120 秒；MPV buffered 三档 cache 与 readahead 时长统一 120 秒；AVPlayer 远程点播偏好改为 120 秒，非硬上限。原有字节预算、起播／恢复门槛和专用直播／低延迟策略不变，实际高水位仍可受字节限制。当前行为见 [播放架构](architecture.md)。
