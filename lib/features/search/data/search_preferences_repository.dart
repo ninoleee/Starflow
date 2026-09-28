@@ -7,6 +7,7 @@ import 'package:starflow/core/storage/app_preferences_store.dart';
 import 'package:starflow/core/storage/local_storage_models.dart';
 import 'package:starflow/features/search/domain/search_models.dart';
 import 'package:starflow/features/search/domain/favorite_sync_document.dart';
+import 'package:starflow/features/discovery/domain/douban_browse_models.dart';
 
 final searchPreferencesRepositoryProvider =
     Provider<SearchPreferencesRepository>(
@@ -27,9 +28,13 @@ class SearchPreferencesRepository {
   static const favoriteResultsPreferenceKey = 'search.favoriteResults';
   static const favoriteSyncDeviceIdPreferenceKey =
       'search.favoriteSyncDeviceId';
+  static const browseModePreferenceKey = 'search.browseMode';
+  static const browseFiltersPreferenceKey = 'search.doubanBrowseFilters.v1';
+  static const browseTypePreferenceKey = 'search.doubanBrowseType';
 
   final PreferencesStore _preferences;
   Future<void> _favoriteWrite = Future<void>.value();
+  Future<void> _browseWrite = Future<void>.value();
   final _favoriteChanges = StreamController<void>.broadcast();
   Stream<void> get favoriteChanges => _favoriteChanges.stream;
   final _favoriteMembershipChanges = StreamController<void>.broadcast();
@@ -47,6 +52,63 @@ class SearchPreferencesRepository {
         .map((item) => item.trim())
         .where((item) => item.isNotEmpty)
         .toList(growable: false);
+  }
+
+  Future<bool> loadBrowseMode() async =>
+      await _preferences.getString(browseModePreferenceKey) == 'douban';
+
+  Future<void> saveBrowseMode(bool browse) => _preferences.setString(
+      browseModePreferenceKey, browse ? 'douban' : 'resources');
+
+  Future<DoubanBrowseCategory> loadBrowseType() async {
+    final stored = await _preferences.getString(browseTypePreferenceKey);
+    return stored == 'variety'
+        ? DoubanBrowseCategory.variety
+        : stored == 'series' || stored == 'tv'
+            ? DoubanBrowseCategory.series
+            : DoubanBrowseCategory.movie;
+  }
+
+  Future<void> saveBrowseType(DoubanBrowseCategory type) =>
+      _preferences.setString(browseTypePreferenceKey, type.value);
+
+  Future<DoubanBrowseQuery> loadBrowseQuery(DoubanBrowseCategory type) async {
+    try {
+      final raw = await _preferences.getString(browseFiltersPreferenceKey);
+      if (raw == null) return DoubanBrowseQuery(category: type);
+      final data = jsonDecode(raw);
+      if (data is Map) {
+        final stored = data[type.value] ??
+            (type == DoubanBrowseCategory.series ? data['tv'] : null);
+        if (stored is Map) {
+          final query =
+              DoubanBrowseQuery.fromJson(Map<String, dynamic>.from(stored));
+          return query.copyWith(category: type);
+        }
+      }
+    } catch (_) {
+      // An old or corrupted filter never prevents browsing.
+    }
+    return DoubanBrowseQuery(category: type);
+  }
+
+  Future<void> saveBrowseQuery(DoubanBrowseQuery query) {
+    final write = _browseWrite.then((_) async {
+      final raw = await _preferences.getString(browseFiltersPreferenceKey);
+      Map<String, dynamic> current;
+      try {
+        final decoded = raw == null ? null : jsonDecode(raw);
+        current = decoded is Map ? Map<String, dynamic>.from(decoded) : {};
+      } catch (_) {
+        current = {};
+      }
+      current[query.category.value] = query.toJson();
+      await _preferences.setString(
+          browseFiltersPreferenceKey, jsonEncode(current));
+    });
+    _browseWrite =
+        write.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return write;
   }
 
   Future<List<String>> loadSelectedTargetIds() async {
@@ -210,6 +272,10 @@ class SearchPreferencesRepository {
   Future<void> clear() async {
     await _preferences.remove(recentQueriesPreferenceKey);
     await _preferences.remove(selectedTargetIdsPreferenceKey);
+    await _browseWrite;
+    await _preferences.remove(browseModePreferenceKey);
+    await _preferences.remove(browseTypePreferenceKey);
+    await _preferences.remove(browseFiltersPreferenceKey);
     await _queueFavoriteWrite(
       () => _writeFavoriteResults([]),
     );
@@ -224,14 +290,27 @@ class SearchPreferencesRepository {
             const <String>[];
     final favoriteResults =
         await _preferences.getString(favoriteResultsPreferenceKey) ?? '[]';
+    final browseMode =
+        await _preferences.getString(browseModePreferenceKey) ?? '';
+    final browseType =
+        await _preferences.getString(browseTypePreferenceKey) ?? '';
+    final browseFilters =
+        await _preferences.getString(browseFiltersPreferenceKey) ?? '';
     final favoriteCount = (await loadFavoriteResults()).length;
     final totalBytes = utf8.encode(jsonEncode(recentQueries)).length +
         utf8.encode(jsonEncode(selectedTargetIds)).length +
-        utf8.encode(favoriteResults).length;
+        utf8.encode(favoriteResults).length +
+        utf8.encode(browseMode).length +
+        utf8.encode(browseType).length +
+        utf8.encode(browseFilters).length;
     return LocalStorageCacheSummary(
       type: LocalStorageCacheType.televisionSearchPreferences,
-      entryCount:
-          recentQueries.length + selectedTargetIds.length + favoriteCount,
+      entryCount: recentQueries.length +
+          selectedTargetIds.length +
+          favoriteCount +
+          (browseMode.isEmpty ? 0 : 1) +
+          (browseType.isEmpty ? 0 : 1) +
+          (browseFilters.isEmpty ? 0 : 1),
       totalBytes: totalBytes,
     );
   }

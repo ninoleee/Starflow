@@ -23,7 +23,9 @@ class MediaPosterTile extends ConsumerStatefulWidget {
     this.titleColor,
     this.subtitleColor,
     this.imageBadgeText = '',
+    this.imageTopLeftBadgeText = '',
     this.imageTopRightBadgeText = '',
+    this.imageBottomRightBadgeText = '',
     this.imageTopRightBadgeTextStyle,
     this.imageTopRightBadgeShowDecoration = true,
     this.focusId,
@@ -48,7 +50,9 @@ class MediaPosterTile extends ConsumerStatefulWidget {
   final Color? titleColor;
   final Color? subtitleColor;
   final String imageBadgeText;
+  final String imageTopLeftBadgeText;
   final String imageTopRightBadgeText;
+  final String imageBottomRightBadgeText;
   final TextStyle? imageTopRightBadgeTextStyle;
   final bool imageTopRightBadgeShowDecoration;
   final String? focusId;
@@ -184,18 +188,58 @@ class _MediaPosterTileState extends ConsumerState<MediaPosterTile> {
             fit: StackFit.expand,
             children: [
               Positioned.fill(child: posterChild),
-              if (widget.imageBadgeText.trim().isNotEmpty)
+              if (widget.imageTopLeftBadgeText.trim().isNotEmpty)
                 Positioned(
+                  top: 10,
                   left: 10,
-                  bottom: 10,
                   child: _PosterImageBadge(
-                    text: widget.imageBadgeText,
+                    text: widget.imageTopLeftBadgeText,
                     textStyle: theme.textTheme.labelSmall?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0,
                       fontSize: AppTextSizes.caption,
                     ),
+                  ),
+                ),
+              if (widget.imageBadgeText.trim().isNotEmpty ||
+                  widget.imageBottomRightBadgeText.trim().isNotEmpty)
+                Positioned(
+                  left: 10,
+                  right: 10,
+                  bottom: 10,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      if (widget.imageBadgeText.trim().isNotEmpty)
+                        Flexible(
+                          child: _PosterImageBadge(
+                            text: widget.imageBadgeText,
+                            textStyle: theme.textTheme.labelSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0,
+                              fontSize: AppTextSizes.caption,
+                            ),
+                          ),
+                        ),
+                      if (widget.imageBadgeText.trim().isNotEmpty &&
+                          widget.imageBottomRightBadgeText.trim().isNotEmpty)
+                        const SizedBox(width: 4),
+                      if (widget.imageBadgeText.trim().isEmpty) const Spacer(),
+                      if (widget.imageBottomRightBadgeText.trim().isNotEmpty)
+                        Flexible(
+                          child: _PosterImageBadge(
+                            text: widget.imageBottomRightBadgeText,
+                            textStyle: theme.textTheme.labelSmall?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0,
+                              fontSize: AppTextSizes.caption,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               if (widget.imageTopRightBadgeText.trim().isNotEmpty)

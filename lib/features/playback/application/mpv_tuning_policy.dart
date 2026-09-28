@@ -35,6 +35,7 @@ MpvBufferBudget resolveMpvBufferBudget({
   required PlaybackTarget target,
   required bool aggressiveTuning,
   required bool isTelevision,
+  bool isAndroidMobile = false,
   int? memoryClassMb,
   int memoryCacheMiB = 0,
 }) {
@@ -65,7 +66,13 @@ MpvBufferBudget resolveMpvBufferBudget({
   // TV budget, even when the device's memory class is unavailable.
   if (isTelevision) forwardBytes = forwardBytes.clamp(48 * _mib, 256 * _mib);
   if (isTelevision && memoryClassMb != null && memoryClassMb > 0) {
-    if (memoryClassMb <= 256) {
+    if (memoryClassMb <= 128) {
+      forwardBytes = forwardBytes.clamp(
+        32 * _mib,
+        (quark || heavy || aggressiveTuning) ? 64 * _mib : 48 * _mib,
+      );
+      backCapBytes = 8 * _mib;
+    } else if (memoryClassMb <= 256) {
       forwardBytes = forwardBytes.clamp(
         48 * _mib,
         (quark || heavy) ? 112 * _mib : 80 * _mib,
@@ -80,17 +87,38 @@ MpvBufferBudget resolveMpvBufferBudget({
   final backBytes = (forwardBytes ~/ 4).clamp(8 * _mib, backCapBytes);
   if (const [64, 128, 256, 512].contains(memoryCacheMiB)) {
     final requested = memoryCacheMiB * _mib;
-    final safetyCap = !isTelevision
-        ? 512 * _mib
-        : (memoryClassMb != null && memoryClassMb > 0 && memoryClassMb <= 256)
-            ? ((quark || heavy) ? 112 : 80) * _mib + 16 * _mib
+    final safetyCap = isAndroidMobile
+        ? (memoryClassMb == null || memoryClassMb <= 0
+            ? 128 * _mib
+            : (memoryClassMb * _mib * 3 ~/ 8).clamp(
+                1 * _mib,
+                (memoryClassMb <= 256
+                        ? 96
+                        : memoryClassMb <= 512
+                            ? 160
+                            : 256) *
+                    _mib,
+              ))
+        : !isTelevision
+            ? 512 * _mib
             : (memoryClassMb != null &&
                     memoryClassMb > 0 &&
-                    memoryClassMb <= 512)
-                ? 208 * _mib
-                : 256 * _mib + backCapBytes;
+                    memoryClassMb <= 128)
+                ? ((quark || heavy || aggressiveTuning) ? 64 : 48) * _mib +
+                    8 * _mib
+                : (memoryClassMb != null &&
+                        memoryClassMb > 0 &&
+                        memoryClassMb <= 256)
+                    ? ((quark || heavy) ? 112 : 80) * _mib + 16 * _mib
+                    : (memoryClassMb != null &&
+                            memoryClassMb > 0 &&
+                            memoryClassMb <= 512)
+                        ? 208 * _mib
+                        : 256 * _mib + backCapBytes;
     final total = requested.clamp(0, safetyCap);
-    final back = (total ~/ 5).clamp(8 * _mib, backCapBytes);
+    final back = (total ~/ 5)
+        .clamp(8 * _mib, backCapBytes)
+        .clamp(0, total ~/ 2);
     return MpvBufferBudget(
       forwardBytes: total - back,
       backBytes: back,
@@ -449,8 +477,8 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
         name: 'fast-start',
         networkTimeoutSeconds: '16',
         cacheOnDisk: 'no',
-        cacheSecs: '120',
-        demuxerReadaheadSecs: '120',
+        cacheSecs: '300',
+        demuxerReadaheadSecs: '300',
         demuxerHysteresisSecs: '5',
         cachePauseWait: '1.2',
         cachePauseInitial: 'no',
@@ -462,8 +490,8 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
         name: 'buffered-high-risk',
         networkTimeoutSeconds: '32',
         cacheOnDisk: 'no',
-        cacheSecs: '120',
-        demuxerReadaheadSecs: '120',
+        cacheSecs: '300',
+        demuxerReadaheadSecs: '300',
         demuxerHysteresisSecs: '20',
         cachePauseWait: lowStartupSpeed ? '3.0' : '2.0',
         cachePauseInitial: 'yes',
@@ -474,8 +502,8 @@ MpvRemotePlaybackTuningProfile? resolveMpvRemotePlaybackTuningProfile({
       name: 'buffered-standard',
       networkTimeoutSeconds: '24',
       cacheOnDisk: 'no',
-      cacheSecs: '120',
-      demuxerReadaheadSecs: '120',
+      cacheSecs: '300',
+      demuxerReadaheadSecs: '300',
       demuxerHysteresisSecs: '12',
       cachePauseWait: '2.0',
       cachePauseInitial: 'yes',

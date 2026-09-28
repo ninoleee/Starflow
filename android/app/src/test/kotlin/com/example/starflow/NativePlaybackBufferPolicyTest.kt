@@ -10,14 +10,14 @@ class NativePlaybackBufferPolicyTest {
     fun manualCapacityIsBoundedAndSurvivesEpisodeAndBandwidthOverrides() {
         for (tv in listOf(false, true)) {
             for (switch in listOf(false, true)) {
-                for ((memory, cap) in listOf(256 to 64, 512 to 128, 1024 to 256)) {
+                for ((memory, cap) in listOf(64 to 32, 256 to 96, 512 to 192, 1024 to 384, 2048 to 512)) {
                     for (requested in listOf(64, 128, 256, 512)) {
                         val config = NativePlaybackBufferPolicy.resolve(tv, memory, true,
                             cachedBandwidthBytesPerSecond = 50_000_000,
                             sourceBitrate = 160_000_000,
                             isRemoteEpisodeSwitch = switch, memoryCacheMiB = requested)
                         assertEquals(minOf(requested, cap) * 1024 * 1024, config.targetBufferBytes)
-                        assertEquals(120_000, config.maxBufferMs)
+                        assertEquals(300_000, config.maxBufferMs)
                         assertFalse(config.prioritizeTimeOverSizeThresholds)
                     }
                 }
@@ -36,10 +36,10 @@ class NativePlaybackBufferPolicyTest {
         )
 
         assertEquals(20_000, config.minBufferMs)
-        assertEquals(120_000, config.maxBufferMs)
+        assertEquals(300_000, config.maxBufferMs)
         assertEquals(1_500, config.bufferForPlaybackMs)
         assertEquals(2_000, config.bufferForPlaybackAfterRebufferMs)
-        assertEquals(64 * 1024 * 1024, config.targetBufferBytes)
+        assertEquals(72 * 1024 * 1024, config.targetBufferBytes)
         assertFalse(config.prioritizeTimeOverSizeThresholds)
     }
 
@@ -51,7 +51,7 @@ class NativePlaybackBufferPolicyTest {
             isHeavyPlayback = true,
         )
 
-        assertEquals(112 * 1024 * 1024, config.targetBufferBytes)
+        assertEquals(192 * 1024 * 1024, config.targetBufferBytes)
         assertEquals(2_000, config.bufferForPlaybackMs)
         assertEquals(2_000, config.bufferForPlaybackAfterRebufferMs)
         assertFalse(config.prioritizeTimeOverSizeThresholds)
@@ -65,19 +65,16 @@ class NativePlaybackBufferPolicyTest {
             isHeavyPlayback = true,
         )
 
-        assertEquals(160 * 1024 * 1024, config.targetBufferBytes)
+        assertEquals(256 * 1024 * 1024, config.targetBufferBytes)
         assertEquals(2_500, config.bufferForPlaybackMs)
         assertEquals(2_000, config.bufferForPlaybackAfterRebufferMs)
-        assertEquals(120_000, config.maxBufferMs)
+        assertEquals(300_000, config.maxBufferMs)
         assertFalse(config.prioritizeTimeOverSizeThresholds)
     }
 
     @Test
-    fun baseBudgetKeepsLowerTiersAndUses160MiBAbove512ForAllMedia() {
-        for ((memory, normalMb, heavyMb) in listOf(
-            Triple(256, 64, 64), Triple(257, 96, 112), Triple(512, 96, 112),
-            Triple(513, 160, 160), Triple(1024, 160, 160),
-        )) {
+    fun baseBudgetUsesHeapPercentageForAllMediaAndEpisodeSwitches() {
+        for (memory in listOf(64, 256, 257, 512, 513, 1024, 2048)) {
             for (heavy in listOf(false, true)) {
                 for (episodeSwitch in listOf(false, true)) {
                     val config = NativePlaybackBufferPolicy.resolve(
@@ -86,9 +83,8 @@ class NativePlaybackBufferPolicyTest {
                         isHeavyPlayback = heavy,
                         isRemoteEpisodeSwitch = episodeSwitch,
                     )
-                    val expectedMb = if (heavy || episodeSwitch) heavyMb else normalMb
-                    assertEquals(120_000, config.maxBufferMs)
-                    assertEquals(expectedMb * 1024 * 1024, config.targetBufferBytes)
+                    assertEquals(300_000, config.maxBufferMs)
+                    assertEquals(NativePlaybackBufferBudget.automaticLimit(memory), config.targetBufferBytes)
                 }
             }
         }
@@ -148,7 +144,7 @@ class NativePlaybackBufferPolicyTest {
         assertEquals(30_000, config.minBufferMs)
         assertEquals(1_500, config.bufferForPlaybackMs)
         assertEquals(2_000, config.bufferForPlaybackAfterRebufferMs)
-        assertEquals(64 * 1024 * 1024, config.targetBufferBytes)
+        assertEquals(72 * 1024 * 1024, config.targetBufferBytes)
         assertTrue(config.episodeSwitchWarmup)
     }
 
@@ -163,7 +159,7 @@ class NativePlaybackBufferPolicyTest {
 
         assertEquals(1_500, config.bufferForPlaybackMs)
         assertEquals(2_000, config.bufferForPlaybackAfterRebufferMs)
-        assertEquals(64 * 1024 * 1024, config.targetBufferBytes)
+        assertEquals(72 * 1024 * 1024, config.targetBufferBytes)
         assertFalse(config.episodeSwitchWarmup)
     }
 
@@ -181,7 +177,7 @@ class NativePlaybackBufferPolicyTest {
         assertEquals("fast", config.bandwidthProfile)
         assertEquals(1_200, config.bufferForPlaybackMs)
         assertEquals(1_500, config.bufferForPlaybackAfterRebufferMs)
-        assertEquals(64 * 1024 * 1024, config.targetBufferBytes)
+        assertEquals(72 * 1024 * 1024, config.targetBufferBytes)
         assertTrue(config.episodeSwitchWarmup)
     }
 
@@ -258,7 +254,7 @@ class NativePlaybackBufferPolicyTest {
                 assertEquals(startMs, config.bufferForPlaybackMs)
                 assertEquals(resumeMs, config.bufferForPlaybackAfterRebufferMs)
                 assertEquals(50_000, config.minBufferMs)
-                assertEquals(120_000, config.maxBufferMs)
+                assertEquals(300_000, config.maxBufferMs)
                 assertEquals(-1, config.targetBufferBytes)
                 assertTrue(config.prioritizeTimeOverSizeThresholds)
                 assertFalse(config.episodeSwitchWarmup)

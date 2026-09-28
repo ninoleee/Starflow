@@ -132,11 +132,13 @@ class SearchPage extends ConsumerStatefulWidget {
     this.initialQuery,
     this.showBackButton = false,
     this.favoritesOnly = false,
+    this.embedded = false,
   });
 
   final String? initialQuery;
   final bool showBackButton;
   final bool favoritesOnly;
+  final bool embedded;
 
   @override
   ConsumerState<SearchPage> createState() => _SearchPageState();
@@ -655,7 +657,11 @@ class _SearchPageState extends ConsumerState<SearchPage>
       _scheduleInitialTelevisionFocus();
     }
     final networkStorage = ref.watch(_searchPageNetworkStorageProvider);
-    final headerTopInset = widget.showBackButton ? kToolbarHeight : 16.0;
+    final headerTopInset = widget.showBackButton
+        ? kToolbarHeight
+        : widget.embedded
+            ? 68.0
+            : 16.0;
     final enabledProviders =
         ref.watch(_searchPageVisibleSearchProvidersProvider);
     final localSources = ref.watch(_searchPageVisibleLocalSourcesProvider);

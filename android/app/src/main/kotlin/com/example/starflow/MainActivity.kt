@@ -128,8 +128,7 @@ class MainActivity : FlutterActivity() {
                     result.success(currentMode == Configuration.UI_MODE_TYPE_TELEVISION)
                 }
                 "getMemoryClassMb" -> {
-                    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-                    result.success(activityManager.memoryClass)
+                    result.success(PlaybackMemoryClass.read(this))
                 }
                 "getPlaybackCacheFreeBytes" -> {
                     result.success(cacheDir.usableSpace)

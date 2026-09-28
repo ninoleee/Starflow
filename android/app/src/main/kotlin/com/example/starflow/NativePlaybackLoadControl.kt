@@ -24,6 +24,7 @@ internal class NativePlaybackLoadControl(
 
     private val policy = NativePlaybackReadAheadPolicy(config, limitBytes, bitrate)
     private val baseTargetBytes = config.targetBufferBytes.coerceAtMost(limitBytes)
+    private val pressureTargetBytes = NativePlaybackBufferBudget.pressureTarget(baseTargetBytes, limitBytes)
     private var pressureUntil = 0L
     private var isLoading = false
     private val refill = NativePlaybackRefillPolicy()
@@ -48,8 +49,8 @@ internal class NativePlaybackLoadControl(
     fun onMemoryPressure() {
         pressureUntil = clock() + 60_000
         invalidateMemoryBuffer()
-        currentTargetBytes = baseTargetBytes
-        allocator.setTargetBufferSize(baseTargetBytes)
+        currentTargetBytes = pressureTargetBytes
+        allocator.setTargetBufferSize(pressureTargetBytes)
         allocator.trim()
     }
 

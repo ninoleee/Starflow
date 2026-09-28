@@ -543,7 +543,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
         ),
       ],
       topButtonBar: materialTopButtonBar,
-      topButtonBarMargin: padding.copyWith(bottom: 36),
+      topButtonBarMargin: playbackTopBarPadding(padding)
+          .copyWith(bottom: playbackTopMetricsOverflow),
       bottomButtonBarMargin: padding.copyWith(top: 0),
       seekBarMargin: padding.copyWith(top: 0) + playbackSeekBarMargin,
     );
@@ -564,7 +565,8 @@ extension _PlayerPageStateControls on _PlayerPageState {
       padding: EdgeInsets.zero,
       buttonBarHeight: playbackButtonBarHeight,
       topButtonBar: desktopTopButtonBar,
-      topButtonBarMargin: padding.copyWith(bottom: 36),
+      topButtonBarMargin: playbackTopBarPadding(padding)
+          .copyWith(bottom: playbackTopMetricsOverflow),
       bottomButtonBarMargin: padding.copyWith(top: 0),
       bottomButtonBar: _buildAdaptiveDesktopBottomButtonBar(),
       seekBarMargin: EdgeInsets.only(left: padding.left, right: padding.right) +
@@ -772,60 +774,40 @@ extension _PlayerPageStateControls on _PlayerPageState {
   ) {
     return [
       Expanded(
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            SizedBox(
-              height: playbackButtonBarHeight,
-              child: Row(children: [
-                ...buttons.take(2),
-                Flexible(
-                    child: MpvNetworkSpeedLabel(
-                  player: state.widget.controller.player,
-                  generation: _startupGeneration,
-                  readDiskCacheBytes: settings.playbackDiskCacheMiB > 0
-                      ? () =>
-                          _readMpvDiskCacheBytes(state.widget.controller.player)
-                      : null,
-                )),
-                ...buttons.skip(2),
-              ]),
-            ),
-            Positioned(
-              top: playbackButtonBarHeight,
-              left: 48,
-              right: 0,
-              child: Row(children: [
-                Expanded(
-                    child: MpvNetworkSpeedLabel(
-                  player: state.widget.controller.player,
-                  generation: _startupGeneration,
-                  formatOnly: true,
-                )),
-              ]),
-            ),
-          ],
+        child: PlayerMpvTopBarRow(
+          backButton: buttons.first,
+          title: buttons[1],
+          metrics: MpvNetworkSpeedLabel(
+            height: playbackTopMetricsHeight,
+            player: state.widget.controller.player,
+            generation: _startupGeneration,
+            readDiskCacheBytes: settings.playbackDiskCacheMiB > 0
+                ? () => _readMpvDiskCacheBytes(state.widget.controller.player)
+                : null,
+          ),
+          actions: buttons.skip(2).toList(),
+          format: MpvNetworkSpeedLabel(
+            height: playbackTopMetricsHeight,
+            player: state.widget.controller.player,
+            generation: _startupGeneration,
+            formatOnly: true,
+          ),
         ),
       ),
     ];
   }
 
   Widget _buildMpvTopBarTitle() {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Text(
-          playerTitle(_resolvedTarget ?? widget.target),
-          maxLines: 1,
-          softWrap: false,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.left,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: AppTextSizes.body,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+    return Text(
+      playerTitle(_resolvedTarget ?? widget.target),
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.left,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: AppTextSizes.body,
+        fontWeight: FontWeight.w600,
       ),
     );
   }

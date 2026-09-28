@@ -1,5 +1,52 @@
 # 主机性能与回归验证
 
+## 2026-09-27 播放内存自动上限与低内存分档
+
+- TV Exo 自动容量保留 Java 堆 `37.5%` 比例，但上限由 `512 MiB` 收为 `256 MiB`；手动档继续使用原最高 `512 MiB` 安全预算。Android TV MPV 新增 `<=128 MiB` 堆档，Android 手机 MPV 手动容量按堆比例与分档上限夹紧；桌面／iOS 和手机 MPV 自动预算不变。当前规则见 [播放架构](architecture.md#点播运行期流畅度策略2026-09-25)，真机放宽条件见 [设备测量清单](performance-device.md)。以下旧测试记录是策略修改前的主机快照，不代表当前容量上限。
+- 固定 `.fvm/flutter_sdk`，执行 `flutter test --no-pub` 定向三份 MPV 策略／内存设置测试，**35 项通过**；三份相关 Dart 文件定向 `dart analyze` 无问题。Android `:app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true` 定向 BufferPolicy／ReadAheadPolicy／LoadControl，**37 项通过**，0 失败。`git diff --check` 通过。未执行真机长播、反复切集后的 PSS、GC 或重缓冲测量，未构建或发布 APK，不据此放宽默认上限；这些测试集合与以下历史记录重叠，不累加。
+
+## 2026-09-27 MPV 内存缓存指标读取兼容
+
+- 本机 C 探针动态加载现有 macOS Release 应用的 `Mpv.framework`（报告 `mpv 0.36.0`），以临时 60 秒 PCM WAV、null 音视频输出和 30 秒缓存运行：`demuxer-cache-state/fw-bytes` 返回不可用，完整 `demuxer-cache-state` JSON 同时返回 `fw-bytes=3255296`、`total-bytes=3280464`、`cache-duration=30.037333`。确认是子属性读取不兼容，而非没有内存缓存；仅本机内核探针，不是网络吞吐或设备 UI 验收。
+- 点播／直播标签改由 `mpv_playback_cache.dart` 解析完整 JSON 的前向字节，保留网速、时长、会话隔离和磁盘独立显示。只修指标读取，不调整内存预算、预读策略或顶栏布局。iOS MPV 使用同一实现，原生 AVPlayer 的字节不可用规则不变。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，`flutter test --no-pub --reporter expanded test/mpv_playback_cache_test.dart test/playback_cache_metrics_label_test.dart test/playback_network_speed_test.dart test/playback_network_speed_label_test.dart test/live_network_speed_label_test.dart test/live_playback_lifecycle_test.dart test/live_tv_page_test.dart`，**70 项通过**。覆盖完整节点、零值、超过 32 位字节数、非法／缺失数据、读取异常及内存／磁盘独立显示；与历史集合重叠，不累加。
+- 三份修改的 Dart 源码与两份测试定向 `dart analyze` 无问题，`git diff --check` 通过。未构建新应用或安装包、未改版本、未完成 iOS 真机或 macOS 新应用播放 UI 验证。
+
+## 2026-09-27 iOS 配置持久化 Keychain 权限
+
+- 用户日志显示 1.9.264 在启动读取配置、迁移凭据时返回 Keychain `-34018`。补齐 Runner entitlements 及 Debug/Profile/Release 引用；最终重签与设备验证边界见 [开发网络](development-network.md#ios-keychain-签名权限)。日志未记录独立的导入异常，不能据此判断 JSON 格式有误。
+- 使用固定 `.fvm/flutter_sdk` 执行 `flutter test --no-pub --reporter expanded test/ios_keychain_entitlements_test.dart test/cloud_account_security_test.dart test/app_settings_repository_reconciliation_test.dart test/webdav_sync_service_test.dart`，**46 项通过**。新增测试在 macOS 用 `plutil` 结构化解析项目，验证全部 Runner 配置引用应用专属访问组；其余平台跳过该主机构建检查。
+- `plutil -lint` 检查 entitlements 与 Xcode 项目通过，`git diff --check` 通过。未构建/签名 IPA、未改版本，未验证设备 Keychain 权限、覆盖安装或实际导入；主机回归不能替代这些验证。
+
+## 2026-09-27 点播缓存时长调整为 300 秒
+
+- Exo 最大缓冲时长、MPV buffered 三档 cache／readahead 时长与 AVPlayer 远程点播偏好由 120 秒改为 300 秒。原字节预算、起播／恢复门槛、75% 实际高水位补充与专用直播／低延迟策略不变；AVPlayer 偏好不是硬上限。当前规则见 [播放架构](architecture.md#点播运行期流畅度策略2026-09-25)，设备待验项目见 [真机清单](performance-device.md)。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10，`flutter test --no-pub --reporter expanded test/playback_mpv_policy_test.dart test/mpv_tuning_policy_aggressive_downgrade_test.dart test/playback_memory_cache_settings_test.dart test/mpv_memory_priority_policy_test.dart` **40 项通过**；修改的 MPV 策略和两份测试定向 `dart analyze` 无问题。
+- JDK 17，在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --console=plain --quiet`，通过 `--tests` 选择 NativePlaybackBufferPolicy／NativePlaybackLoadControl／NativePlaybackReadAheadPolicy／NativePlaybackSession 四类，**55 项通过，0 失败／错误／跳过**。新增三档 TV 的 299999／300000ms 停读与 225001／225000ms 补充边界检查；既有字节先到、起播／恢复、内存压力回退测试通过，手机 readiness 基线同步验证。
+- `swiftc -O ios/Runner/NativePlaybackStartupGate.swift ios/Runner/NativePlaybackBufferingTuning.swift scripts/test_native_playback_startup.swift -o /tmp/starflow-startup-300s-check` 编译并运行通过，包含点播 300 秒、直播 8 秒与本地系统管理配置。`git diff --check` 通过。仅主机策略验证，未做真机峰值内存／长播／重缓冲测量，未构建 APK／IPA、未改版本；集合与历史记录重叠，不累加。
+
+## 2026-09-27 直接使用运行时堆上限分档
+
+- `PlaybackMemoryClass` 直接以 `Runtime.maxMemory()` 换算有效等级，普通／大堆报告值和申请标志只参与诊断；Exo 与 MPV TV 共用入口，原缓存档位、手动容量限制和大堆申请不变。当前规则见 [播放架构](architecture.md#android-大堆与播放内存等级)。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10，执行 `flutter test --no-pub test/playback_mpv_policy_test.dart test/playback_memory_cache_settings_test.dart test/mpv_memory_priority_policy_test.dart`，**39 项通过**。
+- JDK 17，在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --console=plain --quiet`，通过 `--tests` 选择 PlaybackMemoryClass／NativeAppLogger／NativePlaybackBufferPolicy／NativePlaybackLoadControl／NativePlaybackReadAheadPolicy／NativePlaybackSession 六类，**63 项通过，0 失败／错误／跳过**。其中 8 项堆等级测试覆盖系统报告值高于／低于运行时上限、申请标志不影响计算、分档边界取整、异常与溢出保护、诊断原始值和两个入口接线。
+- Kotlin 实际编译，`git diff --check` 通过。仅主机策略回归，不代表真机峰值内存、GC、长播或切集验收；未构建 APK／IPA、未递增版本。与以下历史集合重叠，不累加为全仓测试数。
+
+## 2026-09-27 Android 堆额度诊断日志
+
+- 历史验证快照：以下为有效等级仍取系统报告额度与运行时上限较小值时的结果；当前分档规则已改为直接使用运行时上限，见 [播放架构](architecture.md#android-大堆与播放内存等级)。
+- `PlaybackMemoryClass.read` 经现有结构化本地 logger 记录 info 类别 `playback.memory-class`，保留普通／大堆等级、申请标志、运行时原始上限与最终采用值。仅在既有等级读取入口记录，无播放期定时器；遵循开关／级别过滤，字段边界见 [播放架构](architecture.md#android-大堆与播放内存等级)。
+- 固定 Flutter 3.38.10 Android 配置与 JDK 17，`./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --console=plain --quiet` 定向 PlaybackMemoryClass／NativeAppLogger／NativePlaybackBufferPolicy／NativePlaybackSession，**42 项通过，0 失败／错误／跳过**。新增 2 项验证诊断字段区分请求／报告／有效额度，以及未扩容和异常原始值；包含现有异步写盘与日志轮转测试。与下方集合重叠不累加。
+- Kotlin 实际编译，`git diff --check` 通过。未改 Dart，不重复运行 Flutter 回归；未打包、修改版本或进行真机日志导出／实际内存测量。
+
+## 2026-09-27 Android 大堆申请与有效内存等级
+
+- 历史验证快照：以下为直接采用运行时上限之前的申请与保守分档策略，不代表当前实现仍以普通／大堆报告值限制有效等级。
+- Android application 申请 `largeHeap`，Exo 与 MPV TV 经 `PlaybackMemoryClass` 共用有效等级读取，使用实际 application 标志、系统普通／大堆等级和运行时堆上限。原缓存分档数值、120 秒目标、起播与补充策略不变，当前行为见 [播放架构](architecture.md#android-大堆与播放内存等级)。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10，完成 `flutter pub get` 后，`flutter test --no-pub test/playback_mpv_policy_test.dart test/playback_memory_cache_settings_test.dart test/mpv_memory_priority_policy_test.dart` **39 项通过**。
+- JDK 17，在 `android/` 执行 `./gradlew :app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true --console=plain --quiet`，通过 `--tests` 选择 PlaybackMemoryClass／NativePlaybackBufferPolicy／NativePlaybackLoadControl／NativePlaybackReadAheadPolicy／NativePlaybackSession 五类，**60 项通过，0 失败／错误／跳过**。新增 6 项覆盖普通应用不启用大堆等级、大堆跨档、运行时额度夹紧、厂商未提高额度、取整与异常边界、Manifest 声明和两个入口接线。
+- debug 合并 Manifest 确认 `android:largeHeap="true"`；Kotlin 实际编译，`git diff --check` 通过。仅主机策略与构建接线验证，未做真机实际授予额度、PSS／GC、长播或切集测量；不保证所有设备增加额度。未构建 APK／IPA、未递增版本，与历史集合重叠不累加。
+
 ## 2026-09-26 前台补数据期间禁止额外预取
 
 - 修复“前台向源站补内存／补缺口时，磁盘预取仍抢网络”的调度竞态。进入 `foregroundNetwork` 路径先停止预取并撤销旧高水位；前台网络读取存在期间，心跳即使报告 ready 也不能授权；本次请求结束后，下一次独立心跳才恢复。磁盘回读和已被前台接管的同一在途区间不套用该限制。
@@ -43,6 +90,7 @@
 
 ## 2026-09-26 点播内存时长统一 120 秒
 
+- 历史验证快照：2026-09-27 已改为 300 秒，以下结果仅对应当时的 120 秒策略，不代表当前时长配置。
 - Exo 各内存档／手机最大时长统一 120 秒；MPV buffered 三档 cache 与 readahead 时长统一 120 秒；AVPlayer 远程点播偏好改为 120 秒，非硬上限。原有字节预算、起播／恢复门槛和专用直播／低延迟策略不变，实际高水位仍可受字节限制。当前行为见 [播放架构](architecture.md)。
 - 固定 Flutter 3.38.10 / Dart 3.10.9，`playback_mpv_policy_test.dart` 与 `mpv_memory_priority_policy_test.dart` 联合 **36 项通过**，`mpv_tuning_policy_aggressive_downgrade_test.dart` **1 项通过**；相关 3 份 Dart 文件分析无问题。
 - JDK 17，`:app:testDebugUnitTest -x :app:compileFlutterBuildDebug -Pandroid-skip-build-dependency-validation=true` 定向 BufferPolicy／LoadControl／ReadAheadPolicy／Session 四类，最终 **53 项通过，0 失败／错误／跳过**。首轮发现手机 readiness 测试仍断言旧 90 秒，更新为 119999／120000ms 边界后重跑通过。
@@ -1175,3 +1223,26 @@ Android 在 `android/` 运行 `./gradlew :app:testDebugUnitTest -x :app:compileF
 2026-09-20 订阅列表开关：`live_source_enabled_test.dart`、`live_sources_layout_test.dart`、`live_tv_data_test.dart` 共 32 项主机测试通过，`live_tv_page_test.dart` 与 `live_review_regression_test.dart` 共 29 项通过。覆盖列表直接切换、TV 确认键、320 宽度长名称、保存中重复操作、失败保持原状态、缓存与收藏保留、删除后不重建、编辑保留停用状态及底部留白；定向静态检查无问题。本次没有真机验收或发布构建。
 
 2026-09-20 顶部留白修复：`flutter test test/live_tv_page_test.dart` 共 13 项主机组件测试通过，其中新增 6 项覆盖 0/24/59 逻辑像素顶部安全区及带／不带返回按钮的频道页，断言标题行仅偏移一份安全区高度；对页面与该测试文件的定向 `dart analyze` 无问题。这不是设备截图或真机验收，与下列集合不累加。
+# 2026-09-27 macOS Keychain 配置恢复修复
+
+- 用户截图确认 ad-hoc `1.9.266` DMG 导入失败为 `-34018`（Data Protection Keychain entitlement 缺失）。macOS 现显式改用传统系统 Keychain，移除 Data Protection access group 需求，App Sandbox 仍开启；ad-hoc 构建不需要开发者账号。
+- 旧 Data Protection 凭据可访问时先迁移至传统 Keychain 并读回核验。遇到旧域专属 `-34018` 时保留旧项并继续，让用户可以导入普通配置；不把云盘凭据标记为已迁移、不删除旧数据、不回退明文。
+- 固定 SDK 执行 `flutter test --no-pub test/macos_keychain_entitlements_test.dart test/cloud_account_security_test.dart test/storage_failure_recovery_test.dart`，**13 项通过**；`flutter analyze --no-pub lib/features/settings/data/cloud_credential_store.dart test/macos_keychain_entitlements_test.dart` 无问题。
+- ad-hoc sandboxed App 探针通过传统 Keychain 新增/读回/删除，Security 状态均为 0；这验证当前 macOS 沙盒 Keychain 路径，不代表读取旧 Data Protection 项成功。Flutter Release `1.9.266` 构建成功，`x86_64 + arm64`、最低 macOS 10.15；签名 entitlement 保留 sandbox，无 `keychain-access-groups`。桌面 DMG 已通过 `hdiutil verify`，挂载后应用签名验证通过。用户配置导入界面未自动化复测。
+- DMG：`starflow-macos-1.9.266.dmg`，SHA-256 `25889c365eedf4993ede353d5fc0419bee3aae59cd6ba164603fd3a83046fcb1`。签名为 ad-hoc，无 Developer ID 或公证；首次打开的 Gatekeeper 确认仍可能出现。可复用构建入口为 `scripts/build_macos_dmg.sh`；实现及迁移边界见 [开发网络](development-network.md#macos-keychain-签名)。
+- 2026-09-27 使用 `MACOS_INSTALLER_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/Installers" STARFLOW_FORCE_PUB_GET=1 ./scripts/build_macos_dmg.sh` 重新构建并写入 iCloud Drive `Installers`。脚本完成深度签名校验、DMG 创建和 `hdiutil verify`；主机复核文件存在、签名和镜像校验有效。产物 SHA-256 `e81413c56392a9f2f3c9186ca67aa5b6423fe7ca376823932c71ebfea9a5c656`；这是本地 iCloud Drive 文件，未确认云端上传完成。
+# 2026-09-27 豆瓣选片主机验证（增量）
+
+使用 `.fvm/flutter_sdk` 固定 SDK 对匿名推荐列表参数、解析、缓存、偏好、关闭态、排序切换、快速连续选择、分页错误保留和翻回旧页去重进行定向 Flutter 测试，共 14 项通过（四个测试文件）；搜索页焦点、字号、清晰度筛选和来源标签另有 48 项通过（四个旧测试文件）。12 个相关代码／测试文件定向 `flutter analyze --no-pub` 无问题，`git diff --check` 通过。另核对手机 390×844／TV 1280×720 的宿主 widget 布局，无真实遥控器、手机、Web CORS 或深分页验证；匿名接口抽样不能代表接口长期稳定。未构建发布 APK，也未递增版本。此项为主机验证，不与其他日期的批次合计。
+
+# 2026-09-28 豆瓣电视剧／综艺分类修正
+
+将 UI 的剧集拆成电视剧和综艺，仍请求同一个 `tv` 端点，分别附加形式标签；题材菜单从当前形式入口的 `tags` 读取，不再展示“类型”占位或另一形式。旧 `tv` 本机筛选按电视剧恢复，综艺独立保存。少量匿名请求观察到两种形式返回不同列表；固定 SDK 下四个相关 Flutter 测试文件共 18 项通过，八个相关代码／测试文件定向 `flutter analyze --no-pub` 无问题，`git diff --check` 通过。实际设备、深分页及任意条件交集未测；本次未重新构建安装包。
+
+2026-09-28 年份菜单补充：当前年到 2021 逐年，2020／2015／2010／2005／2000 每五年一个精确年份，1990～1890 每十年一个；有效的旧偏好年份作为额外菜单项保留。本次四个相关测试文件共 19 项通过，三个修改过的 Dart 文件定向分析无问题。豆瓣匿名端点对 `2000-2004` 等五年区间标签的抽样返回空列表，因此此改动没有伪装成区间筛选；设备验证及重建 IPA 均未进行。
+
+2026-09-28 豆瓣海报与分页间距：年份改为海报左上角角标，移除标题下方重复年份；两个分段标签隐藏选中对号，网格行高改为海报加标题实际高度及少量余量，分页前仅保留 12dp，页末使用共享 80dp 占位并计入底部安全区。四个豆瓣相关测试文件共 20 项、共享海报涉及的首页／详情两个旧测试文件共 49 项通过；显式页尾占位后复跑页面两文件 11 项通过。五个相关代码／测试文件定向分析无问题。此为主机组件验证，尚未进行 iOS／TV 真机截图、遥控器验收或重新构建 IPA。
+
+2026-09-28 豆瓣四角角标：在共享海报组件增加可选右下角标签，原右上角能力保持；选片页右上角为电影／电视剧／综艺、右下角为有值的点评人数，左上年份和左下评分不变。140dp 窄海报底部两个角标使用弹性布局和省略。选片页 8 项主机 widget 测试及首页／详情共享组件 49 项回归通过，三个相关代码／测试文件定向分析无问题。未做设备视觉验收或重建 IPA。
+
+2026-09-28 年份全部与点评人数筛选：年份菜单改成显式可空列表并固定首项“全部”；新增 5000／1 万／3 万／6 万／10 万以上点评人数筛选，匿名接口无可用人数参数时最多扫描 50 页候选，去重过滤后在本地按 20 条分页。固定 SDK 下四个豆瓣相关测试文件共 24 项通过，七个相关代码／测试文件定向 `flutter analyze --no-pub` 无问题。协议单测覆盖跨页候选过滤，组件测试覆盖“全部”重选、阈值过滤和本地下一页；未做设备视觉、真实深分页、重建 IPA 或发布验收。

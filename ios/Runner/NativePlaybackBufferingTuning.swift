@@ -91,7 +91,7 @@ enum NativePlaybackBufferingTuning {
       return .passthrough
     }
 
-    let forwardBufferDuration: TimeInterval = context.isLiveStream ? 8 : 120
+    let forwardBufferDuration: TimeInterval = context.isLiveStream ? 8 : 300
     let keepNetworkingWhenPaused = context.isLiveStream
 
     return Configuration(

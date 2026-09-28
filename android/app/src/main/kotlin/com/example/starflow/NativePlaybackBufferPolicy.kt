@@ -17,7 +17,7 @@ object NativePlaybackBufferPolicy {
     fun resolve(
         isTelevision: Boolean,
         memoryClassMb: Int,
-        isHeavyPlayback: Boolean,
+        @Suppress("UNUSED_PARAMETER") isHeavyPlayback: Boolean,
         cachedBandwidthBytesPerSecond: Long = 0L,
         sourceBitrate: Long = 0L,
         isRemoteEpisodeSwitch: Boolean = false,
@@ -26,7 +26,7 @@ object NativePlaybackBufferPolicy {
         val base = if (!isTelevision) {
             NativePlaybackBufferConfig(
                 minBufferMs = 50_000,
-                maxBufferMs = 120_000,
+                maxBufferMs = 300_000,
                 bufferForPlaybackMs = 2_500,
                 bufferForPlaybackAfterRebufferMs = 5_000,
                 targetBufferBytes = -1,
@@ -35,28 +35,28 @@ object NativePlaybackBufferPolicy {
         } else when {
             memoryClassMb <= 256 -> NativePlaybackBufferConfig(
                 minBufferMs = 20_000,
-                maxBufferMs = 120_000,
+                maxBufferMs = 300_000,
                 bufferForPlaybackMs = 1_500,
                 bufferForPlaybackAfterRebufferMs = 2_000,
-                targetBufferBytes = 64 * MEBIBYTE,
+                targetBufferBytes = NativePlaybackBufferBudget.automaticLimit(memoryClassMb),
                 prioritizeTimeOverSizeThresholds = false,
             )
 
             memoryClassMb <= 512 -> NativePlaybackBufferConfig(
                 minBufferMs = 30_000,
-                maxBufferMs = 120_000,
+                maxBufferMs = 300_000,
                 bufferForPlaybackMs = 2_000,
                 bufferForPlaybackAfterRebufferMs = 2_000,
-                targetBufferBytes = (if (isHeavyPlayback) 112 else 96) * MEBIBYTE,
+                targetBufferBytes = NativePlaybackBufferBudget.automaticLimit(memoryClassMb),
                 prioritizeTimeOverSizeThresholds = false,
             )
 
             else -> NativePlaybackBufferConfig(
                 minBufferMs = 45_000,
-                maxBufferMs = 120_000,
+                maxBufferMs = 300_000,
                 bufferForPlaybackMs = 2_500,
                 bufferForPlaybackAfterRebufferMs = 2_000,
-                targetBufferBytes = 160 * MEBIBYTE,
+                targetBufferBytes = NativePlaybackBufferBudget.automaticLimit(memoryClassMb),
                 prioritizeTimeOverSizeThresholds = false,
             )
         }
@@ -98,18 +98,9 @@ object NativePlaybackBufferPolicy {
             prioritizeTimeOverSizeThresholds = false,
         ) else bandwidthAdjusted
         if (!isTelevision || !isRemoteEpisodeSwitch) return selected
-        val episodeTargetBufferBytes = when {
-            memoryClassMb <= 256 -> 64 * MEBIBYTE
-            memoryClassMb <= 512 -> 112 * MEBIBYTE
-            else -> 160 * MEBIBYTE
-        }
         return selected.copy(
             // Keep read-ahead capacity independent of startup and resume thresholds.
             minBufferMs = maxOf(bandwidthAdjusted.minBufferMs, 30_000),
-            targetBufferBytes = if (manualBytes > 0) manualBytes else maxOf(
-                bandwidthAdjusted.targetBufferBytes,
-                episodeTargetBufferBytes,
-            ),
             episodeSwitchWarmup = true,
         )
     }

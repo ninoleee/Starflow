@@ -1,11 +1,17 @@
 package com.example.starflow
 
 internal object NativePlaybackBufferBudget {
-    fun limit(memoryClassMb: Int): Int = when {
-        memoryClassMb <= 256 -> 64
-        memoryClassMb <= 512 -> 128
-        else -> 256
-    } * 1024 * 1024
+    fun automaticLimit(memoryClassMb: Int): Int = minOf(limit(memoryClassMb), 256 * 1024 * 1024)
+
+    fun limit(memoryClassMb: Int): Int {
+        val heapBytes = memoryClassMb.coerceAtLeast(1).toLong() * 1024 * 1024
+        // Use Long before multiplying; malformed or very large heap reports must not overflow.
+        return (heapBytes * 3 / 8).coerceIn(32L * 1024 * 1024, 512L * 1024 * 1024)
+            .coerceAtMost(heapBytes).toInt()
+    }
+
+    fun pressureTarget(baseBytes: Int, limitBytes: Int): Int =
+        minOf(baseBytes, (limitBytes / 2).coerceAtLeast(1))
 
     fun target(baseBytes: Int, limitBytes: Int, bitrate: Long, seconds: Int): Int {
         require(baseBytes > 0 && limitBytes > 0)
@@ -93,7 +99,8 @@ internal class NativePlaybackReadAheadPolicy(
             lastSpeed = playbackSpeed
         }
         val boosted = playWhenReady && nowMs < boostUntil && !memoryPressure
-        val target = if (memoryPressure) config.targetBufferBytes.coerceAtMost(limitBytes) else
+        val target = if (memoryPressure) NativePlaybackBufferBudget.pressureTarget(
+            config.targetBufferBytes, limitBytes) else
             NativePlaybackBufferBudget.target(config.targetBufferBytes, limitBytes, bitrate,
                 if (boosted) 20 else 12)
         val refillMs = if (boosted) maxOf(config.minBufferMs, (config.maxBufferMs * 3L / 4).toInt())

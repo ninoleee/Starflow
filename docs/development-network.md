@@ -2,6 +2,14 @@
 
 核对日期：2026-09-20。本文负责构建下载、运行期请求、代理与凭据边界；组件职责见 [架构说明](architecture.md)，源码入口见 [代码地图](code-map.md)，字幕处理细节见 [字幕链路](subtitles.md)。历史样本与日志证据保留原日期，不代表本次重新完成了服务器或真机联调。
 
+豆瓣选片增量（2026-09-27）：仅活动且启用的 `/search` 选片标签向固定 `m.douban.com/rexxar/api/v2/{movie,tv}/recommend` 发起匿名 GET；类别、年份、地区、类型、最低分和 T/U/R/S 排序由请求参数表达，不发送现有豆瓣账号 Cookie。每页请求 20 条，翻页不预取，刷新跳过 10 分钟／12 页的内存缓存；最多请求到偏移 980，再往后显示本机分页上限。页面条件切换等待旧请求收尾，只提交最新意图；隐藏或关闭后忽略迟到结果，已发出的 HTTP 不保证即时中止。复用豆瓣 guard 的 6 秒期限和熔断／手动探测；401/403、429、HTML 或格式错误提示失败，不自动换 IP、镜像或凭据。海报图片仍走公共图片链路。该网页接口不是稳定的官方开放 API；原生匿名样本和 MockClient 测试不代表所有条件可用，也不保证浏览器 CORS。Web 若没有获准的同源转发路径，应视为未验证，不接公共代理。
+
+2026-09-28 类别修正：电影仍走 `movie/recommend`，电视剧和综艺都走 `tv/recommend`；分别将“电视剧”或“综艺”写入 `selected_categories.类型` 和 `tags`，有题材时再把题材附加到 `tags`。`tv` 响应的 `recommend_categories.类型.data` 是形式入口，其下各自 `tags` 才是题材列表；不能把“类型”占位或另一形式放进题材菜单。匿名抽样确认两种形式返回不同列表，自动化用 MockClient 验证请求和解析；未保证所有组合的服务端交集语义。
+
+2026-09-28 年份菜单：2020 年后逐年、2000～2020 每五年、2000 年前每十年列一个精确年份（1890 年为最早常规项）。选中 2015 等年份仍只发送 `tags=2015`，不代表 2015～2019 年；旧偏好中不在档位上的有效年份仍可选中显示。抽样发现 `tags=2000-2004` 返回空页，因此不把五年区间当作已支持的服务端筛选。
+
+2026-09-28 点评人数筛选：匿名推荐端点未接受已验证的 `rating_count` 参数，第一版也不把 `score_range` 当人数范围复用。选择 5000／1 万／3 万／6 万／10 万以上后，客户端用无人数条件从第 0 页顺序读取最多 50 页（1000 个原始条目），按 `rating.count` 过滤、去重，并仅在结果达到 20 条以上时提供本地下一页；候选列表和普通页缓存均为最多 12 项、10 分钟，手动刷新会清掉对应缓存。该上限和样例不代表豆瓣全库、所有排序均能扫全，也不能描述为服务端人数排序。
+
 ## 网络边界速查
 
 ### 阿里转 115（2026-09-26）
@@ -357,7 +365,7 @@ Web 页面不能自行指定浏览器系统代理，因此 Web 端该页只展�
 - 非 `TV` 内嵌播放器复用 media_kit 的 Adaptive Material / MaterialDesktop 控件，并定制 Starflow 顶栏、网速和播放设置入口；字幕、音轨、外挂字幕、在线字幕、字幕偏移、后台播放和 MPV 参数复用现有播放链路，不新增服务端接口
 - Exo 右上角网速由当前会话已有 TransferListener 的实际网络字节量／采样间隔计算，空闲归零，不用旧带宽估计填充。MPV 仅在控制层标签读取本地 libmpv `cache-speed`，不把主机缓存当实时速率。点播／直播共用每秒刷新、3 个有效样本平滑和格式契约，零值立即清空平滑窗口，未知／2 秒读取超时显示 `--`；Flutter 标签隐藏或销毁停止轮询，换播放器／播放代次丢弃旧结果。两者都不额外发起测速或网络请求；显示平滑不参与自动恢复、缓冲阈值或启动期限判断
 - Android Exo 在播放器内切换远程剧集时会完全关闭旧媒体连接并为新地址创建独立会话；已知 MKV 的 `/smartstrm_fid/` 新集不再先发 64 字节格式探测，避免额外请求与新播放连接争用。TV 卡顿恢复门槛为未知／均衡带宽 `2s`、快网 `1.5s`、慢网 `3s` 的媒体内容，切集与首次打开共用短门槛，不再额外要求 `6s / 12s`。低档基础目标为 `64 MiB`，中档普通片源 `96 MiB`、重型／切集 `112 MiB`；动态预读仍受应用内存等级上限约束，无需填满目标缓存才恢复。短恢复门槛本身不新增网络请求、测速或重试，不改变 HTTP 超时、手机 Exo 或直播策略；MPV 独立调参见下文。
-- 点播单行分开显示网速、内存与磁盘占用及内核缓冲时长：MPV 读取 `demuxer-cache-state/fw-bytes`（前向包近似量）与 `demuxer-cache-duration`，Exo 读取本会话 `DefaultAllocator.totalBytesAllocated` 和已缓冲位置减播放位置；iOS 内存字节不可获取，不伪造估计值。磁盘只读当前 Player／transport 会话的已落盘元数据，原生每 2 秒经带 session、URL、generation 的 resolver 通道采样，隐藏／后台／退出停止，拒绝迟到结果；不新增 HTTP 测速请求。左上角标题下方左对齐显示当前分辨率及音视频编码。独立直播 Exo 保留原 `cacheBytes / cacheDurationMs / videoFormat`、每秒轮询与 2 秒超时，不接入点播磁盘指标。内存与磁盘可能包含相同数据，不能相加为总缓存，时长不从字节推算，不改变 LoadControl 门槛。
+- 点播单行分开显示网速、内存与磁盘占用及内核缓冲时长：MPV 读取完整 `demuxer-cache-state` JSON 中的 `fw-bytes`（前向包近似量）与 `demuxer-cache-duration`，不依赖旧 Apple 内核不支持的子属性路径；iOS／macOS MPV 均采用此读取器。Exo 读取本会话 `DefaultAllocator.totalBytesAllocated` 和已缓冲位置减播放位置；iOS 原生 AVPlayer 内存字节不可获取，不伪造估计值。磁盘只读当前 Player／transport 会话的已落盘元数据，原生每 2 秒经带 session、URL、generation 的 resolver 通道采样，隐藏／后台／退出停止，拒绝迟到结果；不新增 HTTP 测速请求。左上角标题下方左对齐显示当前分辨率及音视频编码。独立直播 Exo 保留原 `cacheBytes / cacheDurationMs / videoFormat`、每秒轮询与 2 秒超时，不接入点播磁盘指标。内存与磁盘可能包含相同数据，不能相加为总缓存，时长不从字节推算，不改变 LoadControl 门槛。
 - Exo 与 MPV 会把同主机实测速度在进程内保留 `10` 分钟用于下一集调参，不写入配置或磁盘。MPV 启动只读该缓存，命中与否都不额外发送 Range 请求；缓存缺失时按片源元数据调参，播放后从本地 `cache-speed` 更新缓存，历史缓存不计入新会话的实测速率统计。Exo 直接复用同一原生 Activity 的 Media3 带宽样本
 - 2026-09-25 运行期预读扩展：TV Exo 在同一加载器中按已知码率与活动传输吞吐调整有界预读目标／补充水位，不创建额外连接或第二个播放器、不改 HTTP 超时／重试；提前准入可能改变原媒体请求的时机与提前下载量，已在满缓存停读的零速率不作为慢网。MPV 恢复门槛与预读容量分离，TV 码率预算仍受设备档上限约束。刷新率提示、温控／解码／缓存健康快照都是本地操作，不上传日志或主动测速。完整规则见 [点播运行期流畅度策略](architecture.md#点播运行期流畅度策略2026-09-25)。
 - MPV / Exo 的可靠性配置位于 `config/playback_policy.json`；修改后运行 `dart tool/generate_playback_policy.dart`，通过 `dart tool/generate_playback_policy.dart --check` 验证。生成不联网、不升级依赖。两端自动卡顿重建最多两次，MPV 运行期错误重建也使用同一预算；切集/手动重试重置，实例释放不重置。Exo 使用独立的 `exoStartupHardLimitMs=60000 / exoStartupNoProgressTimeoutMs=30000`，MPV 自适应期限仍由 `startupHardLimitMs=120000` 封顶。`playback.reliability` 在状态/恢复边界记录 engine、policyVersion、phase、positionMs，恢复记录 action、reason、attempt，不新增预检、测速或远端上报。
@@ -514,6 +522,16 @@ Android 应用使用 JDK 17。TV 交付仍使用 [README 发布预设](../README
 
 ## 6. 实用建议
 
+### macOS Keychain 签名
+
+macOS 凭据存储显式使用 `flutter_secure_storage` 的传统 Keychain（`useDataProtectionKeyChain: false`），不请求 Data Protection Keychain access group，因此可在保留 App Sandbox 时使用 ad-hoc 签名构建，无需 Apple 开发者账号。凭据仍通过系统 Keychain API 保存，不是应用明文文件。Debug/Profile/Release 不声明 `keychain-access-groups`；用户选定文件和网络 entitlement 保持原样。
+
+旧版本写入 Data Protection Keychain，与传统 Keychain 是不同存储域。新存储首次为空时尝试读取旧域；读取成功后先将凭据写入新域并读回验证，成功后后续操作才使用新值。若系统明确返回旧域缺少 entitlement 的 `-34018`，保留旧项目并继续以无本机云盘凭据启动，使用户仍可恢复普通配置；其他 Keychain 错误继续报告。此时旧云盘凭据并未迁移，仍需旧签名版本在可访问时读取。迁移失败不删除旧项、不回退明文。ad-hoc 签名不提供 Developer ID 身份、公证或跨设备升级保证，首次在其他 Mac 打开仍可能需要用户确认。
+
+2026-09-27：用户截图确认旧 ad-hoc `1.9.266` DMG 的配置导入报 `-34018`（Data Protection Keychain entitlement 缺失），签名完整性本身不能证明导入可用。现以传统 Keychain 消除该 entitlement 依赖；主机测试和构建通过不等同于实际系统 Keychain 运行验收。
+
+macOS DMG 使用 `scripts/build_macos_dmg.sh`：读取当前 pubspec 三段版本，不自动递增或写回；仅在显式设置 `STARFLOW_RELEASE_VERSION` 时覆盖包内版本。默认输出桌面，可用 `MACOS_INSTALLER_DIR` 指定目录。脚本以 `.fvmrc` 校验 Flutter SDK，执行 Release 构建后重签外层 `.app`、深度校验嵌套签名与沙盒 entitlement，再创建并校验压缩 DMG。该脚本不代表 Developer ID 签名或公证。
+
 - Android 构建优先先确认 `android/local.properties` 里的 `sdk.dir` 和 `flutter.sdk`
 - 如果 `flutter test` 或 `flutter pub get` 很慢，优先先试镜像脚本
 - 如果 MuMu 已经开着但 `flutter devices` 仍然看不到模拟器，先运行 `.\scripts\connect_mumu.ps1`
@@ -659,6 +677,12 @@ Emby 来源刷新时，每个媒体分区也会作为 maintenance 任务进入�
 命令、母版与输出清单统一见 [README 品牌资源](../README.md#品牌资源)，本节只维护联网边界：图标缩放依赖本地 PNG 与 Pillow；TV Banner 由本机 Microsoft Edge 无头渲染 `docs/starflow_tv_banner.html`，HTML 中 Google Fonts 字体可能需要联网，不使用应用运行期代理或在线元数据服务。
 
 该流程不走 Flutter 构建，但会重新生成图片、图标和横幅。普通文档整理不运行导出脚本；原生启动布局与生成图片是否被引用分别见 [iOS 资源说明](../ios/Runner/Assets.xcassets/LaunchImage.imageset/README.md)。
+
+### iOS Keychain 签名权限
+
+`ios/Runner/Runner.entitlements` 声明 `$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)` 钥匙串访问组，Runner 的 Debug、Profile、Release 均通过 `CODE_SIGN_ENTITLEMENTS` 引用。前缀由实际签名身份解析，不硬编码团队标识。配置仓储在保存普通设置前先写入并回读验证网盘凭据；Keychain 返回 `-34018`（缺少 entitlement）会阻断配置迁移和保存，不能据此判断导入 JSON 损坏，也不回退明文存储或删除旧记录。
+
+IPA 发布预设仍生成未签名包，源码声明不等于最终安装包已获得权限。后续签名/重签必须使用描述文件允许的访问组，若更换应用标识或签名身份需相应解析访问组，并检查最终应用签名中的 `keychain-access-groups`。修改源码无法修复已经安装的包；需正确签名后覆盖安装，并真机复测启动、配置导入与网盘登录。不要为排障先卸载应用。
 
 ## 10. 本地匹配与凭据边界
 

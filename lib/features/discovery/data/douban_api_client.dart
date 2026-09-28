@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:starflow/core/network/starflow_http_client.dart';
 import 'package:starflow/features/discovery/data/douban_network_guard.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
+import 'package:starflow/features/discovery/domain/douban_browse_models.dart';
 
 final doubanApiClientProvider = Provider<DoubanApiClient>((ref) {
   final client = ref.watch(starflowHttpClientProvider);
@@ -24,6 +25,146 @@ class DoubanApiClient {
 
   static const _userAgent =
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+  Future<DoubanBrowsePageData> fetchBrowsePage(
+    DoubanBrowseQuery query, {
+    int start = 0,
+  }) async {
+    query.validate();
+    if (start < 0 || start > 980 || start % 20 != 0) {
+      throw const FormatException('无效分页位置');
+    }
+    final selected = <String, String>{};
+    if (query.category != DoubanBrowseCategory.movie) {
+      selected['类型'] = query.category.tvTag;
+    } else if (query.genre.isNotEmpty) {
+      selected['类型'] = query.genre;
+    }
+    if (query.region.isNotEmpty) selected['地区'] = query.region;
+    final tags = [
+      if (query.category != DoubanBrowseCategory.movie) query.category.tvTag,
+      query.genre,
+      query.region,
+      if (query.year != null) '${query.year}',
+    ].where((value) => value.isNotEmpty).toSet().join(',');
+    final uri = Uri.https(
+        'm.douban.com', '/rexxar/api/v2/${query.mediaType.value}/recommend', {
+      'refresh': '0',
+      'start': '$start',
+      'count': '20',
+      'selected_categories': jsonEncode(selected),
+      'uncollect': 'false',
+      'score_range': '${query.minRating},10',
+      'tags': tags,
+      'sort': query.sort.code,
+    });
+    final payload = await _getBrowseJson(uri, headers: {
+      'Referer': query.mediaType == DoubanSuggestionMediaType.movie
+          ? 'https://movie.douban.com/explore'
+          : 'https://movie.douban.com/tv/',
+    });
+    final rawItems = payload['items'];
+    if (rawItems is! List) {
+      throw const DoubanApiException('豆瓣选片响应格式异常');
+    }
+    final entries = <DoubanEntry>[];
+    for (final raw in rawItems) {
+      if (raw is! Map) continue;
+      late final Map<String, dynamic> item;
+      try {
+        item = Map<String, dynamic>.from(raw);
+      } catch (_) {
+        continue;
+      }
+      if (item['type'] != query.mediaType.value) continue;
+      final id = '${item['id'] ?? ''}'.trim();
+      final title = '${item['title'] ?? ''}'.trim();
+      if (id.isEmpty || title.isEmpty) continue;
+      final rating = item['rating'];
+      final ratingMap = rating is Map ? rating : const {};
+      final ratingValue = _numberValue(ratingMap['value'])?.toDouble() ?? 0;
+      final poster = item['pic'];
+      final posterMap = poster is Map ? poster : const {};
+      entries.add(DoubanEntry(
+        id: id,
+        title: title,
+        year: int.tryParse('${item['year']}') ?? 0,
+        posterUrl: _normalizePosterUrl(
+            '${posterMap['normal'] ?? posterMap['large'] ?? ''}'),
+        note: '',
+        ratingLabel: ratingValue > 0 && ratingValue <= 10
+            ? '豆瓣 ${ratingValue.toStringAsFixed(1)}'
+            : '',
+        ratingCount: max(0, _numberValue(ratingMap['count'])?.toInt() ?? 0),
+        subjectType: query.mediaType.value,
+        sourceUrl: 'https://movie.douban.com/subject/$id/',
+      ));
+    }
+    if (rawItems.isNotEmpty && entries.isEmpty) {
+      throw const DoubanApiException('豆瓣选片没有可识别的作品');
+    }
+    List<String> options(String category) {
+      final groups = payload['recommend_categories'];
+      if (groups is! List) return const [];
+      for (final raw in groups) {
+        if (raw is! Map || raw['type'] != category || raw['data'] is! List) {
+          continue;
+        }
+        if (category == '类型' &&
+            query.mediaType == DoubanSuggestionMediaType.tv) {
+          final group = (raw['data'] as List)
+              .whereType<Map>()
+              .where((item) => item['text'] == query.category.tvTag)
+              .firstOrNull;
+          if (group == null || group['tags'] is! List) return const [];
+          return (group['tags'] as List)
+              .whereType<String>()
+              .where((tag) => tag.trim().isNotEmpty)
+              .toSet()
+              .toList(growable: false);
+        }
+        return (raw['data'] as List)
+            .whereType<Map>()
+            .map((value) => '${value['text'] ?? ''}'.trim())
+            .where(
+                (value) => value.isNotEmpty && value != '全部' && value != '类型')
+            .toList(growable: false);
+      }
+      return const [];
+    }
+
+    return DoubanBrowsePageData(
+      entries: entries,
+      start: start,
+      rawCount: rawItems.length,
+      total: payload['total'] is int ? payload['total'] as int : null,
+      genres: options('类型'),
+      regions: options('地区'),
+    );
+  }
+
+  Future<List<DoubanEntry>> fetchBrowseEntries(
+    DoubanBrowseQuery query, {
+    required int minimumRatingCount,
+    int requestLimit = 50,
+  }) async {
+    if (minimumRatingCount <= 0) {
+      throw const FormatException('无效评分人数下限');
+    }
+    final matches = <DoubanEntry>[];
+    final maxRequests = requestLimit < 1 ? 1 : requestLimit;
+    for (var page = 0; page < maxRequests; page++) {
+      final payload = await fetchBrowsePage(query, start: page * 20);
+      for (final entry in payload.entries) {
+        if (entry.ratingCount >= minimumRatingCount &&
+            !matches.any((item) => item.id == entry.id)) {
+          matches.add(entry);
+        }
+      }
+      if (!payload.hasNext || payload.rawCount == 0) break;
+    }
+    return matches;
+  }
 
   Future<List<DoubanEntry>> fetchInterestItems({
     required String userId,
@@ -290,6 +431,33 @@ class DoubanApiClient {
       return Map<String, dynamic>.from(decoded);
     }
     return const {};
+  }
+
+  Future<Map<String, dynamic>> _getBrowseJson(
+    Uri uri, {
+    required Map<String, String> headers,
+  }) async {
+    final response = await _networkGuard.get(_client, uri, headers: {
+      'User-Agent': _userAgent,
+      'Accept': 'application/json',
+      ...headers,
+    });
+    if (response.statusCode == 403 || response.statusCode == 401) {
+      throw const DoubanApiException('豆瓣要求验证或登录，请稍后手动重试');
+    }
+    if (response.statusCode == 429) {
+      throw const DoubanApiException('豆瓣请求频繁，请稍后手动重试');
+    }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw DoubanApiException('豆瓣选片请求失败：HTTP ${response.statusCode}');
+    }
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } on FormatException {
+      throw const DoubanApiException('豆瓣响应格式异常或需要验证');
+    }
+    throw const DoubanApiException('豆瓣选片响应格式异常');
   }
 
   DoubanEntry? _mapInterestEntry(Map<String, dynamic> item) {

@@ -31,9 +31,11 @@ String formatPlaybackMetrics(
     {int? diskCacheBytes,
     bool showDiskCache = false,
     String memoryCacheLabel = ''}) {
+  final memory =
+      '${memoryCacheLabel.isEmpty ? '' : '$memoryCacheLabel '}${formatPlaybackCacheBytes(cacheBytes)}';
   final cache = diskCacheBytes == null && !showDiskCache
-      ? formatPlaybackCacheBytes(cacheBytes)
-      : '${memoryCacheLabel.isEmpty ? '' : '$memoryCacheLabel '}${formatPlaybackCacheBytes(cacheBytes)} | ${formatPlaybackCacheBytes(diskCacheBytes)}';
+      ? memory
+      : '$memory | ${formatPlaybackCacheBytes(diskCacheBytes)}';
   return [
     formatPlaybackNetworkSpeed(bytesPerSecond),
     cache,

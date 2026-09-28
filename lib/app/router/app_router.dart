@@ -23,6 +23,7 @@ import 'package:starflow/features/playback/domain/subtitle_search_models.dart';
 import 'package:starflow/features/playback/presentation/player_page.dart';
 import 'package:starflow/features/playback/presentation/subtitle_search_page.dart';
 import 'package:starflow/features/search/presentation/search_page.dart';
+import 'package:starflow/features/search/presentation/search_hub_page.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 import 'package:starflow/features/settings/presentation/settings_page.dart';
 
@@ -63,7 +64,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 name: AppRoutes.search.name,
                 pageBuilder: (context, state) => _buildAppPage(
                   state: state,
-                  child: SearchPage(
+                  child: SearchHubPage(
                     initialQuery: state.uri.queryParameters['q'],
                   ),
                 ),

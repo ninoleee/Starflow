@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:starflow/features/playback/data/mpv_playback_cache.dart';
 import 'package:starflow/features/playback/data/mpv_playback_format.dart';
 import 'package:starflow/features/playback/domain/playback_network_speed.dart';
 
@@ -14,6 +15,7 @@ class MpvNetworkSpeedLabel extends StatelessWidget {
     this.visible = true,
     this.readDiskCacheBytes,
     this.formatOnly = false,
+    this.height = 36,
   });
 
   final Player player;
@@ -21,6 +23,7 @@ class MpvNetworkSpeedLabel extends StatelessWidget {
   final bool visible;
   final Future<int?> Function()? readDiskCacheBytes;
   final bool formatOnly;
+  final double height;
 
   Future<int?> _readSpeed() async {
     final native = player.platform;
@@ -32,9 +35,7 @@ class MpvNetworkSpeedLabel extends StatelessWidget {
   Future<int?> _readCacheBytes() async {
     final native = player.platform;
     if (native is! NativePlayer) return null;
-    return parsePlaybackByteCount(
-      await native.getProperty('demuxer-cache-state/fw-bytes'),
-    );
+    return readMpvForwardCacheBytes(native.getProperty);
   }
 
   Future<int?> _readBufferDurationMs() async {
@@ -49,12 +50,12 @@ class MpvNetworkSpeedLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     if (kIsWeb) return const SizedBox.shrink();
     return PlaybackNetworkSpeedLabel(
+      height: height,
       sampleKey: (player, generation),
       showFormat: false,
       formatOnly: formatOnly,
       readSpeed: formatOnly ? () async => null : _readSpeed,
       readCacheBytes: formatOnly ? null : _readCacheBytes,
-      memoryCacheLabel: '前向包约',
       readDiskCacheBytes: formatOnly ? null : readDiskCacheBytes,
       readBufferDurationMs: formatOnly ? null : _readBufferDurationMs,
       readFormat: !formatOnly

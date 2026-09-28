@@ -3,6 +3,63 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:starflow/features/playback/presentation/widgets/player_controls_layout.dart';
 
 void main() {
+  for (final width in [320.0, 844.0]) {
+    for (final metricsWidth in [0.0, 60.0, 1000.0]) {
+      testWidgets('top actions stay at edges: $width / $metricsWidth',
+          (tester) async {
+        await tester.pumpWidget(Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: SizedBox(
+              width: width,
+              height: 56,
+              child: PlayerMpvTopBarRow(
+                backButton: const SizedBox(key: ValueKey('back'), width: 48),
+                title: const Text('A long playback title that can be truncated',
+                    maxLines: 1, overflow: TextOverflow.ellipsis),
+                metrics: SizedBox(
+                    key: const ValueKey('metrics'),
+                    width: metricsWidth,
+                    height: 20),
+                format: const SizedBox(key: ValueKey('format'), height: 20),
+                actions: const [
+                  SizedBox(width: 48),
+                  SizedBox(key: ValueKey('more'), width: 48),
+                ],
+              ),
+            ),
+          ),
+        ));
+        final rowRect = tester.getRect(find.byType(PlayerMpvTopBarRow));
+        expect(tester.getTopLeft(find.byKey(const ValueKey('back'))).dx,
+            rowRect.left);
+        expect(tester.getTopRight(find.byKey(const ValueKey('more'))).dx,
+            rowRect.right);
+        final metrics = tester.getRect(find.byKey(const ValueKey('metrics')));
+        final format = tester.getRect(find.byKey(const ValueKey('format')));
+        expect(metrics.top, rowRect.top + playbackTopMetricsOffset);
+        expect(metrics.top, rowRect.top + 40);
+        expect(tester.getRect(find.byType(Text)).bottom,
+            lessThanOrEqualTo(metrics.top));
+        expect(metrics.right, rowRect.right - 12);
+        expect(format.left, rowRect.left + 56);
+        expect(format.left, tester.getTopLeft(find.byType(Text)).dx);
+        expect(format.right, lessThan(metrics.left));
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
+
+  test('top bar keeps safe area with four pixels of extra side clearance', () {
+    expect(
+      playbackTopBarPadding(playbackControlsPadding(
+        viewport: const Size(844, 390),
+        safeArea: const EdgeInsets.fromLTRB(44, 0, 24, 21),
+      )),
+      const EdgeInsets.fromLTRB(48, 6, 28, 0),
+    );
+  });
+
   for (final viewport in [const Size(844, 390), const Size(390, 844)]) {
     testWidgets('ordinary surface fills $viewport for all video ratios',
         (tester) async {

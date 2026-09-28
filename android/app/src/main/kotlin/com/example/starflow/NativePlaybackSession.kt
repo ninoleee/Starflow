@@ -1,7 +1,6 @@
 package com.example.starflow
 
 import android.app.Activity
-import android.app.ActivityManager
 import android.os.Handler
 import android.os.Looper
 import android.os.Build
@@ -70,7 +69,7 @@ internal class NativePlaybackSession(private val host: Host) {
     private var playbackAllocator: DefaultAllocator? = null
     private var adaptiveLoadControl: NativePlaybackLoadControl? = null
     private var bufferStateListener: Player.Listener? = null
-    private var fallbackHighWaterMs = 120_000L
+    private var fallbackHighWaterMs = 300_000L
     private var memoryPressureUntilMs = 0L
 
     fun isMemoryBufferReady(): Boolean {
@@ -634,9 +633,7 @@ internal class NativePlaybackSession(private val host: Host) {
     }
 
     private fun buildLoadControl(): LoadControl {
-        val memoryClassMb =
-            (host.activity.getSystemService(Activity.ACTIVITY_SERVICE) as ActivityManager)
-                .memoryClass
+        val memoryClassMb = PlaybackMemoryClass.read(host.activity)
         val targetObject = host.target.decodePlaybackTargetObject()
         val width = targetObject.optInt("width", 0)
         val height = targetObject.optInt("height", 0)
@@ -704,7 +701,7 @@ internal class NativePlaybackSession(private val host: Host) {
         if ((!host.isTelevisionDevice && manualBytes == 0) || !NativePlaybackSource.isHttpPlaybackUrl(
                 host.activity.intent.getStringExtra(EXTRA_URL).orEmpty())) return delegate
         return NativePlaybackLoadControl(delegate, allocator, bufferConfig,
-            if (manualBytes > 0) manualBytes else NativePlaybackBufferBudget.limit(memoryClassMb),
+            if (manualBytes > 0) manualBytes else NativePlaybackBufferBudget.automaticLimit(memoryClassMb),
             bitrate, playbackTransferProgress)
             .also { adaptiveLoadControl = it }
     }

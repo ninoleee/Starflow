@@ -16,6 +16,7 @@ class PlaybackNetworkSpeedLabel extends StatefulWidget {
     this.visible = true,
     this.showFormat = true,
     this.formatOnly = false,
+    this.height = 36,
   });
 
   final Object sampleKey;
@@ -28,6 +29,7 @@ class PlaybackNetworkSpeedLabel extends StatefulWidget {
   final bool visible;
   final bool showFormat;
   final bool formatOnly;
+  final double height;
 
   @override
   State<PlaybackNetworkSpeedLabel> createState() =>
@@ -184,7 +186,7 @@ class _PlaybackNetworkSpeedLabelState extends State<PlaybackNetworkSpeedLabel>
       child: SizedBox(
         width:
             (MediaQuery.sizeOf(context).width - 160).clamp(0.0, _metricsWidth),
-        height: 36,
+        height: widget.height,
         child: DefaultTextStyle(
           style: _metricsTextStyle(),
           child: Align(

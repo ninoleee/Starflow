@@ -28,9 +28,9 @@ class NativePlaybackSessionTest {
         session.player = player
         `when`(player.playWhenReady).thenReturn(true)
         `when`(player.playbackState).thenReturn(androidx.media3.common.Player.STATE_READY)
-        `when`(player.totalBufferedDuration).thenReturn(119_999L)
+        `when`(player.totalBufferedDuration).thenReturn(299_999L)
         assertFalse(session.isMemoryBufferReady())
-        `when`(player.totalBufferedDuration).thenReturn(120_000L)
+        `when`(player.totalBufferedDuration).thenReturn(300_000L)
         assertTrue(session.isMemoryBufferReady())
         `when`(player.isLoading).thenReturn(true)
         assertFalse(session.isMemoryBufferReady())

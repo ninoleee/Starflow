@@ -198,7 +198,7 @@ class _PlayerAdaptiveTopChromeState extends State<PlayerAdaptiveTopChrome> {
               ),
             ),
             child: Padding(
-              padding: controlsPadding.copyWith(bottom: 0),
+              padding: playbackTopBarPadding(controlsPadding),
               child: SizedBox(
                 height: playbackButtonBarHeight,
                 child: Row(

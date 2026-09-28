@@ -27,7 +27,7 @@ class NativePlaybackReadAheadPolicyTest {
         isTelevision = true,
         memoryClassMb = 384,
         isHeavyPlayback = false,
-    )
+    ).copy(targetBufferBytes = 64 * 1024 * 1024)
 
     @Test
     fun targetIsBoundedAndNeverFallsBelowTheConfiguredBase() {
@@ -123,36 +123,50 @@ class NativePlaybackReadAheadPolicyTest {
     }
 
     @Test
-    fun pressureTargetStillHonorsLimitSmallerThanBaseAndMemoryTiersHaveExactBoundaries() {
-        for ((memory, limitMb) in listOf(256 to 64, 257 to 128, 512 to 128, 513 to 256)) {
+    fun percentageBudgetHasMinimumMaximumAndOverflowProtection() {
+        for ((memory, limitMb) in listOf(
+            Int.MIN_VALUE to 1, 0 to 1, 16 to 16, 64 to 32, 85 to 32,
+            192 to 72, 256 to 96, 384 to 144, 512 to 192, 768 to 288,
+            1024 to 384, 2048 to 512, Int.MAX_VALUE to 512,
+        )) {
             assertEquals(limitMb * 1024 * 1024, NativePlaybackBufferBudget.limit(memory))
         }
+        for (memory in listOf(86, 257, 513, 1365)) {
+            assertEquals(memory.toLong() * 1024 * 1024 * 3 / 8,
+                NativePlaybackBufferBudget.limit(memory).toLong())
+        }
+        assertEquals(512 * 1024 * 1024, NativePlaybackBufferBudget.limit(1366))
+        for ((memory, expected) in listOf(128 to 48, 512 to 192, 683 to 256, 1024 to 256, 2048 to 256)) {
+            assertEquals(expected * 1024 * 1024,
+                NativePlaybackBufferBudget.automaticLimit(memory))
+        }
+        assertEquals(682L * 1024 * 1024 * 3 / 8,
+            NativePlaybackBufferBudget.automaticLimit(682).toLong())
         val policy = NativePlaybackReadAheadPolicy(config, 16 * 1024 * 1024, Long.MAX_VALUE)
-        assertEquals(16 * 1024 * 1024,
+        assertEquals(8 * 1024 * 1024,
             policy.evaluate(0, 0, 0, 1f, true, true, 0L, true).first)
     }
 
     @Test
-    fun highMemoryBudgetGrowsFrom160To256MiBAndPressureRestoresBase() {
+    fun automaticBudgetRemainsBoundedAndPressureHalvesTarget() {
         val highMemoryConfig = NativePlaybackBufferPolicy.resolve(true, 513, false)
         val limit = NativePlaybackBufferBudget.limit(513)
-        val mib = 1024 * 1024
         for (bitrate in listOf(0L, 10_000_000L)) {
-            assertEquals(160 * mib, NativePlaybackBufferBudget.target(
+            assertEquals(limit, NativePlaybackBufferBudget.target(
                 highMemoryConfig.targetBufferBytes, limit, bitrate, 12,
             ))
         }
-        assertEquals(256 * mib, NativePlaybackBufferBudget.target(
+        assertEquals(limit, NativePlaybackBufferBudget.target(
             highMemoryConfig.targetBufferBytes, limit, Long.MAX_VALUE, 12,
         ))
         val policy = NativePlaybackReadAheadPolicy(highMemoryConfig, limit, 100_000_000L)
         val normal = policy.evaluate(0, 0, 20_000, 1f, true, true, 0L, false)
-        assertEquals(160 * mib, normal.first)
+        assertEquals(limit, normal.first)
         policy.evaluate(1_000, 1_000, 19_000, 1f, true, true, 0L, false)
         val boosted = policy.evaluate(2_000, 2_000, 18_000, 1f, true, true, 0L, false)
-        assertEquals(250_000_000, boosted.first)
+        assertEquals(limit, boosted.first)
         val pressure = policy.evaluate(3_000, 3_000, 17_000, 1f, true, true, 0L, true)
-        assertEquals(160 * mib, pressure.first)
+        assertEquals(limit / 2, pressure.first)
         assertEquals(highMemoryConfig.minBufferMs, pressure.second)
     }
 }

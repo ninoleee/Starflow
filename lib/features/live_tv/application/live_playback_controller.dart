@@ -8,6 +8,7 @@ import 'package:starflow/core/network/network_proxy_config.dart';
 import 'package:starflow/features/playback/application/active_playback_cleanup.dart';
 import 'package:starflow/features/playback/domain/playback_network_speed.dart';
 import 'package:starflow/features/playback/data/mpv_playback_format.dart';
+import 'package:starflow/features/playback/data/mpv_playback_cache.dart';
 import '../domain/live_models.dart';
 import 'live_mpv_options.dart';
 import 'live_playback_error.dart';
@@ -90,10 +91,10 @@ class MpvLiveEngine
     if (_generation != generation || current?.platform is! NativePlayer) {
       return null;
     }
-    final raw = await (current!.platform as NativePlayer)
-        .getProperty('demuxer-cache-state/fw-bytes');
+    final bytes = await readMpvForwardCacheBytes(
+        (current!.platform as NativePlayer).getProperty);
     if (_generation != generation || !identical(current, player)) return null;
-    return parsePlaybackByteCount(raw);
+    return bytes;
   }
 
   @override

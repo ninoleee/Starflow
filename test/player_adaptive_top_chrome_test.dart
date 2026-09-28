@@ -9,7 +9,7 @@ void main() {
       const EdgeInsets.fromLTRB(24, 44, 12, 21)
     ]) {
       testWidgets(
-          'top bar adds 12 side and 6 top pixels inside view insets $insets',
+          'top bar adds 4 side and 6 top pixels inside view insets $insets',
           (tester) async {
         final controller =
             PlayerAdaptiveTopChromeController(autoHideEnabled: false);
@@ -32,8 +32,8 @@ void main() {
           matching: find.byType(Row),
         );
         expect(
-            tester.getTopLeft(row), Offset(insets.left + 12, insets.top + 6));
-        expect(tester.getSize(row), Size(800 - insets.horizontal - 24, 56));
+            tester.getTopLeft(row), Offset(insets.left + 4, insets.top + 6));
+        expect(tester.getSize(row), Size(800 - insets.horizontal - 8, 56));
         expect(
             tester
                 .getCenter(find.byKey(kPlayerAdaptiveTopChromeBackButtonKey))

@@ -21,6 +21,11 @@
 | 首页／Hero | 当前海报优先；首个模块上移回 Hero；Hero 下移恢复该模块最后持焦的可见卡片，失效目标回退首张；异步插入／移除只补缺焦 | `tv_focus_regressions_test.dart`、`home_page_presentation_test.dart` |
 | 首页编辑 | 模块／来源稳定节点，重排和删除恢复目标 | `home_editor_tv_reorder_test.dart` |
 | 搜索／收藏 | 搜索入口／同步入口首焦点；结果不抢现有焦点；搜索输入复用松键机制 | `search_page_focus_test.dart` |
+| 豆瓣选片（2026-09-27） | `/search` 双标签、类别与筛选菜单、海报和显式翻页复用 Flutter 方向寻焦与 `TvPageFocusScope`；定向宿主布局测试覆盖 1280×720，详情返回的指定海报焦点及遥控器操作仍待 TV 真机验收 | `search_hub_page_test.dart`、`douban_browse_page_test.dart` |
+| 豆瓣类别调整（2026-09-28） | 顶部改为电影／电视剧／综艺三选一，题材菜单随类别切换；主机 widget 测试覆盖菜单和请求，遥控器实际焦点顺序仍待真机复验 | `douban_browse_page_test.dart` |
+| 豆瓣海报与分页（2026-09-28） | 年份移至海报左上角，分页贴近最后一行，页面末端留 80dp 加安全区；两个分段标签不显示选中对号。主机测试覆盖组件参数与网格至分页距离；遥控器滚动和底栏遮挡仍待真机复验 | `douban_browse_page_test.dart`、`search_hub_page_test.dart` |
+| 豆瓣四角角标（2026-09-28） | 右上显示当前类别，右下显示已知点评人数，左侧保留年份和评分；窄海报的底部角标弹性省略以免相互覆盖，电视端真实可读性仍待设备验收 | `douban_browse_page_test.dart` |
+| 豆瓣年份与点评人数（2026-09-28） | 年份菜单首项固定“全部”；点评人数提供不限／5000／1 万／3 万／6 万／10 万以上，候选过滤后本地分页。主机测试覆盖菜单与翻页，TV 大字号弹窗和遥控器浏览仍待真机验收 | `douban_browse_page_test.dart`、`douban_browse_test.dart` |
 | 媒体库 | 顶部筛选首焦点；多页分页到边界保焦，确认无效但方向可离开 | `tv_secondary_page_focus_test.dart`、`library_refresh_actions_test.dart` |
 | 查看全部／合集／演职员作品 | 常驻页头首焦点，加载／空／失败不依赖海报；迟到结果不竞争首焦点。演职员作品页上方分页按下进入首张作品卡片，下方分页向上返回末张卡片 | `tv_secondary_page_focus_test.dart` |
 | 详情／信息管理 | 续播与主操作焦点、剧集恢复不抢主操作；更新忙碌保焦 | `detail_episode_restore_test.dart`、`metadata_index_management_page_focus_test.dart` |

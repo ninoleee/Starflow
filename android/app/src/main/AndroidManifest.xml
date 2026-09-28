@@ -14,6 +14,7 @@
     <application
         android:label="Starflow"
         android:allowBackup="false"
+        android:largeHeap="true"
         android:name=".StarflowApplication"
         android:icon="@drawable/icon_preview_sharp"
         android:banner="@drawable/tv_banner_hd"

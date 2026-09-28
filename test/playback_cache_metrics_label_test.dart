@@ -1,10 +1,54 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:starflow/features/playback/data/mpv_playback_cache.dart';
 import 'package:starflow/features/playback/domain/playback_network_speed.dart';
 import 'package:starflow/features/playback/presentation/widgets/playback_network_speed_label.dart';
 
 void main() {
+  testWidgets('MPV JSON memory bytes show independently from relay disk bytes',
+      (tester) async {
+    var cacheState = '{"fw-bytes":33554432,"total-bytes":41943040}';
+    await tester.pumpWidget(MaterialApp(
+      home: PlaybackNetworkSpeedLabel(
+        sampleKey: 1,
+        readSpeed: () async => 2048,
+        readCacheBytes: () => readMpvForwardCacheBytes((_) async => cacheState),
+        readDiskCacheBytes: () async => 128 * 1024 * 1024,
+        readBufferDurationMs: () async => 18000,
+        showFormat: false,
+      ),
+    ));
+    await tester.pump();
+    expect(find.text('2.0 KB/s · 32.0 MB | 128.0 MB · 18s'), findsOneWidget);
+    cacheState = '{"fw-bytes":0,"total-bytes":41943040}';
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(find.text('2.0 KB/s · 0 B | 128.0 MB · 18s'), findsOneWidget);
+    cacheState = '';
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(find.text('2.0 KB/s · -- | 128.0 MB · 18s'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('MPV shows byte size and duration without disk cache',
+      (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: PlaybackNetworkSpeedLabel(
+        sampleKey: 1,
+        readSpeed: () async => 2048,
+        readCacheBytes: () async => 32 * 1024 * 1024,
+        readBufferDurationMs: () async => 18000,
+        showFormat: false,
+      ),
+    ));
+    await tester.pump();
+    expect(find.text('2.0 KB/s · 32.0 MB · 18s'), findsOneWidget);
+    expect(find.textContaining('前向包约'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('disabling disk metrics drops late values and stops disk reads',
       (tester) async {
     final pending = Completer<int?>();

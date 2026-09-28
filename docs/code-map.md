@@ -82,13 +82,13 @@
 | --- | --- | --- |
 | `bootstrap` | `application/bootstrap_controller.dart`、`presentation/bootstrap_page.dart` | 启动阶段与超时兜底，调用设置、缓存和首页 |
 | `home` | `application/home_controller.dart`、`home_feed_repository.dart`、`home_controller_models.dart` | 来源 seed 与本地详情装饰分离；独立首页调度、Hero 预取、元数据刷新及 settings slices；页面拆成 home / hero / sections |
-| `discovery` | `data/discovery_repository.dart`、`douban_api_client.dart`、`douban_network_guard.dart` | 豆瓣列表与详情数据，提供给首页 / 详情；不单独占一个默认主导航 tab |
+| `discovery` | `data/discovery_repository.dart`、`douban_api_client.dart`、`douban_network_guard.dart`、`douban_browse_repository.dart`、`domain/douban_browse_models.dart`、`presentation/douban_browse_page.dart` | 豆瓣首页／详情及搜索页选片列表；选片有独立查询、缓存、分页与展示，不单独占一个默认主导航 tab |
 | `library` | `data/media_repository.dart`、`application/app_media_query_service.dart` | AppMediaRepository 管刷新 / 删除，query service 管读；media_server_client 协调 Emby / 飞牛，NAS 索引覆盖 WebDAV / 夸克 |
 | `details` | `application/detail_page_controller.dart`、`detail_target_resolver.dart`、`detail_metadata_service.dart` | 详情恢复、统一元数据执行、本地匹配、评分预取、版本选择与从头播放；季集 UI 按目标懒加载 |
 | `metadata` | `data/metadata_match_resolver.dart`、`wmdb_metadata_client.dart`、`tmdb_metadata_client.dart` | WMDB / TMDB 匹配、结果复用、网络 guard 与共享限流；IMDb 为默认关闭的 NAS 配置功能，`imdb_rating_dataset.dart` 后台构建有界字节/行偏移索引，客户端共享下载与解析 |
 | `playback` | `application/playback_startup_coordinator.dart`、`presentation/player_page.dart` | 启动、路由、播放会话、可靠性、字幕、播放记忆及平台适配 |
 | `live_tv` | `data/live_repository.dart`、`live_playlist_parser.dart`、`live_epg_parser.dart`、`application/live_playback_controller.dart` | 独立订阅/频道/节目单存储、MPV/Exo 直播会话；`presentation/live_tv_page.dart / live_sources_page.dart / live_player_page.dart` 为界面入口 |
-| `search` | `data/search_repository.dart`、`presentation/search_page.dart` | PanSou / CloudSaver / 本地来源搜索、分享验证、收藏及网盘保存工作流 |
+| `search` | `data/search_repository.dart`、`data/search_preferences_repository.dart`、`presentation/search_hub_page.dart`、`presentation/search_page.dart` | `/search` 双标签入口及本机选片偏好；PanSou / CloudSaver / 本地来源搜索、分享验证、收藏及网盘保存工作流 |
 | `settings` | `application/settings_controller.dart`、`settings_slice_providers.dart`、`domain/app_settings.dart` | 配置模型、窄字段保存、来源生命周期、自动保存、导入导出、日志、代理与 WebDAV 同步 |
 | `storage` | `data/local_storage_cache_repository.dart`、`application/local_storage_cache_revision.dart` | 本地详情及媒体服务器分片缓存、统计与清理，revision 驱动本地派生刷新 |
 
@@ -223,6 +223,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 - `playback_seek_coalescer.dart` 累计和合并 TV 定位输入；`playback_track_guard.dart` 给异步自动选轨提供会话/手动操作边界；`external_playback_file_store.dart` 只清理专属播放列表分配目录，不扫描系统临时根目录。
 - `MpvPlaybackLifecycle` 持有单实例订阅及 `MpvSubtitleSession`，关闭时先失效回调并捕获旧资源的清理 Future；页面级恢复预算不随实例重建重置。`PlaybackPlatformSessionOwner` 持有系统媒体会话绑定、发布快照与生命周期代次，页面继续提供播放状态及遥控命令适配。
 - 非 TV 控件基于 media_kit Adaptive Material / MaterialDesktop，TV 使用专用遥控层；Web 的 `embeddedMpv` 枚举值实际路由浏览器后端，不是浏览器里运行 libmpv。
+- `data/mpv_playback_cache.dart` 为点播／直播 MPV 标签解析完整缓存状态中的前向字节，兼容 Apple 旧内核；`test/mpv_playback_cache_test.dart` 覆盖 JSON 与异常边界，`test/playback_cache_metrics_label_test.dart` 覆盖内存与磁盘独立显示。
 - `playback_engine_support.dart` 是平台选项边界；`native_playback_launcher_io.dart` 桥接 Android Exo / iOS AVPlayer，`system_playback_launcher_io.dart` 负责外部应用 / 系统打开。
 - `FntvSessionOwner` 与 `native_fntv_service.dart` 负责转码会话所有权和原生回调，失败 / 迟到的新会话也需释放；Exo 不另写一套 Authx 客户端。
 - `playback_episode_browser.dart` 管季集浏览缓存，queue / next-episode 策略只预解析一个目标，不预建第二个播放器。
@@ -247,6 +248,7 @@ PlaybackStartupCoordinator -> 本地续播 / 跳过准备
 | `NativePlaybackActivity / LaunchController / Coordinator / Session` | 原生页面装配、启动及 Exo 生命周期，不把策略都放回 Activity |
 | `NativePlaybackSource / Target / Options` | Dart JSON 契约、媒体源与会话设置 |
 | `NativePlaybackRuntimeController / RecoveryController` 及各 `*Policy` | tick、启动进展、缓冲、恢复、错误、HLS、TV seek 和焦点规则 |
+| `PlaybackMemoryClass` | 直接以 Android `Runtime.maxMemory()` 换算有效堆等级，供 MPV TV 平台桥与 Exo Session 共用；普通／大堆报告值仅供诊断；回归 `PlaybackMemoryClassTest` |
 | `NativePlaybackLoadControl / ReadAheadPolicy / HealthPolicy / FrameRateController` | TV 点播有界动态预读、活动读取采样、卡顿诊断限频与可选 Surface 帧率提示；Session 接入，Runtime 复用每秒循环 |
 | `playback_relay_disk_cache.dart / playback_stream_relay_service_io.dart` | MPV／Exo／iOS 可选临时区间缓存、LRU／512 MiB 最低剩余空间保护、有验证器的滚动前向窗口、HLS VOD 分片与 WebVTT、会话清理和网络回退；本地文件直读，不提供独立下载 |
 | `playback_stream_relay_contract.dart / native_playback_launcher_io.dart` | `PlaybackRelayCacheControl` 可选契约、当前会话磁盘快照及暂停／seek 控制；原生 resolver 通道校验 owner、URL 和 generation，隔离迟到响应 |

@@ -45,6 +45,48 @@ class NativePlaybackLoadControlTest {
     }
 
     @Test
+    fun fiveMinuteCapStopsLoadingAndRefillsAtActualHighWaterWithoutDelayingStartup() {
+        for (memory in listOf(192, 512, 1024)) {
+            val config = NativePlaybackBufferPolicy.resolve(true, memory, false)
+            Fixture(config, NativePlaybackBufferBudget.limit(memory)).use { f ->
+                assertPlaybackThresholds(f)
+                assertTrue(f.control.shouldContinueLoading(f.parameters(120_000)))
+                assertTrue(f.control.shouldContinueLoading(f.parameters(299_999)))
+                assertFalse(f.control.shouldContinueLoading(f.parameters(300_000)))
+                assertTrue(f.control.isMemoryReady(300_000))
+                assertFalse(f.control.shouldContinueLoading(f.parameters(225_001)))
+                assertFalse(f.control.isMemoryReady(225_000))
+                assertTrue(f.control.shouldContinueLoading(f.parameters(225_000)))
+                assertPlaybackThresholds(f)
+            }
+        }
+    }
+
+    @Test
+    fun percentageAndManualTargetsHalveDuringPressureAndRecoverAfterSixtySeconds() {
+        for (manualMiB in listOf(0, 64, 128, 256, 512)) {
+            val config = NativePlaybackBufferPolicy.resolve(true, 512, false,
+                memoryCacheMiB = manualMiB)
+            Fixture(config, config.targetBufferBytes, bitrate = 0L).use { f ->
+                val target = config.targetBufferBytes
+                assertEquals(target, f.control.currentTargetBytes)
+                f.control.onMemoryPressure()
+                assertEquals(target / 2, f.control.currentTargetBytes)
+                assertFalse(f.control.isMemoryReady(300_000))
+                f.control.shouldContinueLoading(f.parameters(1_000))
+                assertEquals(target / 2, f.control.currentTargetBytes)
+                f.time = 59_999
+                f.control.shouldContinueLoading(f.parameters(1_000))
+                assertEquals(target / 2, f.control.currentTargetBytes)
+                f.time = 60_000
+                f.control.shouldContinueLoading(f.parameters(1_000))
+                assertEquals(target, f.control.currentTargetBytes)
+                assertPlaybackThresholds(f)
+            }
+        }
+    }
+
+    @Test
     fun dynamicExpansionDoesNotRaiseStartupOrRebufferThresholdsAtAnyPlaybackSpeed() {
         Fixture().use { f ->
             f.boost()
@@ -248,7 +290,7 @@ class NativePlaybackLoadControlTest {
         val allocator = DefaultAllocator(true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
         private val uri = mock(Uri::class.java).also { `when`(it.scheme).thenReturn("https") }
         private val timeline = SinglePeriodTimeline(
-            120_000_000L, true, false, false, null, MediaItem.Builder().setUri(uri).build(),
+            3_600_000_000L, true, false, false, null, MediaItem.Builder().setUri(uri).build(),
         )
         private val periodId = MediaPeriodId(timeline.getUidOfPeriod(0))
         private val delegate = DefaultLoadControl.Builder()

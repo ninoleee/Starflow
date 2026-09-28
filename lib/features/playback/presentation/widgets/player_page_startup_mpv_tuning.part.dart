@@ -209,6 +209,8 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
       target: target,
       aggressiveTuning: _shouldUseAggressiveMpvTuning(target),
       isTelevision: _isTelevisionPlaybackDevice,
+      isAndroidMobile: defaultTargetPlatform == TargetPlatform.android &&
+          !_isTelevisionPlaybackDevice,
       memoryClassMb: _androidMemoryClassMb,
       memoryCacheMiB: _playbackSettings.playbackMemoryCacheMiB,
     );
@@ -216,8 +218,7 @@ extension _PlayerPageStateStartupMpvTuning on _PlayerPageState {
 
   Future<void> _resolveAndroidMemoryClassIfNeeded() async {
     if (_androidMemoryClassResolved ||
-        defaultTargetPlatform != TargetPlatform.android ||
-        !_isTelevisionPlaybackDevice) {
+        defaultTargetPlatform != TargetPlatform.android) {
       return;
     }
     _androidMemoryClassResolved = true;
