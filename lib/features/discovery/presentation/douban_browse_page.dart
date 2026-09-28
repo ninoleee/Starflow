@@ -21,7 +21,9 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 
 class DoubanBrowsePage extends ConsumerStatefulWidget {
-  const DoubanBrowsePage({super.key});
+  const DoubanBrowsePage({super.key, this.topContent});
+
+  final Widget? topContent;
 
   @override
   ConsumerState<DoubanBrowsePage> createState() => _DoubanBrowsePageState();
@@ -232,34 +234,27 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
     Key? key,
     required bool tv,
     required String tooltip,
-    required String label,
     required IconData icon,
     required VoidCallback? onPressed,
   }) {
-    return Tooltip(
+    return IconButton(
       key: key,
-      message: tooltip,
-      child: TextButton.icon(
-        style: TextButton.styleFrom(
-          minimumSize: Size(0, tv ? 44 : 32),
-          padding: EdgeInsets.symmetric(
-            horizontal: tv ? 10 : 5,
-            vertical: tv ? 6 : 2,
-          ),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          visualDensity: tv ? VisualDensity.standard : VisualDensity.compact,
-        ),
-        onPressed: onPressed,
-        icon: Icon(icon, size: 18),
-        label: Text(label, style: Theme.of(context).textTheme.bodySmall),
+      tooltip: tooltip,
+      padding: EdgeInsets.zero,
+      constraints: BoxConstraints.tightFor(
+        width: tv ? 44 : 32,
+        height: tv ? 44 : 32,
       ),
+      visualDensity: tv ? VisualDensity.standard : VisualDensity.compact,
+      iconSize: tv ? 24 : 20,
+      onPressed: onPressed,
+      icon: Icon(icon),
     );
   }
 
   Widget _paginationControls({
     required String keyPrefix,
     required bool tv,
-    bool includeActions = false,
     bool showLoading = true,
   }) {
     return Wrap(
@@ -271,7 +266,6 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
           key: ValueKey('$keyPrefix-page-previous'),
           tv: tv,
           tooltip: '上一页',
-          label: '上一页',
           icon: Icons.chevron_left,
           onPressed:
               _start > 0 && !_loading ? () => _scheduleLoad(_start - 20) : null,
@@ -285,7 +279,6 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
           key: ValueKey('$keyPrefix-page-next'),
           tv: tv,
           tooltip: '下一页',
-          label: '下一页',
           icon: Icons.chevron_right,
           onPressed: _page?.hasNext == true && !_pageLimitReached && !_loading
               ? () => _scheduleLoad(_start + 20)
@@ -297,31 +290,37 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
             height: 18,
             child: CircularProgressIndicator(strokeWidth: 2),
           ),
-        if (includeActions) ...[
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            constraints: BoxConstraints.tightFor(
-              width: tv ? 48 : 36,
-              height: tv ? 48 : 36,
-            ),
-            tooltip: '刷新',
-            icon: Icon(Icons.refresh, size: tv ? 24 : 20),
-            onPressed: _enabled && !_loading
-                ? () => _scheduleLoad(0, refresh: true)
-                : null,
+      ],
+    );
+  }
+
+  Widget _actionButtons({required bool tv}) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          constraints: BoxConstraints.tightFor(
+            width: tv ? 48 : 36,
+            height: tv ? 48 : 36,
           ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            constraints: BoxConstraints.tightFor(
-              width: tv ? 48 : 36,
-              height: tv ? 48 : 36,
-            ),
-            tooltip: '重置筛选',
-            icon: Icon(Icons.filter_alt_off, size: tv ? 24 : 20),
-            onPressed: () =>
-                _select(DoubanBrowseQuery(category: _query.category)),
+          tooltip: '刷新',
+          icon: Icon(Icons.refresh, size: tv ? 24 : 20),
+          onPressed: _enabled && !_loading
+              ? () => _scheduleLoad(0, refresh: true)
+              : null,
+        ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          constraints: BoxConstraints.tightFor(
+            width: tv ? 48 : 36,
+            height: tv ? 48 : 36,
           ),
-        ],
+          tooltip: '重置筛选',
+          icon: Icon(Icons.filter_alt_off, size: tv ? 24 : 20),
+          onPressed: () =>
+              _select(DoubanBrowseQuery(category: _query.category)),
+        ),
       ],
     );
   }
@@ -381,10 +380,11 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
             controller: _scroll,
             padding: EdgeInsets.fromLTRB(
                 kAppPageHorizontalPadding,
-                MediaQuery.paddingOf(context).top + 74,
+                MediaQuery.paddingOf(context).top + 8,
                 kAppPageHorizontalPadding,
                 MediaQuery.paddingOf(context).bottom),
             children: [
+              if (widget.topContent != null) widget.topContent!,
               SizedBox(
                 width: double.infinity,
                 child: SegmentedButton<DoubanBrowseCategory>(
@@ -470,22 +470,30 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Expanded(
-                    child: _paginationControls(
-                      keyPrefix: 'top',
-                      tv: tv,
-                      includeActions: true,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _menu<DoubanBrowseSort>(
+                          key: const ValueKey('douban-filter-sort'),
+                          label: '排序',
+                          value: _query.sort,
+                          values: DoubanBrowseSort.values,
+                          text: (value) => value.labelFor(_query.mediaType),
+                          isDefault: (value) =>
+                              value == DoubanBrowseSort.rating,
+                          onSelected: (value) =>
+                              _select(_query.copyWith(sort: value))),
                     ),
                   ),
-                  const SizedBox(width: 4),
-                  _menu<DoubanBrowseSort>(
-                      key: const ValueKey('douban-filter-sort'),
-                      label: '排序',
-                      value: _query.sort,
-                      values: DoubanBrowseSort.values,
-                      text: (value) => value.labelFor(_query.mediaType),
-                      isDefault: (value) => value == DoubanBrowseSort.rating,
-                      onSelected: (value) =>
-                          _select(_query.copyWith(sort: value))),
+                  _paginationControls(
+                    keyPrefix: 'top',
+                    tv: tv,
+                  ),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: _actionButtons(tv: tv),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),

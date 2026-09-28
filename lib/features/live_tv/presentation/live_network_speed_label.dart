@@ -8,10 +8,12 @@ class LiveNetworkSpeedLabel extends StatelessWidget {
     super.key,
     this.source,
     required this.generation,
+    this.formatAboveMetrics = false,
   });
 
   final LiveNetworkSpeedSource? source;
   final int generation;
+  final bool formatAboveMetrics;
 
   @override
   Widget build(BuildContext context) => PlaybackNetworkSpeedLabel(
@@ -38,5 +40,6 @@ class LiveNetworkSpeedLabel extends StatelessWidget {
                   .readVideoFormat(generation)
               : null;
         },
+        formatAboveMetrics: formatAboveMetrics,
       );
 }

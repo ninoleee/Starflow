@@ -162,6 +162,14 @@ void main() {
       await tester.pump();
       expect(find.textContaining('2.0 KB/s · 32.0 MB · 18s'), findsOneWidget);
       expect(find.textContaining('1920x1080 · HEVC · AAC'), findsOneWidget);
+      final metrics = find.descendant(
+          of: find.byType(LiveNetworkSpeedLabel),
+          matching: find.textContaining('2.0 KB/s · 32.0 MB · 18s'));
+      final format = find.descendant(
+          of: find.byType(LiveNetworkSpeedLabel),
+          matching: find.textContaining('1920x1080 · HEVC · AAC'));
+      expect(tester.getBottomLeft(format).dy,
+          lessThanOrEqualTo(tester.getTopLeft(metrics).dy));
       expect(tester.getTopRight(find.byType(LiveNetworkSpeedLabel)).dx,
           closeTo(size.width - 12, 1));
       await _capture(tester, capture, 'player-${size.width.toInt()}');
@@ -374,6 +382,54 @@ void main() {
       repository.dispose();
     });
   }
+  testWidgets('organize mode exposes bulk group visibility actions',
+      (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final repository = _BulkGroupRepository();
+    const snapshot = LiveSnapshot(sources: [
+      LiveSource(id: 's', name: 'Demo')
+    ], channels: [
+      LiveChannel(
+          id: 'news',
+          sourceId: 's',
+          name: 'News',
+          group: 'News',
+          lines: [LiveLine('https://example.test/news')]),
+      LiveChannel(
+          id: 'sports',
+          sourceId: 's',
+          name: 'Sports',
+          group: 'Sports',
+          lines: [LiveLine('https://example.test/sports')]),
+    ]);
+    await tester.pumpWidget(ProviderScope(overrides: [
+      liveRepositoryProvider.overrideWithValue(repository),
+      liveSnapshotProvider.overrideWith((_) => Stream.value(snapshot)),
+      liveNowNextProvider.overrideWith((_) async => {}),
+      isTelevisionProvider.overrideWith((_) => false),
+    ], child: MaterialApp(theme: _reviewTheme, home: const LiveTvPage())));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_icon('整理频道'));
+    await tester.pumpAndSettle();
+    final hideAll = find.widgetWithText(StarflowButton, '全部隐藏');
+    final showAll = find.widgetWithText(StarflowButton, '全部显示');
+    expect(hideAll, findsOneWidget);
+    expect(showAll, findsOneWidget);
+
+    await tester.tap(hideAll);
+    await tester.pumpAndSettle();
+    expect(repository.bulkVisibility, [true]);
+    await tester.tap(showAll);
+    await tester.pumpAndSettle();
+    expect(repository.bulkVisibility, [true, false]);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    repository.dispose();
+  });
   testWidgets('TV empty state retains a usable subscription action',
       (tester) async {
     final repository = LiveRepository(
@@ -505,6 +561,21 @@ class _UiRepository extends LiveRepository {
   @override
   Future<void> refresh(String id) async {
     refreshes++;
+  }
+}
+
+class _BulkGroupRepository extends LiveRepository {
+  _BulkGroupRepository()
+      : super(
+            openDatabase: () =>
+                databaseFactoryMemory.openDatabase('bulk-group-ui'),
+            client: MockClient((_) async => http.Response('', 404)));
+
+  final bulkVisibility = <bool>[];
+
+  @override
+  Future<void> setAllGroupsHidden(bool hidden) async {
+    bulkVisibility.add(hidden);
   }
 }
 
@@ -1014,7 +1085,11 @@ class _LayoutProbe extends LiveChannelProbe {
 }
 
 class _PageEngine
-    implements CancellableLiveEngine, LiveNetworkSpeedSource, LiveCacheSizeSource, LiveVideoFormatSource {
+    implements
+        CancellableLiveEngine,
+        LiveNetworkSpeedSource,
+        LiveCacheSizeSource,
+        LiveVideoFormatSource {
   void Function(String)? _onState;
   void emit(String state) => _onState?.call(state);
   @override
@@ -1024,7 +1099,8 @@ class _PageEngine
   @override
   Future<int?> readBufferDurationMs(int generation) async => 18000;
   @override
-  Future<String?> readVideoFormat(int generation) async => '1920x1080 · HEVC · AAC';
+  Future<String?> readVideoFormat(int generation) async =>
+      '1920x1080 · HEVC · AAC';
   final urls = <String>[];
   final openVolumes = <double>[];
   double volume = 1;

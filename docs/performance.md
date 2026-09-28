@@ -1,5 +1,11 @@
 # 主机性能与回归验证
 
+## 2026-09-28 非 TV 直播频道列表底部留白
+
+- 非 TV 频道首页的横屏分组列表与频道列表末尾增加 `kBottomReservedSpacing`（80 逻辑像素），避免最后一条频道或整理操作落在 shell `extendBody: true` 的浮动菜单栏下方；TV 保持零底部留白。当前行为见 [直播电视](live-tv.md#使用入口)。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10，执行 `flutter test --no-pub test/live_home_layout_test.dart --plain-name 'lists'`，**2 项通过**；覆盖非 TV 390×844／844×390 以及 TV 1280×720，并断言两个列表的底部 padding。相关页面与测试文件定向 `flutter analyze --no-pub` 无问题，`git diff --check` 通过。
+- 同文件全量运行另有 1 项既有失败：`rotation retains group, search, favorites and organize state` 在横屏找不到 `Sports` 分组标签。将本次底部留白临时归零后该失败仍可复现，因此不作为本次布局留白的回归证据；仍需由相关分组整理改动单独处理。未做真机或模拟器视觉验收，未构建 APK、未改版本，本项与历史测试集合不累加。
+
 ## 2026-09-27 播放内存自动上限与低内存分档
 
 - TV Exo 自动容量保留 Java 堆 `37.5%` 比例，但上限由 `512 MiB` 收为 `256 MiB`；手动档继续使用原最高 `512 MiB` 安全预算。Android TV MPV 新增 `<=128 MiB` 堆档，Android 手机 MPV 手动容量按堆比例与分档上限夹紧；桌面／iOS 和手机 MPV 自动预算不变。当前规则见 [播放架构](architecture.md#点播运行期流畅度策略2026-09-25)，真机放宽条件见 [设备测量清单](performance-device.md)。以下旧测试记录是策略修改前的主机快照，不代表当前容量上限。
@@ -1257,6 +1263,15 @@ Android 在 `android/` 运行 `./gradlew :app:testDebugUnitTest -x :app:compileF
 
 2026-09-28 导航文案：底部一级菜单“搜索”改为“发现”，页面内双标签改为“搜索／选片”；路由、分支索引和偏好键不变。菜单编辑器、App 导航壳与搜索 Hub 共 33 项主机测试通过，六个相关代码／测试文件定向分析及 `git diff --check` 无问题。未做设备截图或重建包。
 
-2026-09-28 豆瓣分页工具栏：上一页和下一页改为带短文字的按钮，页码简化为 `1/6`；刷新、清除放在顶部同组左侧，排序固定在顶部工具栏最右侧。顶部和网格下方各提供一组相同状态的分页按钮，下方不重复排序和操作按钮。组件测试覆盖上下按钮翻页、失败保留、缓存返回、顶部工具栏同排和排序位于最右。手机／TV 页面测试通过，未做设备截图或重建包。
+2026-09-28 豆瓣分页工具栏：翻页按钮只保留左右箭头，页码简化为 `1/6`；顶部工具栏改为排序靠左、翻页居中、刷新和清除靠右。顶部和网格下方各提供一组相同状态的翻页按钮，下方不重复排序和操作按钮。组件测试覆盖上下按钮翻页、失败保留、缓存返回及三段的横向位置。手机／TV 页面测试通过，未做设备截图或重建包。
 
 2026-09-28 豆瓣分页 TV 焦点：分页文字按钮在 TV 下使用标准密度和至少 44dp 高，刷新／清除目标为 48dp，手机仍保持紧凑；遥控器测试覆盖聚焦顶部“下一页”、确定键翻页和页码更新。该为主机焦点回归，真实遥控器与 10 尺可读性仍待设备验收。
+
+2026-09-28 发现入口 tab 滚动：切换条改为搜索／选片页面滚动内容的第一项，不使用悬浮层、滚动监听或独立显隐状态；向下滚动后随内容移出，向上滚回时重新构建并显示。滚动组件测试覆盖移出与恢复，搜索 Hub 5 项测试通过；未做设备截图或重建包。
+
+## 2026-09-28 直播分组批量操作与两行指标
+
+- 直播整理模式在分组操作区增加“全部隐藏 / 全部显示”，仓库用单个 Sembast 事务更新当前全部分组，避免逐项并发写入丢更新。直播播放器右侧指标改为第一行视频格式、第二行网速／缓存；共享指标组件保留点播默认单行模式，直播分行布局在系统大字体下按两行实际高度增高。
+- 固定 `.fvm/flutter_sdk` Flutter 3.38.10 / Dart 3.10.9，`flutter test --no-pub --reporter expanded test/live_tv_data_test.dart test/live_tv_page_test.dart test/live_network_speed_label_test.dart` **43 项通过**；随后运行 `test/playback_network_speed_label_test.dart test/playback_cache_metrics_label_test.dart test/player_tv_playback_widgets_test.dart` **18 项通过**。覆盖批量事务持久化、320／390／640／844／1280 页面布局、按钮触发、2 倍字体及点播单行默认布局。
+- 检查 `build/live-tv-review/player-390.png`、`player-1280.png` 和 `organize-390.png`：格式与网速分两行右对齐，分组批量按钮与频道操作按钮不重叠。截图为合成数据和 fake engine，不代表真实直播源、设备字体或遥控器验收。
+- 修改的 5 份 Dart 源码和 3 份测试定向 `dart analyze` 无问题，`git diff --check` 通过。未运行发布预设、递增版本或构建 APK／IPA。

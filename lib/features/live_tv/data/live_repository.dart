@@ -350,6 +350,21 @@ class LiveRepository {
                 .record('groupPreferences')
                 .put(txn, encodeLiveGroupPreferences(preferences));
           }));
+  Future<void> setAllGroupsHidden(bool hidden) =>
+      _write((db) => db.transaction((txn) async {
+            final snapshot = await loadOutsideTransaction(txn);
+            final groups = snapshot.groups(includeHidden: true);
+            if (groups.isEmpty) return;
+            final preferences = {...snapshot.groupPreferences};
+            for (final group in groups) {
+              preferences[group] =
+                  (preferences[group] ?? const LiveGroupPreference())
+                      .patch({'hidden': hidden});
+            }
+            await _meta
+                .record('groupPreferences')
+                .put(txn, encodeLiveGroupPreferences(preferences));
+          }));
   Future<void> moveGroup(String group, int delta) =>
       _write((db) => db.transaction((txn) async {
             if (group.isEmpty) return;

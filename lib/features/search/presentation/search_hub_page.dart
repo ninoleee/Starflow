@@ -49,6 +49,35 @@ class _SearchHubPageState extends ConsumerState<SearchHubPage> {
     }
   }
 
+  Widget _buildModeTabs() {
+    return Padding(
+      key: const ValueKey('search-hub-tabs'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Center(
+        child: SegmentedButton<bool>(
+          key: const ValueKey('search-hub-mode'),
+          showSelectedIcon: false,
+          segments: const [
+            ButtonSegment(value: false, label: Text('搜索')),
+            ButtonSegment(value: true, label: Text('选片')),
+          ],
+          selected: {_browse},
+          onSelectionChanged: (selection) {
+            _modeTouched = true;
+            setState(() {
+              _browse = selection.single;
+              _browseCreated |= _browse;
+            });
+            unawaited(ref
+                .read(searchPreferencesRepositoryProvider)
+                .saveBrowseMode(_browse)
+                .catchError((Object _) {}));
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Stack(children: [
@@ -58,8 +87,11 @@ class _SearchHubPageState extends ConsumerState<SearchHubPage> {
           enabled: !_browse,
           child: ExcludeFocus(
             excluding: _browse,
-            child:
-                SearchPage(initialQuery: widget.initialQuery, embedded: true),
+            child: SearchPage(
+              initialQuery: widget.initialQuery,
+              embedded: true,
+              embeddedHeader: _buildModeTabs(),
+            ),
           ),
         ),
       ),
@@ -70,37 +102,10 @@ class _SearchHubPageState extends ConsumerState<SearchHubPage> {
             enabled: _browse,
             child: ExcludeFocus(
               excluding: !_browse,
-              child: const DoubanBrowsePage(),
+              child: DoubanBrowsePage(topContent: _buildModeTabs()),
             ),
           ),
         ),
-      Positioned(
-        top: MediaQuery.paddingOf(context).top + 8,
-        left: 16,
-        right: 16,
-        child: Center(
-          child: SegmentedButton<bool>(
-            key: const ValueKey('search-hub-mode'),
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: false, label: Text('搜索')),
-              ButtonSegment(value: true, label: Text('选片')),
-            ],
-            selected: {_browse},
-            onSelectionChanged: (selection) {
-              _modeTouched = true;
-              setState(() {
-                _browse = selection.single;
-                _browseCreated |= _browse;
-              });
-              unawaited(ref
-                  .read(searchPreferencesRepositoryProvider)
-                  .saveBrowseMode(_browse)
-                  .catchError((Object _) {}));
-            },
-          ),
-        ),
-      ),
     ]);
   }
 }

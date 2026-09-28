@@ -202,6 +202,11 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
     _save(ref.read(liveRepositoryProvider).setGroupHidden(group, !hidden));
   }
 
+  void _setAllGroupsHidden(bool hidden) {
+    _clearProbeViewport();
+    _save(ref.read(liveRepositoryProvider).setAllGroupsHidden(hidden));
+  }
+
   void _moveGroup(String group, int delta) {
     _save(ref.read(liveRepositoryProvider).moveGroup(group, delta));
   }
@@ -232,6 +237,30 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
           onPressed: () => _moveGroup(group, 1)),
     ]);
   }
+
+  Widget _groupBulkActions() => Wrap(spacing: 8, runSpacing: 8, children: [
+        StarflowButton(
+            label: '全部隐藏',
+            icon: Icons.visibility_off_outlined,
+            variant: StarflowButtonVariant.secondary,
+            compact: true,
+            onPressed: () => _setAllGroupsHidden(true)),
+        StarflowButton(
+            label: '全部显示',
+            icon: Icons.visibility,
+            variant: StarflowButtonVariant.secondary,
+            compact: true,
+            onPressed: () => _setAllGroupsHidden(false)),
+      ]);
+
+  Widget _organizeGroupBulkTile() => SizedBox(
+      width: 300,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        const SizedBox(
+            height: 32,
+            child: Align(alignment: Alignment.centerLeft, child: Text('分组操作'))),
+        _groupBulkActions(),
+      ]));
 
   Widget _organizeGroupTile(String group, LiveSnapshot snapshot) {
     return SizedBox(
@@ -302,6 +331,7 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
       }
     });
     final tv = ref.watch(isTelevisionProvider).value ?? false;
+    final listBottomPadding = tv ? 0.0 : kBottomReservedSpacing;
     final landscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
     final nowNext = ref.watch(liveNowNextProvider).value ?? {};
@@ -409,12 +439,13 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                                                     'live-home-organize-groups'),
                                                 scrollDirection:
                                                     Axis.horizontal,
-                                                itemCount: groups.length,
+                                                itemCount: groups.length + 1,
                                                 separatorBuilder: (_, __) =>
                                                     const SizedBox(width: 8),
-                                                itemBuilder: (_, i) =>
-                                                    _organizeGroupTile(
-                                                        groups[i], s))),
+                                                itemBuilder: (_, i) => i == 0
+                                                    ? _organizeGroupBulkTile()
+                                                    : _organizeGroupTile(
+                                                        groups[i - 1], s))),
                                       Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
@@ -527,8 +558,9 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                                                         key: const PageStorageKey(
                                                             'live-home-groups'),
                                                         primary: false,
-                                                        padding:
-                                                            EdgeInsets.zero,
+                                                        padding: EdgeInsets.only(
+                                                            bottom:
+                                                                listBottomPadding),
                                                         children: [
                                                           for (final group in [
                                                             '',
@@ -558,6 +590,18 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                                                                     _groupActions(
                                                                         group,
                                                                         s),
+                                                                  if (_organize &&
+                                                                      group
+                                                                          .isEmpty)
+                                                                    Padding(
+                                                                        padding: const EdgeInsets
+                                                                            .fromLTRB(
+                                                                            12,
+                                                                            4,
+                                                                            12,
+                                                                            12),
+                                                                        child:
+                                                                            _groupBulkActions()),
                                                                 ]),
                                                         ])),
                                                 const VerticalDivider(
@@ -587,6 +631,10 @@ class _LiveTvPageState extends ConsumerState<LiveTvPage>
                                                           : ListView.builder(
                                                               key: const PageStorageKey(
                                                                   'live-home-channels'),
+                                                              padding: EdgeInsets
+                                                                  .only(
+                                                                      bottom:
+                                                                          listBottomPadding),
                                                               itemCount:
                                                                   filtered
                                                                       .length,

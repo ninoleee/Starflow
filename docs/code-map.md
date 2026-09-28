@@ -182,13 +182,13 @@ SearchPage -> SearchRequest -> SearchSession -> SearchRepository
 | `application/live_playback_controller.dart` | `LiveEngine` 的 MPV/Exo 适配、单实例串行所有权、换台合并、失效事件、有限重连及全局清理注册 |
 | `application/live_mpv_options.dart` | MPV 直播默认请求标识、订阅覆盖优先级、网络协议白名单及 FFmpeg 6 HLS 分片参数；不改变点播配置 |
 | `application/live_playback_error.dart` | Android `LiveTvPlaybackError.kt` 摘要的白名单解析、固定错误类别和失败文案；控制器按 generation 读取，不保留原始异常或媒体地址 |
-| `presentation/live_tv_page.dart` | 频道列表、搜索/收藏/分组、频道与分组映射/隐藏/排序、主页面活动状态和本地 now/next 更新 |
+| `presentation/live_tv_page.dart` | 频道列表、搜索/收藏/分组、频道与分组映射/隐藏/排序、分组全部隐藏/显示、主页面活动状态和本地 now/next 更新 |
 | `presentation/live_sources_page.dart` | 来源编辑、文件导入草稿、保存后刷新、启停、更新及删除确认；TV 手机扫码，其他平台本地选文件 |
 | `data/live_playlist_transfer_service{,_io,_stub}.dart` | 单次 LAN 文件/备份接收及备份下载、类型化结果、随机令牌/来源校验；频道文件 8 MiB / 备份 32 MiB / 接收 30s 边界及会话关闭；不写仓库 |
 | `presentation/live_playlist_transfer_dialog.dart` | 复用 `LanTransferQrAddressCard`，拥有 TV 扫码弹窗、后台/退出清理和迟到会话隔离 |
-| `presentation/live_player_page.dart / live_widgets.dart` | 固定顶栏、无底栏的全屏播放器，按需全屏设置（频道/节目单/音轨/线路/内核）、本地返回记录、Flutter TV 焦点及共享直播按钮；不提供上下频道按钮或静音入口 |
+| `presentation/live_player_page.dart / live_widgets.dart` | 固定顶栏、无底栏的全屏播放器，右侧信息第一行格式、第二行网速/缓存；按需全屏设置（频道/节目单/音轨/线路/内核）、本地返回记录、Flutter TV 焦点及共享直播按钮；不提供上下频道按钮或静音入口 |
 | `presentation/live_channel_picker.dart` | 播放器左分组／右频道选择器，固定 64dp 行高、当前频道定位、独立列滚动与 TV 跨列焦点；接收本地批量 now/next，复用 `live_widgets.dart` 的 `LiveCurrentProgramme` 显示各台当前节目，不自行读库或拥有播放会话 |
-| `presentation/live_network_speed_label.dart` | 将 `LiveNetworkSpeedSource` 和换台 generation 适配到 playback 的共享 `playback_network_speed_label.dart`；格式／平滑位于 `domain/playback_network_speed.dart`，Exo 原生统计位于 `LiveTvNetworkSpeed.kt`，跨 Dart / Kotlin fixture 为 `test/fixtures/playback_network_speed.json` |
+| `presentation/live_network_speed_label.dart` | 将 `LiveNetworkSpeedSource` 和换台 generation 适配到 playback 的共享 `playback_network_speed_label.dart`，并请求格式在上、网速／缓存在下的直播布局；格式／平滑位于 `domain/playback_network_speed.dart`，Exo 原生统计位于 `LiveTvNetworkSpeed.kt`，跨 Dart / Kotlin fixture 为 `test/fixtures/playback_network_speed.json` |
 
 ```text
 AppRoutes.liveTv (/live-tv) -> LiveTvPage -> LiveRepository -> 独立直播数据库

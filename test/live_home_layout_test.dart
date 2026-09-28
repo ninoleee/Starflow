@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:sembast/sembast_memory.dart' hide Finder;
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/app/theme/app_theme.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
@@ -219,6 +220,33 @@ void main() {
     expect(FocusManager.instance.primaryFocus?.debugLabel,
         startsWith('tv-focus:live-home-group:'));
     expect(find.byType(LiveTvPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('non-TV lists reserve bottom navigation space', (tester) async {
+    for (final size in [const Size(390, 844), const Size(844, 390)]) {
+      _setSize(tester, size);
+      await _mount(tester);
+
+      expect(tester.widget<ListView>(_channels).padding,
+          const EdgeInsets.only(bottom: kBottomReservedSpacing));
+      if (size.width > size.height) {
+        expect(tester.widget<ListView>(_groups).padding,
+            const EdgeInsets.only(bottom: kBottomReservedSpacing));
+      }
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
+
+  testWidgets('TV lists do not reserve bottom navigation space',
+      (tester) async {
+    _setSize(tester, const Size(1280, 720));
+    await _mount(tester, tv: true);
+
+    expect(tester.widget<ListView>(_channels).padding, EdgeInsets.zero);
+    expect(tester.widget<ListView>(_groups).padding, EdgeInsets.zero);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

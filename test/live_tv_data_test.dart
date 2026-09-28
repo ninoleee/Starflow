@@ -227,6 +227,30 @@ https://a.test/sports-1
       expect(snapshot.visible().map((c) => c.name), ['Sports 1']);
     });
 
+    test('bulk group visibility updates every group in one write', () async {
+      const local = LiveSource(id: 'bulk-groups', name: 'Bulk Groups');
+      const listing = '''#EXTM3U
+#EXTINF:-1 group-title="News",News
+https://a.test/news
+#EXTINF:-1 group-title="Sports",Sports
+https://a.test/sports
+''';
+      final repository =
+          repositoryWith(MockClient((_) async => http.Response('', 404)));
+      await repository.saveSource(local, imported: bytes(listing));
+
+      await repository.setAllGroupsHidden(true);
+      var snapshot = await repository.load();
+      expect(snapshot.groups(), isEmpty);
+      expect(snapshot.groups(includeHidden: true), ['News', 'Sports']);
+      expect(snapshot.visible(), isEmpty);
+
+      await repository.setAllGroupsHidden(false);
+      snapshot = await repository.load();
+      expect(snapshot.groups(), ['News', 'Sports']);
+      expect(snapshot.visible().map((c) => c.name), ['News', 'Sports']);
+    });
+
     test('merge restores only new group preferences', () async {
       const incomingSource =
           LiveSource(id: 'incoming-grouped', name: 'Incoming Grouped');

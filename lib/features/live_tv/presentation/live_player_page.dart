@@ -447,6 +447,7 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
     Widget speedLabel() => LiveNetworkSpeedLabel(
           source: _foreground ? speedSource : null,
           generation: controller?.generation ?? 0,
+          formatAboveMetrics: true,
         );
     final guide = ref.watch(liveGuideProvider(_channel.id));
     final nowNext = _list ? ref.watch(liveNowNextProvider).value : null;
@@ -781,9 +782,10 @@ class _LivePlayerPageState extends ConsumerState<LivePlayerPage>
                                                 Flexible(
                                                   flex: 3,
                                                   child: Padding(
-                                                  padding:
-                                                      const EdgeInsets.all(12),
-                                                  child: speedLabel(),
+                                                    padding:
+                                                        const EdgeInsets.all(
+                                                            12),
+                                                    child: speedLabel(),
                                                   ),
                                                 ),
                                             ]),

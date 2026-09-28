@@ -16,6 +16,7 @@ class PlaybackNetworkSpeedLabel extends StatefulWidget {
     this.visible = true,
     this.showFormat = true,
     this.formatOnly = false,
+    this.formatAboveMetrics = false,
     this.height = 36,
   });
 
@@ -29,6 +30,7 @@ class PlaybackNetworkSpeedLabel extends StatefulWidget {
   final bool visible;
   final bool showFormat;
   final bool formatOnly;
+  final bool formatAboveMetrics;
   final double height;
 
   @override
@@ -157,6 +159,7 @@ class _PlaybackNetworkSpeedLabelState extends State<PlaybackNetworkSpeedLabel>
           color: Colors.white,
           fontSize: _metricsFontSize,
           fontWeight: FontWeight.w600,
+          height: 1.1,
           fontFeatures: [FontFeature.tabularFigures()],
         ));
   }
@@ -181,28 +184,61 @@ class _PlaybackNetworkSpeedLabelState extends State<PlaybackNetworkSpeedLabel>
   @override
   Widget build(BuildContext context) {
     if (!widget.visible) return const SizedBox.shrink();
+    final style = _metricsTextStyle();
+    final metrics = Text(
+      widget.formatOnly
+          ? _format
+          : (widget.showFormat && !widget.formatAboveMetrics
+              ? '$_label · $_format'
+              : _label),
+      style: style,
+      maxLines: 1,
+      softWrap: false,
+      overflow: TextOverflow.ellipsis,
+      textAlign: widget.formatOnly || widget.formatAboveMetrics
+          ? TextAlign.left
+          : TextAlign.right,
+    );
+    final stacked = widget.formatAboveMetrics && !widget.formatOnly;
+    final stackedHeight =
+        (MediaQuery.textScalerOf(context).scale(_metricsFontSize) * 2.2)
+                .ceilToDouble() +
+            1;
+    final effectiveHeight = stacked && stackedHeight > widget.height
+        ? stackedHeight
+        : widget.height;
     return Semantics(
-      label: widget.formatOnly ? '视频格式' : '网速和缓存',
+      label: widget.formatOnly
+          ? '视频格式'
+          : stacked
+              ? '视频格式、网速和缓存'
+              : '网速和缓存',
       child: SizedBox(
         width:
             (MediaQuery.sizeOf(context).width - 160).clamp(0.0, _metricsWidth),
-        height: widget.height,
+        height: effectiveHeight,
         child: DefaultTextStyle(
-          style: _metricsTextStyle(),
+          style: style,
           child: Align(
             alignment: widget.formatOnly
                 ? Alignment.centerLeft
                 : Alignment.centerRight,
-            child: Text(
-              widget.formatOnly
-                  ? _format
-                  : (widget.showFormat ? '$_label · $_format' : _label),
-              style: _metricsTextStyle(),
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
-              textAlign: widget.formatOnly ? TextAlign.left : TextAlign.right,
-            ),
+            child: stacked
+                ? Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (widget.showFormat)
+                        Text(_format,
+                            style: style,
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.right),
+                      metrics,
+                    ],
+                  )
+                : metrics,
           ),
         ),
       ),

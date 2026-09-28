@@ -133,12 +133,14 @@ class SearchPage extends ConsumerStatefulWidget {
     this.showBackButton = false,
     this.favoritesOnly = false,
     this.embedded = false,
+    this.embeddedHeader,
   });
 
   final String? initialQuery;
   final bool showBackButton;
   final bool favoritesOnly;
   final bool embedded;
+  final Widget? embeddedHeader;
 
   @override
   ConsumerState<SearchPage> createState() => _SearchPageState();
@@ -660,7 +662,7 @@ class _SearchPageState extends ConsumerState<SearchPage>
     final headerTopInset = widget.showBackButton
         ? kToolbarHeight
         : widget.embedded
-            ? 68.0
+            ? 8.0
             : 16.0;
     final enabledProviders =
         ref.watch(_searchPageVisibleSearchProvidersProvider);
@@ -738,6 +740,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
+                            if (widget.embeddedHeader != null)
+                              widget.embeddedHeader!,
                             if (_showFavoriteResults)
                               Row(
                                 children: [

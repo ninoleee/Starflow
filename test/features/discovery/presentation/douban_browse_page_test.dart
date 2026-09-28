@@ -109,8 +109,11 @@ void main() {
     final pager = find.byTooltip('上一页');
     expect(pager, findsNWidgets(2));
     expect(find.byTooltip('下一页'), findsNWidgets(2));
-    expect(tester.getCenter(sort).dx,
-        greaterThan(tester.getCenter(find.byTooltip('刷新')).dx));
+    expect(tester.getCenter(sort).dx, lessThan(tester.getCenter(status).dx));
+    expect(
+        tester.getCenter(reset).dx, greaterThan(tester.getCenter(status).dx));
+    expect(
+        tester.getCenter(refresh).dx, greaterThan(tester.getCenter(status).dx));
     expect(tester.takeException(), isNull);
   });
 
@@ -190,7 +193,7 @@ void main() {
     expect(tester.getSize(topNext).height, greaterThanOrEqualTo(44));
     expect(tester.getSize(bottomNext).height, greaterThanOrEqualTo(44));
     final focus = Focus.of(tester.element(
-        find.descendant(of: topNext, matching: find.byType(Text)).first));
+        find.descendant(of: topNext, matching: find.byType(Icon)).first));
     focus.requestFocus();
     await tester.pumpAndSettle();
     expect(focus.hasPrimaryFocus, isTrue);
