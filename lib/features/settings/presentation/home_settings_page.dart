@@ -39,17 +39,17 @@ class HomeSettingsPage extends ConsumerWidget {
               ),
         ),
         const SizedBox(height: 10),
-        Wrap(
+        StarflowSingleSelectTabBar<HomeHeroDisplayMode>(
+          layout: StarflowTabLayout.wrap,
           spacing: 10,
           runSpacing: 10,
-          children: [
+          selectedValue: heroSlice.displayMode,
+          onSelected: heroEnabled ? controller.setHomeHeroDisplayMode : null,
+          items: [
             for (final mode in HomeHeroDisplayMode.values)
-              StarflowChipButton(
+              StarflowTabItem(
+                value: mode,
                 label: mode.label,
-                selected: mode == heroSlice.displayMode,
-                onPressed: heroEnabled
-                    ? () => controller.setHomeHeroDisplayMode(mode)
-                    : null,
               ),
           ],
         ),

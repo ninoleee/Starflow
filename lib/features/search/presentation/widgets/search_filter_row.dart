@@ -9,12 +9,14 @@ class SearchFilterRow extends StatelessWidget {
     required this.storageId,
     required this.isTelevision,
     required this.children,
+    this.options,
   });
 
   final String label;
   final String storageId;
   final bool isTelevision;
   final List<Widget> children;
+  final Widget? options;
 
   @override
   Widget build(BuildContext context) {
@@ -29,10 +31,37 @@ class SearchFilterRow extends StatelessWidget {
     painter.dispose();
 
     return LayoutBuilder(builder: (context, constraints) {
+      if (options != null) {
+        final heading = Text(label,
+            style: style?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant));
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: labelWidth,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 22),
+                  child: heading,
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  key: PageStorageKey('search-filter:$storageId'),
+                  padding: const EdgeInsets.all(6),
+                  child: options,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
       final narrow = constraints.maxWidth < 600;
       final stacked = narrow && scaler.scale(14) > 21;
       final optionsWidth = constraints.maxWidth - (stacked ? 0 : labelWidth);
-      final options = [
+      final optionWidgets = [
         for (final child in children)
           ConstrainedBox(
             key: child.key == null
@@ -56,9 +85,9 @@ class SearchFilterRow extends StatelessWidget {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.all(6),
               child: Row(children: [
-                for (var index = 0; index < options.length; index++) ...[
+                for (var index = 0; index < optionWidgets.length; index++) ...[
                   if (index > 0) const SizedBox(width: 8),
-                  options[index],
+                  optionWidgets[index],
                 ],
               ]),
             ),
@@ -67,7 +96,7 @@ class SearchFilterRow extends StatelessWidget {
       } else {
         choices = Padding(
           padding: const EdgeInsets.all(6),
-          child: Wrap(spacing: 8, runSpacing: 8, children: options),
+          child: Wrap(spacing: 8, runSpacing: 8, children: optionWidgets),
         );
       }
 

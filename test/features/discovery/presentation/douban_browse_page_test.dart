@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/app/shell_layout.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -246,6 +247,71 @@ void main() {
         .singleWhere((tile) => tile.focusNode!.hasFocus);
     expect(int.parse(focused.title.replaceFirst('作品', '')),
         greaterThanOrEqualTo(20));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('TV repeated poster down/up navigation retains focus',
+      (tester) async {
+    await _mount(tester, MockClient((_) async => _page(0, total: 20)),
+        tv: true);
+    final firstPoster = tester.widget<MediaPosterTile>(_poster(0)).focusNode!;
+    firstPoster.requestFocus();
+    await tester.pumpAndSettle();
+
+    Future<void> arrow(LogicalKeyboardKey key) async {
+      await tester.sendKeyEvent(key);
+      await tester.pumpAndSettle();
+    }
+
+    int focusedPosterIndex() {
+      final focusedTiles = tester
+          .widgetList<MediaPosterTile>(find.byType(MediaPosterTile))
+          .where((tile) => tile.focusNode!.hasPrimaryFocus)
+          .toList(growable: false);
+      if (focusedTiles.isEmpty) {
+        final mountedTitles = tester
+            .widgetList<MediaPosterTile>(find.byType(MediaPosterTile))
+            .map((tile) => '${tile.title}[${tile.focusNode!.hasFocus}/'
+                '${tile.focusNode!.hasPrimaryFocus}]')
+            .join(',');
+        fail(
+          'No poster has primary focus. '
+          'Current focus: ${FocusManager.instance.primaryFocus?.debugLabel} '
+          '(${FocusManager.instance.primaryFocus?.runtimeType}); '
+          'mounted: $mountedTitles; offset: ${_scroll(tester).offset}',
+        );
+      }
+      return int.parse(
+        focusedTiles.single.title.replaceFirst('作品', ''),
+      );
+    }
+
+    await arrow(LogicalKeyboardKey.arrowDown);
+    expect(focusedPosterIndex(), 8);
+    await arrow(LogicalKeyboardKey.arrowDown);
+    expect(focusedPosterIndex(), 16);
+
+    await arrow(LogicalKeyboardKey.arrowUp);
+    await arrow(LogicalKeyboardKey.arrowUp);
+    expect(focusedPosterIndex(), 0);
+
+    await arrow(LogicalKeyboardKey.arrowDown);
+    expect(focusedPosterIndex(), 8);
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'douban-poster-8');
+
+    await arrow(LogicalKeyboardKey.arrowUp);
+    expect(focusedPosterIndex(), 0);
+    await arrow(LogicalKeyboardKey.arrowUp);
+    expect(FocusManager.instance.primaryFocus, isNotNull);
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      isNot(startsWith('douban-poster-')),
+    );
+
+    await arrow(LogicalKeyboardKey.arrowDown);
+    expect(focusedPosterIndex(), 0);
+    await arrow(LogicalKeyboardKey.arrowDown);
+    expect(focusedPosterIndex(), 8);
     expect(tester.takeException(), isNull);
   });
 
@@ -522,10 +588,10 @@ void main() {
   });
 
   for (final mode in [
-    (size: const Size(390, 844), tv: false, maxWidth: 300.0),
-    (size: const Size(1280, 720), tv: true, maxWidth: 420.0),
+    (size: const Size(390, 844), tv: false, maxWidth: 260.0),
+    (size: const Size(1280, 720), tv: true, maxWidth: 360.0),
   ]) {
-    testWidgets('category tabs use compact width on ${mode.size}',
+    testWidgets('category tabs use compact left layout on ${mode.size}',
         (tester) async {
       await _mount(
         tester,
@@ -535,7 +601,22 @@ void main() {
 
       final group = find.byKey(const ValueKey('douban-category-tabs-group'));
       expect(tester.getSize(group).width, mode.maxWidth);
-      expect(tester.getCenter(group).dx, closeTo(mode.size.width / 2, 1));
+      expect(tester.getTopLeft(group).dx, kAppPageHorizontalPadding);
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('douban-category-movie')))
+            .height,
+        lessThan(44),
+      );
+      for (final label in ['电影', '电视剧', '综艺']) {
+        final tab = find.widgetWithText(StarflowChipButton, label);
+        final labelFinder =
+            find.descendant(of: tab, matching: find.text(label));
+        expect(
+          tester.getCenter(labelFinder).dx,
+          closeTo(tester.getCenter(tab).dx, 0.1),
+        );
+      }
     });
   }
 }

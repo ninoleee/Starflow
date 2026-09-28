@@ -15,18 +15,22 @@ class _LogLevelSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
+    return StarflowMultiSelectTabBar<AppLogLevel>(
+      selectedValues: selectedLevels,
       spacing: 10,
       runSpacing: 10,
-      children: [
+      onChanged: (level, _) {
+        if (enabled) onToggle(level);
+      },
+      items: [
         for (final level in AppLogLevel.values)
-          StarflowChipButton(
+          StarflowTabItem(
+            value: level,
             label: _levelLabel(level),
             icon: _levelIcon(level),
-            selected: selectedLevels.contains(level),
-            onPressed: enabled ? () => onToggle(level) : null,
             focusId: '$focusPrefix:${level.name}',
             accentColor: _levelColor(Theme.of(context).colorScheme, level),
+            enabled: enabled,
           ),
       ],
     );

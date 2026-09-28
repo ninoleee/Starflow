@@ -343,6 +343,11 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
     unawaited(_scheduleLoad(0));
   }
 
+  void _selectCategory(DoubanBrowseCategory category) {
+    final next = _queries[category] ?? DoubanBrowseQuery(category: category);
+    _select(next);
+  }
+
   Widget _menu<T>({
     Key? key,
     Key? textKey,
@@ -432,6 +437,77 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
       node.requestFocus();
       unawaited(Scrollable.ensureVisible(node.context!));
       return;
+    }
+  }
+
+  bool _handlePosterDirection(
+    int index,
+    TraversalDirection direction,
+  ) {
+    final rowDelta = switch (direction) {
+      TraversalDirection.up => -1,
+      TraversalDirection.down => 1,
+      TraversalDirection.left || TraversalDirection.right => null,
+    };
+    if (rowDelta == null) return false;
+
+    final entryCount = _page?.entries.length ?? 0;
+    final targetIndex = index + rowDelta * _posterColumns;
+    if (targetIndex < 0) return false;
+    if (targetIndex >= entryCount) {
+      if (rowDelta < 0) return false;
+      if (_error != null && !_loading) {
+        return false;
+      }
+      _loadMoreIfNeeded(lastRowFocused: true);
+      return true;
+    }
+    _focusPosterAtIndex(targetIndex, rowDelta);
+    return true;
+  }
+
+  void _focusPosterAtIndex(
+    int index,
+    int rowDelta, {
+    int remainingAttempts = 2,
+  }) {
+    if (!mounted || index < 0 || index >= _posterFocusNodes.length) return;
+    final focusNode = _posterFocusNodes[index];
+    final focusContext = focusNode.context;
+    if (focusContext != null && focusNode.canRequestFocus) {
+      focusNode.requestFocus();
+      unawaited(Scrollable.ensureVisible(focusContext));
+      return;
+    }
+    if (remainingAttempts <= 0 ||
+        !_scroll.hasClients ||
+        _posterItemExtent <= 0) {
+      return;
+    }
+
+    final position = _scroll.position;
+    final targetOffset = (position.pixels + rowDelta * (_posterItemExtent + 12))
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    if ((targetOffset - position.pixels).abs() < 0.5) return;
+    _scroll.jumpTo(targetOffset);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusPosterAtIndex(
+        index,
+        rowDelta,
+        remainingAttempts: remainingAttempts - 1,
+      );
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _focusSelectedCategory() {
+    final focusNode = switch (_query.category) {
+      DoubanBrowseCategory.movie => _movieCategoryFocus,
+      DoubanBrowseCategory.series => _seriesCategoryFocus,
+      DoubanBrowseCategory.variety => _varietyCategoryFocus,
+    };
+    if (focusNode.canRequestFocus) {
+      focusNode.requestFocus();
     }
   }
 
@@ -539,63 +615,54 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
                       MediaQuery.paddingOf(context).bottom),
                   sliver: SliverMainAxisGroup(slivers: [
                     SliverList.list(children: [
-                      if (widget.topContent != null) widget.topContent!,
+                      if (widget.topContent != null)
+                        TvDirectionalActionPanel(
+                          enabled: tv,
+                          onMoveDown: _focusSelectedCategory,
+                          child: widget.topContent!,
+                        ),
                       TvDirectionalActionPanel(
                         enabled: tv,
                         onMoveDown: () => _focusTarget(_yearFocusTargetKey),
-                        child: Center(
+                        child: Align(
+                          alignment: Alignment.centerLeft,
                           child: ConstrainedBox(
-                            key: const ValueKey('douban-category-tabs-group'),
                             constraints:
-                                BoxConstraints(maxWidth: tv ? 420 : 300),
-                            child: Row(children: [
-                              Expanded(
-                                child: StarflowChipButton(
-                                  key: const ValueKey('douban-category-movie'),
+                                BoxConstraints(maxWidth: tv ? 360 : 260),
+                            child: StarflowSingleSelectTabBar<
+                                DoubanBrowseCategory>(
+                              key: const ValueKey('douban-category-tabs-group'),
+                              spacing: 2,
+                              compact: true,
+                              selectedValue: _query.category,
+                              onSelected: _selectCategory,
+                              items: [
+                                StarflowTabItem(
+                                  value: DoubanBrowseCategory.movie,
+                                  widgetKey:
+                                      const ValueKey('douban-category-movie'),
                                   focusId: 'douban-category-movie',
                                   focusNode: _movieCategoryFocus,
                                   label: '电影',
-                                  selected: _query.category ==
-                                      DoubanBrowseCategory.movie,
-                                  onPressed: () => _select(
-                                      _queries[DoubanBrowseCategory.movie] ??
-                                          const DoubanBrowseQuery()),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: StarflowChipButton(
-                                  key: const ValueKey('douban-category-series'),
+                                StarflowTabItem(
+                                  value: DoubanBrowseCategory.series,
+                                  widgetKey:
+                                      const ValueKey('douban-category-series'),
                                   focusId: 'douban-category-series',
                                   focusNode: _seriesCategoryFocus,
                                   label: '电视剧',
-                                  selected: _query.category ==
-                                      DoubanBrowseCategory.series,
-                                  onPressed: () => _select(
-                                      _queries[DoubanBrowseCategory.series] ??
-                                          const DoubanBrowseQuery(
-                                              category:
-                                                  DoubanBrowseCategory.series)),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: StarflowChipButton(
-                                  key:
+                                StarflowTabItem(
+                                  value: DoubanBrowseCategory.variety,
+                                  widgetKey:
                                       const ValueKey('douban-category-variety'),
                                   focusId: 'douban-category-variety',
                                   focusNode: _varietyCategoryFocus,
                                   label: '综艺',
-                                  selected: _query.category ==
-                                      DoubanBrowseCategory.variety,
-                                  onPressed: () => _select(
-                                      _queries[DoubanBrowseCategory.variety] ??
-                                          const DoubanBrowseQuery(
-                                              category: DoubanBrowseCategory
-                                                  .variety)),
                                 ),
-                              ),
-                            ]),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -773,43 +840,48 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
                           ),
                           itemBuilder: (context, index) {
                             final entry = _page!.entries[index];
-                            return MediaPosterTile(
-                              focusNode: _posterFocusNodes[index],
-                              key: ValueKey(
-                                  '${_query.mediaType.value}:${entry.id}'),
-                              title: entry.title,
-                              subtitle: '',
-                              posterUrl: entry.posterUrl,
-                              imageTopLeftBadgeText:
-                                  entry.year == 0 ? '' : '${entry.year}',
-                              imageBadgeText: entry.ratingLabel
-                                  .replaceFirst('豆瓣', '')
-                                  .trim(),
-                              imageTopRightBadgeText: entry.genres.isNotEmpty
-                                  ? entry.genres.first
-                                  : '',
-                              imageBottomRightBadgeText:
-                                  buildRatingCountLabel(entry.ratingCount),
-                              width: null,
-                              onTap: () => context.pushNamed('detail',
-                                  extra: MediaDetailTarget(
-                                    title: entry.title,
-                                    overview: '',
-                                    posterUrl: entry.posterUrl,
-                                    year: entry.year,
-                                    ratingLabels: entry.ratingLabel.isEmpty
-                                        ? const []
-                                        : [entry.ratingLabel],
-                                    ratingCount: entry.ratingCount,
-                                    availabilityLabel: '无',
-                                    searchQuery: entry.title,
-                                    itemType: _query.mediaType ==
-                                            DoubanSuggestionMediaType.movie
-                                        ? 'movie'
-                                        : 'series',
-                                    doubanId: entry.id,
-                                    sourceName: '豆瓣',
-                                  )),
+                            return TvDirectionalActionPanel(
+                              enabled: tv,
+                              onDirection: (direction) =>
+                                  _handlePosterDirection(index, direction),
+                              child: MediaPosterTile(
+                                focusNode: _posterFocusNodes[index],
+                                key: ValueKey(
+                                    '${_query.mediaType.value}:${entry.id}'),
+                                title: entry.title,
+                                subtitle: '',
+                                posterUrl: entry.posterUrl,
+                                imageTopLeftBadgeText:
+                                    entry.year == 0 ? '' : '${entry.year}',
+                                imageBadgeText: entry.ratingLabel
+                                    .replaceFirst('豆瓣', '')
+                                    .trim(),
+                                imageTopRightBadgeText: entry.genres.isNotEmpty
+                                    ? entry.genres.first
+                                    : '',
+                                imageBottomRightBadgeText:
+                                    buildRatingCountLabel(entry.ratingCount),
+                                width: null,
+                                onTap: () => context.pushNamed('detail',
+                                    extra: MediaDetailTarget(
+                                      title: entry.title,
+                                      overview: '',
+                                      posterUrl: entry.posterUrl,
+                                      year: entry.year,
+                                      ratingLabels: entry.ratingLabel.isEmpty
+                                          ? const []
+                                          : [entry.ratingLabel],
+                                      ratingCount: entry.ratingCount,
+                                      availabilityLabel: '无',
+                                      searchQuery: entry.title,
+                                      itemType: _query.mediaType ==
+                                              DoubanSuggestionMediaType.movie
+                                          ? 'movie'
+                                          : 'series',
+                                      doubanId: entry.id,
+                                      sourceName: '豆瓣',
+                                    )),
+                              ),
                             );
                           },
                         );

@@ -65,19 +65,21 @@ class MetadataMatchSettingsPage extends ConsumerWidget {
                   ),
                 )
               else
-                Wrap(
+                StarflowSingleSelectTabBar<MetadataMatchProvider>(
+                  layout: StarflowTabLayout.wrap,
                   spacing: 10,
                   runSpacing: 10,
-                  children: [
+                  selectedValue: settings.metadataMatchPriority,
+                  onSelected: (provider) {
+                    ref
+                        .read(settingsControllerProvider.notifier)
+                        .setMetadataMatchPriority(provider);
+                  },
+                  items: [
                     for (final provider in MetadataMatchProvider.values)
-                      StarflowChipButton(
+                      StarflowTabItem(
+                        value: provider,
                         label: '${provider.label} 优先',
-                        selected: provider == settings.metadataMatchPriority,
-                        onPressed: () {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setMetadataMatchPriority(provider);
-                        },
                       ),
                   ],
                 ),

@@ -13,7 +13,8 @@ import 'package:starflow/features/settings/domain/app_settings.dart';
 void main() {
   for (final adaptive in [false, true]) {
     for (final keepFocusable in [false, true]) {
-      testWidgets('busy text button focus: adaptive=$adaptive keep=$keepFocusable',
+      testWidgets(
+          'busy text button focus: adaptive=$adaptive keep=$keepFocusable',
           (tester) async {
         final node = FocusNode();
         final busy = ValueNotifier(false);
@@ -24,21 +25,29 @@ void main() {
           overrides: [
             isTelevisionProvider.overrideWith((ref) => true),
             appSettingsProvider.overrideWithValue(const AppSettings(
-              mediaSources: [], searchProviders: [], homeModules: [],
+              mediaSources: [],
+              searchProviders: [],
+              homeModules: [],
               doubanAccount: DoubanAccountConfig(enabled: false),
             )),
           ],
-          child: MaterialApp(home: Scaffold(body: ValueListenableBuilder<bool>(
+          child: MaterialApp(
+              home: Scaffold(
+                  body: ValueListenableBuilder<bool>(
             valueListenable: busy,
             builder: (context, disabled, child) => adaptive
                 ? TvAdaptiveButton(
-                    label: 'Action', icon: Icons.refresh,
-                    focusNode: node, focusableWhenDisabled: keepFocusable,
+                    label: 'Action',
+                    icon: Icons.refresh,
+                    focusNode: node,
+                    focusableWhenDisabled: keepFocusable,
                     onPressed: disabled ? null : () => activations++,
                   )
                 : StarflowButton(
-                    label: 'Action', loading: disabled,
-                    focusNode: node, focusableWhenDisabled: keepFocusable,
+                    label: 'Action',
+                    loading: disabled,
+                    focusNode: node,
+                    focusableWhenDisabled: keepFocusable,
                     onPressed: () => activations++,
                   ),
           ))),
@@ -346,6 +355,174 @@ void main() {
       50,
     );
     expect(find.byIcon(Icons.check_circle_rounded), findsNothing);
+  });
+
+  testWidgets('single-select tab bar keeps one selected item', (tester) async {
+    var selected = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => StarflowSingleSelectTabBar<int>(
+                selectedValue: selected,
+                onSelected: (value) => setState(() => selected = value),
+                items: const [
+                  StarflowTabItem(value: 0, label: '单选一'),
+                  StarflowTabItem(value: 1, label: '单选二'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    StarflowChipButton button(String label) =>
+        tester.widget<StarflowChipButton>(
+            find.widgetWithText(StarflowChipButton, label));
+    expect(button('单选一').selected, isTrue);
+    expect(button('单选二').selected, isFalse);
+
+    await tester.tap(find.text('单选二'));
+    await tester.pumpAndSettle();
+    expect(button('单选一').selected, isFalse);
+    expect(button('单选二').selected, isTrue);
+  });
+
+  testWidgets('multi-select tab bar allows multiple selected items',
+      (tester) async {
+    var selected = <int>{0};
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => StarflowMultiSelectTabBar<int>(
+                selectedValues: selected,
+                onChanged: (value, isSelected) {
+                  setState(() {
+                    selected = {...selected};
+                    isSelected ? selected.add(value) : selected.remove(value);
+                  });
+                },
+                items: const [
+                  StarflowTabItem(value: 0, label: '多选一'),
+                  StarflowTabItem(value: 1, label: '多选二'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    StarflowChipButton button(String label) =>
+        tester.widget<StarflowChipButton>(
+            find.widgetWithText(StarflowChipButton, label));
+    await tester.tap(find.text('多选二'));
+    await tester.pumpAndSettle();
+    expect(button('多选一').selected, isTrue);
+    expect(button('多选二').selected, isTrue);
+
+    await tester.tap(find.text('多选一'));
+    await tester.pumpAndSettle();
+    expect(button('多选一').selected, isFalse);
+    expect(button('多选二').selected, isTrue);
+  });
+
+  testWidgets('single-select tab bar can clear an optional selection',
+      (tester) async {
+    int? selected = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => StarflowSingleSelectTabBar<int?>(
+                selectedValue: selected,
+                allowEmpty: true,
+                onDeselect: () => setState(() => selected = null),
+                onSelected: (value) => setState(() => selected = value),
+                items: const [
+                  StarflowTabItem(value: 0, label: '可清除'),
+                  StarflowTabItem(value: 1, label: '另一项'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('可清除'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<StarflowChipButton>(
+              find.widgetWithText(StarflowChipButton, '可清除'))
+          .selected,
+      isFalse,
+    );
+  });
+
+  testWidgets('multi-select tab bar enforces minimum and maximum selections',
+      (tester) async {
+    var selected = <int>{0};
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          isTelevisionProvider.overrideWith((ref) => false),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => StarflowMultiSelectTabBar<int>(
+                selectedValues: selected,
+                minSelections: 1,
+                maxSelections: 1,
+                onChanged: (value, isSelected) {
+                  setState(() {
+                    selected = {...selected};
+                    isSelected ? selected.add(value) : selected.remove(value);
+                  });
+                },
+                items: const [
+                  StarflowTabItem(value: 0, label: '必选一'),
+                  StarflowTabItem(value: 1, label: '可选二'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      tester
+          .widget<StarflowChipButton>(
+              find.widgetWithText(StarflowChipButton, '必选一'))
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.text('可选二'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<StarflowChipButton>(
+              find.widgetWithText(StarflowChipButton, '可选二'))
+          .selected,
+      isFalse,
+    );
   });
 
   for (final television in [false, true]) {

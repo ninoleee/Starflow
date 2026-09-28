@@ -566,18 +566,16 @@ class _SearchHeader extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            Wrap(
+            StarflowMultiSelectTabBar<OnlineSubtitleSource>(
+              selectedValues: selectedSources.toSet(),
               spacing: 8,
               runSpacing: 8,
-              children: [
+              onChanged: onSourceChanged,
+              items: [
                 for (final source in availableSources)
-                  StarflowChipButton(
+                  StarflowTabItem(
+                    value: source,
                     label: source.label,
-                    selected: selectedSources.contains(source),
-                    onPressed: () => onSourceChanged(
-                      source,
-                      !selectedSources.contains(source),
-                    ),
                     focusId: 'subtitle-search:source:${source.name}',
                   ),
               ],

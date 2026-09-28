@@ -531,25 +531,21 @@ class _DetailSeasonTabsState extends State<_DetailSeasonTabs> {
           controller.position.ensureVisible(tab, alignment: 0.5);
         });
       }
-      return SingleChildScrollView(
-        controller: controller,
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        child: Row(
-          children: [
-            for (var index = 0; index < widget.groups.length; index++) ...[
-              if (index > 0) const SizedBox(width: 8),
-              StarflowChipButton(
-                key: _tabKeys.putIfAbsent(
-                    widget.groups[index].id, GlobalKey.new),
-                label: widget.groups[index].label,
-                selected: widget.groups[index].id == widget.selectedGroupId,
-                focusId: 'detail:season:${widget.groups[index].id}',
-                onPressed: () => widget.onSelected(widget.groups[index].id),
-              ),
-            ],
-          ],
-        ),
+      return StarflowSingleSelectTabBar<String>(
+        layout: StarflowTabLayout.scroll,
+        scrollController: controller,
+        spacing: 8,
+        selectedValue: widget.selectedGroupId,
+        onSelected: widget.onSelected,
+        items: [
+          for (final group in widget.groups)
+            StarflowTabItem(
+              value: group.id,
+              label: group.label,
+              widgetKey: _tabKeys.putIfAbsent(group.id, GlobalKey.new),
+              focusId: 'detail:season:${group.id}',
+            ),
+        ],
       );
     });
   }

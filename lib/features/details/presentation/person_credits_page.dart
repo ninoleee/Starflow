@@ -1197,30 +1197,29 @@ class _PersonCreditsControls extends StatelessWidget {
         children: [
           _PersonCreditsControlSection(
             title: '排序',
-            child: Wrap(
+            child: StarflowSingleSelectTabBar<_PersonCreditsSortMode>(
+              layout: StarflowTabLayout.wrap,
               spacing: 10,
               runSpacing: 10,
-              children: [
-                StarflowChipButton(
+              selectedValue: sortMode,
+              onSelected: onSortChanged,
+              items: const [
+                StarflowTabItem(
+                  value: _PersonCreditsSortMode.newest,
                   label: '最新',
                   icon: Icons.south_rounded,
-                  selected: sortMode == _PersonCreditsSortMode.newest,
-                  onPressed: () => onSortChanged(_PersonCreditsSortMode.newest),
                   focusId: 'person-credits:sort:newest',
                 ),
-                StarflowChipButton(
+                StarflowTabItem(
+                  value: _PersonCreditsSortMode.oldest,
                   label: '最旧',
                   icon: Icons.north_rounded,
-                  selected: sortMode == _PersonCreditsSortMode.oldest,
-                  onPressed: () => onSortChanged(_PersonCreditsSortMode.oldest),
                   focusId: 'person-credits:sort:oldest',
                 ),
-                StarflowChipButton(
+                StarflowTabItem(
+                  value: _PersonCreditsSortMode.tmdbRating,
                   label: 'TMDB评分',
                   icon: Icons.star_rounded,
-                  selected: sortMode == _PersonCreditsSortMode.tmdbRating,
-                  onPressed: () =>
-                      onSortChanged(_PersonCreditsSortMode.tmdbRating),
                   focusId: 'person-credits:sort:tmdb-rating',
                 ),
               ],
@@ -1229,19 +1228,20 @@ class _PersonCreditsControls extends StatelessWidget {
           const SizedBox(height: 14),
           _PersonCreditsControlSection(
             title: '类别',
-            child: Wrap(
+            child: StarflowSingleSelectTabBar<String>(
+              layout: StarflowTabLayout.wrap,
               spacing: 10,
               runSpacing: 10,
-              children: availablePrimaryCategories
-                  .map(
-                    (category) => StarflowChipButton(
-                      label: category,
-                      selected: selectedPrimaryCategory == category,
-                      onPressed: () => onPrimaryCategoryChanged(category),
-                      focusId: 'person-credits:category:$category',
-                    ),
-                  )
-                  .toList(growable: false),
+              selectedValue: selectedPrimaryCategory,
+              onSelected: onPrimaryCategoryChanged,
+              items: [
+                for (final category in availablePrimaryCategories)
+                  StarflowTabItem(
+                    value: category,
+                    label: category,
+                    focusId: 'person-credits:category:$category',
+                  ),
+              ],
             ),
           ),
           if (selectedPrimaryCategory ==
@@ -1250,19 +1250,20 @@ class _PersonCreditsControls extends StatelessWidget {
             const SizedBox(height: 14),
             _PersonCreditsControlSection(
               title: '电影类型',
-              child: Wrap(
+              child: StarflowSingleSelectTabBar<String>(
+                layout: StarflowTabLayout.wrap,
                 spacing: 10,
                 runSpacing: 10,
-                children: availableMovieGenres
-                    .map(
-                      (genre) => StarflowChipButton(
-                        label: genre,
-                        selected: selectedMovieGenre == genre,
-                        onPressed: () => onMovieGenreChanged(genre),
-                        focusId: 'person-credits:movie-genre:$genre',
-                      ),
-                    )
-                    .toList(growable: false),
+                selectedValue: selectedMovieGenre,
+                onSelected: onMovieGenreChanged,
+                items: [
+                  for (final genre in availableMovieGenres)
+                    StarflowTabItem(
+                      value: genre,
+                      label: genre,
+                      focusId: 'person-credits:movie-genre:$genre',
+                    ),
+                ],
               ),
             ),
           ],

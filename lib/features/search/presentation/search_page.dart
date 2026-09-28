@@ -889,24 +889,32 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 label: '搜索来源',
                                 storageId: 'sources',
                                 isTelevision: isTelevision,
-                                children: [
-                                  for (final target in targets)
-                                    _SearchTargetChip(
-                                      target: target,
-                                      selected: effectiveSelectedTargetIds
-                                          .contains(target.id),
-                                      isTelevision: isTelevision,
-                                      focusId: 'search:target:${target.id}',
-                                      onPressed: () {
-                                        _toggleTargetSelection(target, targets);
-                                        if (_controller.text
-                                            .trim()
-                                            .isNotEmpty) {
-                                          _performSearch();
-                                        }
-                                      },
-                                    ),
-                                ],
+                                options: StarflowMultiSelectTabBar<String>(
+                                  layout: isTelevision
+                                      ? StarflowTabLayout.wrap
+                                      : StarflowTabLayout.scroll,
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  selectedValues: effectiveSelectedTargetIds,
+                                  onChanged: (targetId, _) {
+                                    final target = targets.singleWhere(
+                                      (item) => item.id == targetId,
+                                    );
+                                    _toggleTargetSelection(target, targets);
+                                    if (_controller.text.trim().isNotEmpty) {
+                                      _performSearch();
+                                    }
+                                  },
+                                  items: [
+                                    for (final target in targets)
+                                      StarflowTabItem(
+                                        value: target.id,
+                                        label: target.label,
+                                        focusId: 'search:target:${target.id}',
+                                      ),
+                                  ],
+                                ),
+                                children: const [],
                               ),
                             if (!_showFavoriteResults &&
                                 _results.isNotEmpty &&
@@ -917,26 +925,38 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 label: '网盘类型',
                                 storageId: 'cloud-types',
                                 isTelevision: isTelevision,
-                                children: [
-                                  for (final type in SearchCloudType.values
-                                      .where(availableCloudTypes.contains))
-                                    StarflowChipButton(
-                                      key: ValueKey(
-                                          'search-cloud-type:${type.code}'),
-                                      label: type.label,
-                                      selected: _selectedCloudType == type,
-                                      focusId: 'search:cloud-type:${type.code}',
-                                      onPressed: () {
-                                        setState(() {
-                                          _selectedCloudType =
-                                              _selectedCloudType == type
-                                                  ? null
-                                                  : type;
-                                        });
-                                        _logSearchResultVisibility();
-                                      },
-                                    ),
-                                ],
+                                options: StarflowSingleSelectTabBar<String?>(
+                                  layout: isTelevision
+                                      ? StarflowTabLayout.wrap
+                                      : StarflowTabLayout.scroll,
+                                  allowEmpty: true,
+                                  selectedValue: _selectedCloudType?.code,
+                                  onDeselect: () {
+                                    setState(() => _selectedCloudType = null);
+                                    _logSearchResultVisibility();
+                                  },
+                                  onSelected: (code) {
+                                    if (code == null) return;
+                                    setState(() {
+                                      _selectedCloudType =
+                                          SearchCloudTypeX.fromCode(code);
+                                    });
+                                    _logSearchResultVisibility();
+                                  },
+                                  items: [
+                                    for (final type in SearchCloudType.values
+                                        .where(availableCloudTypes.contains))
+                                      StarflowTabItem(
+                                        value: type.code,
+                                        label: type.label,
+                                        widgetKey: ValueKey(
+                                            'search-cloud-type:${type.code}'),
+                                        focusId:
+                                            'search:cloud-type:${type.code}',
+                                      ),
+                                  ],
+                                ),
+                                children: const [],
                               ),
                             if (!_showFavoriteResults &&
                                 availableResolutions.isNotEmpty)
@@ -946,29 +966,38 @@ class _SearchPageState extends ConsumerState<SearchPage>
                                 label: '清晰度',
                                 storageId: 'resolutions',
                                 isTelevision: isTelevision,
-                                children: [
-                                  for (final resolution
-                                      in SearchResultResolution.values
-                                          .where(availableResolutions.contains))
-                                    StarflowChipButton(
-                                      key: ValueKey(
-                                          'search-resolution:${resolution.name}'),
-                                      label: resolution.label,
-                                      selected:
-                                          _selectedResolution == resolution,
-                                      focusId:
-                                          'search:resolution:${resolution.name}',
-                                      onPressed: () {
-                                        setState(() {
-                                          _selectedResolution =
-                                              _selectedResolution == resolution
-                                                  ? null
-                                                  : resolution;
-                                        });
-                                        _logSearchResultVisibility();
-                                      },
-                                    ),
-                                ],
+                                options: StarflowSingleSelectTabBar<
+                                    SearchResultResolution?>(
+                                  layout: isTelevision
+                                      ? StarflowTabLayout.wrap
+                                      : StarflowTabLayout.scroll,
+                                  allowEmpty: true,
+                                  selectedValue: _selectedResolution,
+                                  onDeselect: () {
+                                    setState(() => _selectedResolution = null);
+                                    _logSearchResultVisibility();
+                                  },
+                                  onSelected: (resolution) {
+                                    if (resolution == null) return;
+                                    setState(
+                                        () => _selectedResolution = resolution);
+                                    _logSearchResultVisibility();
+                                  },
+                                  items: [
+                                    for (final resolution
+                                        in SearchResultResolution.values.where(
+                                            availableResolutions.contains))
+                                      StarflowTabItem(
+                                        value: resolution,
+                                        label: resolution.label,
+                                        widgetKey: ValueKey(
+                                            'search-resolution:${resolution.name}'),
+                                        focusId:
+                                            'search:resolution:${resolution.name}',
+                                      ),
+                                  ],
+                                ),
+                                children: const [],
                               ),
                             const SizedBox(height: 12),
                             if (!_showFavoriteResults && _isSearching) ...[
@@ -1978,32 +2007,6 @@ class _SearchHistoryChip extends StatelessWidget {
       onPressed: onPressed,
       focusId: focusId,
       selected: false,
-    );
-  }
-}
-
-class _SearchTargetChip extends StatelessWidget {
-  const _SearchTargetChip({
-    required this.target,
-    required this.selected,
-    required this.isTelevision,
-    required this.onPressed,
-    this.focusId,
-  });
-
-  final _SearchTarget target;
-  final bool selected;
-  final bool isTelevision;
-  final VoidCallback onPressed;
-  final String? focusId;
-
-  @override
-  Widget build(BuildContext context) {
-    return StarflowChipButton(
-      label: target.label,
-      selected: selected,
-      onPressed: onPressed,
-      focusId: focusId,
     );
   }
 }

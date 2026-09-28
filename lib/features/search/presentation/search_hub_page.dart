@@ -70,6 +70,9 @@ class _SearchHubPageState extends ConsumerState<SearchHubPage> {
       _browse = selected;
       _browseCreated |= selected;
     });
+    if (selected) {
+      _scheduleSelectedModeTabFocus();
+    }
   }
 
   @override
@@ -94,35 +97,34 @@ class _SearchHubPageState extends ConsumerState<SearchHubPage> {
         onFocusChange: _handleModeTabsFocus,
         child: Center(
           child: ConstrainedBox(
-            key: const ValueKey('search-hub-mode-tabs-group'),
             constraints: BoxConstraints(maxWidth: isTelevision ? 320 : 240),
-            child: Row(children: [
-              Expanded(
-                child: StarflowChipButton(
-                  key: browsePage ? _browsePageSearchKey : _searchPageSearchKey,
+            child: StarflowSingleSelectTabBar<bool>(
+              key: const ValueKey('search-hub-mode-tabs-group'),
+              selectedValue: _browse,
+              onSelected: _selectMode,
+              items: [
+                StarflowTabItem(
+                  value: false,
+                  widgetKey:
+                      browsePage ? _browsePageSearchKey : _searchPageSearchKey,
                   focusId: 'search-hub-mode-search',
                   focusNode: browsePage
                       ? _browsePageSearchFocus
                       : _searchPageSearchFocus,
                   label: '搜索',
-                  selected: !_browse,
-                  onPressed: () => _selectMode(false),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: StarflowChipButton(
-                  key: browsePage ? _browsePageBrowseKey : _searchPageBrowseKey,
+                StarflowTabItem(
+                  value: true,
+                  widgetKey:
+                      browsePage ? _browsePageBrowseKey : _searchPageBrowseKey,
                   focusId: 'search-hub-mode-browse',
                   focusNode: browsePage
                       ? _browsePageBrowseFocus
                       : _searchPageBrowseFocus,
                   label: '选片',
-                  selected: _browse,
-                  onPressed: () => _selectMode(true),
                 ),
-              ),
-            ]),
+              ],
+            ),
           ),
         ),
       ),
@@ -139,6 +141,7 @@ class _SearchHubPageState extends ConsumerState<SearchHubPage> {
         .read(searchPreferencesRepositoryProvider)
         .saveBrowseMode(browse)
         .catchError((Object _) {}));
+    _scheduleSelectedModeTabFocus();
   }
 
   Future<void> _returnToModeTabs() async {
@@ -158,15 +161,31 @@ class _SearchHubPageState extends ConsumerState<SearchHubPage> {
   }
 
   bool _focusSelectedModeTab() {
-    final focus = _browse
-        ? (_browse ? _browsePageBrowseFocus : _browsePageSearchFocus)
-        : (_browse ? _searchPageBrowseFocus : _searchPageSearchFocus);
+    final focus = _browse ? _browsePageBrowseFocus : _searchPageSearchFocus;
     if (!focus.canRequestFocus) return false;
     focus.requestFocus();
     if (!_modeTabsFocused) {
       setState(() => _modeTabsFocused = true);
     }
     return true;
+  }
+
+  void _scheduleSelectedModeTabFocus({int remainingAttempts = 3}) {
+    if (!(ref.read(isTelevisionProvider).value ?? false)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_canFocusModeTabs() || _focusSelectedModeTab()) return;
+      if (remainingAttempts > 0) {
+        _scheduleSelectedModeTabFocus(
+          remainingAttempts: remainingAttempts - 1,
+        );
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  bool _canFocusModeTabs() {
+    final route = ModalRoute.of(context);
+    return (route == null || route.isCurrent) && TickerMode.of(context);
   }
 
   void _handleModeTabsFocus(bool focused) {

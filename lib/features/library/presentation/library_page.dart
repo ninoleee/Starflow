@@ -600,18 +600,20 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     required List<LibraryFilter> filters,
     required LibraryFilter activeFilter,
   }) {
-    return Wrap(
+    return StarflowSingleSelectTabBar<LibraryFilter>(
+      layout: StarflowTabLayout.wrap,
       spacing: 10,
       runSpacing: 10,
-      children: [
+      selectedValue: activeFilter,
+      onSelected: _selectFilter,
+      items: [
         for (var index = 0; index < filters.length; index++)
-          _LibraryFilterChip(
-            filter: filters[index],
-            selected: filters[index] == activeFilter,
+          StarflowTabItem(
+            value: filters[index],
+            label: filters[index].label,
             focusNode: index == 0 ? _topFilterFocusNode : null,
             focusId: 'library:filter:${filters[index].name}',
             autofocus: index == 0 && isTelevision,
-            onPressed: () => _selectFilter(filters[index]),
           ),
       ],
     );
@@ -1286,36 +1288,6 @@ class _LibraryPageState extends ConsumerState<LibraryPage>
     return item.sourceKind == MediaSourceKind.quark
         ? _LibraryRefreshSourceKind.quark
         : _LibraryRefreshSourceKind.webDav;
-  }
-}
-
-class _LibraryFilterChip extends StatelessWidget {
-  const _LibraryFilterChip({
-    required this.filter,
-    required this.selected,
-    required this.onPressed,
-    this.focusNode,
-    this.focusId,
-    this.autofocus = false,
-  });
-
-  final LibraryFilter filter;
-  final bool selected;
-  final VoidCallback onPressed;
-  final FocusNode? focusNode;
-  final String? focusId;
-  final bool autofocus;
-
-  @override
-  Widget build(BuildContext context) {
-    return StarflowChipButton(
-      label: filter.label,
-      selected: selected,
-      onPressed: onPressed,
-      focusNode: focusNode,
-      focusId: focusId,
-      autofocus: autofocus,
-    );
   }
 }
 

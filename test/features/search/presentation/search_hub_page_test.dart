@@ -1,11 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:starflow/app/theme/app_colors.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
 import 'package:starflow/core/widgets/tv_focus.dart';
@@ -90,6 +92,15 @@ void main() {
       final group = find.byKey(const ValueKey('search-hub-mode-tabs-group'));
       expect(tester.getSize(group).width, mode.maxWidth);
       expect(tester.getCenter(group).dx, closeTo(mode.size.width / 2, 1));
+      for (final label in ['搜索', '选片']) {
+        final chip = find.widgetWithText(StarflowChipButton, label);
+        final labelFinder =
+            find.descendant(of: chip, matching: find.text(label));
+        expect(
+          tester.getCenter(labelFinder).dx,
+          closeTo(tester.getCenter(chip).dx, 0.1),
+        );
+      }
     });
   }
 
@@ -211,6 +222,121 @@ void main() {
     expect(selectedTab, findsOneWidget);
     final tabFocus = Focus.of(tester.element(selectedTab));
     expect(tabFocus.hasPrimaryFocus, isTrue);
+  });
+
+  testWidgets('TV saved browse mode focuses the selected mode tab',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({'search.browseMode': 'douban'});
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final preferences = SearchPreferencesRepository();
+    await preferences.saveBrowseMode(true);
+    addTearDown(preferences.dispose);
+    await tester.pumpWidget(ProviderScope(overrides: [
+      searchPreferencesRepositoryProvider.overrideWithValue(preferences),
+      appSettingsProvider.overrideWithValue(settings),
+      isTelevisionProvider.overrideWith((ref) => true),
+    ], child: const MaterialApp(home: SearchHubPage())));
+    await tester.pumpAndSettle();
+
+    final selectedTab = tester.widget<StarflowChipButton>(
+        find.widgetWithText(StarflowChipButton, '选片'));
+    expect(selectedTab.selected, isTrue);
+    expect(selectedTab.focusNode!.hasPrimaryFocus, isTrue);
+    final selectedFrame = tester.widget<AnimatedContainer>(find
+        .descendant(
+          of: find.widgetWithText(StarflowChipButton, '选片'),
+          matching: find.byType(AnimatedContainer),
+        )
+        .first);
+    final selectedDecoration = selectedFrame.decoration! as BoxDecoration;
+    expect(
+      selectedDecoration.borderRadius,
+      BorderRadius.circular(AppRadii.md),
+    );
+    final selectedBorder = selectedDecoration.border! as Border;
+    expect(selectedBorder.top.color, Colors.white);
+    expect(selectedBorder.top.width, 3);
+    final selectedBackground = selectedDecoration.color;
+    expect(selectedBackground, isNot(Colors.transparent));
+
+    final unselectedTab = tester.widget<StarflowChipButton>(
+        find.widgetWithText(StarflowChipButton, '搜索'));
+    unselectedTab.focusNode!.requestFocus();
+    await tester.pumpAndSettle();
+    final unfocusedSelectedFrame = tester.widget<AnimatedContainer>(find
+        .descendant(
+          of: find.widgetWithText(StarflowChipButton, '选片'),
+          matching: find.byType(AnimatedContainer),
+        )
+        .first);
+    final focusedUnselectedFrame = tester.widget<AnimatedContainer>(find
+        .descendant(
+          of: find.widgetWithText(StarflowChipButton, '搜索'),
+          matching: find.byType(AnimatedContainer),
+        )
+        .first);
+    expect(
+      (unfocusedSelectedFrame.decoration! as BoxDecoration).color,
+      selectedBackground,
+    );
+    expect(
+      (focusedUnselectedFrame.decoration! as BoxDecoration).color,
+      Colors.transparent,
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'douban-category-movie',
+    );
+    final categoryTab = tester.widget<StarflowChipButton>(
+        find.byKey(const ValueKey('douban-category-movie')));
+    expect(categoryTab.focusNode!.hasPrimaryFocus, isTrue);
+  });
+
+  testWidgets('TV mode switch keeps focus inside the active page',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(ProviderScope(overrides: [
+      appSettingsProvider.overrideWithValue(settings),
+      isTelevisionProvider.overrideWith((ref) => true),
+    ], child: const MaterialApp(home: SearchHubPage())));
+    await tester.pumpAndSettle();
+
+    final searchTab = tester.widget<StarflowChipButton>(
+        find.widgetWithText(StarflowChipButton, '搜索'));
+    searchTab.focusNode!.requestFocus();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+
+    final selectedTab = tester.widget<StarflowChipButton>(
+        find.widgetWithText(StarflowChipButton, '选片'));
+    expect(selectedTab.selected, isTrue);
+    expect(selectedTab.focusNode!.hasPrimaryFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+
+    final restoredTab = tester.widget<StarflowChipButton>(
+        find.widgetWithText(StarflowChipButton, '搜索'));
+    expect(restoredTab.selected, isTrue);
+    expect(
+      FocusManager.instance.primaryFocus?.debugLabel,
+      'search-query',
+    );
   });
 
   for (final mode in [

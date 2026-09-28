@@ -31,6 +31,12 @@ enum StarflowButtonVariant {
   danger,
 }
 
+enum StarflowChipButtonVariant {
+  chip,
+  segmented,
+  compactSegmented,
+}
+
 const double kTvButtonFocusScale = 1.035;
 
 const _tvActionShortcuts = {
@@ -1113,12 +1119,266 @@ class StarflowIconButton extends ConsumerWidget {
   }
 }
 
+enum StarflowTabLayout {
+  row,
+  wrap,
+  scroll,
+}
+
+/// A tab option. Use stable values when [T] overrides `==`.
+class StarflowTabItem<T> {
+  const StarflowTabItem({
+    required this.value,
+    required this.label,
+    this.widgetKey,
+    this.icon,
+    this.focusNode,
+    this.focusId,
+    this.accentColor,
+    this.enabled = true,
+    this.focusableWhenDisabled = false,
+    this.autofocus = false,
+    this.onFocused,
+  });
+
+  final T value;
+  final String label;
+  final Key? widgetKey;
+  final IconData? icon;
+  final FocusNode? focusNode;
+  final String? focusId;
+  final Color? accentColor;
+  final bool enabled;
+  final bool focusableWhenDisabled;
+  final bool autofocus;
+  final VoidCallback? onFocused;
+}
+
+class StarflowSingleSelectTabBar<T> extends StatelessWidget {
+  const StarflowSingleSelectTabBar({
+    super.key,
+    required this.items,
+    required this.selectedValue,
+    required this.onSelected,
+    this.onDeselect,
+    this.allowEmpty = false,
+    this.layout = StarflowTabLayout.row,
+    this.compact = false,
+    this.spacing = 4,
+    this.runSpacing = 8,
+    this.scrollController,
+  });
+
+  final List<StarflowTabItem<T>> items;
+  final T selectedValue;
+  final ValueChanged<T>? onSelected;
+  final VoidCallback? onDeselect;
+  final bool allowEmpty;
+  final StarflowTabLayout layout;
+  final bool compact;
+  final double spacing;
+  final double runSpacing;
+  final ScrollController? scrollController;
+
+  @override
+  Widget build(BuildContext context) {
+    final children = [
+      for (final item in items)
+        KeyedSubtree(
+          key: item.widgetKey == null
+              ? null
+              : ValueKey<Object>(('starflow-tab-item', item.widgetKey)),
+          child: Semantics(
+            inMutuallyExclusiveGroup: true,
+            selected: item.value == selectedValue,
+            enabled: item.enabled && onSelected != null,
+            child: StarflowChipButton(
+              key: item.widgetKey,
+              label: item.label,
+              icon: item.icon,
+              selected: item.value == selectedValue,
+              onPressed: item.enabled && onSelected != null
+                  ? item.value == selectedValue && allowEmpty
+                      ? onDeselect
+                      : () => onSelected!(item.value)
+                  : null,
+              focusNode: item.focusNode,
+              focusId: item.focusId,
+              accentColor: item.accentColor,
+              focusableWhenDisabled: item.focusableWhenDisabled,
+              autofocus: item.autofocus,
+              onFocused: item.onFocused,
+              variant: compact
+                  ? StarflowChipButtonVariant.compactSegmented
+                  : StarflowChipButtonVariant.segmented,
+            ),
+          ),
+        ),
+    ];
+    return switch (layout) {
+      StarflowTabLayout.row => _StarflowTabBarRow(
+          spacing: spacing,
+          children: children,
+        ),
+      StarflowTabLayout.wrap => Wrap(
+          spacing: spacing,
+          runSpacing: runSpacing,
+          children: children,
+        ),
+      StarflowTabLayout.scroll => SingleChildScrollView(
+          controller: scrollController,
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: Row(
+            children: [
+              for (var index = 0; index < children.length; index++) ...[
+                if (index > 0) SizedBox(width: spacing),
+                children[index],
+              ],
+            ],
+          ),
+        ),
+    };
+  }
+}
+
+class StarflowMultiSelectTabBar<T> extends StatelessWidget {
+  const StarflowMultiSelectTabBar({
+    super.key,
+    required this.items,
+    required this.selectedValues,
+    required this.onChanged,
+    this.layout = StarflowTabLayout.wrap,
+    this.compact = false,
+    this.spacing = 10,
+    this.runSpacing = 10,
+    this.minSelections = 0,
+    this.maxSelections,
+    this.showSelectedCheckmark = false,
+    this.scrollController,
+  });
+
+  final List<StarflowTabItem<T>> items;
+  final Set<T> selectedValues;
+  final void Function(T value, bool selected)? onChanged;
+  final StarflowTabLayout layout;
+  final bool compact;
+  final double spacing;
+  final double runSpacing;
+  final int minSelections;
+  final int? maxSelections;
+  final bool showSelectedCheckmark;
+  final ScrollController? scrollController;
+
+  @override
+  Widget build(BuildContext context) {
+    final children = [
+      for (final item in items)
+        Builder(builder: (context) {
+          final selected = selectedValues.contains(item.value);
+          final canChange = selected
+              ? selectedValues.length > minSelections
+              : maxSelections == null || selectedValues.length < maxSelections!;
+          return KeyedSubtree(
+            key: item.widgetKey == null
+                ? null
+                : ValueKey<Object>(('starflow-tab-item', item.widgetKey)),
+            child: Semantics(
+              checked: selected,
+              enabled: item.enabled && onChanged != null && canChange,
+              child: StarflowChipButton(
+                key: item.widgetKey,
+                label: item.label,
+                icon: item.icon,
+                selected: selected,
+                showSelectedCheckmark: showSelectedCheckmark,
+                onPressed: item.enabled && onChanged != null && canChange
+                    ? () => onChanged!(item.value, !selected)
+                    : null,
+                focusNode: item.focusNode,
+                focusId: item.focusId,
+                accentColor: item.accentColor,
+                focusableWhenDisabled: item.focusableWhenDisabled,
+                autofocus: item.autofocus,
+                onFocused: item.onFocused,
+                variant: compact
+                    ? StarflowChipButtonVariant.compactSegmented
+                    : StarflowChipButtonVariant.segmented,
+              ),
+            ),
+          );
+        }),
+    ];
+    return switch (layout) {
+      StarflowTabLayout.row => _StarflowTabBarRow(
+          spacing: spacing,
+          children: children,
+        ),
+      StarflowTabLayout.wrap => Wrap(
+          spacing: spacing,
+          runSpacing: runSpacing,
+          children: children,
+        ),
+      StarflowTabLayout.scroll => SingleChildScrollView(
+          controller: scrollController,
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: Row(
+            children: [
+              for (var index = 0; index < children.length; index++) ...[
+                if (index > 0) SizedBox(width: spacing),
+                children[index],
+              ],
+            ],
+          ),
+        ),
+    };
+  }
+}
+
+class _StarflowTabBarRow extends StatelessWidget {
+  const _StarflowTabBarRow({
+    required this.children,
+    this.spacing = 4,
+  });
+
+  final List<Widget> children;
+  final double spacing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Row(
+          children: [
+            for (var index = 0; index < children.length; index++) ...[
+              Expanded(child: children[index]),
+              if (index != children.length - 1) SizedBox(width: spacing),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class StarflowChipButton extends StatefulWidget {
   const StarflowChipButton({
     super.key,
     required this.label,
     required this.selected,
     required this.onPressed,
+    this.variant = StarflowChipButtonVariant.chip,
     this.icon,
     this.onFocused,
     this.autofocus = false,
@@ -1136,6 +1396,7 @@ class StarflowChipButton extends StatefulWidget {
   final String label;
   final bool selected;
   final VoidCallback? onPressed;
+  final StarflowChipButtonVariant variant;
   final IconData? icon;
   final VoidCallback? onFocused;
   final bool autofocus;
@@ -1223,24 +1484,44 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
     final colorScheme = theme.colorScheme;
     final enabled = widget.onPressed != null;
     final accentColor = widget.accentColor ?? AppActionColors.of(theme).primary;
-    final backgroundColor = widget.selected
-        ? accentColor.withValues(alpha: 0.18)
-        : _focused
-            ? colorScheme.primaryContainer
-            : colorScheme.surfaceContainerHighest.withValues(alpha: 0.58);
-    final foregroundColor = widget.selected
-        ? accentColor
-        : _focused
-            ? colorScheme.onPrimaryContainer
-            : colorScheme.onSurfaceVariant.withValues(alpha: 0.82);
-    final borderColor = _focused
-        ? (theme.brightness == Brightness.dark
-            ? Colors.white
-            : colorScheme.primary)
+    final isSegmented = widget.variant != StarflowChipButtonVariant.chip;
+    final isCompactSegmented =
+        widget.variant == StarflowChipButtonVariant.compactSegmented;
+    final backgroundColor = isSegmented
+        ? widget.selected
+            ? accentColor.withValues(alpha: 0.12)
+            : Colors.transparent
         : widget.selected
-            ? accentColor.withValues(alpha: 0.78)
-            : colorScheme.outlineVariant.withValues(alpha: 0.68);
-    final labelStyle = theme.textTheme.labelLarge?.copyWith(
+            ? accentColor.withValues(alpha: 0.18)
+            : _focused
+                ? colorScheme.primaryContainer
+                : colorScheme.surfaceContainerHighest.withValues(alpha: 0.58);
+    final foregroundColor = isSegmented
+        ? widget.selected
+            ? colorScheme.onPrimary
+            : colorScheme.onSurfaceVariant
+        : widget.selected
+            ? accentColor
+            : _focused
+                ? colorScheme.onPrimaryContainer
+                : colorScheme.onSurfaceVariant.withValues(alpha: 0.82);
+    final focusBorderColor =
+        theme.brightness == Brightness.dark || (isSegmented && widget.selected)
+            ? Colors.white
+            : colorScheme.primary;
+    final borderColor = _focused
+        ? focusBorderColor
+        : isSegmented
+            ? Colors.transparent
+            : widget.selected
+                ? accentColor.withValues(alpha: 0.78)
+                : colorScheme.outlineVariant.withValues(alpha: 0.68);
+    final resolvedBorderColor =
+        isSegmented && !_focused ? Colors.transparent : borderColor;
+    final labelStyle = (isCompactSegmented
+            ? theme.textTheme.labelMedium
+            : theme.textTheme.labelLarge)
+        ?.copyWith(
       color: foregroundColor,
       fontWeight: _focused ? FontWeight.w900 : FontWeight.w700,
       fontFamilyFallback: theme.textTheme.titleSmall?.fontFamilyFallback,
@@ -1250,7 +1531,9 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
     final effectiveIcon = widget.selected && widget.showSelectedCheckmark
         ? Icons.check_circle_rounded
         : widget.icon;
-    final radius = BorderRadius.circular(AppRadii.pill);
+    final radius = BorderRadius.circular(
+      isSegmented ? AppRadii.md : AppRadii.pill,
+    );
     final chip = TvFocusableAction(
       onPressed: widget.onPressed,
       focusableWhenDisabled: widget.focusableWhenDisabled,
@@ -1260,7 +1543,7 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
       focusId: widget.focusId,
       borderRadius: radius,
       visualStyle: TvFocusVisualStyle.none,
-      focusScale: 1.045,
+      focusScale: isSegmented ? 1.0 : 1.045,
       child: AnimatedOpacity(
         opacity: enabled ? 1 : 0.48,
         duration: const Duration(milliseconds: 120),
@@ -1268,16 +1551,28 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
           duration: const Duration(milliseconds: 140),
           curve: Curves.easeOutCubic,
           constraints: BoxConstraints(
-              minHeight: StarflowChipButton.minimumHeight(context)),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+              minHeight: isCompactSegmented
+                  ? 38
+                  : isSegmented
+                      ? 50
+                      : StarflowChipButton.minimumHeight(context)),
+          padding: EdgeInsets.symmetric(
+            horizontal: isCompactSegmented
+                ? 10
+                : isSegmented
+                    ? 14
+                    : 18,
+            vertical: isCompactSegmented
+                ? 6
+                : isSegmented
+                    ? 12
+                    : 12,
+          ),
           decoration: BoxDecoration(
             color: backgroundColor,
             borderRadius: radius,
-            border: Border.all(
-              color: borderColor,
-              width: 3,
-            ),
-            boxShadow: _focused
+            border: Border.all(color: resolvedBorderColor, width: 3),
+            boxShadow: !isSegmented && _focused
                 ? [
                     BoxShadow(
                       color: colorScheme.primary.withValues(alpha: 0.22),
@@ -1287,25 +1582,52 @@ class _StarflowChipButtonState extends State<StarflowChipButton> {
                   ]
                 : null,
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
+          child: Stack(
+            fit: StackFit.passthrough,
+            alignment: Alignment.center,
             children: [
-              if (effectiveIcon != null) ...[
-                Icon(effectiveIcon, size: 20, color: foregroundColor),
-                const SizedBox(width: 9),
-              ],
-              Flexible(
-                child: Text(
-                  widget.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  strutStyle: labelStyle == null
-                      ? null
-                      : StrutStyle.fromTextStyle(labelStyle),
-                  style: labelStyle,
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (effectiveIcon != null) ...[
+                    Icon(
+                      effectiveIcon,
+                      size: isCompactSegmented ? 18 : 20,
+                      color: foregroundColor,
+                    ),
+                    SizedBox(width: isCompactSegmented ? 6 : 9),
+                  ],
+                  Flexible(
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      strutStyle: labelStyle == null
+                          ? null
+                          : StrutStyle.fromTextStyle(labelStyle),
+                      style: labelStyle,
+                    ),
+                  ),
+                ],
               ),
+              if (isSegmented && widget.selected)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: IgnorePointer(
+                    child: Container(
+                      height: isCompactSegmented ? 2 : 3,
+                      decoration: BoxDecoration(
+                        color: accentColor,
+                        borderRadius: BorderRadius.circular(1.5),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
