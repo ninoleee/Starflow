@@ -42,8 +42,6 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
   bool _queryTouched = false;
   bool _enabled = false;
   bool _pageLimitReached = false;
-  List<DoubanEntry>? _matchingEntries;
-  int _matchCursor = 0;
   String? _error;
   final _firstPageForId = <String, int>{};
   final _scroll = ScrollController();
@@ -131,50 +129,30 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
             refresh: refresh,
           );
       if (!mounted || !isPageActive || request != _generation) return;
-      List<DoubanEntry>? matchingEntries;
-      if (_query.minRatingCount > 0) {
-        matchingEntries =
-            await ref.read(doubanBrowseRepositoryProvider).fetchMatchingEntries(
-                  _query,
-                  minimumRatingCount: _query.minRatingCount,
-                  refresh: refresh,
-                );
-        if (!mounted || !isPageActive || request != _generation) return;
-      }
       if (result.genres.isNotEmpty) _genres[_query.category] = result.genres;
       if (result.regions.isNotEmpty) {
         _regions[_query.category] = result.regions;
       }
       if (start == 0 && refresh) _firstPageForId.clear();
-      final candidateEntries = matchingEntries ?? result.entries;
       final seenOnPage = <String>{};
-      final unique = candidateEntries.where((entry) {
+      final unique = result.entries.where((entry) {
         final id = '${_query.category.value}:${entry.id}';
         if (!seenOnPage.add(id)) return false;
-        if (matchingEntries != null) return true;
         final firstPage = _firstPageForId.putIfAbsent(id, () => start);
         return firstPage == start;
       }).toList(growable: false);
-      final isFiltered = matchingEntries != null;
-      final visibleStart = isFiltered ? 0 : start;
-      final visiblePageEntries =
-          isFiltered ? unique.take(20).toList(growable: false) : unique;
-      final visibleTotal = isFiltered ? unique.length : result.total;
-      final rawCount = isFiltered ? unique.length : result.rawCount;
       final page = DoubanBrowsePageData(
-        entries: visiblePageEntries,
-        start: visibleStart,
-        rawCount: rawCount,
-        total: visibleTotal,
+        entries: unique,
+        start: result.start,
+        rawCount: result.rawCount,
+        total: result.total,
         genres: result.genres,
         regions: result.regions,
       );
       setState(() {
         _page = page;
-        _start = isFiltered ? 0 : start;
-        _matchCursor = 0;
-        _matchingEntries = matchingEntries;
-        _pageLimitReached = !isFiltered && start >= 980;
+        _start = start;
+        _pageLimitReached = start >= 980;
         _loading = false;
       });
       if (_scroll.hasClients) _scroll.jumpTo(0);
@@ -200,8 +178,6 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
       _start = 0;
       _firstPageForId.clear();
       _pageLimitReached = false;
-      _matchingEntries = null;
-      _matchCursor = 0;
       _loading = false;
       _error = null;
     });
@@ -219,14 +195,18 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
   }
 
   Widget _menu<T>({
+    Key? key,
     required String label,
     required T value,
     required List<T> values,
     required String Function(T) text,
+    required bool Function(T) isDefault,
     required ValueChanged<T> onSelected,
   }) {
     final initialValue = values.contains(value) ? value : values.first;
+    final displayText = isDefault(value) ? label : text(value);
     return PopupMenuButton<T>(
+      key: key,
       tooltip: label,
       initialValue: initialValue,
       constraints: const BoxConstraints(maxHeight: 440, minWidth: 180),
@@ -241,45 +221,117 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text('$label: ${text(value)}',
-              maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(displayText, maxLines: 1, overflow: TextOverflow.ellipsis),
           const Icon(Icons.arrow_drop_down),
         ]),
       ),
     );
   }
 
-  void _changePage(int delta) {
-    if (_query.minRatingCount > 0) {
-      final entries = _matchingEntries ?? const <DoubanEntry>[];
-      final next = _matchCursor + delta * 20;
-      if (next < 0 || next >= entries.length) return;
-      setState(() {
-        _matchCursor = next;
-        _start = next;
-        _page = DoubanBrowsePageData(
-          entries: entries.skip(next).take(20).toList(growable: false),
-          start: next,
-          rawCount: entries.length,
-          total: entries.length,
-          genres: _page?.genres ?? const [],
-          regions: _page?.regions ?? const [],
-        );
-      });
-      if (_scroll.hasClients) _scroll.jumpTo(0);
-      return;
-    }
-    unawaited(_scheduleLoad(_start + delta * 20));
+  Widget _pageButton({
+    Key? key,
+    required bool tv,
+    required String tooltip,
+    required String label,
+    required IconData icon,
+    required VoidCallback? onPressed,
+  }) {
+    return Tooltip(
+      key: key,
+      message: tooltip,
+      child: TextButton.icon(
+        style: TextButton.styleFrom(
+          minimumSize: Size(0, tv ? 44 : 32),
+          padding: EdgeInsets.symmetric(
+            horizontal: tv ? 10 : 5,
+            vertical: tv ? 6 : 2,
+          ),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: tv ? VisualDensity.standard : VisualDensity.compact,
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon, size: 18),
+        label: Text(label, style: Theme.of(context).textTheme.bodySmall),
+      ),
+    );
   }
 
-  bool get _canGoPrevious =>
-      _query.minRatingCount > 0 ? _matchCursor > 0 : _start > 0;
+  Widget _paginationControls({
+    required String keyPrefix,
+    required bool tv,
+    bool includeActions = false,
+    bool showLoading = true,
+  }) {
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 2,
+      runSpacing: 2,
+      children: [
+        _pageButton(
+          key: ValueKey('$keyPrefix-page-previous'),
+          tv: tv,
+          tooltip: '上一页',
+          label: '上一页',
+          icon: Icons.chevron_left,
+          onPressed:
+              _start > 0 && !_loading ? () => _scheduleLoad(_start - 20) : null,
+        ),
+        Text(
+          _pageLabel,
+          key: ValueKey('$keyPrefix-page-label'),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        _pageButton(
+          key: ValueKey('$keyPrefix-page-next'),
+          tv: tv,
+          tooltip: '下一页',
+          label: '下一页',
+          icon: Icons.chevron_right,
+          onPressed: _page?.hasNext == true && !_pageLimitReached && !_loading
+              ? () => _scheduleLoad(_start + 20)
+              : null,
+        ),
+        if (showLoading && _loading)
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        if (includeActions) ...[
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            constraints: BoxConstraints.tightFor(
+              width: tv ? 48 : 36,
+              height: tv ? 48 : 36,
+            ),
+            tooltip: '刷新',
+            icon: Icon(Icons.refresh, size: tv ? 24 : 20),
+            onPressed: _enabled && !_loading
+                ? () => _scheduleLoad(0, refresh: true)
+                : null,
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            constraints: BoxConstraints.tightFor(
+              width: tv ? 48 : 36,
+              height: tv ? 48 : 36,
+            ),
+            tooltip: '重置筛选',
+            icon: Icon(Icons.filter_alt_off, size: tv ? 24 : 20),
+            onPressed: () =>
+                _select(DoubanBrowseQuery(category: _query.category)),
+          ),
+        ],
+      ],
+    );
+  }
 
-  bool get _canGoNext {
-    if (_query.minRatingCount > 0) {
-      return _matchCursor + 20 < (_matchingEntries?.length ?? 0);
-    }
-    return _page?.hasNext == true && !_pageLimitReached;
+  String get _pageLabel {
+    final page = _start ~/ 20 + 1;
+    final total = _page?.total;
+    if (total == null || total <= 0) return '$page';
+    final totalPages = math.min(50, ((total + 19) ~/ 20).clamp(1, 50));
+    return '$page/$totalPages';
   }
 
   @override
@@ -333,102 +385,110 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
                 kAppPageHorizontalPadding,
                 MediaQuery.paddingOf(context).bottom),
             children: [
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<DoubanBrowseCategory>(
+                  showSelectedIcon: false,
+                  expandedInsets: EdgeInsets.zero,
+                  segments: const [
+                    ButtonSegment(
+                        value: DoubanBrowseCategory.movie, label: Text('电影')),
+                    ButtonSegment(
+                        value: DoubanBrowseCategory.series, label: Text('电视剧')),
+                    ButtonSegment(
+                        value: DoubanBrowseCategory.variety, label: Text('综艺')),
+                  ],
+                  selected: {_query.category},
+                  onSelectionChanged: (value) => _select(
+                      _queries[value.single] ??
+                          DoubanBrowseQuery(category: value.single)),
+                ),
+              ),
+              const SizedBox(height: 8),
               Wrap(
-                  spacing: 10,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    SegmentedButton<DoubanBrowseCategory>(
-                      showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment(
-                            value: DoubanBrowseCategory.movie,
-                            label: Text('电影')),
-                        ButtonSegment(
-                            value: DoubanBrowseCategory.series,
-                            label: Text('电视剧')),
-                        ButtonSegment(
-                            value: DoubanBrowseCategory.variety,
-                            label: Text('综艺')),
+                spacing: 8,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  _menu<String>(
+                      key: const ValueKey('douban-filter-year'),
+                      label: '年份',
+                      value: _query.year?.toString() ?? '',
+                      values: [
+                        '',
+                        ...doubanBrowseYearOptions(selectedYear: _query.year)
+                            .map((year) => '$year'),
                       ],
-                      selected: {_query.category},
-                      onSelectionChanged: (value) => _select(
-                          _queries[value.single] ??
-                              DoubanBrowseQuery(category: value.single)),
+                      text: (value) => value.isEmpty ? '全部' : value,
+                      isDefault: (value) => value.isEmpty,
+                      onSelected: (value) {
+                        if (value.isEmpty) {
+                          _select(_query.copyWith(clearYear: true));
+                        } else {
+                          _select(_query.copyWith(year: int.parse(value)));
+                        }
+                      }),
+                  _menu<String>(
+                      key: const ValueKey('douban-filter-region'),
+                      label: '地区',
+                      value: _query.region,
+                      values: {
+                        '',
+                        _query.region,
+                        ...regions.where((v) => v != '全部')
+                      }.toList(),
+                      text: (value) => value.isEmpty ? '全部' : value,
+                      isDefault: (value) => value.isEmpty,
+                      onSelected: (value) =>
+                          _select(_query.copyWith(region: value))),
+                  _menu<String>(
+                      key: const ValueKey('douban-filter-genre'),
+                      label: '类型',
+                      value: _query.genre,
+                      values: {
+                        '',
+                        _query.genre,
+                        ...genres.where((v) => v != '全部')
+                      }.toList(),
+                      text: (value) => value.isEmpty ? '全部' : value,
+                      isDefault: (value) => value.isEmpty,
+                      onSelected: (value) =>
+                          _select(_query.copyWith(genre: value))),
+                  _menu<int>(
+                      key: const ValueKey('douban-filter-rating'),
+                      label: '评分',
+                      value: _query.minRating,
+                      values: const [0, 6, 7, 8, 9],
+                      text: (value) => value == 0 ? '不限' : '$value 分以上',
+                      isDefault: (value) => value == 0,
+                      onSelected: (value) =>
+                          _select(_query.copyWith(minRating: value))),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: _paginationControls(
+                      keyPrefix: 'top',
+                      tv: tv,
+                      includeActions: true,
                     ),
-                    _menu<int?>(
-                        label: '年份',
-                        value: _query.year,
-                        values: <int?>[
-                          null,
-                          ...doubanBrowseYearOptions(selectedYear: _query.year),
-                        ],
-                        text: (value) => value == null ? '全部' : '$value',
-                        onSelected: (value) => _select(_query.copyWith(
-                            year: value, clearYear: value == null))),
-                    _menu<String>(
-                        label: '地区',
-                        value: _query.region,
-                        values: {
-                          '',
-                          _query.region,
-                          ...regions.where((v) => v != '全部')
-                        }.toList(),
-                        text: (value) => value.isEmpty ? '全部' : value,
-                        onSelected: (value) =>
-                            _select(_query.copyWith(region: value))),
-                    _menu<String>(
-                        label: '类型',
-                        value: _query.genre,
-                        values: {
-                          '',
-                          _query.genre,
-                          ...genres.where((v) => v != '全部')
-                        }.toList(),
-                        text: (value) => value.isEmpty ? '全部' : value,
-                        onSelected: (value) =>
-                            _select(_query.copyWith(genre: value))),
-                    _menu<int>(
-                        label: '评分',
-                        value: _query.minRating,
-                        values: const [0, 6, 7, 8, 9],
-                        text: (value) => value == 0 ? '不限' : '$value 分以上',
-                        onSelected: (value) =>
-                            _select(_query.copyWith(minRating: value))),
-                    _menu<int>(
-                        label: '点评',
-                        value: _query.minRatingCount,
-                        values: const [0, 5000, 10000, 30000, 60000, 100000],
-                        text: (value) => switch (value) {
-                              0 => '不限',
-                              10000 => '1 万以上',
-                              30000 => '3 万以上',
-                              60000 => '6 万以上',
-                              100000 => '10 万以上',
-                              _ => '$value 以上',
-                            },
-                        onSelected: (value) =>
-                            _select(_query.copyWith(minRatingCount: value))),
-                    _menu<DoubanBrowseSort>(
-                        label: '排序',
-                        value: _query.sort,
-                        values: DoubanBrowseSort.values,
-                        text: (value) => value.labelFor(_query.mediaType),
-                        onSelected: (value) =>
-                            _select(_query.copyWith(sort: value))),
-                    IconButton(
-                        tooltip: '重置筛选',
-                        icon: const Icon(Icons.filter_alt_off),
-                        onPressed: () => _select(
-                            DoubanBrowseQuery(category: _query.category))),
-                    IconButton(
-                        tooltip: '刷新',
-                        icon: const Icon(Icons.refresh),
-                        onPressed: enabled && !_loading
-                            ? () => _scheduleLoad(0, refresh: true)
-                            : null),
-                  ]),
-              const SizedBox(height: 16),
+                  ),
+                  const SizedBox(width: 4),
+                  _menu<DoubanBrowseSort>(
+                      key: const ValueKey('douban-filter-sort'),
+                      label: '排序',
+                      value: _query.sort,
+                      values: DoubanBrowseSort.values,
+                      text: (value) => value.labelFor(_query.mediaType),
+                      isDefault: (value) => value == DoubanBrowseSort.rating,
+                      onSelected: (value) =>
+                          _select(_query.copyWith(sort: value))),
+                ],
+              ),
+              const SizedBox(height: 10),
               if (!enabled)
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -448,8 +508,6 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
                     onPressed: () => _scheduleLoad(0, refresh: true),
                     child: const Text('重试')),
               ] else if (_page != null) ...[
-                Text('第 ${_start ~/ 20 + 1} 页 · 本页 ${_page!.entries.length} 部',
-                    style: Theme.of(context).textTheme.bodyMedium),
                 if (_error != null) Text(_error!),
                 if (_page!.entries.isEmpty)
                   const Text('没有符合条件的作品')
@@ -464,15 +522,19 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
                             Theme.of(context).textTheme.titleSmall?.fontSize ??
                                 16) *
                         1.22;
+                    final tileBottomSlack = tv ? 8.0 : 2.0;
                     return GridView.builder(
                       shrinkWrap: true,
+                      primary: false,
+                      padding: EdgeInsets.zero,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: _page!.entries.length,
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: columns,
                         crossAxisSpacing: gap,
                         mainAxisSpacing: gap,
-                        mainAxisExtent: width / .7 + 4 + titleHeight + 8,
+                        mainAxisExtent:
+                            width / .7 + 4 + titleHeight + tileBottomSlack,
                       ),
                       itemBuilder: (context, index) {
                         final entry = _page!.entries[index];
@@ -513,28 +575,19 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
                     );
                   }),
                 if (_pageLimitReached) const Text('已达到本机分页上限，请缩小筛选范围'),
-                const SizedBox(height: 12),
-                Row(children: [
-                  IconButton(
-                      tooltip: '上一页',
-                      icon: const Icon(Icons.chevron_left),
-                      onPressed: _canGoPrevious && !_loading
-                          ? () => _changePage(-1)
-                          : null),
-                  if (_loading)
-                    const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2)),
-                  IconButton(
-                      tooltip: '下一页',
-                      icon: const Icon(Icons.chevron_right),
-                      onPressed: _canGoNext && !_loading
-                          ? () => _changePage(1)
-                          : null),
-                ]),
+                if (_page!.entries.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.center,
+                    child: _paginationControls(
+                      keyPrefix: 'bottom',
+                      tv: tv,
+                      showLoading: false,
+                    ),
+                  ),
+                ],
               ],
-              appPageBottomSpacer(),
+              appPageBottomSpacer(height: 64),
             ],
           ),
         ),

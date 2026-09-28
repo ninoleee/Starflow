@@ -14,7 +14,7 @@ void main() {
       await _open(tester, tv: tv, onResult: (value) => result = value);
       expect(_order(tester).take(3), ['library', 'home', 'settings']);
       await _activate(tester, find.byTooltip('上移首页'), tv: tv);
-      await _activate(tester, find.text('搜索'), tv: tv);
+      await _activate(tester, find.text('发现'), tv: tv);
       await _activate(tester, find.text('保存'), tv: tv);
       expect(result, ['home', 'library', 'settings', 'search']);
       expect(tester.takeException(), isNull);
@@ -97,13 +97,15 @@ List<String> _order(WidgetTester tester) => tester
 Future<void> _activate(WidgetTester tester, Finder target,
     {required bool tv}) async {
   if (tv) {
-    final leaf = find.descendant(
-      of: target,
-      matching: find.byWidgetPredicate(
-        (widget) => widget is Icon || widget is Text,
-      ),
-      matchRoot: true,
-    ).first;
+    final leaf = find
+        .descendant(
+          of: target,
+          matching: find.byWidgetPredicate(
+            (widget) => widget is Icon || widget is Text,
+          ),
+          matchRoot: true,
+        )
+        .first;
     Focus.of(tester.element(leaf)).requestFocus();
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);

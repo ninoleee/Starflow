@@ -68,7 +68,7 @@ const _navigationItems = <_NavigationItemData>[
   _NavigationItemData(
     id: kNavigationDestinationSearch,
     branchIndex: 1,
-    label: '搜索',
+    label: '发现',
     icon: Icons.search_rounded,
     selectedIcon: Icons.search_rounded,
   ),

@@ -143,29 +143,6 @@ class DoubanApiClient {
     );
   }
 
-  Future<List<DoubanEntry>> fetchBrowseEntries(
-    DoubanBrowseQuery query, {
-    required int minimumRatingCount,
-    int requestLimit = 50,
-  }) async {
-    if (minimumRatingCount <= 0) {
-      throw const FormatException('无效评分人数下限');
-    }
-    final matches = <DoubanEntry>[];
-    final maxRequests = requestLimit < 1 ? 1 : requestLimit;
-    for (var page = 0; page < maxRequests; page++) {
-      final payload = await fetchBrowsePage(query, start: page * 20);
-      for (final entry in payload.entries) {
-        if (entry.ratingCount >= minimumRatingCount &&
-            !matches.any((item) => item.id == entry.id)) {
-          matches.add(entry);
-        }
-      }
-      if (!payload.hasNext || payload.rawCount == 0) break;
-    }
-    return matches;
-  }
-
   Future<List<DoubanEntry>> fetchInterestItems({
     required String userId,
     required DoubanInterestStatus status,

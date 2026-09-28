@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -86,11 +87,30 @@ void main() {
     expect(tester.getTopLeft(find.text('☆200')).dx,
         greaterThan(tester.getTopLeft(find.text('豆瓣 8.6')).dx));
     final grid = find.byType(GridView);
+    final status = find.byKey(const ValueKey('top-page-label'));
+    final category = find.byType(SegmentedButton<DoubanBrowseCategory>);
+    final year = find.byKey(const ValueKey('douban-filter-year'));
+    expect(tester.getBottomLeft(category).dy,
+        lessThanOrEqualTo(tester.getTopLeft(year).dy));
+    final sort = find.byKey(const ValueKey('douban-filter-sort'));
+    final reset = find.byTooltip('重置筛选');
+    final refresh = find.byTooltip('刷新');
+    final toolbarCenterYs = [status, sort, reset, refresh]
+        .map((finder) => tester.getCenter(finder).dy)
+        .toList(growable: false);
+    expect(
+        toolbarCenterYs.reduce((a, b) => a > b ? a : b) -
+            toolbarCenterYs.reduce((a, b) => a < b ? a : b),
+        lessThanOrEqualTo(8));
+    final toolbarBottom = [status, sort, reset, refresh]
+        .map((finder) => tester.getBottomLeft(finder).dy)
+        .reduce((a, b) => a > b ? a : b);
+    expect(tester.getTopLeft(grid).dy - toolbarBottom, inInclusiveRange(0, 12));
     final pager = find.byTooltip('上一页');
-    await tester.ensureVisible(pager);
-    await tester.pumpAndSettle();
-    final gap = tester.getTopLeft(pager).dy - tester.getBottomLeft(grid).dy;
-    expect(gap, inInclusiveRange(12, 40));
+    expect(pager, findsNWidgets(2));
+    expect(find.byTooltip('下一页'), findsNWidgets(2));
+    expect(tester.getCenter(sort).dx,
+        greaterThan(tester.getCenter(find.byTooltip('刷新')).dx));
     expect(tester.takeException(), isNull);
   });
 
@@ -126,11 +146,70 @@ void main() {
     expect(left.right, lessThanOrEqualTo(right.left));
   });
 
-  testWidgets(
-      'rating count menu filters candidates and keeps year all selectable',
+  testWidgets('TV focus reaches pagination controls and activates next page',
       (tester) async {
     SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     final starts = <String>[];
+    await tester.pumpWidget(ProviderScope(overrides: [
+      appSettingsProvider.overrideWithValue(const AppSettings(
+        mediaSources: [],
+        searchProviders: [],
+        homeModules: [],
+        doubanAccount: DoubanAccountConfig(enabled: true),
+      )),
+      isTelevisionProvider.overrideWith((ref) => true),
+      doubanApiClientProvider.overrideWithValue(DoubanApiClient(MockClient(
+        (request) async {
+          final start = request.url.queryParameters['start']!;
+          starts.add(start);
+          return http.Response.bytes(
+              utf8.encode(jsonEncode({
+                'items': [
+                  {'id': '123', 'title': '第一页影片', 'type': 'movie'}
+                ],
+                'total': 40,
+              })),
+              200,
+              headers: const {
+                'content-type': 'application/json; charset=utf-8'
+              });
+        },
+      ))),
+    ], child: const MaterialApp(home: DoubanBrowsePage())));
+    await tester.pump();
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+
+    final topNext = find.byKey(const ValueKey('top-page-next'));
+    final bottomNext = find.byKey(const ValueKey('bottom-page-next'));
+    expect(tester.getSize(topNext).height, greaterThanOrEqualTo(44));
+    expect(tester.getSize(bottomNext).height, greaterThanOrEqualTo(44));
+    final focus = Focus.of(tester.element(
+        find.descendant(of: topNext, matching: find.byType(Text)).first));
+    focus.requestFocus();
+    await tester.pumpAndSettle();
+    expect(focus.hasPrimaryFocus, isTrue);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+    expect(starts, ['0', '20']);
+    final pageLabel =
+        tester.widget<Text>(find.byKey(const ValueKey('top-page-label')));
+    expect(pageLabel.data, '2/2');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('year all clears a previously selected year', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final tags = <String>[];
     await tester.pumpWidget(ProviderScope(overrides: [
       appSettingsProvider.overrideWithValue(const AppSettings(
         mediaSources: [],
@@ -141,15 +220,16 @@ void main() {
       isTelevisionProvider.overrideWith((ref) => false),
       doubanApiClientProvider.overrideWithValue(DoubanApiClient(MockClient(
         (request) async {
-          starts.add(request.url.queryParameters['start']!);
+          tags.add(request.url.queryParameters['tags']!);
           final start = request.url.queryParameters['start']!;
+          final requestTags = request.url.queryParameters['tags']!;
           return http.Response.bytes(
               utf8.encode(jsonEncode({
                 'items': start == '0'
                     ? [
                         {
                           'id': '1',
-                          'title': '热门',
+                          'title': requestTags.contains('2024') ? '二零二四' : '热门',
                           'type': 'movie',
                           'year': '2024',
                           'rating': {'count': 12000}
@@ -177,67 +257,33 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.textContaining('年份: 全部'));
+    await tester.tap(find.byKey(const ValueKey('douban-filter-year')));
     await tester.pumpAndSettle();
     expect(find.text('全部'), findsWidgets);
+    await tester.tap(find.text('2024').last);
+    await tester.pump();
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pumpAndSettle();
+    expect(_filterText('douban-filter-year', '2024'), findsOneWidget);
+    expect(tags.last, contains('2024'));
+    expect(find.text('二零二四'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('douban-filter-year')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('全部').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('全部').last);
-    await tester.pumpAndSettle();
-    expect(find.textContaining('年份: 全部'), findsOneWidget);
-
-    await tester.tap(find.textContaining('点评: 不限'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('1 万以上'));
     await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.runAsync(() async {
+      for (var i = 0; i < 50 && tags.last.contains('2024'); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
     await tester.pumpAndSettle();
+    expect(_filterText('douban-filter-year', '年份'), findsOneWidget);
     expect(find.text('热门'), findsOneWidget);
-    expect(find.text('冷门'), findsNothing);
-    expect(starts, ['0', '0']);
-  });
-
-  testWidgets(
-      'rating count results paginate across more than one candidate page',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    final api = _RatingCountApiClient();
-    await tester.pumpWidget(ProviderScope(overrides: [
-      appSettingsProvider.overrideWithValue(const AppSettings(
-        mediaSources: [],
-        searchProviders: [],
-        homeModules: [],
-        doubanAccount: DoubanAccountConfig(enabled: true),
-      )),
-      isTelevisionProvider.overrideWith((ref) => false),
-      doubanApiClientProvider.overrideWithValue(api),
-    ], child: const MaterialApp(home: DoubanBrowsePage())));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('点评: 不限'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('1 万以上'));
-    await tester.pump();
-    await tester.pumpAndSettle();
-    await tester.pumpAndSettle();
-    expect(find.text('作品1'), findsOneWidget);
-    expect(find.text('作品21'), findsNothing);
-    expect(api.browseStarts, ['0']);
-    expect(api.candidateRequests, 1);
-
-    await tester.dragUntilVisible(
-      find.byTooltip('下一页'),
-      find.byType(ListView),
-      const Offset(0, -300),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('下一页'));
-    await tester.pumpAndSettle();
-    expect(find.text('作品21'), findsOneWidget);
-    expect(find.text('作品1'), findsNothing);
-    expect(api.browseStarts, ['0']);
-    expect(api.candidateRequests, 1);
   });
 
   testWidgets(
@@ -280,8 +326,9 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
     expect(sorts, ['S']);
-    expect(find.textContaining('第 1 页'), findsOneWidget);
-    await tester.tap(find.textContaining('排序: 高分优先'));
+    expect(find.text('1/1'), findsNWidgets(2));
+    expect(_filterText('douban-filter-sort', '排序'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('douban-filter-sort')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('近期热度').last);
     await tester.pump();
@@ -289,8 +336,8 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
     expect(sorts, ['S', 'U']);
-    expect(find.textContaining('排序: 近期热度'), findsOneWidget);
-    expect(find.textContaining('第 1 页'), findsOneWidget);
+    expect(_filterText('douban-filter-sort', '近期热度'), findsOneWidget);
+    expect(find.text('1/1'), findsNWidgets(2));
   });
 
   testWidgets('failed next page leaves the current page visible',
@@ -325,15 +372,14 @@ void main() {
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
-    expect(find.textContaining('第 1 页'), findsOneWidget);
-    await tester.ensureVisible(find.byTooltip('下一页'));
-    await tester.tap(find.byTooltip('下一页'));
+    expect(find.text('1/2'), findsNWidgets(2));
+    await tester.tap(find.byTooltip('下一页').first);
     await tester.pump();
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
     expect(starts, ['0', '20']);
-    expect(find.textContaining('第 1 页'), findsOneWidget);
+    expect(find.text('1/2'), findsNWidgets(2));
     expect(find.textContaining('请求失败'), findsOneWidget);
   });
 
@@ -392,10 +438,10 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
     expect(tags, ['', '电视剧']);
-    await tester.tap(find.textContaining('类型: 全部'));
+    await tester.tap(find.byKey(const ValueKey('douban-filter-genre')));
     await tester.pumpAndSettle();
     expect(find.text('悬疑'), findsOneWidget);
-    expect(find.text('类型'), findsNothing);
+    expect(find.widgetWithText(PopupMenuItem<String>, '类型'), findsNothing);
     expect(find.text('综艺'), findsOneWidget);
     await tester.tap(find.text('悬疑'));
     await tester.pump();
@@ -410,7 +456,7 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
     expect(tags.last, '综艺');
-    await tester.tap(find.textContaining('类型: 全部'));
+    await tester.tap(find.byKey(const ValueKey('douban-filter-genre')));
     await tester.pumpAndSettle();
     expect(find.text('真人秀'), findsOneWidget);
     expect(find.text('悬疑'), findsNothing);
@@ -461,18 +507,18 @@ void main() {
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byTooltip('下一页'));
-    await tester.tap(find.byTooltip('下一页'));
+    await tester.tap(find.byTooltip('下一页').last);
     await tester.pump();
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
     expect(find.text('次页作品'), findsOneWidget);
     expect(find.text('首屏作品'), findsNothing);
-    await tester.ensureVisible(find.byTooltip('上一页'));
-    await tester.tap(find.byTooltip('上一页'));
+    expect(find.text('2/3'), findsNWidgets(2));
+    await tester.tap(find.byTooltip('上一页').last);
     await tester.pumpAndSettle();
     expect(find.text('首屏作品'), findsOneWidget);
+    expect(find.text('1/3'), findsNWidgets(2));
     expect(starts, ['0', '20']);
   });
 
@@ -506,11 +552,11 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pump();
     expect(sorts, ['S']);
-    await tester.tap(find.textContaining('排序: 高分优先'));
+    await tester.tap(find.byKey(const ValueKey('douban-filter-sort')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('近期热度').last);
     await tester.pump();
-    await tester.tap(find.textContaining('排序: 近期热度'));
+    await tester.tap(find.byKey(const ValueKey('douban-filter-sort')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('首映时间').last);
     await tester.pump();
@@ -520,67 +566,13 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
     await tester.pumpAndSettle();
     expect(sorts, ['S', 'R']);
-    expect(find.textContaining('排序: 首映时间'), findsOneWidget);
+    expect(_filterText('douban-filter-sort', '首映时间'), findsOneWidget);
   });
 }
 
 void _noop() {}
 
-class _RatingCountApiClient extends DoubanApiClient {
-  _RatingCountApiClient()
-      : super(MockClient((_) async => http.Response('{}', 200)));
-
-  final browseStarts = <String>[];
-  int candidateRequests = 0;
-
-  @override
-  Future<DoubanBrowsePageData> fetchBrowsePage(
-    DoubanBrowseQuery query, {
-    int start = 0,
-  }) async {
-    browseStarts.add('$start');
-    final entries = start == 0
-        ? List.generate(
-            20,
-            (index) => DoubanEntry(
-              id: '${index + 1}',
-              title: '作品${index + 1}',
-              year: 0,
-              posterUrl: '',
-              note: '',
-              ratingLabel: '',
-              ratingCount: 12000,
-              subjectType: 'movie',
-            ),
-          )
-        : <DoubanEntry>[];
-    return DoubanBrowsePageData(
-      entries: entries,
-      start: start,
-      rawCount: entries.length,
-      total: 20,
+Finder _filterText(String key, String text) => find.descendant(
+      of: find.byKey(ValueKey(key)),
+      matching: find.text(text),
     );
-  }
-
-  @override
-  Future<List<DoubanEntry>> fetchBrowseEntries(
-    DoubanBrowseQuery query, {
-    required int minimumRatingCount,
-    int requestLimit = 50,
-  }) async {
-    candidateRequests++;
-    return List.generate(
-      40,
-      (index) => DoubanEntry(
-        id: '${index + 1}',
-        title: '作品${index + 1}',
-        year: 0,
-        posterUrl: '',
-        note: '',
-        ratingLabel: '',
-        ratingCount: 12000,
-        subjectType: 'movie',
-      ),
-    );
-  }
-}

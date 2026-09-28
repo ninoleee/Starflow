@@ -371,7 +371,8 @@ class SettingsPage extends ConsumerStatefulWidget {
   }) async {
     final selected = await showDialog<List<String>>(
       context: context,
-      builder: (_) => NavigationDestinationDialog(initialSelection: selectedIds),
+      builder: (_) =>
+          NavigationDestinationDialog(initialSelection: selectedIds),
     );
     if (selected == null || !context.mounted) {
       return;
@@ -597,7 +598,7 @@ String _mpvSettingsSummary(
 String _navigationDestinationSummary(List<String> selectedIds) {
   const labels = <String, String>{
     kNavigationDestinationHome: '首页',
-    kNavigationDestinationSearch: '搜索',
+    kNavigationDestinationSearch: '发现',
     kNavigationDestinationFavorites: '收藏',
     kNavigationDestinationLibrary: '媒体库',
     kNavigationDestinationLiveTv: '直播',

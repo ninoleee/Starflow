@@ -66,7 +66,6 @@ class DoubanBrowseQuery {
     this.region = '',
     this.genre = '',
     this.minRating = 0,
-    this.minRatingCount = 0,
     this.sort = DoubanBrowseSort.rating,
   });
 
@@ -76,7 +75,6 @@ class DoubanBrowseQuery {
   final String region;
   final String genre;
   final int minRating;
-  final int minRatingCount;
   final DoubanBrowseSort sort;
 
   DoubanBrowseQuery copyWith({
@@ -86,7 +84,6 @@ class DoubanBrowseQuery {
     String? region,
     String? genre,
     int? minRating,
-    int? minRatingCount,
     DoubanBrowseSort? sort,
   }) =>
       DoubanBrowseQuery(
@@ -95,7 +92,6 @@ class DoubanBrowseQuery {
         region: region ?? this.region,
         genre: genre ?? this.genre,
         minRating: minRating ?? this.minRating,
-        minRatingCount: minRatingCount ?? this.minRatingCount,
         sort: sort ?? this.sort,
       );
 
@@ -106,14 +102,10 @@ class DoubanBrowseQuery {
     if (minRating != 0 && (minRating < 6 || minRating > 9)) {
       throw const FormatException('无效评分范围');
     }
-    if (minRatingCount != 0 &&
-        !const [5000, 10000, 30000, 60000, 100000].contains(minRatingCount)) {
-      throw const FormatException('无效评分人数范围');
-    }
   }
 
   String get cacheKey =>
-      '${category.value}|${year ?? ''}|$region|$genre|$minRating|$minRatingCount|${sort.code}';
+      '${category.value}|${year ?? ''}|$region|$genre|$minRating|${sort.code}';
 
   Map<String, dynamic> toJson() => {
         'type': mediaType.value,
@@ -122,7 +114,6 @@ class DoubanBrowseQuery {
         'region': region,
         'genre': genre,
         'rating': minRating,
-        'ratingCount': minRatingCount,
         'sort': sort.code,
       };
 
@@ -140,8 +131,6 @@ class DoubanBrowseQuery {
       region: json['region'] is String ? json['region'] as String : '',
       genre: json['genre'] is String ? json['genre'] as String : '',
       minRating: json['rating'] is int ? json['rating'] as int : 0,
-      minRatingCount:
-          json['ratingCount'] is int ? json['ratingCount'] as int : 0,
       sort: DoubanBrowseSort.values.firstWhere(
         (value) => value.code == sort,
         orElse: () => DoubanBrowseSort.rating,

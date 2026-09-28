@@ -177,52 +177,5 @@ void main() {
     await expectLater(
         api.fetchBrowsePage(const DoubanBrowseQuery(), start: -20),
         throwsFormatException);
-    await expectLater(
-        api.fetchBrowsePage(const DoubanBrowseQuery(minRatingCount: 2500)),
-        throwsFormatException);
-  });
-
-  test('rating count filter keeps only matching entries across pages',
-      () async {
-    final starts = <String>[];
-    final api = DoubanApiClient(MockClient((request) async {
-      final start = request.url.queryParameters['start']!;
-      starts.add(start);
-      return http.Response.bytes(
-          utf8.encode(jsonEncode({
-            'items': start == '0'
-                ? [
-                    {
-                      'id': '1',
-                      'title': '热门',
-                      'type': 'movie',
-                      'rating': {'count': 8000}
-                    },
-                    {
-                      'id': '2',
-                      'title': '冷门',
-                      'type': 'movie',
-                      'rating': {'count': 200}
-                    },
-                  ]
-                : [
-                    {
-                      'id': '3',
-                      'title': '更热门',
-                      'type': 'movie',
-                      'rating': {'count': 30000}
-                    },
-                  ],
-            'total': 21,
-          })),
-          200,
-          headers: const {'content-type': 'application/json; charset=utf-8'});
-    }));
-    final entries = await api.fetchBrowseEntries(
-      const DoubanBrowseQuery(),
-      minimumRatingCount: 5000,
-    );
-    expect(starts, ['0', '20']);
-    expect(entries.map((entry) => entry.id), ['1', '3']);
   });
 }

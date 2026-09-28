@@ -16,8 +16,7 @@ void main() {
         category: DoubanBrowseCategory.series,
         year: 2020,
         genre: '悬疑',
-        minRating: 8,
-        minRatingCount: 30000));
+        minRating: 8));
     await repository.saveBrowseQuery(const DoubanBrowseQuery(
         category: DoubanBrowseCategory.variety, genre: '真人秀'));
     await repository.saveBrowseMode(true);
@@ -33,7 +32,6 @@ void main() {
     expect(tv.year, 2020);
     expect(tv.genre, '悬疑');
     expect(tv.minRating, 8);
-    expect(tv.minRatingCount, 30000);
     expect(variety.genre, '真人秀');
     final summary = await repository.inspectSummary();
     expect(summary.totalBytes, greaterThan(0));

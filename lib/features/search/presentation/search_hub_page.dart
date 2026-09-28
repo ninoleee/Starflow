@@ -80,10 +80,11 @@ class _SearchHubPageState extends ConsumerState<SearchHubPage> {
         right: 16,
         child: Center(
           child: SegmentedButton<bool>(
+            key: const ValueKey('search-hub-mode'),
             showSelectedIcon: false,
             segments: const [
-              ButtonSegment(value: false, label: Text('资源搜索')),
-              ButtonSegment(value: true, label: Text('豆瓣选片')),
+              ButtonSegment(value: false, label: Text('搜索')),
+              ButtonSegment(value: true, label: Text('选片')),
             ],
             selected: {_browse},
             onSelectionChanged: (selection) {

@@ -30,7 +30,7 @@ void main() {
       isTelevisionProvider.overrideWith((ref) => false),
     ], child: const MaterialApp(home: SearchHubPage())));
     await tester.pumpAndSettle();
-    expect(find.text('豆瓣选片'), findsOneWidget);
+    expect(_hubTab('选片'), findsOneWidget);
     expect(find.textContaining('豆瓣模块已关闭'), findsOneWidget);
     expect(find.text('电影'), findsOneWidget);
     expect(find.text('电视剧'), findsOneWidget);
@@ -61,7 +61,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('豆瓣模块已关闭'), findsNothing);
     expect(find.text('电影'), findsNothing);
-    expect(find.text('资源搜索'), findsOneWidget);
+    expect(_hubTab('搜索'), findsOneWidget);
   });
 
   for (final mode in [
@@ -87,10 +87,15 @@ void main() {
             child: const SearchHubPage(),
           ))));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('豆瓣选片'));
+      await tester.tap(_hubTab('选片'));
       await tester.pumpAndSettle();
       expect(find.text('电影'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }
 }
+
+Finder _hubTab(String label) => find.descendant(
+      of: find.byKey(const ValueKey('search-hub-mode')),
+      matching: find.text(label),
+    );

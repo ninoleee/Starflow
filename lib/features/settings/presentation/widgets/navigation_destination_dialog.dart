@@ -21,7 +21,7 @@ class _NavigationDestinationDialogState
     extends ConsumerState<NavigationDestinationDialog> {
   static const _labels = {
     kNavigationDestinationHome: '首页',
-    kNavigationDestinationSearch: '搜索',
+    kNavigationDestinationSearch: '发现',
     kNavigationDestinationFavorites: '收藏',
     kNavigationDestinationLibrary: '媒体库',
     kNavigationDestinationLiveTv: '直播',
