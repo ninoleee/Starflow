@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:starflow/app/shell_layout.dart';
@@ -21,9 +23,14 @@ import 'package:starflow/features/settings/application/settings_controller.dart'
 import 'package:starflow/features/search/data/search_preferences_repository.dart';
 
 class DoubanBrowsePage extends ConsumerStatefulWidget {
-  const DoubanBrowsePage({super.key, this.topContent});
+  const DoubanBrowsePage({
+    super.key,
+    this.topContent,
+    this.scrollController,
+  });
 
   final Widget? topContent;
+  final ScrollController? scrollController;
 
   @override
   ConsumerState<DoubanBrowsePage> createState() => _DoubanBrowsePageState();
@@ -36,7 +43,6 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
   final _genres = <DoubanBrowseCategory, List<String>>{};
   final _regions = <DoubanBrowseCategory, List<String>>{};
   DoubanBrowsePageData? _page;
-  int _start = 0;
   int _generation = 0;
   Future<void>? _pendingLoad;
   bool _loading = false;
@@ -44,13 +50,30 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
   bool _queryTouched = false;
   bool _enabled = false;
   bool _pageLimitReached = false;
+  bool _hasMore = false;
+  int? _prefetchStart;
   String? _error;
-  final _firstPageForId = <String, int>{};
-  final _scroll = ScrollController();
+  late final ScrollController _scroll;
+  late final bool _ownsScroll;
+  final _posterFocusNodes = <FocusNode>[];
+  final _gridKey = GlobalKey();
+  int _posterColumns = 1;
+  double _posterItemExtent = 0;
+  int _currentVisiblePage = 1;
+  bool _visiblePageUpdateScheduled = false;
+  final _yearFocusTargetKey = GlobalKey();
+  final _sortFocusTargetKey = GlobalKey();
+  final _movieCategoryFocus = FocusNode(debugLabel: 'douban-category-movie');
+  final _seriesCategoryFocus = FocusNode(debugLabel: 'douban-category-series');
+  final _varietyCategoryFocus =
+      FocusNode(debugLabel: 'douban-category-variety');
 
   @override
   void initState() {
     super.initState();
+    _scroll = widget.scrollController ?? ScrollController();
+    _ownsScroll = widget.scrollController == null;
+    _scroll.addListener(_handleScroll);
     _restoreQuery();
   }
 
@@ -78,7 +101,16 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
   @override
   void dispose() {
     _generation++;
-    _scroll.dispose();
+    _scroll.removeListener(_handleScroll);
+    if (_ownsScroll) {
+      _scroll.dispose();
+    }
+    for (final node in _posterFocusNodes) {
+      node.dispose();
+    }
+    _movieCategoryFocus.dispose();
+    _seriesCategoryFocus.dispose();
+    _varietyCategoryFocus.dispose();
     super.dispose();
   }
 
@@ -87,15 +119,20 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
     if (_preferencesLoaded && _page == null && !_loading && _error == null) {
       unawaited(_scheduleLoad(0));
     }
+    _scheduleViewportCheck();
   }
 
   @override
   void onPageBecameInactive() {
     _generation++;
+    _prefetchStart = null;
     if (_loading) setState(() => _loading = false);
   }
 
-  Future<void> _scheduleLoad(int start, {bool refresh = false}) async {
+  Future<void> _scheduleLoad(
+    int start, {
+    bool refresh = false,
+  }) async {
     final intent = _generation;
     final previous = _pendingLoad;
     if (previous != null) await previous;
@@ -103,16 +140,126 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
     final next = _load(start, refresh: refresh);
     _pendingLoad = next;
     await next;
-    if (identical(_pendingLoad, next)) _pendingLoad = null;
+    if (identical(_pendingLoad, next)) {
+      _pendingLoad = null;
+      _scheduleViewportCheck();
+    }
   }
 
-  Future<void> _load(int start, {bool refresh = false}) async {
+  void _scheduleViewportCheck() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadMoreIfNeeded();
+        _scheduleVisiblePageUpdate();
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _handleScroll() {
+    _loadMoreIfNeeded();
+    _scheduleVisiblePageUpdate();
+  }
+
+  void _scheduleVisiblePageUpdate() {
+    if (_visiblePageUpdateScheduled) return;
+    _visiblePageUpdateScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _visiblePageUpdateScheduled = false;
+      if (!mounted || _posterFocusNodes.isEmpty) return;
+      int? firstVisibleIndex;
+      final render = _gridKey.currentContext?.findRenderObject();
+      if (render is RenderSliverGrid && _posterItemExtent > 0) {
+        final rowExtent = _posterItemExtent + 12;
+        final row = (render.constraints.scrollOffset / rowExtent).floor();
+        firstVisibleIndex = math.max(0, row) * _posterColumns;
+      }
+      if (firstVisibleIndex == null) {
+        final viewport = MediaQuery.sizeOf(context);
+        final top = MediaQuery.paddingOf(context).top;
+        for (var index = 0; index < _posterFocusNodes.length; index++) {
+          final node = _posterFocusNodes[index];
+          if (node.context == null) continue;
+          final rect = node.rect;
+          if (rect.bottom <= top || rect.top >= viewport.height) continue;
+          firstVisibleIndex = index;
+          break;
+        }
+      }
+      if (firstVisibleIndex == null) return;
+      final page = firstVisibleIndex ~/ 20 + 1;
+      if (page != _currentVisiblePage) {
+        setState(() => _currentVisiblePage = page);
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  void _loadMoreIfNeeded({bool lastRowFocused = false}) {
+    if (!mounted ||
+        !isPageActive ||
+        !_enabled ||
+        !_hasMore ||
+        _loading ||
+        _pendingLoad != null ||
+        _error != null ||
+        !_scroll.hasClients) {
+      return;
+    }
+    if (lastRowFocused || _scroll.position.extentAfter <= 200) {
+      unawaited(_scheduleLoad(_page!.start + 20));
+      return;
+    }
+    _prefetchNextPageIfNeeded();
+  }
+
+  void _prefetchNextPageIfNeeded() {
+    if (!mounted ||
+        !isPageActive ||
+        !_enabled ||
+        !_hasMore ||
+        _page == null ||
+        _loading ||
+        _pendingLoad != null ||
+        _error != null ||
+        !_scroll.hasClients) {
+      return;
+    }
+    final nextStart = _page!.start + 20;
+    if (_prefetchStart == nextStart) return;
+    final prefetchThreshold = math.max(
+      320.0,
+      _scroll.position.viewportDimension * 1.5,
+    );
+    if (_scroll.position.extentAfter > prefetchThreshold) return;
+    _prefetchStart = nextStart;
+    final query = _query;
+    unawaited(
+      ref
+          .read(doubanBrowseRepositoryProvider)
+          .fetch(query, start: nextStart)
+          .then<void>(
+            (_) {},
+            onError: (Object _, StackTrace __) {},
+          ),
+    );
+  }
+
+  Future<void> _load(
+    int start, {
+    bool refresh = false,
+  }) async {
     if (_loading || !isPageActive || !_enabled) {
       return;
     }
     if (start == 0 && !refresh && _page == null && _error != null) {
       // Explicit retry is handled by the refresh path.
       return;
+    }
+    final query = _query;
+    if (refresh && start == 0) {
+      ref.read(doubanBrowseRepositoryProvider).invalidateQuery(query);
+      _prefetchStart = null;
     }
     final request = ++_generation;
     setState(() {
@@ -126,26 +273,24 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
             );
       }
       final result = await ref.read(doubanBrowseRepositoryProvider).fetch(
-            _query,
+            query,
             start: start,
             refresh: refresh,
           );
       if (!mounted || !isPageActive || request != _generation) return;
-      if (result.genres.isNotEmpty) _genres[_query.category] = result.genres;
+      if (result.genres.isNotEmpty) _genres[query.category] = result.genres;
       if (result.regions.isNotEmpty) {
-        _regions[_query.category] = result.regions;
+        _regions[query.category] = result.regions;
       }
-      if (start == 0 && refresh) _firstPageForId.clear();
-      final seenOnPage = <String>{};
+      final previousEntries =
+          start == 0 ? const <DoubanEntry>[] : _page!.entries;
+      final seenOnPage = previousEntries.map((entry) => entry.id).toSet();
       final unique = result.entries.where((entry) {
-        final id = '${_query.category.value}:${entry.id}';
-        if (!seenOnPage.add(id)) return false;
-        final firstPage = _firstPageForId.putIfAbsent(id, () => start);
-        return firstPage == start;
+        return seenOnPage.add(entry.id);
       }).toList(growable: false);
       final page = DoubanBrowsePageData(
-        entries: unique,
-        start: result.start,
+        entries: [...previousEntries, ...unique],
+        start: start,
         rawCount: result.rawCount,
         total: result.total,
         genres: result.genres,
@@ -153,13 +298,14 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
       );
       setState(() {
         _page = page;
-        _start = start;
         _pageLimitReached = start >= 980;
+        _hasMore = result.hasNext && unique.isNotEmpty && !_pageLimitReached;
         _loading = false;
       });
-      if (_scroll.hasClients) _scroll.jumpTo(0);
+      if (start == 0 && _scroll.hasClients) _scroll.jumpTo(0);
     } catch (error) {
       if (!mounted || !isPageActive || request != _generation) return;
+      if (start > 0) _hasMore = false;
       setState(() {
         _error = error is DoubanApiException ? error.message : '豆瓣选片暂时不可用';
         _loading = false;
@@ -177,9 +323,10 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
       _query = next;
       _queries[next.category] = next;
       _page = null;
-      _start = 0;
-      _firstPageForId.clear();
+      _hasMore = false;
+      _prefetchStart = null;
       _pageLimitReached = false;
+      _currentVisiblePage = 1;
       _loading = false;
       _error = null;
     });
@@ -198,6 +345,7 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
 
   Widget _menu<T>({
     Key? key,
+    Key? textKey,
     required String label,
     required T value,
     required List<T> values,
@@ -206,131 +354,133 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
     required ValueChanged<T> onSelected,
   }) {
     final initialValue = values.contains(value) ? value : values.first;
+    final selectedIndex = values.indexOf(initialValue);
     final displayText = isDefault(value) ? label : text(value);
-    return PopupMenuButton<T>(
-      key: key,
-      tooltip: label,
-      initialValue: initialValue,
-      constraints: const BoxConstraints(maxHeight: 440, minWidth: 180),
-      onSelected: onSelected,
-      itemBuilder: (context) => values
-          .map((item) => PopupMenuItem<T>(
-                value: item,
-                child: Text(text(item),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-              ))
-          .toList(),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Text(displayText, maxLines: 1, overflow: TextOverflow.ellipsis),
-          const Icon(Icons.arrow_drop_down),
-        ]),
+    final isTelevision = ref.watch(isTelevisionProvider).value ?? false;
+    return _BrowseControlFocusFrame(
+      isTelevision: isTelevision,
+      child: PopupMenuButton<T>(
+        key: key,
+        tooltip: label,
+        initialValue: initialValue,
+        onOpened: isTelevision
+            ? () => _focusMenuSelection(selectedIndex, values.length)
+            : null,
+        constraints: const BoxConstraints(maxHeight: 440, minWidth: 180),
+        onSelected: onSelected,
+        itemBuilder: (context) => values
+            .map((item) => PopupMenuItem<T>(
+                  value: item,
+                  child: Text(text(item),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ))
+            .toList(),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(displayText,
+                key: textKey, maxLines: 1, overflow: TextOverflow.ellipsis),
+            const Icon(Icons.arrow_drop_down),
+          ]),
+        ),
       ),
     );
   }
 
-  Widget _pageButton({
-    Key? key,
-    required bool tv,
-    required String tooltip,
-    required IconData icon,
-    required VoidCallback? onPressed,
+  void _focusMenuSelection(
+    int selectedIndex,
+    int expectedCount, {
+    int attempt = 0,
   }) {
-    return IconButton(
-      key: key,
-      tooltip: tooltip,
-      padding: EdgeInsets.zero,
-      constraints: BoxConstraints.tightFor(
-        width: tv ? 44 : 32,
-        height: tv ? 44 : 32,
-      ),
-      visualDensity: tv ? VisualDensity.standard : VisualDensity.compact,
-      iconSize: tv ? 24 : 20,
-      onPressed: onPressed,
-      icon: Icon(icon),
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final scope = FocusManager.instance.primaryFocus;
+      final scopeContext = scope?.context;
+      if (scope == null || scopeContext == null || !scopeContext.mounted) {
+        return;
+      }
+      final candidates = scope.traversalDescendants.toList(growable: false);
+      if (candidates.length != expectedCount ||
+          selectedIndex < 0 ||
+          selectedIndex >= candidates.length) {
+        if (attempt < 2) {
+          _focusMenuSelection(
+            selectedIndex,
+            expectedCount,
+            attempt: attempt + 1,
+          );
+        }
+        return;
+      }
+      candidates[selectedIndex].requestFocus();
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
-  Widget _paginationControls({
-    required String keyPrefix,
-    required bool tv,
-    bool showLoading = true,
-  }) {
-    return Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 2,
-      runSpacing: 2,
-      children: [
-        _pageButton(
-          key: ValueKey('$keyPrefix-page-previous'),
-          tv: tv,
-          tooltip: '上一页',
-          icon: Icons.chevron_left,
-          onPressed:
-              _start > 0 && !_loading ? () => _scheduleLoad(_start - 20) : null,
-        ),
-        Text(
-          _pageLabel,
-          key: ValueKey('$keyPrefix-page-label'),
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        _pageButton(
-          key: ValueKey('$keyPrefix-page-next'),
-          tv: tv,
-          tooltip: '下一页',
-          icon: Icons.chevron_right,
-          onPressed: _page?.hasNext == true && !_pageLimitReached && !_loading
-              ? () => _scheduleLoad(_start + 20)
-              : null,
-        ),
-        if (showLoading && _loading)
-          const SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          ),
-      ],
-    );
+  bool _focusTarget(GlobalKey key) {
+    final targetContext = key.currentContext;
+    if (targetContext == null) return false;
+    final focus = Focus.of(targetContext);
+    if (!focus.canRequestFocus) return false;
+    focus.requestFocus();
+    return true;
+  }
+
+  void _focusFirstPoster() {
+    for (final node in _posterFocusNodes) {
+      if (node.context == null || !node.canRequestFocus) continue;
+      node.requestFocus();
+      unawaited(Scrollable.ensureVisible(node.context!));
+      return;
+    }
   }
 
   Widget _actionButtons({required bool tv}) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          constraints: BoxConstraints.tightFor(
-            width: tv ? 48 : 36,
-            height: tv ? 48 : 36,
+        _BrowseControlFocusFrame(
+          isTelevision: tv,
+          child: IconButton(
+            key: const ValueKey('douban-refresh'),
+            visualDensity: VisualDensity.compact,
+            constraints: BoxConstraints.tightFor(
+              width: tv ? 48 : 36,
+              height: tv ? 48 : 36,
+            ),
+            tooltip: '刷新',
+            icon: Icon(Icons.refresh, size: tv ? 24 : 20),
+            onPressed: _enabled && !_loading
+                ? () => _scheduleLoad(0, refresh: true)
+                : null,
           ),
-          tooltip: '刷新',
-          icon: Icon(Icons.refresh, size: tv ? 24 : 20),
-          onPressed: _enabled && !_loading
-              ? () => _scheduleLoad(0, refresh: true)
-              : null,
         ),
-        IconButton(
-          visualDensity: VisualDensity.compact,
-          constraints: BoxConstraints.tightFor(
-            width: tv ? 48 : 36,
-            height: tv ? 48 : 36,
+        _BrowseControlFocusFrame(
+          isTelevision: tv,
+          child: IconButton(
+            key: const ValueKey('douban-clear-filters'),
+            visualDensity: VisualDensity.compact,
+            constraints: BoxConstraints.tightFor(
+              width: tv ? 48 : 36,
+              height: tv ? 48 : 36,
+            ),
+            tooltip: '重置筛选',
+            icon: Icon(Icons.filter_alt_off, size: tv ? 24 : 20),
+            onPressed: () =>
+                _select(DoubanBrowseQuery(category: _query.category)),
           ),
-          tooltip: '重置筛选',
-          icon: Icon(Icons.filter_alt_off, size: tv ? 24 : 20),
-          onPressed: () =>
-              _select(DoubanBrowseQuery(category: _query.category)),
         ),
       ],
     );
   }
 
-  String get _pageLabel {
-    final page = _start ~/ 20 + 1;
+  int get _currentPage => _currentVisiblePage;
+
+  int get _totalPages {
     final total = _page?.total;
-    if (total == null || total <= 0) return '$page';
-    final totalPages = math.min(50, ((total + 19) ~/ 20).clamp(1, 50));
-    return '$page/$totalPages';
+    final calculated =
+        total == null || total <= 0 ? _currentPage : (total + 19) ~/ 20;
+    return math.max(_currentPage, math.min(50, calculated));
   }
 
   @override
@@ -346,6 +496,7 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
           ref.read(doubanBrowseRepositoryProvider).clear();
           setState(() {
             _page = null;
+            _prefetchStart = null;
             _loading = false;
             _error = null;
           });
@@ -376,228 +527,445 @@ class _DoubanBrowsePageState extends ConsumerState<DoubanBrowsePage>
       isTelevision: tv,
       child: Scaffold(
         body: AppPageBackground(
-          child: ListView(
-            controller: _scroll,
-            padding: EdgeInsets.fromLTRB(
-                kAppPageHorizontalPadding,
-                MediaQuery.paddingOf(context).top + 8,
-                kAppPageHorizontalPadding,
-                MediaQuery.paddingOf(context).bottom),
-            children: [
-              if (widget.topContent != null) widget.topContent!,
-              SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<DoubanBrowseCategory>(
-                  showSelectedIcon: false,
-                  expandedInsets: EdgeInsets.zero,
-                  segments: const [
-                    ButtonSegment(
-                        value: DoubanBrowseCategory.movie, label: Text('电影')),
-                    ButtonSegment(
-                        value: DoubanBrowseCategory.series, label: Text('电视剧')),
-                    ButtonSegment(
-                        value: DoubanBrowseCategory.variety, label: Text('综艺')),
-                  ],
-                  selected: {_query.category},
-                  onSelectionChanged: (value) => _select(
-                      _queries[value.single] ??
-                          DoubanBrowseQuery(category: value.single)),
+          child: Stack(children: [
+            CustomScrollView(
+              controller: _scroll,
+              slivers: [
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(
+                      kAppPageHorizontalPadding,
+                      MediaQuery.paddingOf(context).top + 8,
+                      kAppPageHorizontalPadding,
+                      MediaQuery.paddingOf(context).bottom),
+                  sliver: SliverMainAxisGroup(slivers: [
+                    SliverList.list(children: [
+                      if (widget.topContent != null) widget.topContent!,
+                      TvDirectionalActionPanel(
+                        enabled: tv,
+                        onMoveDown: () => _focusTarget(_yearFocusTargetKey),
+                        child: Center(
+                          child: ConstrainedBox(
+                            key: const ValueKey('douban-category-tabs-group'),
+                            constraints:
+                                BoxConstraints(maxWidth: tv ? 420 : 300),
+                            child: Row(children: [
+                              Expanded(
+                                child: StarflowChipButton(
+                                  key: const ValueKey('douban-category-movie'),
+                                  focusId: 'douban-category-movie',
+                                  focusNode: _movieCategoryFocus,
+                                  label: '电影',
+                                  selected: _query.category ==
+                                      DoubanBrowseCategory.movie,
+                                  onPressed: () => _select(
+                                      _queries[DoubanBrowseCategory.movie] ??
+                                          const DoubanBrowseQuery()),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: StarflowChipButton(
+                                  key: const ValueKey('douban-category-series'),
+                                  focusId: 'douban-category-series',
+                                  focusNode: _seriesCategoryFocus,
+                                  label: '电视剧',
+                                  selected: _query.category ==
+                                      DoubanBrowseCategory.series,
+                                  onPressed: () => _select(
+                                      _queries[DoubanBrowseCategory.series] ??
+                                          const DoubanBrowseQuery(
+                                              category:
+                                                  DoubanBrowseCategory.series)),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: StarflowChipButton(
+                                  key:
+                                      const ValueKey('douban-category-variety'),
+                                  focusId: 'douban-category-variety',
+                                  focusNode: _varietyCategoryFocus,
+                                  label: '综艺',
+                                  selected: _query.category ==
+                                      DoubanBrowseCategory.variety,
+                                  onPressed: () => _select(
+                                      _queries[DoubanBrowseCategory.variety] ??
+                                          const DoubanBrowseQuery(
+                                              category: DoubanBrowseCategory
+                                                  .variety)),
+                                ),
+                              ),
+                            ]),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TvDirectionalActionPanel(
+                        enabled: tv,
+                        onMoveDown: () => _focusTarget(_sortFocusTargetKey),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            _menu<String>(
+                                key: const ValueKey('douban-filter-year'),
+                                textKey: _yearFocusTargetKey,
+                                label: '年份',
+                                value: _query.year?.toString() ?? '',
+                                values: [
+                                  '',
+                                  ...doubanBrowseYearOptions(
+                                          selectedYear: _query.year)
+                                      .map((year) => '$year'),
+                                ],
+                                text: (value) => value.isEmpty ? '全部' : value,
+                                isDefault: (value) => value.isEmpty,
+                                onSelected: (value) {
+                                  if (value.isEmpty) {
+                                    _select(_query.copyWith(clearYear: true));
+                                  } else {
+                                    _select(_query.copyWith(
+                                        year: int.parse(value)));
+                                  }
+                                }),
+                            _menu<String>(
+                                key: const ValueKey('douban-filter-region'),
+                                label: '地区',
+                                value: _query.region,
+                                values: {
+                                  '',
+                                  _query.region,
+                                  ...regions.where((v) => v != '全部')
+                                }.toList(),
+                                text: (value) => value.isEmpty ? '全部' : value,
+                                isDefault: (value) => value.isEmpty,
+                                onSelected: (value) =>
+                                    _select(_query.copyWith(region: value))),
+                            _menu<String>(
+                                key: const ValueKey('douban-filter-genre'),
+                                label: '类型',
+                                value: _query.genre,
+                                values: {
+                                  '',
+                                  _query.genre,
+                                  ...genres.where((v) => v != '全部')
+                                }.toList(),
+                                text: (value) => value.isEmpty ? '全部' : value,
+                                isDefault: (value) => value.isEmpty,
+                                onSelected: (value) =>
+                                    _select(_query.copyWith(genre: value))),
+                            _menu<int>(
+                                key: const ValueKey('douban-filter-rating'),
+                                label: '评分',
+                                value: _query.minRating,
+                                values: const [0, 6, 7, 8, 9],
+                                text: (value) =>
+                                    value == 0 ? '不限' : '$value 分以上',
+                                isDefault: (value) => value == 0,
+                                onSelected: (value) =>
+                                    _select(_query.copyWith(minRating: value))),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: TvDirectionalActionPanel(
+                                enabled: tv,
+                                onMoveDown: _focusFirstPoster,
+                                child: _menu<DoubanBrowseSort>(
+                                    key: const ValueKey('douban-filter-sort'),
+                                    textKey: _sortFocusTargetKey,
+                                    label: '排序',
+                                    value: _query.sort,
+                                    values: DoubanBrowseSort.values,
+                                    text: (value) =>
+                                        value.labelFor(_query.mediaType),
+                                    isDefault: (value) =>
+                                        value == DoubanBrowseSort.rating,
+                                    onSelected: (value) =>
+                                        _select(_query.copyWith(sort: value))),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: _actionButtons(tv: tv),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      if (!enabled)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('豆瓣模块已关闭'),
+                            TextButton(
+                              onPressed: () => context.pushNamed('home-editor'),
+                              child: const Text('前往首页编辑启用豆瓣模块'),
+                            ),
+                          ],
+                        )
+                      else if (_page == null && _loading)
+                        const Center(child: CircularProgressIndicator())
+                      else if (_page == null && _error != null) ...[
+                        Text(_error!),
+                        TextButton(
+                            onPressed: () => _scheduleLoad(0, refresh: true),
+                            child: const Text('重试')),
+                      ] else if (_page?.entries.isEmpty == true)
+                        const Text('没有符合条件的作品'),
+                    ]),
+                    if (_page?.entries.isNotEmpty == true)
+                      SliverLayoutBuilder(builder: (context, constraints) {
+                        const gap = 12.0;
+                        final columns = math.max(
+                            2,
+                            ((constraints.crossAxisExtent + gap) / 150)
+                                .floor());
+                        _posterColumns = columns;
+                        while (
+                            _posterFocusNodes.length < _page!.entries.length) {
+                          final index = _posterFocusNodes.length;
+                          final node =
+                              FocusNode(debugLabel: 'douban-poster-$index');
+                          node.addListener(() {
+                            final count = _page?.entries.length ?? 0;
+                            if (node.hasFocus &&
+                                count > 0 &&
+                                index >=
+                                    ((count - 1) ~/ _posterColumns) *
+                                        _posterColumns) {
+                              _loadMoreIfNeeded(lastRowFocused: true);
+                            }
+                          });
+                          _posterFocusNodes.add(node);
+                        }
+                        final width = (constraints.crossAxisExtent -
+                                (columns - 1) * gap) /
+                            columns;
+                        final titleHeight = MediaQuery.textScalerOf(context)
+                                .scale(Theme.of(context)
+                                        .textTheme
+                                        .titleSmall
+                                        ?.fontSize ??
+                                    16) *
+                            1.22;
+                        final tileBottomSlack = tv ? 8.0 : 2.0;
+                        _posterItemExtent =
+                            width / .7 + 4 + titleHeight + tileBottomSlack;
+                        return SliverGrid.builder(
+                          key: _gridKey,
+                          itemCount: _page!.entries.length,
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: columns,
+                            crossAxisSpacing: gap,
+                            mainAxisSpacing: gap,
+                            mainAxisExtent: _posterItemExtent,
+                          ),
+                          itemBuilder: (context, index) {
+                            final entry = _page!.entries[index];
+                            return MediaPosterTile(
+                              focusNode: _posterFocusNodes[index],
+                              key: ValueKey(
+                                  '${_query.mediaType.value}:${entry.id}'),
+                              title: entry.title,
+                              subtitle: '',
+                              posterUrl: entry.posterUrl,
+                              imageTopLeftBadgeText:
+                                  entry.year == 0 ? '' : '${entry.year}',
+                              imageBadgeText: entry.ratingLabel
+                                  .replaceFirst('豆瓣', '')
+                                  .trim(),
+                              imageTopRightBadgeText: entry.genres.isNotEmpty
+                                  ? entry.genres.first
+                                  : '',
+                              imageBottomRightBadgeText:
+                                  buildRatingCountLabel(entry.ratingCount),
+                              width: null,
+                              onTap: () => context.pushNamed('detail',
+                                  extra: MediaDetailTarget(
+                                    title: entry.title,
+                                    overview: '',
+                                    posterUrl: entry.posterUrl,
+                                    year: entry.year,
+                                    ratingLabels: entry.ratingLabel.isEmpty
+                                        ? const []
+                                        : [entry.ratingLabel],
+                                    ratingCount: entry.ratingCount,
+                                    availabilityLabel: '无',
+                                    searchQuery: entry.title,
+                                    itemType: _query.mediaType ==
+                                            DoubanSuggestionMediaType.movie
+                                        ? 'movie'
+                                        : 'series',
+                                    doubanId: entry.id,
+                                    sourceName: '豆瓣',
+                                  )),
+                            );
+                          },
+                        );
+                      }),
+                    SliverToBoxAdapter(
+                        child: Column(children: [
+                      if (_page != null) ...[
+                        if (_loading)
+                          const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: CircularProgressIndicator(),
+                          )
+                        else if (_error != null) ...[
+                          Text(_error!),
+                          TvAdaptiveButton(
+                            key: const ValueKey('douban-load-more-retry'),
+                            label: '重试',
+                            icon: Icons.refresh,
+                            onPressed: () =>
+                                _scheduleLoad(_page!.start + 20, refresh: true),
+                          ),
+                        ] else if (_pageLimitReached)
+                          const Text('已达到加载上限，请缩小筛选范围')
+                        else if (!_hasMore && _page!.entries.isNotEmpty)
+                          const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text('已显示全部结果')),
+                      ],
+                      appPageBottomSpacer(height: 64),
+                    ])),
+                  ]),
+                )
+              ],
+            ),
+            if (enabled && _page?.entries.isNotEmpty == true)
+              Positioned(
+                top: 0,
+                right: 6,
+                bottom: 0,
+                child: IgnorePointer(
+                  child: Center(
+                    child: _FloatingPageIndicator(
+                      currentPage: _currentPage,
+                      totalPages: _totalPages,
+                    ),
+                  ),
                 ),
               ),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  _menu<String>(
-                      key: const ValueKey('douban-filter-year'),
-                      label: '年份',
-                      value: _query.year?.toString() ?? '',
-                      values: [
-                        '',
-                        ...doubanBrowseYearOptions(selectedYear: _query.year)
-                            .map((year) => '$year'),
-                      ],
-                      text: (value) => value.isEmpty ? '全部' : value,
-                      isDefault: (value) => value.isEmpty,
-                      onSelected: (value) {
-                        if (value.isEmpty) {
-                          _select(_query.copyWith(clearYear: true));
-                        } else {
-                          _select(_query.copyWith(year: int.parse(value)));
-                        }
-                      }),
-                  _menu<String>(
-                      key: const ValueKey('douban-filter-region'),
-                      label: '地区',
-                      value: _query.region,
-                      values: {
-                        '',
-                        _query.region,
-                        ...regions.where((v) => v != '全部')
-                      }.toList(),
-                      text: (value) => value.isEmpty ? '全部' : value,
-                      isDefault: (value) => value.isEmpty,
-                      onSelected: (value) =>
-                          _select(_query.copyWith(region: value))),
-                  _menu<String>(
-                      key: const ValueKey('douban-filter-genre'),
-                      label: '类型',
-                      value: _query.genre,
-                      values: {
-                        '',
-                        _query.genre,
-                        ...genres.where((v) => v != '全部')
-                      }.toList(),
-                      text: (value) => value.isEmpty ? '全部' : value,
-                      isDefault: (value) => value.isEmpty,
-                      onSelected: (value) =>
-                          _select(_query.copyWith(genre: value))),
-                  _menu<int>(
-                      key: const ValueKey('douban-filter-rating'),
-                      label: '评分',
-                      value: _query.minRating,
-                      values: const [0, 6, 7, 8, 9],
-                      text: (value) => value == 0 ? '不限' : '$value 分以上',
-                      isDefault: (value) => value == 0,
-                      onSelected: (value) =>
-                          _select(_query.copyWith(minRating: value))),
-                ],
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _FloatingPageIndicator extends StatelessWidget {
+  const _FloatingPageIndicator({
+    required this.currentPage,
+    required this.totalPages,
+  });
+
+  final int currentPage;
+  final int totalPages;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface.withValues(alpha: 0.78),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 9),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$currentPage',
+              key: const ValueKey('douban-floating-page-current'),
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                height: 1,
               ),
-              const SizedBox(height: 4),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: _menu<DoubanBrowseSort>(
-                          key: const ValueKey('douban-filter-sort'),
-                          label: '排序',
-                          value: _query.sort,
-                          values: DoubanBrowseSort.values,
-                          text: (value) => value.labelFor(_query.mediaType),
-                          isDefault: (value) =>
-                              value == DoubanBrowseSort.rating,
-                          onSelected: (value) =>
-                              _select(_query.copyWith(sort: value))),
-                    ),
-                  ),
-                  _paginationControls(
-                    keyPrefix: 'top',
-                    tv: tv,
-                  ),
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.centerRight,
-                      child: _actionButtons(tv: tv),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              if (!enabled)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('豆瓣模块已关闭'),
-                    TextButton(
-                      onPressed: () => context.pushNamed('home-editor'),
-                      child: const Text('前往首页编辑启用豆瓣模块'),
-                    ),
-                  ],
-                )
-              else if (_page == null && _loading)
-                const Center(child: CircularProgressIndicator())
-              else if (_page == null && _error != null) ...[
-                Text(_error!),
-                TextButton(
-                    onPressed: () => _scheduleLoad(0, refresh: true),
-                    child: const Text('重试')),
-              ] else if (_page != null) ...[
-                if (_error != null) Text(_error!),
-                if (_page!.entries.isEmpty)
-                  const Text('没有符合条件的作品')
-                else
-                  LayoutBuilder(builder: (context, constraints) {
-                    const gap = 12.0;
-                    final columns = math.max(
-                        2, ((constraints.maxWidth + gap) / 150).floor());
-                    final width =
-                        (constraints.maxWidth - (columns - 1) * gap) / columns;
-                    final titleHeight = MediaQuery.textScalerOf(context).scale(
-                            Theme.of(context).textTheme.titleSmall?.fontSize ??
-                                16) *
-                        1.22;
-                    final tileBottomSlack = tv ? 8.0 : 2.0;
-                    return GridView.builder(
-                      shrinkWrap: true,
-                      primary: false,
-                      padding: EdgeInsets.zero,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: _page!.entries.length,
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: columns,
-                        crossAxisSpacing: gap,
-                        mainAxisSpacing: gap,
-                        mainAxisExtent:
-                            width / .7 + 4 + titleHeight + tileBottomSlack,
-                      ),
-                      itemBuilder: (context, index) {
-                        final entry = _page!.entries[index];
-                        return MediaPosterTile(
-                          key:
-                              ValueKey('${_query.mediaType.value}:${entry.id}'),
-                          title: entry.title,
-                          subtitle: '',
-                          posterUrl: entry.posterUrl,
-                          imageTopLeftBadgeText:
-                              entry.year == 0 ? '' : '${entry.year}',
-                          imageBadgeText: entry.ratingLabel,
-                          imageTopRightBadgeText: _query.category.label,
-                          imageBottomRightBadgeText:
-                              buildRatingCountLabel(entry.ratingCount),
-                          width: null,
-                          onTap: () => context.pushNamed('detail',
-                              extra: MediaDetailTarget(
-                                title: entry.title,
-                                overview: '',
-                                posterUrl: entry.posterUrl,
-                                year: entry.year,
-                                ratingLabels: entry.ratingLabel.isEmpty
-                                    ? const []
-                                    : [entry.ratingLabel],
-                                ratingCount: entry.ratingCount,
-                                availabilityLabel: '无',
-                                searchQuery: entry.title,
-                                itemType: _query.mediaType ==
-                                        DoubanSuggestionMediaType.movie
-                                    ? 'movie'
-                                    : 'series',
-                                doubanId: entry.id,
-                                sourceName: '豆瓣',
-                              )),
-                        );
-                      },
-                    );
-                  }),
-                if (_pageLimitReached) const Text('已达到本机分页上限，请缩小筛选范围'),
-                if (_page!.entries.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.center,
-                    child: _paginationControls(
-                      keyPrefix: 'bottom',
-                      tv: tv,
-                      showLoading: false,
-                    ),
-                  ),
-                ],
-              ],
-              appPageBottomSpacer(height: 64),
-            ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '$totalPages',
+              key: const ValueKey('douban-floating-page-total'),
+              style: theme.textTheme.bodySmall?.copyWith(height: 1),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Observe the native control's focus without adding another traversal stop.
+class _BrowseControlFocusFrame extends StatefulWidget {
+  const _BrowseControlFocusFrame({
+    required this.isTelevision,
+    required this.child,
+  });
+
+  final bool isTelevision;
+  final Widget child;
+
+  @override
+  State<_BrowseControlFocusFrame> createState() =>
+      _BrowseControlFocusFrameState();
+}
+
+class _BrowseControlFocusFrameState extends State<_BrowseControlFocusFrame> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.isTelevision) return widget.child;
+    final scheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return TvRemoteShortcuts(
+      shortcuts: const {
+        SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+        SingleActivator(LogicalKeyboardKey.gameButtonA): ActivateIntent(),
+      },
+      child: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onFocusChange: (focused) => setState(() => _focused = focused),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          constraints: const BoxConstraints(minHeight: 44),
+          decoration: BoxDecoration(
+            color: _focused
+                ? (dark
+                    ? Colors.white.withValues(alpha: 0.18)
+                    : scheme.primaryContainer)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
           ),
+          foregroundDecoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: _focused
+                  ? (dark ? Colors.white : scheme.primary)
+                  : Colors.transparent,
+              width: 2,
+            ),
+          ),
+          child: widget.child,
         ),
       ),
     );

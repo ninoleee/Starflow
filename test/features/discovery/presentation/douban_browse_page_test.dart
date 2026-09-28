@@ -10,572 +10,532 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:starflow/core/platform/tv_platform.dart';
 import 'package:starflow/core/widgets/media_poster_tile.dart';
+import 'package:starflow/core/widgets/tv_focus.dart';
 import 'package:starflow/features/discovery/data/douban_api_client.dart';
+import 'package:starflow/features/discovery/data/douban_browse_repository.dart';
 import 'package:starflow/features/discovery/domain/douban_browse_models.dart';
 import 'package:starflow/features/discovery/domain/douban_models.dart';
 import 'package:starflow/features/discovery/presentation/douban_browse_page.dart';
 import 'package:starflow/features/settings/application/settings_controller.dart';
 import 'package:starflow/features/settings/domain/app_settings.dart';
 
-void main() {
-  testWidgets('disabled discovery does not issue requests', (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    var requests = 0;
-    await tester.pumpWidget(ProviderScope(overrides: [
-      appSettingsProvider.overrideWithValue(const AppSettings(
-          mediaSources: [],
-          searchProviders: [],
-          homeModules: [],
-          doubanAccount: DoubanAccountConfig(enabled: false))),
-      isTelevisionProvider.overrideWith((ref) => false),
-      doubanApiClientProvider
-          .overrideWithValue(DoubanApiClient(MockClient((_) async {
-        requests++;
-        return http.Response('{}', 200);
-      }))),
-    ], child: const MaterialApp(home: DoubanBrowsePage())));
-    await tester.pumpAndSettle();
-    expect(find.textContaining('豆瓣模块已关闭'), findsOneWidget);
-    expect(requests, 0);
-  });
-
-  testWidgets('poster year badge and pagination follow the last grid row',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(ProviderScope(overrides: [
-      appSettingsProvider.overrideWithValue(const AppSettings(
-        mediaSources: [],
-        searchProviders: [],
-        homeModules: [],
-        doubanAccount: DoubanAccountConfig(enabled: true),
-      )),
-      isTelevisionProvider.overrideWith((ref) => false),
-      doubanApiClientProvider.overrideWithValue(DoubanApiClient(MockClient(
-        (_) async => http.Response.bytes(
-          utf8.encode(jsonEncode({
-            'items': [
+http.Response _page(int start,
+        {int count = 20, int? total = 40, String prefix = ''}) =>
+    http.Response.bytes(
+        utf8.encode(jsonEncode({
+          'items': [
+            for (var i = start; i < start + count; i++)
               {
-                'id': '123',
-                'title': '测试电影',
+                'id': '$prefix$i',
+                'title': '作品$prefix$i',
                 'type': 'movie',
-                'year': '2023',
+                'year': '2024',
+                'card_subtitle': '2024 / 中国大陆 / 惊悚 / 犯罪',
                 'rating': {'value': 8.6, 'count': 200},
               }
-            ],
-            'total': 1,
-          })),
-          200,
-          headers: const {'content-type': 'application/json; charset=utf-8'},
-        ),
-      ))),
-    ], child: const MaterialApp(home: DoubanBrowsePage())));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
+          ],
+          if (total != null) 'total': total,
+        })),
+        200,
+        headers: const {'content-type': 'application/json; charset=utf-8'});
 
-    final poster = tester.widget<MediaPosterTile>(find.byType(MediaPosterTile));
-    expect(poster.imageTopLeftBadgeText, '2023');
-    expect(poster.imageTopRightBadgeText, '电影');
-    expect(poster.imageBadgeText, '豆瓣 8.6');
+DoubanBrowsePageData _data(int start, {String prefix = ''}) =>
+    DoubanBrowsePageData(
+      entries: [
+        for (var i = start; i < start + 20; i++)
+          DoubanEntry(
+            id: '$prefix$i',
+            title: '作品$prefix$i',
+            year: 2024,
+            posterUrl: '',
+            note: '',
+            ratingLabel: '豆瓣 8.6',
+            ratingCount: 200,
+            subjectType: 'movie',
+          ),
+      ],
+      start: start,
+      rawCount: 20,
+      total: 40,
+    );
+
+class _ControlledBrowseRepository extends DoubanBrowseRepository {
+  _ControlledBrowseRepository(this.handler)
+      : super(DoubanApiClient(MockClient((_) async => _page(0))));
+
+  final Future<DoubanBrowsePageData> Function(
+      DoubanBrowseQuery query, int start) handler;
+
+  @override
+  Future<DoubanBrowsePageData> fetch(
+    DoubanBrowseQuery query, {
+    int start = 0,
+    bool refresh = false,
+  }) =>
+      handler(query, start);
+}
+
+Future<void> _settle(WidgetTester tester) async {
+  await tester.pump();
+  await tester
+      .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _mount(WidgetTester tester, MockClient client,
+    {bool tv = false,
+    bool enabled = true,
+    DoubanBrowseRepository? repository}) async {
+  SharedPreferences.setMockInitialValues({});
+  tester.view.physicalSize = tv ? const Size(1280, 720) : const Size(390, 844);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(ProviderScope(
+      overrides: [
+        appSettingsProvider.overrideWithValue(AppSettings(
+          mediaSources: const [],
+          searchProviders: const [],
+          homeModules: const [],
+          doubanAccount: DoubanAccountConfig(enabled: enabled),
+        )),
+        isTelevisionProvider.overrideWith((ref) => tv),
+        if (repository == null)
+          doubanApiClientProvider.overrideWithValue(DoubanApiClient(client))
+        else
+          doubanBrowseRepositoryProvider.overrideWithValue(repository),
+      ],
+      child: MaterialApp(
+          theme: ThemeData.dark(), home: const DoubanBrowsePage())));
+  await _settle(tester);
+}
+
+ScrollController _scroll(WidgetTester tester) =>
+    tester.widget<CustomScrollView>(find.byType(CustomScrollView)).controller!;
+
+Future<void> _bottom(WidgetTester tester) async {
+  final scroll = _scroll(tester);
+  scroll.jumpTo(scroll.position.maxScrollExtent);
+  await _settle(tester);
+}
+
+Finder _poster(int id, {String prefix = ''}) =>
+    find.byKey(ValueKey('movie:$prefix$id'));
+
+Future<void> _sort(WidgetTester tester, String label) async {
+  _scroll(tester).jumpTo(0);
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const ValueKey('douban-filter-sort')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text(label).last);
+  await _settle(tester);
+}
+
+void main() {
+  testWidgets('disabled discovery does not issue requests', (tester) async {
+    var requests = 0;
+    await _mount(tester, MockClient((_) async {
+      requests++;
+      return _page(0);
+    }), enabled: false);
+    expect(requests, 0);
+    expect(find.text('豆瓣模块已关闭'), findsOneWidget);
+  });
+
+  testWidgets('poster shows numeric rating and no pagination controls',
+      (tester) async {
+    await _mount(tester, MockClient((_) async => _page(0, count: 1, total: 1)));
+    final poster = tester.widget<MediaPosterTile>(_poster(0));
+    expect(poster.imageBadgeText, '8.6');
+    expect(poster.imageTopLeftBadgeText, '2024');
+    expect(poster.imageTopRightBadgeText, '惊悚');
     expect(poster.imageBottomRightBadgeText, '☆200');
     expect(poster.subtitle, isEmpty);
-    expect(tester.getTopLeft(find.text('2023')).dy,
-        lessThan(tester.getTopLeft(find.text('☆200')).dy));
-    expect(tester.getTopLeft(find.text('电影').last).dy,
-        lessThan(tester.getTopLeft(find.text('豆瓣 8.6')).dy));
-    expect(tester.getTopLeft(find.text('☆200')).dx,
-        greaterThan(tester.getTopLeft(find.text('豆瓣 8.6')).dx));
-    final grid = find.byType(GridView);
-    final status = find.byKey(const ValueKey('top-page-label'));
-    final category = find.byType(SegmentedButton<DoubanBrowseCategory>);
-    final year = find.byKey(const ValueKey('douban-filter-year'));
-    expect(tester.getBottomLeft(category).dy,
-        lessThanOrEqualTo(tester.getTopLeft(year).dy));
-    final sort = find.byKey(const ValueKey('douban-filter-sort'));
-    final reset = find.byTooltip('重置筛选');
-    final refresh = find.byTooltip('刷新');
-    final toolbarCenterYs = [status, sort, reset, refresh]
-        .map((finder) => tester.getCenter(finder).dy)
-        .toList(growable: false);
-    expect(
-        toolbarCenterYs.reduce((a, b) => a > b ? a : b) -
-            toolbarCenterYs.reduce((a, b) => a < b ? a : b),
-        lessThanOrEqualTo(8));
-    final toolbarBottom = [status, sort, reset, refresh]
-        .map((finder) => tester.getBottomLeft(finder).dy)
-        .reduce((a, b) => a > b ? a : b);
-    expect(tester.getTopLeft(grid).dy - toolbarBottom, inInclusiveRange(0, 12));
-    final pager = find.byTooltip('上一页');
-    expect(pager, findsNWidgets(2));
-    expect(find.byTooltip('下一页'), findsNWidgets(2));
-    expect(tester.getCenter(sort).dx, lessThan(tester.getCenter(status).dx));
-    expect(
-        tester.getCenter(reset).dx, greaterThan(tester.getCenter(status).dx));
-    expect(
-        tester.getCenter(refresh).dx, greaterThan(tester.getCenter(status).dx));
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('compact poster badges fit without overlap', (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const ProviderScope(
-      child: MaterialApp(
-        home: Scaffold(
-          body: Center(
-            child: SizedBox(
-              width: 140,
-              child: MediaPosterTile(
-                title: '影片',
-                subtitle: '',
-                posterUrl: '',
-                imageTopLeftBadgeText: '2023',
-                imageTopRightBadgeText: '电视剧',
-                imageBadgeText: '豆瓣 9.6',
-                imageBottomRightBadgeText: '☆9.9万',
-                onTap: _noop,
-              ),
-            ),
-          ),
-        ),
-      ),
-    ));
-    await tester.pumpAndSettle();
-    expect(tester.takeException(), isNull);
-    expect(tester.getTopLeft(find.text('☆9.9万')).dx,
-        greaterThan(tester.getTopLeft(find.text('豆瓣 9.6')).dx));
-    final left = tester.getRect(find.text('豆瓣 9.6'));
-    final right = tester.getRect(find.text('☆9.9万'));
-    expect(left.right, lessThanOrEqualTo(right.left));
-  });
-
-  testWidgets('TV focus reaches pagination controls and activates next page',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    tester.view.physicalSize = const Size(1280, 720);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final starts = <String>[];
-    await tester.pumpWidget(ProviderScope(overrides: [
-      appSettingsProvider.overrideWithValue(const AppSettings(
-        mediaSources: [],
-        searchProviders: [],
-        homeModules: [],
-        doubanAccount: DoubanAccountConfig(enabled: true),
-      )),
-      isTelevisionProvider.overrideWith((ref) => true),
-      doubanApiClientProvider.overrideWithValue(DoubanApiClient(MockClient(
-        (request) async {
-          final start = request.url.queryParameters['start']!;
-          starts.add(start);
-          return http.Response.bytes(
-              utf8.encode(jsonEncode({
-                'items': [
-                  {'id': '123', 'title': '第一页影片', 'type': 'movie'}
-                ],
-                'total': 40,
-              })),
-              200,
-              headers: const {
-                'content-type': 'application/json; charset=utf-8'
-              });
-        },
-      ))),
-    ], child: const MaterialApp(home: DoubanBrowsePage())));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-
-    final topNext = find.byKey(const ValueKey('top-page-next'));
-    final bottomNext = find.byKey(const ValueKey('bottom-page-next'));
-    expect(tester.getSize(topNext).height, greaterThanOrEqualTo(44));
-    expect(tester.getSize(bottomNext).height, greaterThanOrEqualTo(44));
-    final focus = Focus.of(tester.element(
-        find.descendant(of: topNext, matching: find.byType(Icon)).first));
-    focus.requestFocus();
-    await tester.pumpAndSettle();
-    expect(focus.hasPrimaryFocus, isTrue);
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-    expect(starts, ['0', '20']);
-    final pageLabel =
-        tester.widget<Text>(find.byKey(const ValueKey('top-page-label')));
-    expect(pageLabel.data, '2/2');
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('year all clears a previously selected year', (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    final tags = <String>[];
-    await tester.pumpWidget(ProviderScope(overrides: [
-      appSettingsProvider.overrideWithValue(const AppSettings(
-        mediaSources: [],
-        searchProviders: [],
-        homeModules: [],
-        doubanAccount: DoubanAccountConfig(enabled: true),
-      )),
-      isTelevisionProvider.overrideWith((ref) => false),
-      doubanApiClientProvider.overrideWithValue(DoubanApiClient(MockClient(
-        (request) async {
-          tags.add(request.url.queryParameters['tags']!);
-          final start = request.url.queryParameters['start']!;
-          final requestTags = request.url.queryParameters['tags']!;
-          return http.Response.bytes(
-              utf8.encode(jsonEncode({
-                'items': start == '0'
-                    ? [
-                        {
-                          'id': '1',
-                          'title': requestTags.contains('2024') ? '二零二四' : '热门',
-                          'type': 'movie',
-                          'year': '2024',
-                          'rating': {'count': 12000}
-                        },
-                        {
-                          'id': '2',
-                          'title': '冷门',
-                          'type': 'movie',
-                          'year': '2023',
-                          'rating': {'count': 200}
-                        },
-                      ]
-                    : const [],
-                'total': 2,
-              })),
-              200,
-              headers: const {
-                'content-type': 'application/json; charset=utf-8'
-              });
-        },
-      ))),
-    ], child: const MaterialApp(home: DoubanBrowsePage())));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const ValueKey('douban-filter-year')));
-    await tester.pumpAndSettle();
-    expect(find.text('全部'), findsWidgets);
-    await tester.tap(find.text('2024').last);
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-    expect(_filterText('douban-filter-year', '2024'), findsOneWidget);
-    expect(tags.last, contains('2024'));
-    expect(find.text('二零二四'), findsOneWidget);
-
-    await tester.tap(find.byKey(const ValueKey('douban-filter-year')));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('全部').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('全部').last);
-    await tester.pump();
-    await tester.runAsync(() async {
-      for (var i = 0; i < 50 && tags.last.contains('2024'); i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
-    await tester.pumpAndSettle();
-    expect(_filterText('douban-filter-year', '年份'), findsOneWidget);
-    expect(find.text('热门'), findsOneWidget);
+    expect(find.byTooltip('上一页'), findsNothing);
+    expect(find.byTooltip('下一页'), findsNothing);
+    expect(find.text('已显示全部结果'), findsOneWidget);
+    final current = find.byKey(const ValueKey('douban-floating-page-current'));
+    final total = find.byKey(const ValueKey('douban-floating-page-total'));
+    expect(tester.widget<Text>(current).data, '1');
+    expect(tester.widget<Text>(total).data, '1');
+    expect(tester.getCenter(current).dy, lessThan(tester.getCenter(total).dy));
+    expect(tester.getRect(find.text('8.6')).right,
+        lessThanOrEqualTo(tester.getRect(find.text('☆200')).left));
   });
 
   testWidgets(
-      'changing sort requests a fresh page and keeps its selected label',
+      'scroll appends once, keeps earlier results, and stops at the end',
       (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    final sorts = <String>[];
-    await tester.pumpWidget(ProviderScope(overrides: [
-      appSettingsProvider.overrideWithValue(const AppSettings(
-          mediaSources: [],
-          searchProviders: [],
-          homeModules: [],
-          doubanAccount: DoubanAccountConfig(enabled: true))),
-      isTelevisionProvider.overrideWith((ref) => false),
-      doubanApiClientProvider
-          .overrideWithValue(DoubanApiClient(MockClient((request) async {
-        sorts.add(request.url.queryParameters['sort']!);
-        return http.Response.bytes(
-            utf8.encode(jsonEncode({
-              'items': [
-                {
-                  'id': '123',
-                  'title': '测试电影',
-                  'type': 'movie',
-                  'year': '2023',
-                  'rating': {'value': 8.6, 'count': 200}
-                }
-              ],
-              'total': 1,
-              'sorts': [
-                {'name': 'T', 'checked': true}
-              ],
-            })),
-            200,
-            headers: const {'content-type': 'application/json; charset=utf-8'});
-      }))),
-    ], child: const MaterialApp(home: DoubanBrowsePage())));
+    final starts = <int>[];
+    final second = Completer<http.Response>();
+    await _mount(tester, MockClient((request) {
+      final start = int.parse(request.url.queryParameters['start']!);
+      starts.add(start);
+      return start == 0 ? Future.value(_page(0)) : second.future;
+    }));
+    expect(starts, [0]);
+    final scroll = _scroll(tester);
+    scroll.jumpTo(scroll.position.maxScrollExtent);
     await tester.pump();
     await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    scroll.jumpTo(scroll.offset - 1);
+    scroll.jumpTo(scroll.position.maxScrollExtent);
+    await tester.pump();
+    expect(starts, [0, 20]);
+    final offset = scroll.offset;
+    second.complete(_page(20));
+    await _settle(tester);
+    expect(scroll.offset, closeTo(offset, 1));
+    expect(starts, [0, 20]);
+    expect(
+        tester
+            .widget<Text>(
+                find.byKey(const ValueKey('douban-floating-page-total')))
+            .data,
+        '2');
+    await _bottom(tester);
+    await _bottom(tester);
+    expect(starts, [0, 20]);
+    expect(_poster(39), findsOneWidget);
+    expect(
+        tester
+            .widget<Text>(
+                find.byKey(const ValueKey('douban-floating-page-current')))
+            .data,
+        '2');
+    scroll.jumpTo(0);
     await tester.pumpAndSettle();
-    expect(sorts, ['S']);
-    expect(find.text('1/1'), findsNWidgets(2));
-    expect(_filterText('douban-filter-sort', '排序'), findsOneWidget);
+    expect(_poster(0), findsOneWidget);
+    expect(
+        tester
+            .widget<Text>(
+                find.byKey(const ValueKey('douban-floating-page-current')))
+            .data,
+        '1');
+    expect(
+        tester.widgetList<MediaPosterTile>(find.byType(MediaPosterTile)).length,
+        lessThan(40));
+  });
+
+  testWidgets('TV append preserves focused poster and down reaches new results',
+      (tester) async {
+    final second = Completer<http.Response>();
+    final starts = <int>[];
+    await _mount(tester, MockClient((request) {
+      final start = int.parse(request.url.queryParameters['start']!);
+      starts.add(start);
+      return start == 0 ? Future.value(_page(0)) : second.future;
+    }), tv: true);
+    final scroll = _scroll(tester);
+    scroll.jumpTo(scroll.position.maxScrollExtent);
+    await tester.pump();
+    final node = tester.widget<MediaPosterTile>(_poster(19)).focusNode!;
+    node.requestFocus();
+    await tester.pump();
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    expect(starts, [0, 20]);
+    second.complete(_page(20));
+    await _settle(tester);
+    expect(node.hasPrimaryFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    final focused = tester
+        .widgetList<MediaPosterTile>(find.byType(MediaPosterTile))
+        .singleWhere((tile) => tile.focusNode!.hasFocus);
+    expect(int.parse(focused.title.replaceFirst('作品', '')),
+        greaterThanOrEqualTo(20));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('prefetches the next batch before the append threshold',
+      (tester) async {
+    final starts = <int>[];
+    final second = Completer<http.Response>();
+    await _mount(tester, MockClient((request) {
+      final start = int.parse(request.url.queryParameters['start']!);
+      starts.add(start);
+      return start == 0 ? Future.value(_page(0)) : second.future;
+    }));
+    final scroll = _scroll(tester);
+    scroll.jumpTo(
+      scroll.position.maxScrollExtent -
+          scroll.position.viewportDimension * 1.25,
+    );
+    await tester.pump();
+    expect(starts, [0, 20]);
+    expect(_poster(20), findsNothing);
+
+    second.complete(_page(20));
+    await _settle(tester);
+    expect(_poster(20), findsNothing);
+
+    await _bottom(tester);
+    expect(starts, [0, 20]);
+    expect(_poster(20), findsOneWidget);
+  });
+
+  testWidgets('overlap deduplicates and repeated batches stop auto loading',
+      (tester) async {
+    final starts = <int>[];
+    await _mount(tester, MockClient((request) async {
+      final start = int.parse(request.url.queryParameters['start']!);
+      starts.add(start);
+      return _page(start == 0 ? 0 : 19, total: 100);
+    }));
+    await _bottom(tester);
+    await _bottom(tester);
+    await _bottom(tester);
+    expect(starts, [0, 20, 40]);
+    expect(find.text('已显示全部结果'), findsOneWidget);
+    expect(_poster(38), findsOneWidget);
+  });
+
+  testWidgets('empty batch stops and short first batch fills the viewport',
+      (tester) async {
+    final starts = <int>[];
+    await _mount(tester, MockClient((request) async {
+      final start = int.parse(request.url.queryParameters['start']!);
+      starts.add(start);
+      return start == 0
+          ? _page(0, count: 1, total: 40)
+          : _page(20, count: 0, total: 40);
+    }));
+    await _settle(tester);
+    await _bottom(tester);
+    expect(starts, [0, 20]);
+    expect(_poster(0), findsOneWidget);
+  });
+
+  testWidgets('append failure retains results and retries the same offset',
+      (tester) async {
+    final starts = <int>[];
+    await _mount(tester, MockClient((request) async {
+      final start = int.parse(request.url.queryParameters['start']!);
+      starts.add(start);
+      if (start == 20 && starts.length == 2) {
+        return http.Response('failure', 503);
+      }
+      return _page(start);
+    }));
+    await _bottom(tester);
+    await _bottom(tester);
+    expect(starts, [0, 20]);
+    expect(find.textContaining('请求失败'), findsOneWidget);
+    expect(_poster(19), findsOneWidget);
+    await tester
+        .ensureVisible(find.byKey(const ValueKey('douban-load-more-retry')));
+    await tester.tap(find.byKey(const ValueKey('douban-load-more-retry')));
+    await _settle(tester);
+    expect(starts, [0, 20, 20]);
+    _scroll(tester).jumpTo(0);
+    await tester.pumpAndSettle();
+    expect(_poster(0), findsOneWidget);
+  });
+
+  testWidgets('changing sort discards pending append and starts a fresh list',
+      (tester) async {
+    final oldAppend = Completer<DoubanBrowsePageData>();
+    final requests = <String>[];
+    final repository = _ControlledBrowseRepository((query, start) {
+      final sort = query.sort.code;
+      requests.add('$sort:$start');
+      if (sort == 'S' && start == 20) return oldAppend.future;
+      return Future.value(_data(start, prefix: sort));
+    });
+    await _mount(tester, MockClient((_) async => _page(0)),
+        repository: repository);
+    _scroll(tester).jumpTo(_scroll(tester).position.maxScrollExtent);
+    await tester.pump();
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    _scroll(tester).jumpTo(0);
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('douban-filter-sort')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('近期热度').last);
     await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-    expect(sorts, ['S', 'U']);
-    expect(_filterText('douban-filter-sort', '近期热度'), findsOneWidget);
-    expect(find.text('1/1'), findsNWidgets(2));
+    oldAppend.complete(_data(20, prefix: 'S'));
+    await _settle(tester);
+    expect(requests, ['S:0', 'S:20', 'U:0']);
+    await _settle(tester);
+    expect(_poster(0, prefix: 'U'), findsOneWidget);
+    expect(_poster(20, prefix: 'S'), findsNothing);
+    expect(_scroll(tester).offset, 0);
   });
 
-  testWidgets('failed next page leaves the current page visible',
+  testWidgets('sort refreshes results and keeps selected label',
       (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    final starts = <String>[];
-    await tester.pumpWidget(ProviderScope(overrides: [
-      appSettingsProvider.overrideWithValue(const AppSettings(
-        mediaSources: [],
-        searchProviders: [],
-        homeModules: [],
-        doubanAccount: DoubanAccountConfig(enabled: true),
-      )),
-      isTelevisionProvider.overrideWith((ref) => false),
-      doubanApiClientProvider
-          .overrideWithValue(DoubanApiClient(MockClient((request) async {
-        final start = request.url.queryParameters['start']!;
-        starts.add(start);
-        if (start == '20') return http.Response('failure', 503);
-        return http.Response.bytes(
-            utf8.encode(jsonEncode({
-              'items': [
-                {'id': '123', 'title': '第一页影片', 'type': 'movie', 'year': '2023'}
-              ],
-              'total': 40,
-            })),
-            200,
-            headers: const {'content-type': 'application/json; charset=utf-8'});
-      }))),
-    ], child: const MaterialApp(home: DoubanBrowsePage())));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-    expect(find.text('1/2'), findsNWidgets(2));
-    await tester.tap(find.byTooltip('下一页').first);
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-    expect(starts, ['0', '20']);
-    expect(find.text('1/2'), findsNWidgets(2));
-    expect(find.textContaining('请求失败'), findsOneWidget);
+    final sorts = <String>[];
+    await _mount(tester, MockClient((request) async {
+      sorts.add(request.url.queryParameters['sort']!);
+      return _page(0, count: 1, total: 1);
+    }));
+    await _sort(tester, '近期热度');
+    expect(sorts, ['S', 'U']);
+    expect(find.text('近期热度'), findsOneWidget);
   });
 
-  testWidgets('series and variety display separate genre tags', (tester) async {
-    SharedPreferences.setMockInitialValues({});
+  testWidgets('TV sort menu enters on its currently selected item',
+      (tester) async {
+    final sorts = <String>[];
+    await _mount(tester, MockClient((request) async {
+      sorts.add(request.url.queryParameters['sort']!);
+      return _page(0, count: 1, total: 1);
+    }), tv: true);
+
+    await tester.tap(find.byKey(const ValueKey('douban-filter-sort')));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await _settle(tester);
+
+    expect(sorts, ['S', 'R']);
+  });
+
+  testWidgets('year all clears selected year and reset restores defaults',
+      (tester) async {
     final tags = <String>[];
-    await tester.pumpWidget(ProviderScope(overrides: [
-      appSettingsProvider.overrideWithValue(const AppSettings(
-        mediaSources: [],
-        searchProviders: [],
-        homeModules: [],
-        doubanAccount: DoubanAccountConfig(enabled: true),
-      )),
-      isTelevisionProvider.overrideWith((ref) => false),
-      doubanApiClientProvider.overrideWithValue(DoubanApiClient(MockClient(
-        (request) async {
-          tags.add(request.url.queryParameters['tags']!);
-          return http.Response.bytes(
-              utf8.encode(jsonEncode({
-                'items': [],
-                'total': 0,
-                'recommend_categories': [
-                  {
-                    'type': '类型',
-                    'data': [
-                      {
-                        'text': '类型',
-                        'tags': ['不限类型']
-                      },
-                      {
-                        'text': '电视剧',
-                        'tags': ['悬疑']
-                      },
-                      {
-                        'text': '综艺',
-                        'tags': ['真人秀']
-                      },
-                    ]
-                  }
-                ]
-              })),
-              200,
-              headers: const {
-                'content-type': 'application/json; charset=utf-8'
-              });
-        },
-      ))),
-    ], child: const MaterialApp(home: DoubanBrowsePage())));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await _mount(tester, MockClient((request) async {
+      tags.add(request.url.queryParameters['tags']!);
+      return _page(0, count: 1, total: 1);
+    }));
+    await tester.tap(find.byKey(const ValueKey('douban-filter-year')));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('2024').last);
+    await _settle(tester);
+    expect(tags.last, contains('2024'));
+    await tester.tap(find.byKey(const ValueKey('douban-filter-year')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('全部').last);
+    await tester.tap(find.text('全部').last);
+    await _settle(tester);
+    expect(
+        find.descendant(
+            of: find.byKey(const ValueKey('douban-filter-year')),
+            matching: find.text('年份')),
+        findsOneWidget);
+    await _sort(tester, '近期热度');
+    await tester.tap(find.byTooltip('重置筛选'));
+    await _settle(tester);
+    expect(find.text('排序'), findsOneWidget);
+  });
+
+  testWidgets('series and variety use distinct genre menus', (tester) async {
+    final tags = <String>[];
+    await _mount(tester, MockClient((request) async {
+      tags.add(request.url.queryParameters['tags']!);
+      return _page(0, count: 0, total: 0);
+    }));
     await tester.tap(find.text('电视剧'));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-    expect(tags, ['', '电视剧']);
+    await _settle(tester);
     await tester.tap(find.byKey(const ValueKey('douban-filter-genre')));
     await tester.pumpAndSettle();
-    expect(find.text('悬疑'), findsOneWidget);
-    expect(find.widgetWithText(PopupMenuItem<String>, '类型'), findsNothing);
-    expect(find.text('综艺'), findsOneWidget);
-    await tester.tap(find.text('悬疑'));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('悬疑').last);
+    await _settle(tester);
     expect(tags.last, '电视剧,悬疑');
-    await tester.pumpAndSettle();
     await tester.tap(find.text('综艺'));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-    expect(tags.last, '综艺');
+    await _settle(tester);
     await tester.tap(find.byKey(const ValueKey('douban-filter-genre')));
     await tester.pumpAndSettle();
-    expect(find.text('真人秀'), findsOneWidget);
     expect(find.text('悬疑'), findsNothing);
-    await tester.tap(find.text('真人秀'));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('真人秀').last);
+    await _settle(tester);
     expect(tags.last, '综艺,真人秀');
   });
 
-  testWidgets('returning to a cached page restores its earlier IDs',
+  testWidgets('TV filter controls retain visible focus and menu return',
       (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    final starts = <String>[];
-    await tester.pumpWidget(ProviderScope(overrides: [
-      appSettingsProvider.overrideWithValue(const AppSettings(
-        mediaSources: [],
-        searchProviders: [],
-        homeModules: [],
-        doubanAccount: DoubanAccountConfig(enabled: true),
-      )),
-      isTelevisionProvider.overrideWith((ref) => false),
-      doubanApiClientProvider.overrideWithValue(DoubanApiClient(MockClient(
-        (request) async {
-          final start = request.url.queryParameters['start']!;
-          starts.add(start);
-          return http.Response.bytes(
-            utf8.encode(jsonEncode({
-              'items': start == '0'
-                  ? [
-                      {'id': '1', 'title': '首屏作品', 'type': 'movie'}
-                    ]
-                  : [
-                      {'id': '1', 'title': '首屏作品', 'type': 'movie'},
-                      {'id': '2', 'title': '次页作品', 'type': 'movie'},
-                      {'id': '2', 'title': '次页作品', 'type': 'movie'},
-                    ],
-              'total': 41,
-            })),
-            200,
-            headers: const {'content-type': 'application/json; charset=utf-8'},
-          );
-        },
-      ))),
-    ], child: const MaterialApp(home: DoubanBrowsePage())));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await _mount(tester, MockClient((_) async => _page(0, count: 1, total: 1)),
+        tv: true);
+    FocusNode node(String key) => Focus.of(tester.element(find
+        .descendant(of: find.byKey(ValueKey(key)), matching: find.byType(Icon))
+        .first));
+    void highlighted(String key, bool value) {
+      final frame = tester.widget<AnimatedContainer>(find
+          .ancestor(
+              of: find.byKey(ValueKey(key)),
+              matching: find.byType(AnimatedContainer))
+          .first);
+      final border =
+          (frame.foregroundDecoration! as BoxDecoration).border! as Border;
+      expect(border.top.color, value ? Colors.white : Colors.transparent);
+      expect(border.top.width, 2);
+    }
+
+    tester
+        .widget<StarflowChipButton>(
+            find.byKey(const ValueKey('douban-category-movie')))
+        .focusNode!
+        .requestFocus();
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('下一页').last);
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
+    final categoryFrame = tester.widget<AnimatedContainer>(find
+        .descendant(
+            of: find.byKey(const ValueKey('douban-category-movie')),
+            matching: find.byType(AnimatedContainer))
+        .first);
+    final categoryBorder =
+        (categoryFrame.decoration! as BoxDecoration).border! as Border;
+    expect(categoryBorder.top.color, Colors.white);
+    expect(categoryBorder.top.width, 3);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    expect(find.text('次页作品'), findsOneWidget);
-    expect(find.text('首屏作品'), findsNothing);
-    expect(find.text('2/3'), findsNWidgets(2));
-    await tester.tap(find.byTooltip('上一页').last);
+    expect(node('douban-filter-year').hasPrimaryFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pumpAndSettle();
-    expect(find.text('首屏作品'), findsOneWidget);
-    expect(find.text('1/3'), findsNWidgets(2));
-    expect(starts, ['0', '20']);
+    expect(node('douban-filter-sort').hasPrimaryFocus, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pumpAndSettle();
+    expect(
+        tester.widget<MediaPosterTile>(_poster(0)).focusNode!.hasFocus, isTrue);
+
+    node('douban-filter-year').requestFocus();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(node('douban-filter-region').hasPrimaryFocus, isTrue);
+    highlighted('douban-filter-year', false);
+    for (final key in [
+      'douban-filter-year',
+      'douban-filter-region',
+      'douban-filter-genre',
+      'douban-filter-rating',
+      'douban-filter-sort',
+      'douban-refresh',
+      'douban-clear-filters'
+    ]) {
+      node(key).requestFocus();
+      await tester.pumpAndSettle();
+      highlighted(key, true);
+    }
+    node('douban-filter-year').requestFocus();
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(find.byType(PopupMenuItem<String>), findsWidgets);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(node('douban-filter-year').hasPrimaryFocus, isTrue);
+    highlighted('douban-filter-year', true);
   });
 
-  testWidgets('rapid sort changes only request the final pending selection',
-      (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    final first = Completer<http.Response>();
-    final sorts = <String>[];
-    http.Response page() => http.Response.bytes(
-          utf8.encode(jsonEncode({'items': [], 'total': 0})),
-          200,
-          headers: const {'content-type': 'application/json; charset=utf-8'},
-        );
-    await tester.pumpWidget(ProviderScope(overrides: [
-      appSettingsProvider.overrideWithValue(const AppSettings(
-        mediaSources: [],
-        searchProviders: [],
-        homeModules: [],
-        doubanAccount: DoubanAccountConfig(enabled: true),
-      )),
-      isTelevisionProvider.overrideWith((ref) => false),
-      doubanApiClientProvider.overrideWithValue(DoubanApiClient(MockClient(
-        (request) {
-          sorts.add(request.url.queryParameters['sort']!);
-          return sorts.length == 1 ? first.future : Future.value(page());
-        },
-      ))),
-    ], child: const MaterialApp(home: DoubanBrowsePage())));
-    await tester.pump();
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pump();
-    expect(sorts, ['S']);
-    await tester.tap(find.byKey(const ValueKey('douban-filter-sort')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('近期热度').last);
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('douban-filter-sort')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('首映时间').last);
-    await tester.pump();
-    expect(sorts, ['S']);
-    first.complete(page());
-    await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 100)));
-    await tester.pumpAndSettle();
-    expect(sorts, ['S', 'R']);
-    expect(_filterText('douban-filter-sort', '首映时间'), findsOneWidget);
-  });
+  for (final mode in [
+    (size: const Size(390, 844), tv: false, maxWidth: 300.0),
+    (size: const Size(1280, 720), tv: true, maxWidth: 420.0),
+  ]) {
+    testWidgets('category tabs use compact width on ${mode.size}',
+        (tester) async {
+      await _mount(
+        tester,
+        MockClient((_) async => _page(0, count: 1, total: 1)),
+        tv: mode.tv,
+      );
+
+      final group = find.byKey(const ValueKey('douban-category-tabs-group'));
+      expect(tester.getSize(group).width, mode.maxWidth);
+      expect(tester.getCenter(group).dx, closeTo(mode.size.width / 2, 1));
+    });
+  }
 }
-
-void _noop() {}
-
-Finder _filterText(String key, String text) => find.descendant(
-      of: find.byKey(ValueKey(key)),
-      matching: find.text(text),
-    );

@@ -96,6 +96,7 @@ class DoubanApiClient {
             ? '豆瓣 ${ratingValue.toStringAsFixed(1)}'
             : '',
         ratingCount: max(0, _numberValue(ratingMap['count'])?.toInt() ?? 0),
+        genres: _resolveBrowseGenres(item),
         subjectType: query.mediaType.value,
         sourceUrl: 'https://movie.douban.com/subject/$id/',
       ));
@@ -731,6 +732,33 @@ class DoubanApiClient {
       }
     }
     return '';
+  }
+
+  List<String> _resolveBrowseGenres(Map<String, dynamic> item) {
+    final direct = _extractNames(item['genres'] ?? item['genre']);
+    if (direct.isNotEmpty) return direct.take(3).toList(growable: false);
+
+    final subtitle =
+        '${item['card_subtitle'] ?? item['subtitle'] ?? ''}'.trim();
+    if (subtitle.isEmpty ||
+        (!subtitle.contains('/') && !subtitle.contains('·'))) {
+      return const [];
+    }
+    final parts = subtitle
+        .split(RegExp(r'\s*(?:/|·)\s*'))
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty && part != 'null')
+        .toList(growable: false);
+    if (parts.length < 2) return const [];
+    final startsWithYear = RegExp(r'^(?:19|20)\d{2}$').hasMatch(parts.first);
+    final genreStart = startsWithYear ? (parts.length > 2 ? 2 : 1) : 0;
+    return parts
+        .skip(genreStart)
+        .where((part) =>
+            !RegExp(r'^\d+\s*分钟$').hasMatch(part) &&
+            !RegExp(r'^\d+(?:\.\d+)?$').hasMatch(part))
+        .take(3)
+        .toList(growable: false);
   }
 
   List<String> _resolveNames(

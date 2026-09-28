@@ -4,7 +4,7 @@
 
 本文件是组件边界与数据流说明，按 **2026-09-20 当前工作区**（含未提交修改）核对，不是早期规划稿。目录和逐模块入口见 [代码地图](code-map.md)，平台能力和发布约束见 [README](../README.md)，请求协议见 [开发网络](development-network.md)。
 
-搜索页豆瓣选片增量（2026-09-27）：`SearchHubPage` 仅接管 `/search` 的双标签及子树可见性；原 `SearchPage` 继续持有资源查询、收藏和详情搜索，隐藏时依页面活动状态停止新增工作。`DoubanBrowsePage` 持有筛选、代次、页码及同一查询下的去重归属；`DoubanBrowseRepository` 合并同请求并保存最多 12 页、10 分钟的内存缓存；`DoubanApiClient` 解析匿名推荐列表，复用现有豆瓣网络 guard 和共享 HTTP。点击海报携带豆瓣身份进入既有详情，不在列表逐项匹配资源。本机标签／类别／条件由 `SearchPreferencesRepository` 保存并纳入原搜索偏好清理；关闭豆瓣模块会隔离迟到结果并清除选片缓存。具体网络限制见 [开发网络](development-network.md)，主机测试见 [性能记录](performance.md)。
+搜索页豆瓣选片增量（2026-09-27）：`SearchHubPage` 仅接管 `/search` 的双标签及子树可见性；原 `SearchPage` 继续持有资源查询、收藏和详情搜索，隐藏时依页面活动状态停止新增工作。`DoubanBrowsePage` 持有筛选、代次、可视页和连续加载；距底部约一屏半时只后台预取紧邻下一页，实际接近末尾或 TV 进入末排时才追加，切换条件和失活会取消后续预取调度。`DoubanBrowseRepository` 合并同请求并保存最多 12 页、10 分钟的内存缓存，手动刷新使当前条件的分页缓存失效；`DoubanApiClient` 解析匿名推荐列表，复用现有豆瓣网络 guard 和共享 HTTP。点击海报携带豆瓣身份进入既有详情，不在列表逐项匹配资源。本机标签／类别／条件由 `SearchPreferencesRepository` 保存并纳入原搜索偏好清理；关闭豆瓣模块会隔离迟到结果并清除选片缓存。具体网络限制见 [开发网络](development-network.md)，主机测试见 [性能记录](performance.md)。
 
 2026-09-28 类别修正：`DoubanBrowseCategory` 表示 UI 中的电影／电视剧／综艺，后两者映射到同一个 `tv` 媒体身份，但拥有各自查询键和题材候选；既有 `tv` 本机条件按电视剧读取。形式筛选与题材标签的网络映射由 `DoubanApiClient` 承担，详情目标仍按 movie / series 映射。
 

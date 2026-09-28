@@ -31,7 +31,7 @@ class DoubanBrowseRepository {
     final future = _client.fetchBrowsePage(query, start: start);
     _inFlight[key] = future;
     future.then((value) {
-      if (epoch != _epoch) return;
+      if (epoch != _epoch || !identical(_inFlight[key], future)) return;
       _cache.remove(key);
       _cache[key] = (DateTime.now(), value);
       while (_cache.length > 12) {
@@ -41,6 +41,12 @@ class DoubanBrowseRepository {
       if (identical(_inFlight[key], future)) _inFlight.remove(key);
     });
     return future;
+  }
+
+  void invalidateQuery(DoubanBrowseQuery query) {
+    final prefix = '${query.cacheKey}|';
+    _cache.removeWhere((key, _) => key.startsWith(prefix));
+    _inFlight.removeWhere((key, _) => key.startsWith(prefix));
   }
 
   void clear() {

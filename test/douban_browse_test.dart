@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -43,7 +44,7 @@ void main() {
                 'year': '2023',
                 'pic': {'normal': '//img.doubanio.com/poster.jpg'},
                 'rating': {'value': 8.5, 'count': 360},
-                'card_subtitle': '不是剧情简介',
+                'card_subtitle': '2024 / 中国大陆 / 惊悚 / 犯罪',
               },
               {'id': '456', 'title': '电视剧', 'type': 'tv'},
             ],
@@ -80,6 +81,7 @@ void main() {
     expect(page.entries.single.ratingLabel, '豆瓣 8.5');
     expect(page.entries.single.ratingCount, 360);
     expect(page.entries.single.note, isEmpty);
+    expect(page.entries.single.genres, ['惊悚', '犯罪']);
     expect(
         page.entries.single.posterUrl, 'https://img.doubanio.com/poster.jpg');
     expect(page.genres, ['科幻']);
@@ -108,6 +110,43 @@ void main() {
     expect(page.hasNext, false);
     expect(page.entries.single.subjectType, 'tv');
     await repo.fetch(query, start: 20, refresh: true);
+    expect(requests, 2);
+  });
+
+  test('invalidating a query drops all pages and rejects late cache writes',
+      () async {
+    final staleResponse = Completer<http.Response>();
+    final freshResponse = Completer<http.Response>();
+    var requests = 0;
+    http.Response page(String title) => http.Response.bytes(
+          utf8.encode(jsonEncode({
+            'items': [
+              {'id': title, 'title': title, 'type': 'movie'}
+            ],
+            'total': 40,
+          })),
+          200,
+          headers: const {'content-type': 'application/json; charset=utf-8'},
+        );
+    final api = DoubanApiClient(MockClient((request) {
+      requests++;
+      expect(request.url.queryParameters['start'], '20');
+      return requests == 1 ? staleResponse.future : freshResponse.future;
+    }));
+    final repo = DoubanBrowseRepository(api);
+    const query = DoubanBrowseQuery();
+
+    final stalePage = repo.fetch(query, start: 20);
+    repo.invalidateQuery(query);
+    final freshPage = repo.fetch(query, start: 20);
+
+    staleResponse.complete(page('stale'));
+    await stalePage;
+    freshResponse.complete(page('fresh'));
+    final fresh = await freshPage;
+
+    expect(fresh.entries.single.title, 'fresh');
+    expect((await repo.fetch(query, start: 20)).entries.single.title, 'fresh');
     expect(requests, 2);
   });
 

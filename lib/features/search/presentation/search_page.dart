@@ -134,6 +134,7 @@ class SearchPage extends ConsumerStatefulWidget {
     this.favoritesOnly = false,
     this.embedded = false,
     this.embeddedHeader,
+    this.scrollController,
   });
 
   final String? initialQuery;
@@ -141,6 +142,7 @@ class SearchPage extends ConsumerStatefulWidget {
   final bool favoritesOnly;
   final bool embedded;
   final Widget? embeddedHeader;
+  final ScrollController? scrollController;
 
   @override
   ConsumerState<SearchPage> createState() => _SearchPageState();
@@ -151,7 +153,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
   static const String _emptySelectionSentinel = '__empty__';
 
   late final TextEditingController _controller;
-  final ScrollController _scrollController = ScrollController();
+  late final ScrollController _scrollController;
+  late final bool _ownsScrollController;
   final FocusNode _queryFocusNode = FocusNode(debugLabel: 'search-query');
   final FocusNode _favoriteSyncFocusNode =
       FocusNode(debugLabel: 'favorites-sync');
@@ -191,6 +194,8 @@ class _SearchPageState extends ConsumerState<SearchPage>
   @override
   void initState() {
     super.initState();
+    _scrollController = widget.scrollController ?? ScrollController();
+    _ownsScrollController = widget.scrollController == null;
     _showFavoriteResults = widget.favoritesOnly;
     _controller = TextEditingController(text: widget.initialQuery ?? '');
     unawaited(_loadSearchPreferences());
@@ -242,7 +247,9 @@ class _SearchPageState extends ConsumerState<SearchPage>
     _saveFeedback.dispose();
     _queryFocusNode.dispose();
     _favoriteSyncFocusNode.dispose();
-    _scrollController.dispose();
+    if (_ownsScrollController) {
+      _scrollController.dispose();
+    }
     _controller.dispose();
     super.dispose();
   }
